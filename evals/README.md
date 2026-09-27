@@ -4107,69 +4107,99 @@ nothing.
   slot and a vendor API quota; one developer with two CLI sessions, one
   test suite and one local database) x five rules x one situation where a
   message is due and one where it is not: 40 in all. Situations never use
-  the words message, send, tell, notify or broadcast.
+  the words message, send, tell, notify or broadcast, and a send situation
+  leaves the peer it matters to on the board rather than naming it.
+- **Held-out sets.** `coordination_checkin_heldout.py` (8 shared-resource
+  situations, each with a peer tied to the shared thing on the board) was
+  written after the shared-resource rule had been reworded against the main
+  set; its result then drove a second rewording, so it is no longer held
+  out. `coordination_checkin_heldout2.py` (16 situations, both shipped rules,
+  both directions) was frozen in its own commit before the shipped wording
+  was scored on anything, and is the unbiased check. Each set has its own
+  digest in the artifact; `--scenarios all+heldout+heldout2` runs them
+  together and the artifact reports each set separately (`by_set`).
 - **Arms**: `none` (no check-in), `old` (the text served before the rules,
   pinned verbatim in the fixtures with its SHA-256 in the test), `new` (the
-  constant now); `label@suffix` is an A/A copy for the noise floor.
+  constant now); `label@suffix` is an A/A copy for the noise floor; other
+  texts come from files with `--arm-file`, and every text measured on
+  2026-09-28 is committed under `evals/results/coordination-checkin-arms/`.
 - **Scoring**: correct when a send scenario gets a message and a no-send
   scenario gets status or nothing; `addressed` (send scenarios) when the
-  message names the peer the rule points at, or everyone for rule 3.
-  Paired on (scenario, replicate), cluster-bootstrap 95% CIs over
-  scenarios, per rule and split by expectation, so a rule that does not
-  move its own scenarios is visible.
+  message names the peer the rule points at, or everyone. Paired on
+  (scenario, replicate), cluster-bootstrap 95% CIs over scenarios, per rule
+  and split by expectation, so a rule that does not move its own scenarios
+  is visible. A resumed run reuses a record only if its arm text and frame
+  are unchanged.
 
-    python -m evals.coordination_checkin_bench run --tag <tag> --arms none,old,new,new@aa --replicates 3
-    python -m evals.coordination_checkin_bench run --tag <tag> --arms new,cut         --arm-file cut=evals/results/coordination-checkin-arms/<file>.txt
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms none,old,new,new@aa \
+        --scenarios all+heldout+heldout2 --replicates 3
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms new,cut \
+        --arm-file cut=evals/results/coordination-checkin-arms/<file>.txt
     python -m evals.coordination_checkin_bench report evals/results/coordination-checkin-bench-<tag>.json
 
 Two frames put the question. `board` (bench v1) asks for a board decision
 outright; `task` (the default since v2) asks for the agent's next step in its
-own work, with the board action as one field of it. The arm texts are
-recorded in each artifact; ablation texts are committed under
-`evals/results/coordination-checkin-arms/` and passed with `--arm-file`.
+own work, with the board action as one field of it.
 
-**2026-09-28 (claude-sonnet-5, medium effort, 40 scenarios x 3 replicates,
-120 pairs per comparison, every run valid).** Five artifacts,
-`coordination-checkin-bench-checkin-rules-20260928*.json`, in the order run:
+**2026-09-28 (claude-sonnet-5, medium effort, 3 replicates, every run
+valid).** Seven artifacts, `coordination-checkin-bench-checkin-rules-20260928*.json`,
+in the order run. The shared-resource rule went through three wordings:
+(1) "check who holds it and message them"; (2) "message them that you are
+next ... a status line is not a queue, and do not guess that they are
+idle"; (3, shipped) "look for whoever holds it or has it booked; if someone
+does, message them that you are next ... a status line is not a queue; if
+the board shows it free, use it and say so in your status".
 
-1. *Board frame, five rules, first wording* (no suffix, $2.01). The new text
-   scored exactly like the old one: new minus old +0.000 over 120 pairs.
-   Every arm, no check-in included, sent whenever a situation named a
-   peer, so four rules sat at ceiling. The frame and the scenarios were
-   too easy; the shared-resource rule's first wording ("check who holds it
-   and message them") also moved nothing, because the model read a
+1. *Board frame, five rules, wording 1* (no suffix, $2.01). New minus old
+   +0.000 over 120 pairs. Every arm, no check-in included, sent whenever a
+   situation named a peer, so four rules sat at ceiling; wording 1 of the
+   shared-resource rule also moved nothing, because the model read a
    holder's posted ETA as making a message pointless.
-2. *Task frame, five rules, rule 2 reworded, send situations that leave the
-   affected peer to the board* (`-task`, $2.32): new minus old +0.100
-   [+0.025, +0.200]; all of it from the shared-resource rule (+0.375) and
-   keep-your-status-true (+0.125). "A message is what a peer must act on"
-   and "tell every active peer before debugging what you did not break"
-   scored 1.00 in every arm, no check-in included; "message everyone
-   waiting when you clear something" scored 1.00 in the old arm too.
+2. *Task frame, five rules, wording 2* (`-task`, $2.32): new minus old
+   +0.100 [+0.025, +0.200], all of it from the shared-resource rule
+   (+0.375) and keep-your-status-true (+0.125). "A message is what a peer
+   must act on" and "tell every active peer before debugging what you did
+   not break" scored 1.00 in every arm, no check-in included; "message
+   everyone waiting when you clear something" scored 1.00 in the old arm,
+   whose mechanical steps were enough (no check-in: 0.92).
 3. *Ablation* (`-ablation`, $1.78): the text without those first two rules
    decided exactly like the full text (+0.000 over 120 pairs). The Codex
    form carrying only them scored 0.90, the old text's accuracy.
 4. *Ablation* (`-ablation2`, $1.73): dropping the waiting rule as well
    changed nothing (+0.000 over 120 pairs). A Codex form carrying the
    shared-resource rule instead scored 0.97.
-5. *The shipped texts* (`-shipped`, $2.23): the check-in with the two rules
-   that moved decisions, against the old text, no text and an A/A copy.
+5. *Wording 2 with the two kept rules* (`-shipped`, $2.23; named for the
+   text it was going to ship). New minus old +0.108 [+0.025, +0.208] over
+   120 pairs. On the send situations, the shared-resource rule went from
+   0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00.
+6. *First held-out set* (`-heldout`, $0.46). Wording 2 reversed: new minus
+   old -0.208 [-0.500, +0.000] over 24 pairs, because it messaged holders
+   who had already released the thing (no-send held 0.50 against the old
+   text's 0.92). Its gain in run 5 came from the four situations it had
+   been reworded against. Wording 3 adds the boundary.
+7. *Wording 3 on every set* (`-final`, $4.74, 960 runs), accuracy by arm:
 
-| arm | accuracy | due messages sent | no-send held |
-|---|---|---|---|
-| no check-in | 0.86 | 0.72 | 1.00 |
-| old check-in | 0.89 | 0.78 | 1.00 |
-| shipped check-in | 1.00 | 1.00 | 1.00 |
+| set | no check-in | old check-in | wording 2 | shipped (wording 3) |
+|---|---|---|---|---|
+| main (40 situations) | 0.87 | 0.91 | 0.98 | 0.98 |
+| first held-out (8, used for wording 3) | 0.88 | 0.92 | 0.83 | 1.00 |
+| second held-out (16, frozen first) | 0.96 | 0.92 | 0.81 | 0.98 |
 
-New minus old: +0.108 [+0.025, +0.208] over 120 pairs, against an A/A
-difference of -0.008 [-0.033, +0.000]. The shared-resource rule moved its
-send scenarios 0.62 to 1.00 and keep-your-status-true 0.83 to 1.00; no arm
-sent a message where none was due. The three cut rules are not shown to be
-useless: the model already followed them with no check-in at all, so this
-bench could not see them help. What it cannot measure either is the
-session the review saw, where the agent is deep in its own work and the
-board is out of mind; one decision in a short prompt is an upper bound on
-attention.
+Shipped minus old, by set: main +0.075 [-0.008, +0.175] (120 pairs);
+first held-out +0.083 [+0.000, +0.292] (24); second held-out +0.062
+[-0.062, +0.208] (48), A/A -0.021. Shipped minus wording 2 on the second
+held-out set: +0.167 [+0.000, +0.375].
+
+Read plainly: wording 3 keeps wording 2's gain on the main set and removes
+its over-sending on both held-out sets. On the only unbiased set the gain
+over the old check-in, and over no check-in at all (0.96), cannot be told
+apart from zero. There the shared-resource rule lifted due messages from
+0.75 to 1.00 while holding no-send at 0.92, the old text's level; every arm
+scored 1.00 on keep-your-status-true, so only the main set supports that
+rule. The three cut rules are not shown to be useless: nothing any arm did
+could improve on them here. Nor does one decision in a short prompt
+reproduce what the review saw, an agent deep in its own work with the board
+out of mind; this bench is an upper bound on attention.
 
 ---
 

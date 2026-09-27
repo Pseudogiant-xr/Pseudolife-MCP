@@ -3872,10 +3872,12 @@ how to send one (a review of six sessions had found 15 status updates, 9
 peer lists and 7 receives against no sends until a human asked for one). It
 carries two field-neutral rules, the two of five candidates that changed
 decisions in `evals/coordination_checkin_bench.py` (see `evals/README.md`):
-before using something shared, message whoever holds it that you are next,
-even when their status says when they expect to finish, because a status
-line is not a queue; and keep your status true (what you hold, what you
-wait on, when you expect to finish). The Codex form, inside its
+before using something shared, look for whoever holds it or has it
+booked, and if someone does, message them that you are next, even when
+their status says when they expect to finish, because a status line is not
+a queue (if the board shows it free, use it and say so in your status); and
+keep your status true (what you hold, what you wait on, when you expect to
+finish). The Codex form, inside its
 512-character MCP-instructions budget, carries the first. An install's own
 words for its shared things (a suite lock, a GPU, a style guide, an API
 quota) belong in the daemon's `<data_dir>/hook-instructions.md`, which the

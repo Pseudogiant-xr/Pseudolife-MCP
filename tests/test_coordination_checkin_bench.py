@@ -82,6 +82,10 @@ def test_second_heldout_set_covers_both_shipped_rules_both_ways():
         else:
             assert s.to is None, s.id
     assert cb.SCENARIO_SETS["heldout2"] == [s.id for s in HELDOUT2]
+    joined = cb.scenario_ids("all+heldout+heldout2")
+    assert joined == [*fx.SCENARIO_IDS, *(s.id for s in HELDOUT), *(s.id for s in HELDOUT2)]
+    assert cb.scenario_ids("lab-waiting-send,solo-waiting-send") == [
+        "lab-waiting-send", "solo-waiting-send"]
     assert cb.heldout_digest("coordination_checkin_heldout2.py") != cb.heldout_digest()
 
 

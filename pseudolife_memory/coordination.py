@@ -95,15 +95,25 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # (four field-neutral teams x five rules x send/no-send, claude-sonnet-5; the
 # artifacts are evals/results/coordination-checkin-bench-checkin-rules-
 # 20260928*.json). Two moved decisions and are kept: the shared-resource rule
-# (its first wording, "check who holds it and message them", moved nothing,
-# because the model read a holder's posted ETA as making a message
-# pointless; "you are next ... a status line is not a queue" is the reworded
-# form) and keep-your-status-true. Three were cut because removing them
+# and keep-your-status-true. The shared-resource rule took three wordings.
+# The first ("check who holds it and message them") moved nothing: the model
+# read a holder's posted ETA as making a message pointless. The second added
+# "you are next ... a status line is not a queue ... do not guess that they
+# are idle"; it won on the situations it was reworded against but, on eight
+# held-out ones, messaged holders who had already released the thing. The
+# third, served here, bounds it: message a current holder or booker, and
+# when the board shows the thing free, use it and say so in your status.
+# Its unbiased check is the second held-out set, frozen in its own commit
+# before this wording was scored: there it beat the old check-in by +0.062
+# [-0.062, +0.208] over 48 pairs, which cannot be told apart from zero, and
+# the second wording by +0.167; keep-your-status-true scored 1.00 in every
+# arm there, so only the main set supports it (artifact -final). Three rules were cut because removing them
 # changed no decision in 120 pairs: "a message is what a peer must act on",
 # "tell every active peer before debugging what you did not break", and
-# "message everyone waiting when you clear something". The model already did
-# all three with no check-in at all, so the bench cannot say they are
-# useless, only that it could not see them help. An install's own words for
+# "message everyone waiting when you clear something". The model followed
+# the first two with no check-in at all, and the third with the old
+# check-in's mechanical steps, so the bench cannot say they are useless,
+# only that it could not see them help. An install's own words for
 # its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
 # hook-instructions.md is one host's), served after the memory core. The
 # closing subagent sentence (#425) is about who may write, not when to send,
@@ -118,11 +128,12 @@ CHECKIN_TEXT = (
     "receive is the source of full messages. If coordination tools are "
     "unavailable, say so and continue independently. When to send: Before using "
     "something shared (anything only one of you can use at a time, or that slows "
-    "down for everyone), check who holds it and message them that you are next "
-    "and what you need, even when their status shows when they expect to finish: "
-    "a status line is not a queue, and do not guess that they are idle. Keep "
-    "your status true: what you hold, what you are waiting on, when you expect "
-    "to finish. A peer may not see mail until its next turn. A subagent shares its "
+    "down for everyone), look for whoever holds it or has it booked. If someone "
+    "does, message them that you are next and what you need, even when their "
+    "status says when they expect to finish: a status line is not a queue. If "
+    "the board shows it free, use it and say so in your status. Keep your "
+    "status true: what you hold, what you are waiting on, when you expect to "
+    "finish. A peer may not see mail until its next turn. A subagent shares its "
     "parent's board address, so it only reads the board (list, receive without "
     "ack, memory_search); status, ack and send belong to the parent, which can "
     "name its subagents with memory_agents(action=update, children=[...]).")
@@ -131,13 +142,13 @@ CHECKIN_TEXT = (
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
 # Daemon text plus this is exactly Codex's 512-character budget. It carries
-# the shared-resource rule, the one that moved decisions most: in the same
-# bench this form (without the subagent sentence from #425) scored 0.97
-# against 1.00 for the full text, where a form carrying the two cut rules
-# scored 0.90, the same as the pre-rules text (2026-09-28).
+# the shared-resource rule, the one that moved decisions most, in its bounded
+# wording ("someone holds"). An earlier Codex form carrying the two cut rules
+# scored the pre-rules text's accuracy (2026-09-28); the measured forms are
+# under evals/results/coordination-checkin-arms/.
 CHECKIN_INSTRUCTION = (
-    "Board: memory_agents update, list; memory_message receive, ack. Before "
-    "using a shared thing, message its holder you're next; status isn't a queue. "
+    "Board: memory_agents update, list; memory_message receive, ack. Need a "
+    "shared thing someone holds? Message them you're next; status isn't a queue. "
     "Subagents only read the board.")
 
 

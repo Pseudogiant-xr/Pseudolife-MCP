@@ -146,6 +146,14 @@ def scenario(sid: str) -> fx.Scenario:
     raise SystemExit(f"unknown scenario {sid!r}")
 
 
+def scenario_ids(spec: str) -> list[str]:
+    """Named sets joined with ``+`` (``all+heldout2``), or a comma list of ids."""
+    names = spec.split("+")
+    if all(n in SCENARIO_SETS for n in names):
+        return [sid for n in names for sid in SCENARIO_SETS[n]]
+    return [scenario(s).id for s in spec.split(",")]
+
+
 def text_sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -410,9 +418,23 @@ def build_artifact(records: list[dict], arms: list[Arm], args, tag: str) -> dict
         "heldout_digest": heldout_digest(),
         "heldout2_digest": heldout_digest("coordination_checkin_heldout2.py"),
         "summary": summarize(records, labels),
+        "by_set": by_set(records, arms),
         "comparisons": comparisons, "aa_noise": noise, "total_usd": round(usd, 4),
         "runs": records,
     }
+
+
+def by_set(records: list[dict], arms: list[Arm]) -> dict:
+    """Summary and paired comparisons per scenario set (main, heldout,
+    heldout2): a gain on the set a rule was worded against says less than
+    one on a set it never saw."""
+    out = {}
+    for name in sorted({r.get("set", "main") for r in records}):
+        rows = [r for r in records if r.get("set", "main") == name]
+        out[name] = {"summary": summarize(rows, [a.label for a in arms]),
+                     "comparisons": {f"{b.label} - {a.label}": paired(rows, a.label, b.label)
+                                     for i, a in enumerate(arms) for b in arms[i + 1:]}}
+    return out
 
 
 class Bench:
@@ -495,8 +517,7 @@ class Bench:
             raise SystemExit(f"{out_path.name} exists; tags are single-use")
         arms = parse_arms(args.arms, read_arm_files(args.arm_file))
         texts = {a.label: a.text for a in arms}
-        scenarios = SCENARIO_SETS.get(args.scenarios) or [
-            scenario(s).id for s in args.scenarios.split(",")]
+        scenarios = scenario_ids(args.scenarios)
         items = plan(arms, scenarios, args.replicates, args.seed)
         # A resumed run reuses a record only when it was made under the same
         # arm text and frame: a text edited between a crash and the resume
@@ -545,6 +566,18 @@ def render(artifact: dict) -> str:
         lines.append(f"{rule:<28}" + "".join(
             f"{_cell(s['per_arm'].get(a, {}).get('per_rule', {}).get(rule)):>12}" for a in arms))
     lines.append("")
+    for name, part in (artifact.get("by_set") or {}).items():
+        ps = part["summary"]["per_arm"]
+        lines.append(f"set {name}: " + "; ".join(
+            f"{a} acc {_cell(ps.get(a, {}).get('accuracy'))} send "
+            f"{_cell(ps.get(a, {}).get('send_recall'))} hold "
+            f"{_cell(ps.get(a, {}).get('no_send_specificity'))}" for a in arms))
+        for key, comp in part["comparisons"].items():
+            if comp.get("pairs") and comp["delta"] is not None:
+                lines.append(f"  {key}: {comp['delta']:+.3f} [{comp['ci95'][0]:+.3f}, "
+                             f"{comp['ci95'][1]:+.3f}] n={comp['pairs']}")
+    if artifact.get("by_set"):
+        lines.append("")
     for key, comp in artifact["comparisons"].items():
         if not comp.get("pairs"):
             continue

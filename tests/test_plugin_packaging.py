@@ -494,18 +494,21 @@ def test_checkin_says_when_to_send_not_only_how():
     must stay inside them, so a reword means a new bench run."""
     from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
     arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
-    measured = (arms / "cut134-20260928.txt").read_text(encoding="utf-8").strip()
+    measured = (arms / "rules-v3-20260928.txt").read_text(encoding="utf-8").strip()
     assert measured in CHECKIN_TEXT
-    assert (arms / "codex2-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
-    for phrase in ("check who holds it and message them that you are next",
-                   "a status line is not a queue", "Keep your status true"):
+    assert (arms / "codex3-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
+    for phrase in ("look for whoever holds it or has it booked",
+                   "message them that you are next", "a status line is not a queue",
+                   "If the board shows it free, use it", "Keep your status true"):
         assert phrase in CHECKIN_TEXT, phrase
+    # Cut: three rules the bench could not see help, and the clause that
+    # made the shared-resource rule over-send on held-out situations.
     for cut in ("a message is what a peer must act on", "before you debug it",
-                "message everyone waiting on it"):
+                "message everyone waiting on it", "do not guess that they are idle"):
         assert cut not in CHECKIN_TEXT, cut
     # The mechanical steps stay, in front of the rules.
     assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")
-    assert "message its holder" in CHECKIN_INSTRUCTION
+    assert "someone holds? Message them you're next" in CHECKIN_INSTRUCTION
     for verb in ("update", "list", "receive", "ack"):
         assert verb in CHECKIN_INSTRUCTION
     for text in (CHECKIN_TEXT, CHECKIN_INSTRUCTION):

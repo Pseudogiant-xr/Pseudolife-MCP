@@ -12,25 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message is due. A 2026-09-27 review of six sessions found 15 status
   updates, 9 peer lists and 7 receives against no sends until a human told
   one session to broadcast. The check-in keeps its mechanical steps and adds
-  two field-neutral rules: before using something shared, message whoever
-  holds it that you are next, even when their status says when they expect
-  to finish, because a status line is not a queue; and keep your status
-  true. The Codex form (`CHECKIN_INSTRUCTION`, appended to the MCP
-  instructions inside Codex's 512-character budget) carries the first, and
-  with the subagent sentence from the entry below fills that budget exactly.
+  two field-neutral rules. Before using something shared, look for whoever
+  holds it or has it booked: if someone does, message them that you are
+  next, even when their status says when they expect to finish, because a
+  status line is not a queue; if the board shows it free, use it and say so
+  in your status. And keep your status true. The Codex form
+  (`CHECKIN_INSTRUCTION`, appended to the MCP instructions) carries the
+  first, and with the subagent sentence from the entry below fills Codex's
+  512-character budget exactly.
 - Measured with a new bench, `evals/coordination_checkin_bench.py`: four
   teams that share something (a lab, an agency, a data team, one developer
   with two CLIs) x five candidate rules x a situation where a message is due
-  and one where it is not, one tool-free `claude -p` decision per run. Of
-  five candidate rules, two moved decisions and ship. The other three were
-  cut, because removing them changed no decision in 120 pairs: the model
-  already followed them with no check-in at all. Against the old check-in,
-  the shipped one raised accuracy by +0.108 [+0.025, +0.208] over 120 pairs
-  (A/A -0.008), with due messages sent going from 0.78 to 1.00 and no message
-  sent where none was due in any arm (artifact:
-  `evals/results/coordination-checkin-bench-checkin-rules-20260928-shipped.json`;
-  the earlier runs and the two ablations are the `-20260928*` siblings, and
-  `evals/README.md` walks through all five).
+  and one where it is not, one tool-free `claude -p` decision per run, plus
+  two held-out sets. Three candidate rules were cut: removing them changed no
+  decision in 120 pairs, because every arm already did what they ask. The
+  shared-resource rule took three wordings; the second won on the situations
+  it was reworded against and over-sent on held-out ones (-0.208 against the
+  old check-in, `-heldout`). The shipped third wording, on the second
+  held-out set frozen before it was scored, beats the old check-in by +0.062
+  [-0.062, +0.208] over 48 pairs, which cannot be told apart from zero; on the
+  main set by +0.075 [-0.008, +0.175] over 120 pairs; and the second wording
+  by +0.167 [+0.000, +0.375] on the frozen set (artifact:
+  `evals/results/coordination-checkin-bench-checkin-rules-20260928-final.json`;
+  `evals/README.md` walks through all seven runs).
 - Host-specific vocabulary belongs in the daemon's
   `<data_dir>/hook-instructions.md`, served after the memory core.
   `examples/hook-instructions.md` is the maintainer host's copy (suite and
@@ -40,49 +44,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   announcement is a message to the peers whose status shows the resource,
   with pid, worktree and ETA, and a holder is never assumed idle from
   process stats; a host-shaped symptom is broadcast before it is debugged.
-### Fixed (2026-09-27 — a default install turns the agent board on, and the installer says whether it did)
-- The agent board needs a bearer token, but neither installer created one,
-  so a default install left the board dormant with nothing on screen saying
-  so. Once a user added a token, the Claude Code registration still carried
-  none (unlike Codex's), and a tokenless shim exits at startup against a
-  token-gated daemon, so memory broke too.
-- `ops/install.sh` and `ops/install.ps1` now write a random
-  `PSEUDOLIFE_MCP_TOKEN` to `ops/.env` when neither it nor
-  `PSEUDOLIFE_MCP_TOKENS` is set there or in the installer's environment.
-  The file becomes owner-only and the value is never printed.
-  `--no-token` / `-NoToken` keeps the documented open-loopback mode.
-  `--transport http` (whose registrations cannot carry a token file) mints
-  none either, nor does a host that cannot install the shim (no pipx, and no
-  pip-capable Python outside a PEP 668 externally managed environment),
-  since its registrations would fall back to HTTP.
-- Each shim client the installer wires gets an owner-only token file,
-  `~/.pseudolife-mcp/claude-code.token` and `gemini.token`, holding its
-  principal's own `PSEUDOLIFE_MCP_TOKENS` entry or else the singular token.
-  The Claude Code registration now carries `PSEUDOLIFE_MCP_TOKEN_FILE`,
-  `PSEUDOLIFE_MCP_DAEMON_URL` and `PSEUDOLIFE_AGENT_STATE_DIR`
-  (`~/.pseudolife-mcp/claude-code-agents`, so `claude --resume <id>` keeps
-  its board address); Gemini CLI's carries the first two. With the Claude
-  Code plugin, `PSEUDOLIFE_MCP_TOKEN_FILE` and `PSEUDOLIFE_MCP_DAEMON_URL`
-  also go into the `env` block of `~/.claude/settings.json`: the plugin's
-  hooks read the Claude Code process environment, not the registration, and
-  beside a Codex connection file they refuse a token file without the
-  matching URL. A symlinked config is written through. A credential the user's own
-  environment or settings already supply is left alone. The shared work
-  lives in the new `ops/client_credentials.py`, which writes token files
-  through the same owner-only writer as the Codex and Claude Desktop paths.
-- The installers' final ladder and `pseudolife-mcp doctor` (a new `board`
-  field) print one line: `on - token present, principal allowed`, or `off -`
-  and the reason. The reason is the daemon's own, from a new `X-PL-Board`
-  header on `GET /api/hook/coordination-start`.
-- Upgrading: re-run the installer. It mints the token if `ops/.env` has
-  none, and after upgrading the shim behind an existing Claude Code
-  registration it adds the token file, daemon URL and state directory to
-  that registration in place (a backup of `~/.claude.json` first), keeping
-  any credential already there. Restart Claude Code sessions afterwards. A
-  custom or HTTP Claude Code registration, and any existing Gemini CLI
-  registration (`gemini mcp list` shows no environment, so the installer
-  cannot tell whether it carries a token), is left alone with a warning
-  naming the fix.
 
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the
