@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -602,8 +603,38 @@ def _origin_from_source(source: str | None) -> str | None:
 # of a word, not a boundary. The one exception is the possessive "'s": a
 # task says "the bench server's config", and that names "bench server".
 _APOS = "'’"
-_SCOPE_BEFORE = rf"(?<!\w)(?<!\w[{_APOS}])"
-_SCOPE_AFTER = rf"(?!\w)(?![{_APOS}](?!s(?!\w))\w)"
+
+
+def _scope_word_char(c: str) -> bool:
+    """A character that continues a word for the pin-scope test. Combining
+    marks (Unicode category M: Devanagari vowel signs and virama, a
+    decomposed accent) are not ``isalnum()`` in Python, but they belong
+    to the letter before them, so a regex word-class bound would split
+    inside such words."""
+    return c == "_" or c.isalnum() or unicodedata.category(c)[0] == "M"
+
+
+def _scope_bounded(q: str, i: int, j: int) -> bool:
+    """True when ``q[i:j]`` touches no word character on either side,
+    counting an apostrophe glued to a word as part of it except before
+    a possessive ``s``."""
+    if i > 0:
+        before = q[i - 1]
+        if _scope_word_char(before):
+            return False
+        if before in _APOS and i > 1 and _scope_word_char(q[i - 2]):
+            return False
+    if j < len(q):
+        after = q[j]
+        if _scope_word_char(after):
+            return False
+        if (after in _APOS and j + 1 < len(q)
+                and _scope_word_char(q[j + 1])):
+            possessive = q[j + 1] == "s" and (
+                j + 2 == len(q) or not _scope_word_char(q[j + 2]))
+            if not possessive:
+                return False
+    return True
 
 
 def _entity_in_query(entity: str | None, query: str | None) -> bool:
@@ -618,8 +649,10 @@ def _entity_in_query(entity: str | None, query: str | None) -> bool:
     server?" and "the bench server's config" name ``bench server``;
     ``_norm_key`` itself is untouched, because it keys the slots. An
     apostrophe inside a word is not a boundary except before a
-    possessive ``s``, so ``don't`` does not name ``Don``. No embedding
-    pass; the cost is one regex scan per constraint-labelled fact.
+    possessive ``s``, so ``don't`` does not name ``Don``, and a combining
+    mark continues the word it follows. No embedding pass and no regex;
+    the cost is one substring scan per constraint-labelled fact, with a
+    neighbour check only where the entity occurs.
 
     Known limit: a RAW-STRING test — it does not resolve graph aliases,
     so a constraint written under an alias that was later folded into
@@ -632,8 +665,13 @@ def _entity_in_query(entity: str | None, query: str | None) -> bool:
     e = _norm_key(entity or "")
     if not e:
         return False
-    pattern = _SCOPE_BEFORE + re.escape(e) + _SCOPE_AFTER
-    return re.search(pattern, _norm_key(query or "")) is not None
+    q = _norm_key(query or "")
+    i = q.find(e)
+    while i != -1:
+        if _scope_bounded(q, i, i + len(e)):
+            return True
+        i = q.find(e, i + 1)
+    return False
 
 
 def _inherited_labels(parents, new_text: str) -> tuple[str | None, str | None]:

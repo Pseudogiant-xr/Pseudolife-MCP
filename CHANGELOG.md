@@ -14,14 +14,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server, then run" and "the bench server's config" did not (probed
   2026-09-27). The scope test (`_entity_in_query`) required a hyphen on
   each side of the entity after slot normalisation, and `?`, `,` and `'`
-  are not slot separators. It now requires only that no letter or digit
-  touches the entity, so any punctuation ends it. An apostrophe inside a
-  word still binds it, except before a possessive `s`: "Don's team"
-  names `Don`, "don't" does not. The slot key (`_norm_key`) is unchanged,
-  so no slot is re-keyed, and every query that pinned a rule before
-  still pins it. `memory_recall` seeds through its own raw-text matcher
-  (`recall._mentions`), which already treats `?`, `,` and `'s` as
-  boundaries and is left as it is.
+  are not slot separators. It now requires only that no letter, digit or
+  combining mark touches the entity, so any punctuation ends it while a
+  Devanagari vowel sign or a decomposed accent still continues the word.
+  An apostrophe inside a word still binds it, except before a possessive
+  `s`: "Don's team" names `Don`, "don't" does not. The slot key
+  (`_norm_key`) is unchanged, so no slot is re-keyed. Every query that
+  named an entity before still names it, because the scope test only
+  widens; newly named rules compete for the same capped pin slots, so
+  one can take a slot a lower-cosine rule held before. The test is now a
+  substring scan with a neighbour check instead of a regex, so no pattern
+  is compiled per entity. `memory_recall`'s default mechanical driver
+  seeds through its own raw-text matcher (`recall._mentions`), which
+  already treats `?`, `,` and `'s` as boundaries and is left as it is.
 
 ### Changed (2026-09-27 — the standing memory block says where hard rules belong)
 - A rule stored only in the bank ("hold the GPU run when VRAM is in use")

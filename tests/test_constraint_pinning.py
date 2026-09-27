@@ -5,7 +5,7 @@ AHEAD of cosine ranking instead of competing on similarity (schema v35).
 
 - ``memory_search``'s cortex block (``service.cortex_search``): a constraint
   fact is in scope when its slot's ``entity_norm`` occurs as a
-  separator-bounded run inside ``_norm_key(query)`` — the query NAMES the
+  word-bounded run inside ``_norm_key(query)`` — the query NAMES the
   entity;
 - ``memory_recall``: a constraint fact is in scope when its entity is a
   SEED of the walk (hop 0 — the entities the query itself resolved to);
@@ -183,6 +183,31 @@ def test_scope_test_does_not_split_contractions():
     assert not _entity_in_query("brien", "ask o'brien first")
     assert _entity_in_query("Don", "ask Don's team first")
     assert _entity_in_query("bench servers", "the bench servers' configs")
+
+
+def test_scope_test_is_word_bounded_on_both_sides():
+    """Neither end of the entity may touch a word character: "db" is not
+    named by "mydb" (leading side) or "dbx" (trailing side)."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("db", "the mydb host")
+    assert not _entity_in_query("server", "is the webserver up?")
+    assert not _entity_in_query("db", "the payments-dbx host")
+    assert not _entity_in_query("bench", "the benchmark server?")
+
+
+def test_scope_test_treats_combining_marks_as_part_of_a_word():
+    """A combining mark (a Devanagari vowel sign or virama, a decomposed
+    accent) is not alphanumeric in Python, but it belongs to the letter
+    before it: the entity must not end or start next to one."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("राम",          # राम
+                                "रामायण "
+                                "कब")                  # रामायण कब
+    assert not _entity_in_query("मान",          # मान
+                                "सम्मान")  # सम्मान
+    assert not _entity_in_query("jose", "josé said")       # NFD josé
+    assert _entity_in_query("राम",
+                            "राम कब?")  # राम कब?
 
 
 def test_mcp_search_cortex_block_carries_labels_and_pins(tmp_path, monkeypatch):
