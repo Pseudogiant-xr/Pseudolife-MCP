@@ -31,7 +31,7 @@ _PARAMETERS = {
     "lease": {"name", "ttl", "expect", "purpose"},
     "release": {"name"},
     "leases": {"name", "limit"},
-    "attach": {"attachment_id", "wake_enabled"},
+    "attach": {"attachment_id", "wake_enabled", "ring"},
     "heartbeat": {"attachment_id", "generation", "active"},
     "detach": {"attachment_id", "generation"},
     "send": {"to", "text", "request_id", "reply_to", "clears", "urgent"},

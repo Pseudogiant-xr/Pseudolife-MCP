@@ -790,6 +790,9 @@ def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
     assert (result.returncode, result.stderr) == (0, "")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the file is refused there")
 def test_the_gate_reads_a_private_token_file(tmp_path):
     server, requests = _gate_daemon("allow\n")
     try:
@@ -864,3 +867,43 @@ def test_lifecycle_ps1_stop_asks_an_unparked_codex_thread_to_park(tmp_path):
         server.server_close()
     # The .seen marker is the wake hook's, and Codex has none: untouched.
     assert _read_seen(tmp_path) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_a_token_file_others_can_read_is_refused(tmp_path):
+    """The gate reads a bearer file with the checks the sibling hooks
+    apply (owner-only, one link, bounded): a readable one is not used."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        token_file = tmp_path / "token"
+        token_file.write_text("file-token\n")
+        token_file.chmod(0o644)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert (result.returncode, result.stderr, requests) == (0, "", [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("setting", [("PSEUDOLIFE_AGENT_WAKE_HOOK", "0"),
+                                     ("PSEUDOLIFE_AGENT_WAKE_HOOK", "off"),
+                                     ("PSEUDOLIFE_AGENT_COORDINATION", "0")])
+def test_the_codex_park_gate_honours_an_explicit_opt_out(tmp_path, setting):
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        env = _env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env[setting[0]] = setting[1]
+        _digest(tmp_path, 3, BODY, ring=False)
+        _agent(tmp_path)
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                          input=_payload(), env=env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+    finally:
+        server.shutdown()
+        server.server_close()

@@ -1035,10 +1035,10 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 
 | `wake.decision` | When | Extra fields |
 | --- | --- | --- |
-| `hinted` | the recipient acted on the board within `active_seconds`; its next tool result carries the mail | |
+| `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
-| `no_path` | the recipient has no wake path (`wake_enabled: false`) | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (same words, or one inside the other), or `urgent` within the sender's cap | `ring_at` |
+| `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's; at least three letters), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
@@ -1048,13 +1048,21 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 cap). Chatter never rings. A retry of the same `request_id` repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
 burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
-is a `coordination_wakes` row; the recipient's next attach or heartbeat
-carries the newest once (`wake` in the answer, with the latest `ring_at`),
-and the shim rings through its client's path: the Claude adapter writes
+is a `coordination_wakes` row; the recipient's attach and heartbeat answers
+carry the newest for one heartbeat interval after it is first served
+(`wake`, with the latest `ring_at`), so a retried heartbeat still gets it,
+and the adapter takes each ring once. A wake path is a live channel or a
+**ring path**: an adapter declares at register and at every attach whether
+a ring reaches it without a channel (`ring`, kept in `capabilities`; the
+Claude shim when it has a digest for the Stop hook, a Codex thread the
+doorbell watches). A daemon older than v48 refuses the attach parameter
+once, and the adapter stops sending it. The shim rings through its client's
+path: the Claude adapter writes
 `<key>.ring` beside the digest (line 1 the digest watermark, line 2 the
 decision and reason) at `ring_at` for the Stop hook, and the Codex doorbell
 asks the adapter for a due ring at the moment it would otherwise run
-`codex queue`. Every ring's ledger line (`ring` from the adapter, `wait` from
+`codex queue` (an offer whose mail the session has already seen, or that
+has nothing pending, is dropped). Every ring's ledger line (`ring` from the adapter, `wait` from
 the Stop hook, `bell` from the doorbell) carries the decision and reason as a
 sixth column. Against a daemon older than v48 nothing rings; pull delivery,
 tool-result hints and the prompt-hook digest are unchanged.
@@ -1192,7 +1200,9 @@ also capped (below, and by the daemon's `wake` caps under
   rides the same exit-2 rewake as the mail wake. No answer (a daemon that
   is down, a bearer it refuses, no address) is allow: the gate never holds
   a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
-  regular `PSEUDOLIFE_MCP_TOKEN_FILE`, the URL from
+  private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
+  as the other hooks; Git Bash cannot show an NTFS file is owner-only, so
+  on Windows use the variable), the URL from
   `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other hooks.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
@@ -1213,7 +1223,11 @@ also capped (below, and by the daemon's `wake` caps under
   `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
   which Codex turns into a continuation prompt; allow, no address, a
   continuation's Stop, or no answer prints nothing. The wake itself stays
-  Claude Code's: the bash script exits unless Claude Code started it. Whether Codex honours the decision
+  Claude Code's: the bash script exits unless Claude Code started it. Codex
+  runs the native command only on Windows (`commandWindows`), so the Codex
+  gate is Windows-only; an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`, `false`, `no` or `off` turns it
+  off. Whether Codex honours the decision
   of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).

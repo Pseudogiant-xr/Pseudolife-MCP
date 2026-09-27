@@ -142,6 +142,10 @@ DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.
 # Rings decided at send (v48) are kept this long: the nightly total counts a
 # day of them, and a week matches the request-key window.
 WAKE_RETENTION = 7 * 86400
+# A served ring rides the recipient's answers this long after it is first
+# served: longer than the adapter's 20 s heartbeat, so the answer to a
+# retried heartbeat still carries it (review, 2026-09-28).
+WAKE_SERVE_REPEAT = 25
 MAX_PAGE = 50
 MAX_PENDING = 256
 MESSAGE_TTL = 86400
@@ -286,10 +290,17 @@ class WakePolicy:
 
 def _need_matches(clears: str, needs: str) -> bool:
     """Whether a message's ``clears`` names the recipient's ``park_needs``:
-    the same words, case and whitespace aside, or one inside the other."""
-    left = " ".join(clears.lower().split())
-    right = " ".join(needs.lower().split())
-    return bool(left) and bool(right) and (left in right or right in left)
+    the same words, case and spacing aside, or the words of one as a run of
+    whole words inside the other. Whole words only, so a one-letter
+    ``clears`` cannot match any need and ring past the urgent cap."""
+    left = re.findall(r"\w+", clears.lower())
+    right = re.findall(r"\w+", needs.lower())
+    if not left or not right:
+        return False
+    short, long = (left, right) if len(left) <= len(right) else (right, left)
+    if len("".join(short)) < 3:
+        return False
+    return any(long[i:i + len(short)] == short for i in range(len(long) - len(short) + 1))
 
 
 def body_commitment(salt_hex, body):
@@ -1474,9 +1485,16 @@ class CoordinationStore:
         return {"pending_count": self._pending_count(agent_id),
                 "pending_preview": self._pending_preview(agent_id)}
 
-    def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False):
+    def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False,
+               ring=None):
+        """Take or renew the adapter lease. ``ring`` (v48) says whether a
+        ring the daemon decides reaches this session without a live channel
+        (the Claude Stop hook's .ring marker, the Codex doorbell); it is
+        kept in ``capabilities`` and counts as a wake path."""
         _string(attachment_id, 120, "attachment_id", empty=False)
         self._fields(wake_enabled=wake_enabled)
+        if ring is not None and not isinstance(ring, bool):
+            raise CoordinationError("invalid_capabilities")
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
@@ -1497,6 +1515,10 @@ class CoordinationStore:
                 "wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, started, now,
                  wake_enabled, agent_id))
+            if ring is not None:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET capabilities=capabilities || %s "
+                    "WHERE agent_id=%s", (Jsonb({"ring": ring}), agent_id))
             mailbox = self._mailbox_state(agent_id)
             ring = self._serve_wake(agent_id, now)
             self._append([self._event(
@@ -1545,10 +1567,16 @@ class CoordinationStore:
         attach or heartbeat, once: the daemon decides, the shim rings. One
         answer covers them all, the newest ring's reason and the latest
         ``ring_at`` (a burst staggers them); ``None`` when nothing is due."""
-        rows = self._all(
+        self.storage.conn.execute(
             "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
-            "AND served_at IS NULL RETURNING decision,reason,ring_at,created_at,wake_id",
-            (now, agent_id))
+            "AND served_at IS NULL", (now, agent_id))
+        # A ring rides the answers of one heartbeat interval: a lost answer
+        # that the adapter retries still carries it, and the adapter takes
+        # each ring once.
+        rows = self._all(
+            "SELECT decision,reason,ring_at,created_at,wake_id FROM coordination_wakes "
+            "WHERE recipient_agent_id=%s AND served_at>%s",
+            (agent_id, now - WAKE_SERVE_REPEAT))
         if not rows:
             return None
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
@@ -1583,11 +1611,17 @@ class CoordinationStore:
         park = self._live_park(recipient, now)
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
                 if park and park["park_reason"] != "done" else {})
-        if recipient["last_activity"] > now - policy.active_seconds:
+        # A parked session has stopped: its last board action (the park
+        # itself) is no sign a tool result will carry the mail, so only an
+        # unparked session counts as active (review, 2026-09-28).
+        if park is None and recipient["last_activity"] > now - policy.active_seconds:
             return {"decision": "hinted", "reason": "active"}
         if park and park["park_reason"] == "done":
             return {"decision": "not_needed", "reason": "parked_done"}
-        if not recipient["wake_enabled"]:
+        # A wake path is a live channel, or a ring path the adapter declared
+        # at attach (the Stop hook's .ring marker, the Codex doorbell).
+        capabilities = recipient.get("capabilities") or {}
+        if not recipient["wake_enabled"] and capabilities.get("ring") is not True:
             return {"decision": "no_path", "reason": "wake_disabled", **need}
         hour, day = now - 3600, now - 86400
         if park:

@@ -220,6 +220,11 @@ try {
 $gateQuery = $null
 if ($Event -eq 'Stop') {
     if ($stopHookActive -or $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { exit 0 }
+    # An explicit no to the wake hook or to coordination turns the gate off,
+    # the same switches Claude Code's Stop command reads.
+    foreach ($setting in @($env:PSEUDOLIFE_AGENT_WAKE_HOOK, $env:PSEUDOLIFE_AGENT_COORDINATION)) {
+        if (([string]$setting).Trim().ToLowerInvariant() -in '0', 'false', 'no', 'off') { exit 0 }
+    }
     try {
         $digestDir = Get-DigestDir
         $key = Get-DigestKey $sessionId
