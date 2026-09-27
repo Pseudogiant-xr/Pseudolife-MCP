@@ -307,8 +307,10 @@ jobs:
 
       - name: Hook, installer and embedded-provider tests
         # The plugin hooks' BSD branches (stat -f, base64 -D, shasum,
-        # ps -o lstart=) execute only here. -rs prints every skip reason,
-        # so a platform skip cannot pass for coverage.
+        # ps -o lstart=) execute only here. No Postgres is started, so the
+        # store tests in test_coordination_turn_digest.py skip; the Linux
+        # lanes run them. -rs prints every skip reason, so a platform skip
+        # cannot pass for coverage.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py -q -rs
+        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py -q -rs

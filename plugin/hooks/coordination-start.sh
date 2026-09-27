@@ -25,7 +25,10 @@ SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"
 # record alone. --continue can still launch the shim with a startup id no
 # hook ever sees; the record cannot name that one.
 valid_key() {  # $1 = a line; prints it when it is a 64-hex key
-    case "$1" in ''|*[!0-9a-f]*) return 0 ;; esac
+    # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+    # a range by locale collation, where a-f takes upper case and 0-9 takes
+    # digits such as the superscript two (tests/test_hook_glob_ranges.py).
+    case "$1" in ''|*[!0123456789abcdef]*) return 0 ;; esac
     [ "${#1}" -eq 64 ] && printf '%s' "$1"
 }
 sha256_of() {  # $1 = text
@@ -65,7 +68,7 @@ DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/
 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     KEY=$(sha256_of "$SID")
     case "${CLAUDE_PID:-}" in
-        ''|*[!0-9]*) ;;
+        ''|*[!0123456789]*) ;;
         *)
             if [ -n "$KEY" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
                 RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
@@ -88,8 +91,8 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
                         NOW=$(date +%s 2>/dev/null)
                         # Validated before any arithmetic: bash aborts the
                         # whole script on a malformed number such as 08.
-                        case "$STAMP" in ''|0*|*[!0-9]*) STAMP="" ;; esac
-                        case "$NOW" in ''|0*|*[!0-9]*) STAMP="" ;; esac
+                        case "$STAMP" in ''|0*|*[!0123456789]*) STAMP="" ;; esac
+                        case "$NOW" in ''|0*|*[!0123456789]*) STAMP="" ;; esac
                         if [ -n "$STAMP" ] && [ "$FROM" = "$FOR" ] &&
                                 [ "${#STAMP}" -le 12 ] && [ "${#NOW}" -le 12 ] &&
                                 [ $((NOW - STAMP)) -ge 0 ] && [ $((NOW - STAMP)) -le 60 ]; then
