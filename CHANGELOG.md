@@ -63,6 +63,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   explains the consequence beside the mechanism; `memory-model.md` points
   there.
   No retrieval behaviour changes.
+### Fixed (2026-09-27 — `memory_recall` seeds an entity a sentence ends on)
+- `memory_recall` starts its graph walk from the entities the question
+  names, and the name matcher behind that (`_mentions` in
+  `memory/recall.py`) treated a period right after a name as part of a
+  word. "Start the bench server." named no entity, so the walk seeded from
+  whatever the search hits mentioned instead. The same blind spot hid every
+  name that ends a sentence in a hit text, where the matcher also picks
+  fallback seeds and ranks re-queries. A period after a name now counts as
+  a boundary unless a word character follows it, so "node" still does not
+  match inside "node.js" and "v1" not inside "v1.2". A period before a name
+  still blocks it, so a dotfile path such as ".env" does not name "env".
+- Two more alignments with the constraint-pin scope test
+  (`_entity_in_query`) that `memory_search` uses. A name's own separators
+  (space, `_`, `-`, `/`) now match each other, so "payments db" and
+  "payments-db" name the same entity. An apostrophe inside a word is no
+  longer a boundary, except before a possessive "s", so "don't" does not
+  name "Don" but "the bench server's config" names "bench server". Hyphens
+  in the text stay boundaries ("k8s" matches "k8s-prod"). The docstring
+  claimed the opposite, and now says what the code does.
+- Seed bench (`evals/seed_bench.py`, 2026-09-27, deterministic: a control
+  run with the old matcher reproduced the before numbers exactly). The
+  shipped query-first seeder is unchanged at precision 1.0, recall 1.0,
+  because every bench question ends in "?". Six of the bench's 17 corpus
+  sentences end on an entity name, which the old matcher missed, so the
+  hit-derived variants moved: the retired liberal seeder went 0.28 → 0.295
+  (its June figure was 0.262) and the rejected ranked-and-capped variant
+  0.75 → 0.625. Artifacts: `evals/results/seed_bench-2026-09-27-mentions-*.json`.
+  Compiled patterns are now cached per name, so a vocabulary larger than
+  `re`'s own 512-pattern cache no longer recompiles every name on every
+  seeding.
 
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on

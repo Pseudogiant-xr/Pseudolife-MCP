@@ -61,6 +61,69 @@ def test_mechanical_seeds_fall_back_to_hits_when_query_bare():
     assert seeds == ["alpha", "beta"]
 
 
+def test_mentions_sentence_final_period_is_a_boundary():
+    # "start the bench server." names "bench server"; "?" and "," already did.
+    assert rc._mentions("start the bench server.", "bench server")
+    assert rc._mentions("Restart k8s. Then check.", "k8s")
+    assert rc._mentions("is it the bench server?", "bench server")
+    # ...but a dot glued to a word on both sides is part of a name.
+    assert not rc._mentions("we deploy node.js here", "node")
+    assert not rc._mentions("we deploy node.js here", "js")
+    assert rc._mentions("we deploy node.js here", "node.js")
+    assert rc._mentions("we deploy node.js.", "node.js")
+    assert not rc._mentions("pinned to v1.2 today", "v1")
+    assert rc._mentions("i like c++.", "c++")    # metacharacters escaped
+
+
+def test_mentions_a_dot_before_a_name_still_blocks_it():
+    # Only the TRAILING dot changed: a dotfile path in a hit text does not
+    # name the entity its stem happens to spell.
+    assert not rc._mentions("see .env file", "env")
+    assert not rc._mentions("edit .claude/settings.json", "claude")
+    assert not rc._mentions("activate .venv first", "venv")
+
+
+def test_mentions_folds_the_names_own_separators():
+    # The same run of separators _entity_in_query folds, so memory_recall
+    # seeds the entity memory_search's pin scope already treats as named.
+    assert rc._mentions("payments-db host", "payments db")
+    assert rc._mentions("the payments db host", "payments-db")
+    assert rc._mentions("the payments_db host", "payments-db")
+    assert rc._mentions("the payments / db host", "payments db")
+    assert not rc._mentions("the payments database host", "payments db")
+    # The TEXT's boundaries are not folded: "_" stays part of a word.
+    assert not rc._mentions("see pseudolife_memory/recall.py", "pseudolife")
+    # Only INTERNAL separators fold; a leading one stays literal.
+    assert rc._mentions("GET /api now", "/api")
+    assert not rc._mentions("GET api now", "/api")
+    assert not rc._mentions("GET -api now", "/api")
+
+
+def test_mentions_contraction_is_not_a_boundary_but_possessive_is():
+    assert not rc._mentions("don't do it", "don")
+    assert not rc._mentions("don’t do it", "don")
+    assert not rc._mentions("ask o'brien", "brien")
+    assert not rc._mentions("ask o’brien", "brien")
+    assert rc._mentions("the bench server's config", "bench server")
+    assert rc._mentions("the bench server’s config", "bench server")
+    assert rc._mentions("Don's laptop", "don")
+    # Only a whole-word 's' is possessive: "o'sullivan" does not name "o".
+    assert not rc._mentions("ask o'sullivan", "o")
+
+
+def test_mentions_hyphen_is_a_boundary():
+    # Pinned as documented behavior (the docstring used to claim the
+    # opposite): a hyphenated compound names each hyphen-bounded run.
+    assert rc._mentions("k8s-prod cluster", "k8s")
+    assert rc._mentions("k8s-prod cluster", "k8s-prod")
+
+
+def test_mechanical_seeds_query_ending_in_a_period():
+    c = rc.MechanicalController()
+    assert c.seed_entities("start the bench server.", ["unrelated hit"],
+                           ["bench server", "unrelated"]) == ["bench server"]
+
+
 def test_run_recall_reaches_two_hop_terminal():
     svc = _two_hop()
     st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],

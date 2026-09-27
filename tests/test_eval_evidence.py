@@ -9939,3 +9939,43 @@ for _cid, _needle, _value, _stated, _places in (
          _mpb_arm("full_separate_hook", "memory_tool_calls"), 1.0, 1)):
     CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(MPB_SANITY,),
                         value=_value, stated=_stated, places=_places))
+
+
+# ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
+# evals/seed_bench.py before and after the _mentions boundary change, plus
+# a control that patches the old matcher back in on the new tree (it
+# reproduces "before" exactly, so the bench is deterministic). The June
+# figure is the canonical seed_bench.json, left as that decision's record.
+_SEED = RESULTS + "seed_bench-2026-09-27-mentions-"
+SEED_BEFORE, SEED_AFTER = _SEED + "before.json", _SEED + "after.json"
+SEED_CONTROL = _SEED + "control-oldmatcher.json"
+SEED_JUNE = RESULTS + "seed_bench.json"
+
+
+def _seed_p(variant: str, metric: str = "seed_precision") -> Callable[[dict], float]:
+    return lambda d: d[variant][metric]
+
+
+for _cid, _art, _variant, _metric, _needle, _stated in (
+        ("seed-mentions-shipped-precision", SEED_AFTER, "A", "seed_precision",
+         "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-shipped-recall", SEED_AFTER, "A", "seed_recall",
+         "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-shipped-precision-before", SEED_BEFORE, "A",
+         "seed_precision", "unchanged at precision 1.0, recall 1.0,", 1.0),
+        ("seed-mentions-v0-before", SEED_BEFORE, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.28),
+        ("seed-mentions-v0-control", SEED_CONTROL, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.28),
+        ("seed-mentions-v0-after", SEED_AFTER, "v0", "seed_precision",
+         "the retired liberal seeder went 0.28 → 0.295", 0.295),
+        ("seed-mentions-v0-june", SEED_JUNE, "v0", "seed_precision",
+         "(its June figure was 0.262)", 0.262),
+        ("seed-mentions-c-before", SEED_BEFORE, "C", "seed_precision",
+         "0.75 → 0.625", 0.75),
+        ("seed-mentions-c-control", SEED_CONTROL, "C", "seed_precision",
+         "0.75 → 0.625", 0.75),
+        ("seed-mentions-c-after", SEED_AFTER, "C", "seed_precision",
+         "0.75 → 0.625", 0.625)):
+    CLAIMS.append(Claim(id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+                        value=_seed_p(_variant, _metric), stated=_stated, places=3))
