@@ -58,6 +58,63 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot tell whether it carries a token), is left alone with a warning
   naming the fix.
 
+### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
+- A subagent that a Claude Code session spawns with its Agent tool shares the
+  parent's shim, so its board calls carry the parent's identity (probed
+  2026-09-27: its `memory_agents(action="list")` left out the parent's own
+  row, and its receive returned the parent's cursor). Its status update
+  overwrote the parent's, its `ack` marked the parent's mail read unseen, and
+  its `send` went out under the parent's name, and nothing in the shim can
+  tell the calls apart. The served check-in (`CHECKIN_TEXT`, and the compact
+  `CHECKIN_INSTRUCTION` the shim appends to the MCP instructions) now says a
+  subagent only reads the board, and that status, ack and send belong to the
+  parent. The compact form's wording was tightened to fit: the daemon's
+  instructions plus it are 501 of Codex's 512 characters.
+- Schema v47 adds `coordination_agents.children`, where the parent names its
+  subagents instead of giving them addresses:
+  `memory_agents(action="update", children=[...])` takes at most 8 labels of
+  at most 40 characters, with no duplicates (`invalid_children` otherwise, and
+  `secret_like_body` for a credential-shaped label). The daemon stores each as
+  `{label, since}`, stamping `since` itself and keeping it for a label the next
+  update carries over. Omitting `children` leaves it unchanged and `[]` clears
+  it, like the other fields; a children-only update does not move
+  `status_set_at`. Every peer row in `memory_agents(action="list")`, and the
+  caller's own row in the update and register results, carries `children`. The
+  column is added only when missing, as v46's are. The same field goes through
+  the REST `update` action. `memory_agents`' description paid for the new line
+  by trimming its own wording: the core manifest is 11,496 of 11,500
+  characters, caps unchanged.
+- README's `memory_agents` row now lists `lease`, `expect` and `children`,
+  and the claim and release actions, which it had lagged since v45.
+
+### Fixed (2026-09-27 — Codex coordination setup keeps live delivery on and recognises the default-on board)
+- Re-running `ops/setup-codex-coordination.py --enable` no longer turns
+  off Codex live delivery. Enable wrote `PSEUDOLIFE_AGENT_WAKE=0` whenever
+  the value differed, so a registration set to `1` for the app-server bridge
+  went back to pull-only. The script no longer writes the variable. When
+  it is unset the shim already uses pull, so the only thing the `"0"` ever
+  did was reset an opt-in. Enable's report now says `wake: live` only when
+  the wake flag and both bridge settings are present.
+- `--check` recognises the board being on by default. Before, it reported
+  `needs-configuration` unless `PSEUDOLIFE_AGENT_COORDINATION` was
+  explicitly truthy, but since the board went on by default an unset value
+  is a working configuration. The check now asks the daemon what the shim
+  asks at startup (`GET /api/hook/coordination-start` with the
+  registration's bearer). It reports `ready (default-on)` when the daemon
+  serves the board and `ready (explicit)` for a pinned opt-in. A new
+  `coordination_mode` field carries the same mode. `--enable` is now only
+  for pinning explicit mode, and the Codex setup steps in
+  `docs/guide/configuration.md` say so.
+- When the daemon refuses the bearer's principal, `--check` says so:
+  `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
+  `--enable`'s refusal names the same cause. A Codex principal from a
+  `PSEUDOLIFE_MCP_TOKENS` map is off the board until it is listed (the
+  2026-09-25 default, unchanged). In that state a shim on the default
+  setting leaves coordination off without an error, and one pinned with
+  `--enable` shows only an attach-unavailable hint. The coordination section of the
+  configuration guide and the README's Codex setup now say this for
+  upgraders.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a
