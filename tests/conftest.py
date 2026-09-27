@@ -75,6 +75,12 @@ else:
 
     psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
 
+# The board mirror of the full-suite lock (tests/suite_lock.py) speaks for
+# this session with its bearer and daemon URL, which the isolation just below
+# strips from the environment; keep a copy first. Only pytest_configure reads
+# it, and only for a full run under the lock.
+BOARD_ENV = suite_lock.board_environment(os.environ)
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
@@ -356,9 +362,13 @@ def pytest_configure(config: pytest.Config) -> None:
     # What it read from the checkout by now (this file, its imports, and
     # ops/.env for the bench URL above) is fingerprinted and re-checked on
     # every poll: a run whose copies changed while it queued stops instead
-    # of running them.
-    held = suite_lock.take_for_session(config, os.environ, ROOT / "tests",
-                                       read_files=(ENV_FILE,))
+    # of running them. The board mirrors the lock as the lease `full-suite`
+    # (holder, queue, expected end, a notice to the peers concerned); it is
+    # built here, before the fingerprint, so its module is part of it.
+    lock_dir = suite_lock.lock_dir(os.environ)
+    held = suite_lock.take_for_session(
+        config, os.environ, ROOT / "tests", read_files=(ENV_FILE,),
+        mirror=suite_lock.board_mirror(lock_dir, ROOT, BOARD_ENV))
     if held is not None:
         config.stash[_SUITE_LOCK] = held
 

@@ -3973,6 +3973,8 @@ expiring hold on a shared resource, taken around any command.
 
 ```sh
 pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
+pseudolife-mcp lease check NAME [--json]
 pseudolife-mcp lease list [NAME] [--json]
 ```
 
@@ -4017,6 +4019,48 @@ the lock, not the command: kill it outright (SIGKILL, Task Manager) and the
 lock goes while the command may run on. On a case-insensitive filesystem,
 names that differ only in case share one lock file, which can only make one
 wait for the other.
+
+`lease hold NAME --while-pid PID` is the lease for a process the command did
+not start and cannot wrap: a launcher starts a detached server, then starts a
+hold that lasts as long as the server's pid does. The order is the reverse of
+`run`, because the process already owns the resource: the OS lock first (a
+lock another process holds is waited for, or given up on at once with
+`--timeout 0`, exit `75`), the board second, and both are released when PID
+exits, or when the hold is stopped (`128+N`), which leaves PID running.
+`--worktree` names the checkout in the notices below; `--expect` is the
+expected end the board shows. `evals/qwen_server.ps1` uses it around the bench
+server: `Start-Qwen` refuses to launch while `lease check gpu` says the lease
+is held (beside its VRAM busy-check, which stays the guard against anything
+that takes no lease), and holds `gpu` for the server it starts.
+
+`lease check NAME` is the launch gate for an orchestrator, in place of watching
+process CPU: it prints the local lock's state and the board's holder with the
+expected end, and exits `0` when the lease is free or `1` when either says it
+is held (`--json` for one report). For `full-suite` it probes the test suite's
+own lock (`full-suite.lock` and its slots, with the holder record's pid,
+worktree and start time), since that file, not `lease-full-suite.lock`, is the
+truth for a full run. Without a board the local lock decides.
+
+The test suite's lock is mirrored the same way. A full `pytest` run
+(`tests/conftest.py`, `tests/suite_lock.py`) holds the board lease `full-suite`
+behind its OS lock: while it queues it is a board waiter, once it holds the lock
+it holds the lease, with the run's pid and worktree as its purpose and an
+expected end from the median of the last five recorded run times
+(`~/.pseudolife-mcp/locks/full-suite.durations.jsonl`; 25 minutes until five
+are on record). The OS lock stays the truth: a board that is unreachable,
+refuses, or shows another holder costs one line and never delays or stops the
+run, and `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and
+daemon URL are read when conftest is imported, before the suite's own client
+isolation strips them.
+
+Acquiring and releasing `hold` and the suite's mirror send one notice each
+(`LEASE NAME acquired: pid, worktree, expected end` / `LEASE NAME released:
+pid, worktree, held for`) by board mail to the peers the lease concerns:
+attached agents in the same project (compared without case; every project
+when the sender has none set) whose status says `suite=running`,
+`suite=queued` or `gpu=`, and any peer parked with `park_clear_by` naming the
+lease. At most 20 peers are told per event. The notices are automatic and
+need no reply; they replace hand-written SUITE-START/SUITE-END notes.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the

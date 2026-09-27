@@ -7,6 +7,7 @@ registers, holds, renews and releases, a queued run times out and leaves the
 queue, and the audit log records each step.
 """
 import json
+import subprocess
 import sys
 import threading
 
@@ -191,3 +192,47 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "no-bank-here"))
     assert lease_cli.main(["break", "gpu"]) == 1
     assert "no bank found" in capsys.readouterr().err
+
+
+def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypatch, capsys):
+    """``lease hold`` against the real store: the lease is held under the
+    hold's own address while the followed process lives, the peers whose
+    status says they work around the suite or the GPU get the acquire and
+    release notices as ordinary board mail (so the request ids and texts
+    pass the daemon's checks), and a peer with another status gets none."""
+    bridge, storage = board
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_PROJECT", raising=False)
+    runner = _post(bridge, "register", {"label": "suite-runner", "status": "SUITE-START; suite=running"})
+    quiet = _post(bridge, "register", {"label": "quiet", "status": "reviewing a PR"})
+    as_ = lambda a: {"X-PL-Agent": a["agent_id"], "X-PL-Agent-Key": a["credential"]}
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    threading.Thread(target=child.wait, daemon=True).start()
+    seen = {}
+
+    def watch():
+        for _ in range(400):
+            leases = _post(bridge, "leases", {"name": "gpu"})["leases"]
+            if leases:
+                seen["lease"] = leases[0]
+                return
+            threading.Event().wait(0.02)
+
+    watcher = threading.Thread(target=watch)
+    watcher.start()
+    code = lease_cli.main(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "10m",
+                           "--purpose", "bench server", "--worktree", "wt-bench"],
+                          transport=bridge)
+    watcher.join(10)
+    assert code == 0
+    assert seen["lease"]["holder"]["label"] == lease_cli.HOLD_LABEL
+    assert seen["lease"]["holder"]["purpose"] == "bench server"
+    assert seen["lease"]["expected_end"] is not None
+    assert _post(bridge, "leases", {"name": "gpu"})["leases"] == []
+    texts = [m["text"] for m in _post(bridge, "receive", {}, as_(runner))["messages"]]
+    assert len(texts) == 2, texts
+    assert texts[0].startswith("LEASE gpu acquired") and texts[1].startswith("LEASE gpu released")
+    assert f"pid {child.pid}" in texts[0] and "wt-bench" in texts[0] and "expected end" in texts[0]
+    assert _post(bridge, "receive", {}, as_(quiet))["messages"] == []
+    kinds = [event for event, _ in _events(storage, "lease_acquire", "lease_release")]
+    assert kinds == ["lease_acquire", "lease_release"]
+    assert "board skipped" not in capsys.readouterr().err

@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — the full-suite lock and the bench server's GPU show on the board as leases, and tell the peers concerned)
+- On the night of 2026-09-27 two full suites and three GPU cells ran while
+  the agent board's lease list stayed empty: `tests/suite_lock.py` took its
+  OS lock and `evals/qwen_server.ps1` launched the server, and neither
+  touched the board; the `SUITE-START`/`SUITE-END` notes the rule asked for
+  were status overwrites nobody was sent. A full `pytest` run now mirrors
+  its lock as the board lease `full-suite` (`BoardMirror` in
+  `pseudolife_memory/lease_cli.py`): a queued run is a board waiter, a
+  running one the holder, with its pid and worktree as the purpose and an
+  expected end from the median of the last five recorded run times
+  (`full-suite.durations.jsonl` beside the lock; 25 minutes until five are
+  on record). The OS lock stays the truth: a board that is unreachable,
+  refuses, or shows another holder costs one line on stderr and never
+  delays or stops the run; `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither.
+  conftest reads the bearer and daemon URL at import, before the suite's
+  client isolation strips them.
+- `pseudolife-mcp lease hold NAME --while-pid PID` holds a lease for a
+  process the command did not start: the OS lock first (the process already
+  owns the resource; `--timeout 0` gives up at once, exit 75), the board
+  second, both released when PID exits or the hold is stopped. `Start-Qwen`
+  refuses to launch while `lease check gpu` says the lease is held (the VRAM
+  busy-check stays as the guard against anything that takes no lease) and
+  holds `gpu` for the server it starts; `Stop-Qwen` ends the hold with the
+  server. Without the CLI on the host the lease steps warn once and the
+  server runs unleased, as before.
+- `pseudolife-mcp lease check NAME [--json]` is the launch gate for
+  orchestrators: exit 0 when free, 1 when the OS lock or the board says held,
+  with the holder and expected end. For `full-suite` it probes the suite's
+  own lock and its slots, with the holder record's pid, worktree and start.
+- Acquiring and releasing (`hold`, and the suite's mirror) send one board
+  message each to the attached peers of the same project whose status says
+  `suite=running`, `suite=queued` or `gpu=`, and to any peer parked with
+  `park_clear_by` naming the lease (read where present; a sibling change
+  defines it), at most 20 per event, with pid, worktree and expected end.
+  `CLAUDE.md`'s full-suite rule and `docs/guide/configuration.md` now say to
+  read `lease check` instead of hand-announcing.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a

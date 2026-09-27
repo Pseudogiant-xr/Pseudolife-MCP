@@ -35,35 +35,42 @@ def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_
 
 @pytest.mark.parametrize(
     ("running", "initial_listener", "ready", "final_owner", "launch_fails", "busy",
-     "expected", "says"),
+     "leased", "expected", "says"),
     [
         # A reproducible server already serving is reused, never stopped.
         # Its own VRAM is not a busy GPU: nothing new is launched onto it.
-        ("reproducible", False, True, 4242, False, None, (True, 0, 0),
+        ("reproducible", False, True, 4242, False, None, None, (True, 0, 0, 0),
          "reusing the reproducible Qwen server"),
-        ("reproducible", False, True, 4242, False, 20000, (True, 0, 0),
+        ("reproducible", False, True, 4242, False, 20000, None, (True, 0, 0, 0),
          "this run did not start it and will not stop it"),
         # Running but not answering: neither reused nor displaced.
-        ("reproducible", False, False, 4242, False, None, (False, 0, 0),
+        ("reproducible", False, False, 4242, False, None, None, (False, 0, 0, 0),
          "not answering on :1234"),
         # Any other config is refused, never displaced.
-        ("fast", False, True, 4242, False, None, (False, 0, 0),
+        ("fast", False, True, 4242, False, None, None, (False, 0, 0, 0),
          "Qwen server running as 'fast' but 'reproducible' is required"),
-        ("foreign", False, True, 4242, False, None, (False, 0, 0),
+        ("foreign", False, True, 4242, False, None, None, (False, 0, 0, 0),
          "not serving Qwen3.8-27B-UD-Q4_K_XL.gguf"),
-        ("", True, True, 4242, False, None, (False, 0, 0), "port 1234 is occupied"),
-        ("", False, True, 4242, False, None, (True, 1, 1), ""),
-        ("", False, True, 9999, False, None, (False, 1, 1), ""),
-        ("", False, False, 4242, False, None, (False, 1, 1), ""),
-        ("", False, True, 4242, True, None, (False, 1, 0), ""),
+        ("", True, True, 4242, False, None, None, (False, 0, 0, 0), "port 1234 is occupied"),
+        # A launch that answers holds the gpu lease for its server's pid.
+        ("", False, True, 4242, False, None, None, (True, 1, 1, 1), "gpu lease hold started"),
+        ("", False, True, 9999, False, None, None, (False, 1, 1, 1), ""),
+        ("", False, False, 4242, False, None, None, (False, 1, 1, 0), ""),
+        ("", False, True, 4242, True, None, None, (False, 1, 0, 0), ""),
         # Nothing to reuse and the GPU is busy: hold, never launch.
-        ("", False, True, 4242, False, 6000, (False, 0, 0), "GPU BUSY"),
+        ("", False, True, 4242, False, 6000, None, (False, 0, 0, 0), "GPU BUSY"),
+        # Another launcher holds the gpu lease: hold, never launch (2026-09-28).
+        ("", False, True, 4242, False, None, "lease gpu: held by other-run",
+         (False, 0, 0, 0), "GPU LEASED"),
     ],
 )
 def test_owned_qwen_launch_and_cleanup_never_stop_foreign_processes(
-    running, initial_listener, ready, final_owner, launch_fails, busy, expected, says
+    running, initial_listener, ready, final_owner, launch_fails, busy, leased, expected,
+    says
 ):
-    """Exercise the helper with process and port mocks; never launch a model."""
+    """Exercise the helper with process and port mocks; never launch a model.
+    ``expected`` is (result, server launches, kills of the launched server,
+    gpu lease holds started for it)."""
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("PowerShell 7 is not installed")
@@ -76,8 +83,10 @@ $script:mockReady = ${str(ready).lower()}
 $script:mockFinalOwner = {final_owner}
 $script:mockLaunchFails = ${str(launch_fails).lower()}
 $script:mockBusy = {"$null" if busy is None else busy}
+$script:mockLeased = {"$null" if leased is None else repr(leased)}
 $script:listenerCalls = 0
 $script:launches = 0
+$script:holds = 0
 $script:fake = [pscustomobject]@{{Id=4242; HasExited=$false; Kills=0}}
 $script:fake | Add-Member ScriptMethod Kill {{ $this.Kills++; $this.HasExited=$true }}
 $script:fake | Add-Member ScriptMethod WaitForExit {{ param($ms) return $true }}
@@ -92,10 +101,16 @@ function Get-NetTCPConnection {{
     }}
 }}
 function Test-GpuBusy {{ return $script:mockBusy }}
+function Test-GpuLeaseHeld {{ return $script:mockLeased }}
 function Start-Sleep {{}}
 function Test-Path {{ return $false }}
 function Wait-QwenEndpoint {{ return $script:mockReady }}
 function Start-Process {{
+    param($FilePath, $ArgumentList)
+    if ("$ArgumentList" -match 'lease hold gpu --while-pid 4242 ') {{
+        $script:holds++
+        return [pscustomobject]@{{Id=77; HasExited=$true}}
+    }}
     $script:launches++
     if ($script:mockLaunchFails) {{ throw 'mock launch failure' }}
     return $script:fake
@@ -103,7 +118,7 @@ function Start-Process {{
 function Get-Process {{ throw 'foreign process query during owned cleanup' }}
 $result = Start-Qwen -Owned
 Stop-Qwen -Owned
-Write-Output "OWNED_RESULT=$result,$script:launches,$($script:fake.Kills)"
+Write-Output "OWNED_RESULT=$result,$script:launches,$($script:fake.Kills),$script:holds"
 """
     result = subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -114,7 +129,7 @@ Write-Output "OWNED_RESULT=$result,$script:launches,$($script:fake.Kills)"
         line.removeprefix("OWNED_RESULT=")
         for line in result.stdout.splitlines() if line.startswith("OWNED_RESULT=")
     )
-    assert actual == f"{str(expected[0])},{expected[1]},{expected[2]}", (
+    assert actual == ",".join(str(part) for part in expected), (
         result.stdout + result.stderr
     )
     assert says in result.stdout, result.stdout + result.stderr
