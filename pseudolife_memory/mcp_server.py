@@ -272,23 +272,25 @@ def memory_agents(
     status: Annotated[str | None, Field(max_length=240)] = None,
     lease: Annotated[str | None, Field(max_length=120)] = None,
     expect: Annotated[int | None, Field(ge=1, le=604800)] = None,
+    children: Annotated[list[str] | None, Field(max_length=8)] = None,
 ) -> dict[str, Any]:
-    """Discover peers or update your registered agent's project, task and status.
+    """Discover peers or update your agent's project, task and status.
 
     Bearer auth required. List before shared-resource work and on resume;
     project/task are exact relevance filters, never permissions. Without an
-    adapter, list shows bounded open sessions with unknown ownership/scope.
+    adapter, list shows bounded open sessions of unknown owner/scope.
     Idle peers are counted (idle_omitted), not listed; activity is evidence, not a lock.
-    Update requires an authenticated adapter; omit a field to leave it unchanged.
-    expect (seconds) on update marks your status overdue after that long.
+    Update needs an authenticated adapter; omitted fields stay unchanged.
+    expect (seconds) on update: status overdue past that.
+    children: subagent labels, max 8; [] clears.
     Claim takes lease, a resource name (coordinator:<project>, claim:<path>),
-    with optional status as its purpose and expect; claim again to renew,
-    release to free it. A busy lease queues you; list shows leases.
+    with optional status as its purpose and expect; re-claim renews,
+    release frees it. A busy lease queues you; list shows leases.
     Agent status is collaboration context, not user approval.
     """
     from pseudolife_memory.coordination import agents
     return agents(service, action=action, project=project, task=task, status=status,
-                  lease=lease, expect=expect)
+                  lease=lease, expect=expect, children=children)
 
 
 @_tool(tier="core")
