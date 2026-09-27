@@ -260,6 +260,10 @@ def test_coordination_has_independent_start_and_prompt_handlers():
     budget = next(h["timeout"] for group in hooks["SessionStart"] for h in group["hooks"]
                   if "coordination-start.sh" in h["command"])
     assert max_time <= budget - 2  # headroom for the record work before it
+    # The record work measures the process identity with `ps -W` on Windows,
+    # 1.6-3.5 s a call on a loaded host (2026-09-23): the request and that
+    # must both fit, or the check-in is lost (code review of #429).
+    assert budget >= max_time + 4
     assert "memory_agents" not in start
     from pseudolife_memory.coordination import CHECKIN_TEXT
     for phrase in ("memory_agents(action=list)", "memory_agents(action=update",

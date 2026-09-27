@@ -40,8 +40,10 @@ you how to start it.
 ## Codex compatibility
 
 When loaded by a current Codex runtime, the plugin's lifecycle hooks use the
-same events. On Windows, `commandWindows` runs native PowerShell 7 helpers;
-Claude keeps the Bash commands. With the daemon running, use
+same events. On Windows, Codex runs each entry's `commandWindows`, a native
+PowerShell 7 helper (`lifecycle.ps1`); Claude Code has no such field and
+runs the Bash `command` through Git Bash (see [Windows](#windows)). With the
+daemon running, use
 `python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
 to approve the PseudoLife hook definitions and verify their lifecycle (the
 `Stop` entry is Claude Code's opt-in wake hook and a no-op in Codex).
@@ -54,6 +56,39 @@ Use one hook source so the same event does not run twice; the setup helper
 checks for known duplicates. Keep a single MCP transport registration, and follow the
 [Codex setup and verification guide](../docs/guide/providers.md#codex-specifics)
 for startup budgets, standing instructions and runtime diagnostics.
+
+## Windows
+
+**Git for Windows is a requirement of this plugin.** Claude Code runs every
+hook command through Git Bash on Windows and finds it itself:
+`CLAUDE_CODE_GIT_BASH_PATH` when set, else `C:\Program Files\Git\bin\bash.exe`
+or its `(x86)` twin, else `bin\bash.exe` of the Git whose `cmd\git.exe` is on
+PATH ([Claude Code docs](https://code.claude.com/docs/en/troubleshoot-install.md)).
+It never looks `bash` up on PATH, so a PATH whose `bash` is the WSL launcher
+in `System32` does not affect it: verified on Claude Code 2.1.280 on
+2026-09-27 with every Git directory removed from PATH, the hooks still ran
+under `C:\Program Files\Git\bin\bash.exe`. Without Git Bash, Claude Code runs
+hook commands in PowerShell, where every command here fails (`bash` is not
+found, or opens WSL, which cannot read the plugin's Windows paths), and the
+session gets no briefing, no per-turn note and no episode close.
+`pseudolife-mcp doctor` reports the bash.exe Claude Code would use
+(`git_bash`, reading `CLAUDE_CODE_GIT_BASH_PATH` from the settings `env`
+block too) and fails with `GitBashMissing` when there is none; it also
+warns when `bash` on PATH is the WSL launcher, which breaks tools that do
+look it up.
+
+The `commandWindows` field on each hook entry is for Codex (above); Claude
+Code ignores it and never runs `lifecycle.ps1`. Two limits of the Bash hooks
+under Claude Code on Windows: SessionEnd hooks from a plugin get 1.5 s in
+total, whatever `timeout` hooks.json sets (a settings.json hook can raise
+the budget, a plugin's cannot; measured 2026-09-27), so the `/clear` and
+`/resume` digest handoff is written before the episode-close request and
+reads the process identity SessionStart recorded instead of measuring it,
+while that record says it still holds (`ps -W` prints a process's start
+time differently after its first 24 hours, and a DST change shifts it);
+and the opt-in Stop hook checks that Claude Code is still running through
+`ps -W` at arm time and once a minute (a Windows PID is invisible to
+`kill -0`), so a watcher orphaned by a crash ends within the minute.
 
 ## Startup check-in and per-turn coordination
 
@@ -160,8 +195,9 @@ listed for review and left alone. By hand:
 - **Memory SessionStart hook** — curls the daemon's `/api/hook/session-start`
   for concise memory guidance and a bounded briefing, and registers the
   session's episode identity. On a resume or compaction it serves only the
-  episode-handle line and a pointer to the full briefing. Needs `bash` on PATH
-  (Git Bash on Windows) and `curl` — both ship with git / the OS.
+  episode-handle line and a pointer to the full briefing. Needs `bash` and
+  `curl`; on Windows that is Git for Windows, which Claude Code finds
+  without PATH help (see [Windows](#windows)).
 - **Memory-policy SessionStart hook** — curls `/api/hook/memory-policy`,
   which returns the full memory-loop block only when the daemon's
   `memory_policy.variant` is `full_separate_hook` (an output of its own, so

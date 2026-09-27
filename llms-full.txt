@@ -933,7 +933,10 @@ verification. Session episodes also work without hooks through the daemon:
 **Current Codex runtimes enable hooks by default, including Windows.**
 Availability depends on the application/runtime and policy, not the model.
 If `[features] hooks = false` is intentional, keep it and use the standing
-`AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
+`AGENTS.md` block. Codex runs the plugin's Windows hooks as native
+PowerShell 7 commands; Claude Code runs their Bash commands through Git
+Bash, so it needs Git for Windows installed (see
+[plugin/README.md](plugin/README.md#windows)).
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
@@ -4944,9 +4947,11 @@ sessions can keep waking each other, so wakes are capped (below).
 - A watcher waits at most 3540 s after the turn that armed it; the hook's
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer is not woken; its mail still appears on its next prompt. On Linux and
-  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
-  Claude Code ends a waiting hook at teardown.
+  longer is not woken; its mail still appears on its next prompt. The watcher
+  also stops when Claude Code exits: at once on Linux and macOS, and within
+  a minute on Windows, where it lists the process through `ps -W` at arm
+  time and then once a minute (a Windows PID is invisible to `kill -0`). In
+  `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
   native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
   command stops at the flag check, and the script exits unless Claude Code
@@ -6420,8 +6425,10 @@ still write briefing and reminder definitions, but do not perform the new
 trust and readiness workflow.
 
 The Windows installer and plugin supply
-`commandWindows` overrides; Claude
-keeps its Bash plugin commands. Plugin SessionEnd on Windows uses a bounded
+`commandWindows` overrides, which Codex runs; Claude Code ignores the field
+and runs its Bash plugin commands through Git Bash, which it must find on
+the machine (see the plugin README's
+[Windows](../../plugin/README.md#windows) section). Plugin SessionEnd on Windows uses a bounded
 request inside Codex's three-second maximum, with idle reaping as fallback.
 SessionStart retries one transient failure within its 15-second budget. The
 native command escapes non-ASCII context so redirected JSON stays valid under
