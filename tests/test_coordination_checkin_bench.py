@@ -35,6 +35,91 @@ def test_scenario_set_is_four_personas_by_five_rules_by_two_expectations():
             assert expects == {"send", "no_send"}, (persona, rule)
 
 
+def test_heldout_set_tests_the_shared_resource_rule_and_its_cost():
+    """Written after the rule was tuned on the main set's four shared-resource
+    send situations (review of PR #435): every held-out situation has a peer
+    tied to the shared thing on the board, so a rule that over-sends fails
+    the no-send half. Its own module keeps the main set's digest stable."""
+    from evals.coordination_checkin_heldout import HELDOUT
+    assert len(HELDOUT) == 8 and len({s.id for s in HELDOUT}) == 8
+    assert {s.rule for s in HELDOUT} == {"shared_resource"}
+    assert not {s.id for s in HELDOUT} & set(fx.SCENARIO_IDS)
+    for persona in fx.PERSONAS:
+        assert {s.expect for s in HELDOUT if s.persona == persona} == {"send", "no_send"}
+    for s in HELDOUT:
+        assert "heldout" in s.tags
+        labels = {p.label for p in fx.PERSONAS[s.persona].peers}
+        assert {label for label, _ in s.board} <= labels, s.id
+        for cue in _CUES:
+            assert cue not in s.situation.lower(), (s.id, cue)
+        assert (s.to in labels) if s.expect == "send" else s.to is None, s.id
+        if s.expect == "send":
+            assert s.to not in s.situation, s.id
+    assert cb.SCENARIO_SETS["heldout"] == [s.id for s in HELDOUT]
+    assert cb.scenario(HELDOUT[0].id) is HELDOUT[0]
+    assert len(cb.heldout_digest()) == 12
+
+
+def test_second_heldout_set_covers_both_shipped_rules_both_ways():
+    """Frozen in its own commit before the reworded shared-resource rule was
+    scored on anything: the unbiased check on both rules that ship."""
+    from evals.coordination_checkin_heldout import HELDOUT
+    from evals.coordination_checkin_heldout2 import HELDOUT2
+    assert len(HELDOUT2) == 16 and len({s.id for s in HELDOUT2}) == 16
+    assert not {s.id for s in HELDOUT2} & ({s.id for s in HELDOUT} | set(fx.SCENARIO_IDS))
+    for rule in ("shared_resource", "status_true"):
+        for persona in fx.PERSONAS:
+            got = sorted(s.expect for s in HELDOUT2 if s.rule == rule and s.persona == persona)
+            assert got == ["no_send", "send"], (rule, persona)
+    for s in HELDOUT2:
+        assert "heldout2" in s.tags
+        labels = {p.label for p in fx.PERSONAS[s.persona].peers}
+        assert {label for label, _ in s.board} <= labels, s.id
+        for cue in _CUES:
+            assert cue not in s.situation.lower(), (s.id, cue)
+        if s.expect == "send":
+            assert s.to in labels and s.to not in s.situation, s.id
+        else:
+            assert s.to is None, s.id
+    assert cb.SCENARIO_SETS["heldout2"] == [s.id for s in HELDOUT2]
+    assert cb.heldout_digest("coordination_checkin_heldout2.py") != cb.heldout_digest()
+
+
+def test_resume_reuses_a_record_only_under_the_same_arm_text(tmp_path, monkeypatch):
+    """A record made under an arm text that changed before the resume is
+    re-run, not mixed into the new text's results (review of PR #435)."""
+    calls = []
+
+    class Args:
+        tag, arms, scenarios, replicates, seed = "t", "new", "lab-waiting-send", 1, 1
+        model, effort, parallel, run_timeout, frame = "m", "e", 1, 1.0, "task"
+        work_root, arm_file = tmp_path, []
+        out = tmp_path / "artifact.json"
+
+    monkeypatch.setattr(cb.mb, "check_work_root", lambda p: Path(p))
+    bench = cb.Bench(Args)
+    stale = _rec("new", "lab-waiting-send", 0, 1.0)
+    stale.update(run_id="t-new-lab-waiting-send-r0", text_sha256="0" * 64, frame="task")
+    bench.runs_path.write_text(json.dumps(stale) + "\n", encoding="utf-8")
+
+    def one(self, item, text):
+        calls.append(item["scenario"])
+        rec = _rec("new", item["scenario"], 0, 1.0)
+        rec.update(run_id=cb.run_id("t", item), text_sha256=cb.text_sha(text), frame="task")
+        with self.runs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+        return rec
+
+    monkeypatch.setattr(cb.Bench, "one", one)
+    monkeypatch.setattr(cb, "render", lambda art: "")
+    bench.run()
+    assert calls == ["lab-waiting-send"]           # the stale record was not reused
+    calls.clear()
+    Args.out = tmp_path / "artifact2.json"
+    cb.Bench(Args).run()
+    assert calls == []                             # a matching record is
+
+
 def test_situations_never_name_the_act_and_send_scenarios_name_a_recipient():
     for s in fx.SCENARIOS:
         text = s.situation.lower()

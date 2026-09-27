@@ -52,9 +52,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from evals import coordination_checkin_scenarios as fx  # noqa: E402
+from evals.coordination_checkin_heldout import HELDOUT  # noqa: E402
+from evals.coordination_checkin_heldout2 import HELDOUT2  # noqa: E402
 from evals import memory_policy_bench as mb  # noqa: E402
 
-BENCH_VERSION = 2   # v2: --frame (task by default); v1 was the board frame only
+BENCH_VERSION = 3   # v3: held-out set, resume keyed by arm text; v2: --frame; v1: board frame only
 RESULTS_DIR = ROOT / "evals" / "results"
 ARTIFACT_PREFIX = "coordination-checkin-bench-"
 DEFAULT_MODEL = mb.DEFAULT_CLAUDE_MODEL
@@ -130,6 +132,23 @@ def run_id(tag: str, item: dict) -> str:
 
 
 # ── the prompt ─────────────────────────────────────────────────────────────
+
+ALL_SCENARIOS = [*fx.SCENARIOS, *HELDOUT, *HELDOUT2]
+# Named scenario sets for --scenarios; anything else is a comma list of ids.
+SCENARIO_SETS = {"all": [s.id for s in fx.SCENARIOS], "heldout": [s.id for s in HELDOUT],
+                 "heldout2": [s.id for s in HELDOUT2]}
+
+
+def scenario(sid: str) -> fx.Scenario:
+    for s in ALL_SCENARIOS:
+        if s.id == sid:
+            return s
+    raise SystemExit(f"unknown scenario {sid!r}")
+
+
+def text_sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 # How the question is put. ``board`` (bench v1, the 2026-09-28 first run)
 # asks for a board decision outright; every arm, even no check-in at all,
@@ -335,17 +354,22 @@ def paired(records: list[dict], a: str, b: str, seed: int = 20260927) -> dict:
     out = {"delta": delta, "ci95": ci, "pairs": sum(len(v) for v in deltas.values()),
            "scenarios": sum(1 for v in deltas.values() if v), "per_rule": {}}
     for rule in fx.RULES:
-        sids = [s.id for s in fx.SCENARIOS if s.rule == rule]
+        sids = [s.id for s in ALL_SCENARIOS if s.rule == rule]
         rule_deltas = {sid: deltas[sid] for sid in sids if deltas.get(sid)}
         d, c = mb.cluster_bootstrap(rule_deltas, rng)
         out["per_rule"][rule] = {
             "delta": d, "ci95": c, "pairs": sum(len(v) for v in rule_deltas.values()),
             "send": _mean([x for sid, v in rule_deltas.items() for x in v
-                           if fx.scenario(sid).expect == "send"]),
+                           if scenario(sid).expect == "send"]),
             "no_send": _mean([x for sid, v in rule_deltas.items() for x in v
-                              if fx.scenario(sid).expect == "no_send"]),
+                              if scenario(sid).expect == "no_send"]),
         }
     return out
+
+
+def heldout_digest(name: str = "coordination_checkin_heldout.py") -> str:
+    data = (ROOT / "evals" / name).read_bytes()
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()[:12]
 
 
 def scenario_digest() -> str:
@@ -377,12 +401,14 @@ def build_artifact(records: list[dict], arms: list[Arm], args, tag: str) -> dict
         "client_version": mb.client_version("claude"), "model": args.model,
         "effort": args.effort,
         "arms": [{"label": a.label, "variant": a.variant,
-                  "text_sha256": hashlib.sha256(a.text.encode("utf-8")).hexdigest(),
+                  "text_sha256": text_sha(a.text),
                   "text": a.text} for a in arms],
         "system_prompt": SYSTEM_PROMPT,
         "scenarios": sorted({r["scenario"] for r in records}), "replicates": args.replicates,
         "seed": args.seed, "frame": getattr(args, "frame", "board"),
         "scenario_digest": scenario_digest(),
+        "heldout_digest": heldout_digest(),
+        "heldout2_digest": heldout_digest("coordination_checkin_heldout2.py"),
         "summary": summarize(records, labels),
         "comparisons": comparisons, "aa_noise": noise, "total_usd": round(usd, 4),
         "runs": records,
@@ -416,7 +442,7 @@ class Bench:
         return out
 
     def one(self, item: dict, text: str) -> dict:
-        sc = fx.scenario(item["scenario"])
+        sc = scenario(item["scenario"])
         rid = run_id(self.tag, item)
         run_dir = self.work / "runs" / rid
         shutil.rmtree(run_dir, ignore_errors=True)
@@ -428,6 +454,8 @@ class Bench:
         rec = {"run_id": rid, **item, "persona": sc.persona, "rule": sc.rule,
                "expect": sc.expect, "to": sc.to, "model": self.args.model,
                "effort": self.args.effort, "frame": self.args.frame,
+               "text_sha256": text_sha(text),
+               "set": next((t for t in sc.tags if t.startswith("heldout")), "main"),
                "bench_version": BENCH_VERSION, "errors": []}
         try:
             client = run_claude(run_dir, project, prompt, model=self.args.model,
@@ -467,10 +495,16 @@ class Bench:
             raise SystemExit(f"{out_path.name} exists; tags are single-use")
         arms = parse_arms(args.arms, read_arm_files(args.arm_file))
         texts = {a.label: a.text for a in arms}
-        scenarios = list(fx.SCENARIO_IDS) if args.scenarios == "all" else [
-            fx.scenario(s).id for s in args.scenarios.split(",")]
+        scenarios = SCENARIO_SETS.get(args.scenarios) or [
+            scenario(s).id for s in args.scenarios.split(",")]
         items = plan(arms, scenarios, args.replicates, args.seed)
-        done = {rid for rid, rec in self.records().items() if valid(rec)}
+        # A resumed run reuses a record only when it was made under the same
+        # arm text and frame: a text edited between a crash and the resume
+        # would otherwise mix two texts under one label.
+        shas = {a.label: text_sha(a.text) for a in arms}
+        done = {rid for rid, rec in self.records().items()
+                if valid(rec) and rec.get("text_sha256") == shas.get(rec["arm"])
+                and rec.get("frame") == args.frame}
         todo = [i for i in items if run_id(self.tag, i) not in done]
         self.log(f"plan: {len(items)} runs ({len(todo)} to go), arms={args.arms}, "
                  f"scenarios={len(scenarios)}, replicates={args.replicates}, "
