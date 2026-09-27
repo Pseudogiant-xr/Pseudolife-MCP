@@ -816,7 +816,7 @@ def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
     assert result == {"message_id": oops["message_id"], "seq": sent["seq"], "redact_seq": 5,
                       "redact_hash": redact_row["hash"],
                       "expect_head": f"5:{redact_row['hash']}",
-                      "live_body_cleared": True, "audit_copy": "removed"}
+                      "live_body_cleared": True, "audit_copy": "removed", "other_copies": []}
     # The new head, recorded outside the bank, catches a later removal of
     # the redact row itself.
     assert verify(store, expect_head=(5, redact_row["hash"]))["ok"]
