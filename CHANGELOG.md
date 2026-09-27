@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
+- `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
+  bounded names with Python's `\w`, which leaves out combining marks: a
+  decomposed accent, a Devanagari vowel sign or virama. A mark therefore
+  ended a word, so "cafe" matched inside a decomposed "café", "jose" inside
+  "josé", and "हि" inside "हिंदी". The constraint-pin scope test
+  (`_entity_in_query`, which `memory_search` uses) already counted marks as
+  part of a word, so on such text the two matchers disagreed. A match is
+  now re-checked with the marks just outside it read as letters, and the
+  search moves on to the next candidate if that check rejects it. The rest
+  of the rule is unchanged, including the period, apostrophe and
+  separator-folding rules above. The seed bench's corpus is all ASCII and
+  scored the same as before (artifact:
+  `evals/results/seed_bench-2026-09-27-mentions-marks.json`). A name and a
+  text in different Unicode normal forms (NFC "café" against NFD "café")
+  still do not match; neither matcher normalises.
+
 ### Fixed (2026-09-27 — a hung Codex CLI's whole tree dies at the doorbell timeout on Windows, even on a busy machine)
 - When `codex queue` hangs, the opt-in Codex doorbell kills it and everything
   it started. On Windows that kill was `taskkill /T /F`, given 5 seconds, then
