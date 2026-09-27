@@ -8,7 +8,10 @@ INPUT=$(cat 2>/dev/null)
 # prompt string. Then accept only an id-shaped value.
 SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' 2>/dev/null |
       head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
-case "$SID" in ''|*[!A-Za-z0-9._-]*) SID="" ;; esac
+# Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+# a range by locale collation, where a-f takes upper case and 0-9 takes
+# digits such as the superscript two (tests/test_hook_glob_ranges.py).
+case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) SID="" ;; esac
 [ "${#SID}" -le 128 ] || SID=""
 # Codex desktop can start hooks without HOME in the environment.
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
@@ -21,14 +24,14 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     # Code started for this session; a host run from a Claude Bash command
     # inherits both variables from the outer session and must not follow it.
     case "${CLAUDE_PID:-}" in
-        ''|*[!0-9]*) ;;
+        ''|*[!0123456789]*) ;;
         *)
             RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
             if [ -n "$KEY" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] &&
                     [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
                 SHIM="" FOR=""
                 { IFS= read -r SHIM; IFS= read -r FOR; } 2>/dev/null < "$RECORD"
-                case "$SHIM" in ''|*[!0-9a-f]*) SHIM="" ;; esac
+                case "$SHIM" in ''|*[!0123456789abcdef]*) SHIM="" ;; esac
                 if [ "${#SHIM}" -eq 64 ] && [ "$FOR" = "$KEY" ]; then
                     KEY="$SHIM"
                 fi
@@ -42,8 +45,8 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
         CONTENT=$(tr -d '\r' < "$FILE")
         WATERMARK=${CONTENT%%$'\n'*}
         LAST=$(cat "$SEEN" 2>/dev/null | tr -d '\r\n ')
-        case "$WATERMARK" in ''|*[!0-9]*) WATERMARK="" ;; esac
-        case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
+        case "$WATERMARK" in ''|*[!0123456789]*) WATERMARK="" ;; esac
+        case "$LAST" in ''|*[!0123456789]*) LAST=0 ;; esac
         PRINTED=0
         if [ -n "$WATERMARK" ] && [ "$WATERMARK" -gt "$LAST" ]; then
             BODY=""
