@@ -27,22 +27,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `park_*` fields (`park_set_at` is the daemon's stamp). The served
   check-in tells sessions to park when they stop.
 - **The daemon decides, the shim rings.** Every `memory_message(action=
-  "send")` now returns `wake` beside the receipt: `hinted` (the recipient
-  acted within the last 60 s, so its next tool result carries the mail);
-  `not_needed` (parked `done`); `no_path` (no wake path, with the parked
-  need); `rung` (parked with a need the mail plausibly clears: the sender is
-  `park_clear_by`, `park_clear_by` is `anyone`, the send's new `clears`
-  names the need, or the sender set `urgent`), with `ring_at`; `withheld`
+  "send")` now returns `wake` beside the receipt: `hinted` (an unparked
+  recipient acted within the last 60 s, so its next tool result carries the
+  mail; a parked one has stopped, and is decided on its park however
+  recently it parked); `not_needed` (parked `done`); `no_path` (neither a
+  live channel nor a ring path, with the parked need); `rung` (parked with
+  a need the mail plausibly clears: the sender is `park_clear_by`,
+  `park_clear_by` is `anyone`, the send's new `clears` names the need in
+  whole words, or the sender set `urgent`), with `ring_at`; `withheld`
   (parked with a need the mail does not clear) with `park_needs` and
   `park_clear_by`, so the sender knows what would wake it; `nudged` (idle,
   no park record: rung at most once an hour, with a request to park);
   `capped`. Chatter never rings. A retry repeats its decision, and the
   audit log's `send` event names it. The rings the daemon decides are
   `coordination_wakes` rows; the recipient's next attach or heartbeat
-  carries the newest once as `wake`, and the Claude adapter writes
+  carries the newest as `wake` for one heartbeat interval (so a retried
+  heartbeat still gets it; the adapter takes each ring once). An adapter
+  declares at register and every attach whether a ring reaches it without
+  a live channel (`ring`: the Claude shim when it has a digest for the Stop
+  hook, a Codex thread the doorbell watches), and the daemon counts that as
+  a wake path; a daemon older than v48 refuses the attach parameter once
+  and the adapter stops sending it. The Claude adapter writes
   `<key>.ring` beside the digest (the digest watermark, then the decision
   and reason) at `ring_at`, while the Codex doorbell asks the adapter for a
-  due ring at the moment it would otherwise run `codex queue`. The Stop
+  due ring at the moment it would otherwise run `codex queue`; an offer
+  whose mail the session has already seen is dropped. The Stop
   hook fires only on a ring past `.seen`, a nudge adds one sentence asking
   for a park record, and every ring's ledger line (`wait`, `bell`, `ring`)
   carries the decision and reason. Against a daemon older than v48 nothing
@@ -68,6 +77,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Code's async Stop hook blocks through the same exit-2 rewake path as the
   mail wake (async hooks cannot use `decision`); Codex gets the documented
   `{"decision": "block", "reason": ...}` on stdout. No answer is allow.
+  The Codex gate runs only on Windows (Codex runs the native
+  `commandWindows`; elsewhere it runs the bash command, which exits unless
+  Claude Code started it), and an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off` turns it off.
+  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when it is private
+  (the sibling hooks' check), so under Git Bash, which cannot show an NTFS
+  file is owner-only, it needs `PSEUDOLIFE_MCP_TOKEN`.
 - `memory_agents` and `memory_message` grew by 199 characters after each
   docstring was tightened to pay for its own line; the core and full
   description budgets move deliberately (11,500 -> 11,750, 17,800 ->
@@ -77,9 +93,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Stop hook still runs only with `PSEUDOLIFE_AGENT_WAKE_HOOK=1` and the
   Codex doorbell with `PSEUDOLIFE_CODEX_DOORBELL=1`; once on, they ring
   only on the daemon's decision, so a v48 shim beside a pre-v48 daemon
-  never rings, and a pre-v48 shim beside a v48 daemon keeps its old
-  behaviour (it ignores `wake`). The `wait` and `bell` ledger lines gain a
-  sixth column, the ring's reason.
+  never rings. Upgrade the plugin and the shim together (`-All`): the new
+  `stop-wake.sh` fires only on the `.ring` marker, which only a v48 shim
+  writes, so an updated plugin beside an older shim never wakes. The `wait`
+  and `bell` ledger lines gain a sixth column, the ring's reason.
 
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the

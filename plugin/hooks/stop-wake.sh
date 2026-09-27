@@ -115,11 +115,32 @@ AGENT="$DIGEST_DIR/$KEY.agent"
 TURN="$DIGEST_DIR/$KEY.turn"
 [ -L "$FILE" ] && exit 0
 
+# A bearer file the hook may read: a regular, owner-only, single-link file
+# of bounded size under no symlinked directory. The same check as
+# coordination-start.sh and session-start.sh.
+private_regular() {
+    local path="$1" maximum="$2" current parent meta
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    current=$(dirname "$path")
+    while [ "$current" != "." ] && [ "$current" != "/" ]; do
+        [ ! -L "$current" ] || return 1
+        parent=$(dirname "$current")
+        [ "$parent" != "$current" ] || break
+        current="$parent"
+    done
+    meta=$(stat -c '%u %a %h' "$path" 2>/dev/null ||
+           stat -f '%u %Lp %l' "$path" 2>/dev/null) || return 1
+    set -- $meta
+    case "${2:-}" in *00) ;; *) return 1 ;; esac
+    [ "${1:-x}" = "$(id -u)" ] && [ "${3:-0}" = 1 ] || return 1
+    [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
+}
+
 # The park gate's one request. The daemon URL and bearer come from the
 # hook's environment the way the other hooks read them (PSEUDOLIFE_MCP_TOKEN,
-# or a regular PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file
-# is lifecycle.ps1's concern, which runs this gate for Codex. Prints the
-# body; any failure prints nothing, which is allow.
+# or a private PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file
+# is lifecycle.ps1's concern, which runs this gate for Codex on Windows.
+# Prints the body; any failure prints nothing, which is allow.
 gate_answer() {
     local url="${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}" token="" rest
     local file="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
@@ -129,7 +150,7 @@ gate_answer() {
     rest=${url#*://}
     case "$rest" in ''|*/*) return 1 ;; esac
     if [ -n "$file" ]; then
-        [ -f "$file" ] && [ ! -L "$file" ] || return 1
+        private_regular "$file" 4096 || return 1
         token=$(cat "$file")
         token=${token//[$'\r\n']/}
         case "$token" in ''|*[[:space:]]*) return 1 ;; esac

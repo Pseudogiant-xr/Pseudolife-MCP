@@ -1372,3 +1372,115 @@ def test_a_malformed_wake_answer_rings_nothing(tmp_path):
                 assert coordination.ring_due() is None
 
     asyncio.run(drive())
+
+
+def test_an_adapter_with_a_ring_path_says_so_at_attach(tmp_path):
+    """A Claude shim with a digest (the Stop hook reads its .ring) or a
+    Codex adapter the doorbell watches declares ``ring: true`` at attach;
+    a daemon older than v48 refuses the parameter once, and the adapter
+    attaches without it from then on."""
+    daemon = FakeDaemon()
+    refused = []
+
+    def hook(action, body):
+        if action == "attach" and "ring" in body and not refused:
+            refused.append(body)
+            return httpx.Response(400, json={"error": "unexpected_parameter"})
+        return None
+    daemon.hook = hook
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                pass
+
+    asyncio.run(drive())
+    attaches = [body for action, body, _ in daemon.calls if action == "attach"]
+    assert attaches[0]["ring"] is True
+    assert "ring" not in attaches[1]
+    register = next(body for action, body, _ in daemon.calls if action == "register")
+    assert register["capabilities"]["ring"] is True
+
+    daemon = FakeDaemon()
+
+    async def plain():
+        client, coordination = adapter(daemon)   # no digest, no doorbell: no ring path
+        async with client:
+            async with coordination:
+                pass
+
+    asyncio.run(plain())
+    # Declared false, so a resumed address drops a ring path it once had.
+    attach = next(body for action, body, _ in daemon.calls if action == "attach")
+    assert attach["ring"] is False
+    register = next(body for action, body, _ in daemon.calls if action == "register")
+    assert "ring" not in register["capabilities"]
+
+
+def test_the_agent_file_stays_fresh_with_the_digest(tmp_path):
+    """Another shim's sweep removes marker files a day old; a live
+    session's .agent is touched with its digest, as .seen is."""
+    daemon = _mailbox_daemon([(0, [], None), (0, [], None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                agent = tmp_path / "digest.agent"
+                old = time.time() - 2 * 86400
+                os.utime(agent, (old, old))
+                coordination._digest_written_at = -1e9     # the hourly rewrite is due
+                await coordination._heartbeat()
+                assert agent.stat().st_mtime > old + 86400
+
+    asyncio.run(drive())
+
+
+def test_a_ring_offer_the_session_already_saw_is_dropped(tmp_path):
+    """The doorbell's offer carries the watermark it was for: once the
+    prompt hook or a hint has shown that mail, the offer is gone, so a
+    later withheld message cannot ring on it."""
+    daemon = _mailbox_daemon([(0, [], None),
+                              (1, _preview("m1"),
+                               {"decision": "rung", "reason": "anyone", "ring_at": 0.0})])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                (tmp_path / "digest.seen").write_text(f"{coordination.digest_watermark}\n")
+                assert coordination.ring_due() is None
+
+    asyncio.run(drive())
+
+
+def test_a_ring_repeated_on_a_retried_heartbeat_is_taken_once(tmp_path):
+    ring = {"decision": "rung", "reason": "anyone", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (1, _preview("m1"), ring)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("rung", "anyone")
+                await coordination._heartbeat()
+                assert coordination.ring_due() is None
+
+    asyncio.run(drive())
+
+
+def test_turn_and_marker_files_leave_with_the_digest(tmp_path):
+    daemon = FakeDaemon()
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                (tmp_path / "digest.turn").write_text("1700000000\n")
+        assert not (tmp_path / "digest.turn").exists()
+
+    asyncio.run(drive())

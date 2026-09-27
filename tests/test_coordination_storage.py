@@ -538,10 +538,12 @@ def _wake_capable(store, principal="alice"):
 
 
 def test_an_active_recipient_is_hinted_not_rung(store):
+    """An unparked session that acted within ``active_seconds`` sees the
+    mail in its next tool result; a parked one is decided on its park
+    (test_a_session_that_just_parked_is_rung_not_hinted)."""
     a = store.register("alice")
     b = _wake_capable(store)
-    store.update(*creds(b), park_reason="blocked", park_needs="review", park_clear_by="anyone")
-    store.update(*creds(b), park_reason="blocked")   # activity just now
+    store.update(*creds(b), status="implementing")   # activity just now
     assert _wake(store, a, b) == {"decision": "hinted", "reason": "active"}
 
 
@@ -708,6 +710,7 @@ def test_the_ring_reaches_the_recipient_once_through_its_heartbeat(store):
     _wake(store, a, b)
     assert store.heartbeat(*creds(b), **beat)["wake"] == {
         "decision": "rung", "reason": "anyone", "ring_at": 1000.0}
+    store.test_time[0] += 30   # past the one-heartbeat repeat window
     assert store.heartbeat(*creds(b), **beat)["wake"] is None
     # A nudge says so, so the shim can ask for a park record.
     store.update(*creds(b), park_reason=None)
@@ -773,3 +776,74 @@ def test_park_gate_asks_an_unparked_session_once(store):
     # Unknown or foreign addresses are allowed: the hook has nothing to ask.
     assert store.park_gate("0" * 32, "alice") == {"gate": "allow", "reason": "unknown_agent"}
     assert store.park_gate(a["agent_id"], "bob") == {"gate": "allow", "reason": "unknown_agent"}
+
+
+# --- review fixes (2026-09-28) ------------------------------------------------
+
+def _ring_capable(store, principal="alice"):
+    """A plain-shim session: no live channel (wake_enabled false), but its
+    adapter says at attach that a ring reaches it (the Stop hook's .ring
+    marker, the Codex doorbell)."""
+    agent = store.register(principal)
+    store.attach(*creds(agent), attachment_id=agent["agent_id"][:8], ring=True)
+    return agent
+
+
+def test_a_ring_path_declared_at_attach_is_a_wake_path(store):
+    """The Stop hook and the Codex doorbell are wake paths although the
+    adapter has no live channel: a parked plain-shim session is rung, and
+    only an address with neither is no_path."""
+    a = store.register("alice")
+    b = _ring_capable(store)
+    assert store.authenticate(*creds(b))["capabilities"]["ring"] is True
+    store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="anyone")
+    _idle(store, b)
+    assert _wake(store, a, b)["decision"] == "rung"
+    # A later attach that declares no ring path takes it back.
+    store.attach(*creds(b), attachment_id=b["agent_id"][:8], ring=False)
+    _idle(store, b)
+    assert _wake(store, a, b)["decision"] == "no_path"
+
+
+def test_a_session_that_just_parked_is_rung_not_hinted(store):
+    """Parking is a board action, so the recipient looks active for a
+    minute after it; but a parked session has stopped, and no tool result
+    will carry the mail. A reply that clears the need rings at once."""
+    a = store.register("alice")
+    b = _wake_capable(store)
+    store.update(*creds(b), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by=a["agent_id"])
+    assert _wake(store, a, b)["decision"] == "rung"
+    # Chatter to it is still withheld, not hinted.
+    c = store.register("alice")
+    assert _wake(store, c, b)["decision"] == "withheld"
+
+
+def test_clears_matches_whole_words_only(store):
+    a = store.register("alice")
+    b = _wake_capable(store)
+    store.update(*creds(b), park_reason="needs_info", park_needs="which judge family",
+                 park_clear_by="maintainer")
+    _idle(store, b)
+    for loose in ("e", "ju", "dge fam", "which judges"):
+        assert _wake(store, a, b, clears=loose)["decision"] == "withheld", loose
+    assert _wake(store, a, b, clears="Judge  family")["decision"] == "rung"
+
+
+def test_a_served_ring_is_served_again_within_a_heartbeat(store):
+    """A heartbeat answer can be lost and retried; the ring rides the next
+    answer too, for one heartbeat, and then stops."""
+    a = store.register("alice")
+    b = _wake_capable(store)
+    store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="anyone")
+    generation = store.attach(*creds(b), attachment_id=b["agent_id"][:8],
+                              wake_enabled=True)["generation"]
+    beat = dict(attachment_id=b["agent_id"][:8], generation=generation)
+    _idle(store, b)
+    _wake(store, a, b)
+    first = store.heartbeat(*creds(b), **beat)["wake"]
+    assert first["decision"] == "rung"
+    store.test_time[0] += 5
+    assert store.heartbeat(*creds(b), **beat)["wake"] == first
+    store.test_time[0] += 30
+    assert store.heartbeat(*creds(b), **beat)["wake"] is None
