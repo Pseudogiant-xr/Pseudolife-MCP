@@ -9,17 +9,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a
-  decomposed accent, a Devanagari vowel sign or virama. A mark therefore
-  ended a word, so "cafe" matched inside a decomposed "café", "jose" inside
-  "josé", and "हि" inside "हिंदी". The constraint-pin scope test
-  (`_entity_in_query`, which `memory_search` uses) already counted marks as
-  part of a word, so on such text the two matchers disagreed. A match is
-  now re-checked with the marks just outside it read as letters, and the
-  search moves on to the next candidate if that check rejects it. The rest
-  of the rule is unchanged, including the period, apostrophe and
-  separator-folding rules above. The seed bench's corpus is all ASCII and
-  scored the same as before (artifact:
-  `evals/results/seed_bench-2026-09-27-mentions-marks.json`). A name and a
+  decomposed accent, or a Devanagari vowel sign, anusvara or virama. A mark
+  therefore ended a word, so "cafe" matched inside a decomposed "café",
+  "jose" inside a decomposed "josé", and "हि" inside "हिंदी". The
+  constraint-pin scope test (`_entity_in_query`, which `memory_search`
+  uses) already counted marks as part of a word, so on such text the two
+  matchers disagreed. A match is now re-checked with the marks just outside
+  it read as letters, and the search moves on to the next candidate if that
+  check rejects it. The rest of the rule is unchanged, including the
+  period, apostrophe and separator-folding rules from the entry
+  "`memory_recall` seeds an entity a sentence ends on". The seed bench's
+  corpus is all ASCII and scored the same as that fix's after run
+  (`evals/results/seed_bench-2026-09-27-mentions-after.json`) on every
+  metric but latency (artifact:
+  `evals/results/seed_bench-2026-09-27-combining-marks.json`). A name and a
   text in different Unicode normal forms (NFC "café" against NFD "café")
   still do not match; neither matcher normalises.
 

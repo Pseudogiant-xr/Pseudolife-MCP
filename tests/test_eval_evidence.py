@@ -9981,13 +9981,13 @@ for _cid, _art, _variant, _metric, _needle, _stated in (
                         value=_seed_p(_variant, _metric), stated=_stated, places=3))
 
 
-SEED_MARKS = _SEED + "marks.json"
+SEED_MARKS = RESULTS + "seed_bench-2026-09-27-combining-marks.json"
 
 
 def test_seed_bench_combining_mark_rerun_scores_the_same():
-    """The combining-mark fix to _mentions says the seed bench "scored the
-    same as before": every metric but latency must equal the after run."""
-    assert "scored the same as before" in _read_doc(CHANGELOG)
+    """The combining-mark fix to _mentions says the seed bench scored the
+    same as the boundary fix's after run on every metric but latency."""
+    assert "scored the same as that fix's after run" in _read_doc(CHANGELOG)
     assert SEED_MARKS in _tracked()
     after, marks = _load_artifact(SEED_AFTER), _load_artifact(SEED_MARKS)
 

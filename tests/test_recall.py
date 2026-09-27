@@ -175,6 +175,8 @@ def test_mentions_mark_after_a_dot_or_apostrophe_blocks_like_a_letter():
 def test_mentions_keeps_looking_past_a_mark_bounded_candidate():
     assert rc._mentions(_nfd("josé met jose"), "jose")
     assert rc._mentions("सम्मान and मान", "मान")
+    # The next clean match can overlap the rejected one.
+    assert rc._mentions("́a a a", "a a")
 
 
 @pytest.mark.parametrize("entity,query", [
