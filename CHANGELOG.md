@@ -25,6 +25,77 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   job that forbids nesting), the CLI runs as before, with taskkill as the kill.
   POSIX is unchanged: the CLI's process group is killed.
 
+### Fixed (2026-09-27 — a rule is pinned when the query names its entity before punctuation)
+- Constraint pinning in `memory_search` missed a rule whenever the query
+  named the rule's entity right before punctuation. With a rule stored
+  under `bench server`, "about to start the bench server on the 4090"
+  pinned it, but "should I start the bench server?", "start the bench
+  server, then run" and "the bench server's config" did not (probed
+  2026-09-27). The scope test (`_entity_in_query`) required a hyphen on
+  each side of the entity after slot normalisation, and `?`, `,` and `'`
+  are not slot separators. It now requires only that no letter, digit or
+  combining mark touches the entity, so any punctuation ends it while a
+  Devanagari vowel sign or a decomposed accent still continues the word.
+  An apostrophe inside a word still binds it, except before a possessive
+  `s`: "Don's team" names `Don`, "don't" does not. The slot key
+  (`_norm_key`) is unchanged, so no slot is re-keyed. Every query that
+  named an entity before still names it, because the scope test only
+  widens; newly named rules compete for the same capped pin slots, so
+  one can take a slot a lower-cosine rule held before. The test is now a
+  substring scan with a neighbour check instead of a regex, so no pattern
+  is compiled per entity. `memory_recall`'s default mechanical driver
+  seeds through its own raw-text matcher (`recall._mentions`), which
+  already treats `?`, `,` and `'s` as boundaries and is left as it is.
+
+### Changed (2026-09-27 — the standing memory block says where hard rules belong)
+- A rule stored only in the bank ("hold the GPU run when VRAM is in use")
+  was missed when a session asked about its task rather than about the
+  rule. In `memory_search`, constraint pinning serves a `constraint` fact
+  ahead of the ranking only when the query names the fact's entity (in
+  `memory_recall`, only on the walk's seeds), and a session asks about the
+  task it is doing, not the rule it is about to break — probed on the live
+  bank on 2026-09-27 while checking a client's local memory files against
+  it. The standing memory block (`examples/CLAUDE.memory.md`,
+  byte-identical to `MEMORY_LOOP_BLOCK`, which the `full_separate_hook`
+  policy variant serves) now says so at the constraint label: name a
+  rule's entity the way a task would say it, and keep any rule that must
+  hold however the task is phrased in the standing instructions too, with
+  the bank holding its why and its history. `docs/guide/retrieval.md`
+  explains the consequence beside the mechanism; `memory-model.md` points
+  there.
+  No retrieval behaviour changes.
+
+### Fixed (2026-09-27 — `memory_recall` seeds an entity a sentence ends on)
+- `memory_recall` starts its graph walk from the entities the question
+  names, and the name matcher behind that (`_mentions` in
+  `memory/recall.py`) treated a period right after a name as part of a
+  word. "Start the bench server." named no entity, so the walk seeded from
+  whatever the search hits mentioned instead. The same blind spot hid every
+  name that ends a sentence in a hit text, where the matcher also picks
+  fallback seeds and ranks re-queries. A period after a name now counts as
+  a boundary unless a word character follows it, so "node" still does not
+  match inside "node.js" and "v1" not inside "v1.2". A period before a name
+  still blocks it, so a dotfile path such as ".env" does not name "env".
+- Two more alignments with the constraint-pin scope test
+  (`_entity_in_query`) that `memory_search` uses. A name's own separators
+  (space, `_`, `-`, `/`) now match each other, so "payments db" and
+  "payments-db" name the same entity. An apostrophe inside a word is no
+  longer a boundary, except before a possessive "s", so "don't" does not
+  name "Don" but "the bench server's config" names "bench server". Hyphens
+  in the text stay boundaries ("k8s" matches "k8s-prod"). The docstring
+  claimed the opposite, and now says what the code does.
+- Seed bench (`evals/seed_bench.py`, 2026-09-27, deterministic: a control
+  run with the old matcher reproduced the before numbers exactly). The
+  shipped query-first seeder is unchanged at precision 1.0, recall 1.0,
+  because every bench question ends in "?". Six of the bench's 17 corpus
+  sentences end on an entity name, which the old matcher missed, so the
+  hit-derived variants moved: the retired liberal seeder went 0.28 → 0.295
+  (its June figure was 0.262) and the rejected ranked-and-capped variant
+  0.75 → 0.625. Artifacts: `evals/results/seed_bench-2026-09-27-mentions-*.json`.
+  Compiled patterns are now cached per name, so a vocabulary larger than
+  `re`'s own 512-pattern cache no longer recompiles every name on every
+  seeding.
+
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on
   every user prompt, took a median of about 270 ms a turn on the
@@ -323,7 +394,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection checks stay in one script; `lifecycle.ps1` does the same for
   Codex on Windows. `ops/setup-codex-hooks.py` now reads the fixed line from
   `install-hook.ps1`; the `ops/install-hook.*` fallback moved to the note
-  too (next entry).
+  too (see the entry above, "installs without the plugin get the
+  memory-change note too").
 - New `MemoryService.memory_changes_since(since, session_key=)`: counts and
   the newest of each kind, scanned under the service lock that every entry
   and lesson write holds while stamping, so its `now` (rounded down) is a

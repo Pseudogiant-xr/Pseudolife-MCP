@@ -303,8 +303,11 @@ the cosine ranking, marked `pinned: true`, when it is **in scope** — and
 scope is defined cheaply and precisely, with no second embedding pass:
 in `memory_search`'s cortex block, the query *names the fact's entity*
 (both sides go through the cortex's slot normalisation, so `payments db`
-matches `payments-db`, and the entity must occur as a separator-bounded
-run, so `db` does not match `payments-database`; a raw-string test — it
+matches `payments-db`, and the entity must occur as a word-bounded run
+with no letter, digit or combining mark touching it, so `db` does not
+match `payments-database` while `bench server?`, `bench server,` and
+`bench server's` all name `bench server`; an apostrophe inside a word
+binds it, so `don't` does not name `Don`; a raw-string test — it
 does not resolve graph aliases, so a constraint written under an alias
 later folded into another name is pinned by `memory_recall` but not by
 the cortex block, a known open follow-up now that
@@ -326,6 +329,32 @@ per-entity fact cap below. An unlabelled bank is served byte-identically;
 sinks below the fresh ranked facts — staleness is a trust decision and
 outranks the pin. The labels themselves are described in
 [memory-model](memory-model.md#who-said-it-and-how-exactly-must-it-survive-schema-v35).
+
+**What the scope test means for rules.** In `memory_search` the pin's
+scope is *entity naming*, and a working session describes the moment a
+rule matters by the task, not by the rule's name. "About to start the
+bench server on the 4090" does not name `GPU pre-flight rule`, so that
+constraint is not pinned and is ranked only if cosine happens to favour
+it; "GPU pre-flight rule before a bench run" names it and pins it, floor
+and cap permitting (probed on the live bank, 2026-09-27, while checking a
+client's local memory files against it — the same held for a subagent
+model rule and a main-checkout rule). `memory_recall` scopes by seed
+instead: the mechanical driver seeds the vocabulary entities the query
+names, and falls back to entities mentioned in the seed hits only when
+the query names none, so a task-phrased recall can pin a rule the query
+never names — but once the query names any known entity, that fallback
+does not run. Two consequences. When you store a rule, name its entity
+the way the task would say it (`bench server`, not `GPU pre-flight
+rule`). The bounded match ends at whitespace, punctuation or a
+possessive `'s`, so "should I start the bench server?" and "the bench
+server's config" name it as well; in `memory_recall`, whose seeds come
+from a raw-text match over entity names, a `.` straight after the name
+does not end it. And a rule that must hold *however* the task is
+phrased — a safety rule, a "never do X" — belongs in the agent's
+standing-instruction surface too (the CLAUDE.md / AGENTS.md block, or
+the client's own always-loaded memory), with the bank holding its why,
+its history and its corrections: an always-loaded line fires without a
+query; a bank entry fires only when the query reaches it.
 
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
