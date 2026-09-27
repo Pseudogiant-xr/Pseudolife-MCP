@@ -80,6 +80,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -106,9 +107,13 @@ DEFAULT_URL = "http://127.0.0.1:8765"
 HELD_ENV = "PSEUDOLIFE_LEASES_HELD"
 LABEL = "lease-run"
 HOLD_LABEL = "lease-hold"  # a mirror of a lock this process holds (hold, conftest)
-# Board holders that only ever mirror a local OS lock: beside a free lock,
-# their record is stale (see _check_lease).
-_PROCESS_LABELS = frozenset({LABEL, HOLD_LABEL})
+# A mirror's board label is HOLD_LABEL@<instance id>: the id is minted once
+# per lock directory (INSTANCE_FILE), so `lease check` can tell a leftover
+# hold of this machine and account, which the free lock here disproves, from
+# one whose lock lives in another home directory (WSL, another account or
+# machine), which it cannot. Random, so no host or user name reaches the board.
+INSTANCE_FILE = "instance.id"
+_INSTANCE_ID = re.compile(r"[0-9a-f]{12}")
 # The test suite's own lock (tests/suite_lock.py); only ever probed here. Its
 # file names are that module's: slot 0 keeps the bare names, slot k inserts
 # the slot number, and the holder record beside each names pid and worktree.
@@ -841,6 +846,41 @@ def _run(args, command: list[str], transport) -> int:
 
 # --- the mirror of a lock this process holds --------------------------------------
 
+def instance_id(directory: Path) -> str | None:
+    """This lock directory's instance id (12 hex), minted on first use; None
+    when it cannot be read or written, or the file holds something else
+    (never overwritten: a hold without an id is only ever counted as held)."""
+    path = Path(directory) / INSTANCE_FILE
+    for attempt in range(2):
+        try:
+            text = path.read_text(encoding="ascii").strip()
+        except FileNotFoundError:
+            text = None
+        except (OSError, ValueError):
+            return None
+        if text is not None:
+            return text if _INSTANCE_ID.fullmatch(text) else None
+        if attempt:
+            return None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "x", encoding="ascii") as handle:
+                minted = secrets.token_hex(6)
+                handle.write(minted + "\n")
+            return minted
+        except FileExistsError:
+            continue  # another process minted it first: read theirs
+        except OSError:
+            return None
+    return None
+
+
+def hold_label(directory: Path) -> str:
+    """The board label of a mirror whose lock lives in ``directory``."""
+    stamp = instance_id(directory)
+    return f"{HOLD_LABEL}@{stamp}" if stamp else HOLD_LABEL
+
+
 def _clear_by(agent: dict):
     """A peer's ``park_clear_by`` (a sibling change's field), flat or under
     ``park``, as a list of names; empty when it has none."""
@@ -916,8 +956,11 @@ class BoardMirror:
 
     def __init__(self, name: str, *, purpose: str = "", expect: int | None = None,
                  ttl: int = DEFAULT_TTL, worktree: str = "", pid: int | None = None,
-                 environ=None, transport=None, no_board: bool = False):
+                 environ=None, transport=None, no_board: bool = False,
+                 lock_dir: Path | None = None):
         self.name = name
+        # Stamped with the instance id of the directory the lock lives in.
+        self.label = hold_label(os_lock.lock_dir() if lock_dir is None else lock_dir)
         self.purpose = purpose[:MAX_PURPOSE]
         self.expect = expect
         self.ttl = ttl
@@ -1007,6 +1050,9 @@ class BoardMirror:
                         interval = min(TRANSIENT_RETRY, interval)
                     elif state == "waiting" and reply["state"] == "held":
                         self._early_grant()
+                        # A hand-back that failed is asked again at the poll
+                        # pace, never in a tight lease/release loop.
+                        next_call = time.monotonic() + BOARD_POLL
                         continue
                     elif state == "holding" and reply["state"] != "held":
                         self._lost()
@@ -1061,7 +1107,7 @@ class BoardMirror:
             if not board.registered:
                 board.register(
                     task=f"{self.name}: pid {self.pid}"[:MAX_SCOPE],
-                    project=_project(self._environ), label=HOLD_LABEL,
+                    project=_project(self._environ), label=self.label,
                     status=_printable(f"lease:{self.name} pid {self.pid} {self.worktree}")[:240])
             reply = board.lease(self.name, self.ttl, expect=self.expect, purpose=self.purpose)
         except _Transient as exc:
@@ -1369,9 +1415,15 @@ def _check_lease(args, transport) -> int:
     # or lapses. Lock files are never deleted, so "free" is the usual state
     # of an idle lease here, not a sign that nobody holds it (orchestrator
     # re-review, 2026-09-28).
+    # A hold stamped with this lock directory's instance id is this machine's
+    # and account's, so the free lock here disproves it. Any other board
+    # holder (a claim, `lease run`, a hold from WSL or another machine or
+    # account) has its lock elsewhere, if anywhere, and counts as held.
     holder = board["holder"]
-    board_stale = (holder is not None and local["state"] == "free"
-                   and holder.get("label") in _PROCESS_LABELS)
+    here = _suite_lock_dir() if args.name == SUITE_LEASE else os_lock.lock_dir()
+    ours = instance_id(here)
+    board_stale = (holder is not None and local["state"] == "free" and ours is not None
+                   and holder.get("label") == f"{HOLD_LABEL}@{ours}")
     held = local["state"] == "held" or (holder is not None and not board_stale)
     if args.json:
         print(json.dumps({"name": args.name, "held": held, "local": local, "board": board},

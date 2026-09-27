@@ -194,7 +194,8 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     assert "no bank found" in capsys.readouterr().err
 
 
-def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypatch, capsys):
+def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypatch, capsys,
+                                                                 tmp_path):
     """``lease hold`` against the real store: the lease is held under the
     hold's own address while the followed process lives, the peers whose
     status says they work around the suite or the GPU get the acquire and
@@ -224,7 +225,10 @@ def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypat
                           transport=bridge)
     watcher.join(10)
     assert code == 0
-    assert seen["lease"]["holder"]["label"] == lease_cli.HOLD_LABEL
+    # Stamped with the lock directory's instance id, which the real board
+    # accepts (it is no secret-shaped value).
+    label = seen["lease"]["holder"]["label"]
+    assert label == lease_cli.hold_label(tmp_path / "locks") and "@" in label
     assert seen["lease"]["holder"]["purpose"] == "bench server"
     assert seen["lease"]["expected_end"] is not None
     assert _post(bridge, "leases", {"name": "gpu"})["leases"] == []

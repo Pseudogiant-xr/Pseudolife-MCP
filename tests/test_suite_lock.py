@@ -1118,7 +1118,9 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
         assert _wait_for(lambda: sum("acquired" in b["text"]
                                      for b in daemon.bodies("send")) == 3)
         assert daemon.actions()[:2] == ["register", "lease"]
-        assert daemon.bodies("register")[0]["label"] == "lease-hold"
+        from pseudolife_memory import lease_cli
+        assert daemon.bodies("register")[0]["label"] == (
+            f"lease-hold@{lease_cli.instance_id(tmp_path)}")  # the suite lock's directory
         body = daemon.bodies("lease")[0]
         assert body["name"] == "full-suite" and body["expect"] == 700
         assert ROOT.name in body["purpose"] and "pytest" in body["purpose"]
@@ -1416,3 +1418,17 @@ def test_a_waiter_whose_board_address_expired_registers_again_at_hold(held, quic
     finally:
         suite_lock.release(result["held"])
     assert released_last(daemon)
+
+
+def test_a_hand_back_that_keeps_failing_is_retried_at_the_poll_pace(held, quick_board,
+                                                                     monkeypatch):
+    # A board that grants but will not take the grant back must not turn the
+    # waiter into a lease/release loop with no pause (orchestrator re-check).
+    monkeypatch.setattr(quick_board, "BOARD_POLL", 0.2)
+    daemon = FakeDaemon(lease=[HELD("full-suite")],
+                        release=[(503, {"error": "coordination_unavailable"})])
+    mirror = _mirror(held.dir, daemon)
+    mirror.waiting()
+    time.sleep(1.0)
+    mirror.release(0.5)
+    assert 2 <= daemon.actions().count("lease") <= 8

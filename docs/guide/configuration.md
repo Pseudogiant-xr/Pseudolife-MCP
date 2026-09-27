@@ -376,12 +376,14 @@ process CPU: it prints the local lock's state and the board's holder with the
 expected end, and exits `0` when the lease is free, `1` when it is held, and
 `70` when the check itself failed, which a gate must not read as held
 (`--json` for one report). It is held when the local lock is held, or when the
-board shows a holder. The one exception: a board record left by a process
-mirror (`lease-hold` or `lease-run`) beside a free local lock outlived its
-process (killed outright), is shown as stale, and lapses at its ttl. Any other
-board holder, such as a session that claimed the lease with `memory_agents` or
-a run on another machine or account, counts as held until it is released or
-lapses, since no local lock can speak for it.
+board shows a holder. The one exception: a `lease hold` or suite mirror whose
+board label carries this lock directory's instance id (`lease-hold@<id>`; the
+id is 12 random hex digits in `instance.id` beside the locks, so no host or
+user name reaches the board) beside a free local lock outlived its process
+(killed outright), is shown as stale, and lapses at its ttl. Any other board
+holder, such as a session that claimed the lease with `memory_agents`, a
+`lease run`, or a hold from WSL or another machine or account, counts as held
+until it is released or lapses, since no local lock can speak for it.
 For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
 slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with

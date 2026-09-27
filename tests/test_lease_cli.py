@@ -1207,7 +1207,8 @@ def test_hold_keeps_the_lease_while_the_pid_lives_then_releases(lease_env, sleep
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
     assert daemon.actions()[0] == "register"
     assert released_last(daemon)
-    assert daemon.bodies("register")[0]["label"] == "lease-hold"
+    assert daemon.bodies("register")[0]["label"] == (
+        f"lease-hold@{lease_cli.instance_id(lease_env)}")
     assert daemon.bodies("lease")[0] == {"name": "gpu", "ttl": 120, "expect": 1800,
                                          "purpose": "bench server"}
     assert len(daemon.bodies("lease")) >= 3  # renewed while it held
@@ -1397,13 +1398,12 @@ def _free_lock_file(lease_env, name="gpu"):
     free.release()  # the file stays: a lock file is never deleted
 
 
-@pytest.mark.parametrize("label", [lease_cli.HOLD_LABEL, lease_cli.LABEL])
-def test_check_trusts_a_free_local_lock_over_a_leftover_process_mirror(lease_env, capsys,
-                                                                       label):
-    # A `lease hold` or `lease run` killed outright drops its OS lock at once
-    # while its board record lapses at the ttl: the lock is the truth for a
-    # process-held lease, and that board record is stale.
+def test_check_trusts_a_free_local_lock_over_this_machines_leftover_hold(lease_env, capsys):
+    # A `lease hold` killed outright drops its OS lock at once while its board
+    # record lapses at the ttl. Its label carries this lock directory's
+    # instance id, so beside the free lock here the record is stale.
     _free_lock_file(lease_env)
+    label = f"{lease_cli.HOLD_LABEL}@{lease_cli.instance_id(lease_env)}"
     daemon = _board_holding(label)
     assert _run(["check", "gpu"], daemon) == 0
     out = capsys.readouterr().out
@@ -1411,6 +1411,35 @@ def test_check_trusts_a_free_local_lock_over_a_leftover_process_mirror(lease_env
     assert _run(["check", "gpu", "--json"], daemon) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["held"] is False and report["board"]["holder"]["label"] == label
+
+
+@pytest.mark.parametrize("label", [
+    f"{lease_cli.HOLD_LABEL}@0123456789ab",  # a hold on another machine, WSL or account
+    lease_cli.HOLD_LABEL,                    # no instance id to vouch for it
+    lease_cli.LABEL,                         # `lease run`: its lock may be anywhere
+])
+def test_check_counts_a_hold_it_cannot_vouch_for_as_held(lease_env, capsys, label):
+    # The local lock file here says nothing about a lock in another home
+    # directory: only a hold stamped with this directory's id yields to it
+    # (orchestrator re-check of be50adf5, 2026-09-28).
+    _free_lock_file(lease_env)
+    lease_cli.instance_id(lease_env)  # this machine's id exists, and differs
+    daemon = _board_holding(label)
+    assert _run(["check", "gpu"], daemon) == 1
+    out = capsys.readouterr().out
+    assert "lease gpu: held" in out and "stale" not in out
+
+
+def test_the_instance_id_is_minted_once_per_lock_directory(tmp_path):
+    first = lease_cli.instance_id(tmp_path)
+    assert first and len(first) == 12 and int(first, 16) >= 0
+    assert lease_cli.instance_id(tmp_path) == first
+    assert lease_cli.instance_id(tmp_path / "elsewhere") != first
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / lease_cli.INSTANCE_FILE).write_text("not an id", encoding="ascii")
+    assert lease_cli.instance_id(tmp_path / "bad") is None  # never overwritten
+    from pseudolife_memory.storage.coordination import looks_like_secret
+    assert not looks_like_secret(f"{lease_cli.HOLD_LABEL}@{first}")
 
 
 def test_check_counts_a_session_claim_as_held_beside_a_free_lock(lease_env, capsys):
