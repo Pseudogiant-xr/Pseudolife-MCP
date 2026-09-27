@@ -38,8 +38,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The wake caps are operator-configurable under `coordination.wake` in
   `config.yaml`: `per_recipient_per_hour` (20, counting every wake),
   `urgent_per_sender_per_hour` (6), `nightly_total` (200) and
-  `fan_out_stagger_seconds` (30), all whole numbers; the two hourly caps are
-  at least 1, and `nightly_total: 0` rings nobody.
+  `fan_out_stagger_seconds` (30), all whole numbers, and `0` on a cap rings
+  nobody.
   `/health` reports `coordination: {enabled, wake: {...}}`, and
   `pseudolife-mcp doctor` gains a `wake` section: each registered client's
   wake path (`claude_code.stop_hook`, `off` unless the plugin is installed
@@ -53,10 +53,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `wake`, the README's Codex setup states the `memory_message` approval a
   woken task needs (without it the task stalls on a prompt) and its
   Updating section says existing installs start ringing after the client
-  update and how to opt out. The live Codex doorbell probe the 2026-09-12
-  validation record still lacks is written up as a procedure there with a
-  recorder (`evals/codex_doorbell_probe.py`); whether it has run is stated
-  in that record, not here.
+  update and how to opt out.
+- The live Codex doorbell probe the 2026-09-12 validation record lacked has
+  run once (2026-09-28, codex-cli 0.156.1 against the 0.15.0 shim runtime,
+  the pre-policy path): the bell was queued, the idle thread took a turn,
+  read the mail and acknowledged it. The procedure, the timeline and the
+  recorder (`evals/codex_doorbell_probe.py`) are in that record; artifact:
+  `evals/results/codex-doorbell-probe-20260928.json`. One run on one host:
+  it shows the path works, not how reliably.
 
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the

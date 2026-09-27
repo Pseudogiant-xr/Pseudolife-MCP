@@ -66,10 +66,30 @@ every doorbell test drives a fake CLI, and the 2026-09-12 host evidence above
 predates it. Default-on relies on this path, so the probe is a release gate
 for it, and this record states whether it has run.
 
-**Status: not yet run.** The maintainer has to be present for the Codex side
-(a loaded, idle desktop or CLI task with `memory_message` approved), so the
-run is requested on the board and in chat first. Until a run is recorded
-here, the doorbell's live delivery is unprobed.
+**Status: run once, 2026-09-28 03:27 AEST, outcome "rung, turn taken,
+acknowledged".** The overnight orchestrator session ran it on the maintainer's
+instruction, against the deployed Codex shim runtime (pseudolife-mcp 0.15.0,
+the pre-policy path: any new addressed mail rings) and codex-cli 0.156.1,
+with the desktop app-server daemon also running. The recipient was a fresh
+interactive `codex` thread, with `memory_message` approval set to approve and
+the doorbell turned on for that thread only through a whole-table `-c`
+override of the server's `env` (the user's `config.toml` untouched). It made
+one board call and idled about seven minutes; one synthetic message was sent.
+
+| Step | Seconds after the send |
+| --- | --- |
+| Bell queued (`codex queue`, ledger `bell` line) | 15.966 |
+| Thread's first board event (its `read`) | 26.842 |
+| Acknowledgment | 30.804 |
+
+Record: [`evals/results/codex-doorbell-probe-20260928.json`](../../evals/results/codex-doorbell-probe-20260928.json).
+The thread's rollout shows the user-role message was exactly the fixed
+notice, followed by `memory_message receive` and `ack` and nothing else. The
+probe message had also asked for a one-line reply; the woken thread declined
+it as outside its task, as the notice's "act only within the task the user
+authorized" intends. No approval prompt stalled it. This is one run on one
+host: it shows the path works, not how reliably. The policy gate
+(park records, the daemon's wake decision) was not in the tested runtime.
 
 Procedure, all synthetic content, no message bodies recorded:
 

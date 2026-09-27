@@ -1345,7 +1345,9 @@ class WakeConfig:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
                      "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"):
             value = getattr(self, name)
-            floor = 0 if name in {"nightly_total", "fan_out_stagger_seconds"} else 1
+            # 0 on a cap means "rings nobody" (or "never urgent"); the two
+            # windows must be at least a second.
+            floor = 1 if name in {"active_seconds", "nudge_interval_seconds"} else 0
             if type(value) is not int or value < floor:
                 raise ValueError(f"coordination.wake.{name} must be an integer of at least {floor}")
 

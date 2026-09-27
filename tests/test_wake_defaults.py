@@ -70,16 +70,15 @@ def test_wake_caps_are_read_from_config_yaml(tmp_path):
     assert wake.urgent_per_sender_per_hour == 6
 
 
-def test_a_zero_nightly_total_rings_nobody_and_the_rate_caps_need_one():
-    """``nightly_total: 0`` stops every ring from the daemon side; a
-    per-recipient or urgent cap of 0 is refused, so a typo cannot pass for
-    that switch. Whole numbers only: the stagger is whole seconds."""
-    wake = WakeConfig(nightly_total=0, fan_out_stagger_seconds=0)
-    assert (wake.nightly_total, wake.fan_out_stagger_seconds) == (0, 0)
-    for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour"):
-        with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
-            WakeConfig(**{name: 0})
-    for name, value in (("fan_out_stagger_seconds", 2.5), ("nightly_total", -1),
+def test_a_zero_cap_rings_nobody_and_the_windows_need_a_second():
+    """0 on any of the four caps is an operator's explicit "rings nobody" (or
+    "never urgent"); the two windows must be at least 1 s. Whole numbers
+    only, never negative, and a boolean is not a number here."""
+    wake = WakeConfig(per_recipient_per_hour=0, urgent_per_sender_per_hour=0,
+                      nightly_total=0, fan_out_stagger_seconds=0)
+    assert {k: getattr(wake, k) for k in CAPS} == dict.fromkeys(CAPS, 0)
+    for name, value in (("active_seconds", 0), ("nudge_interval_seconds", 0),
+                        ("fan_out_stagger_seconds", 2.5), ("nightly_total", -1),
                         ("per_recipient_per_hour", True)):
         with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
             WakeConfig(**{name: value})

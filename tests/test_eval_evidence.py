@@ -9996,3 +9996,36 @@ def test_seed_bench_combining_mark_rerun_scores_the_same():
                 for k, v in d.items() if k != "embedder"}
     assert scores(marks) == scores(after)
     assert marks["embedder"] == after["embedder"]
+
+
+# -- the live Codex doorbell probe (2026-09-28) ------------------------------
+# One run of evals/codex_doorbell_probe.py against a real Codex home; the
+# Codex validation record states its timeline.
+CODEX_SPEC = "docs/specs/2026-09-12-codex-coordination.md"
+DOORBELL_PROBE = RESULTS + "codex-doorbell-probe-20260928.json"
+
+
+def _probe_delta(field: str) -> Callable[[dict], float]:
+    def value(d):
+        line = d["timeline"]
+        if field == "bell":
+            return line["bell_at"] - line["sent_at"]
+        return line[field] - line["sent_at"]
+    return value
+
+
+for _cid, _needle, _field, _stated in (
+        ("codex-doorbell-probe-bell", "| Bell queued (`codex queue`, ledger `bell` line) | 15.966 |",
+         "bell", 15.966),
+        ("codex-doorbell-probe-read", "| Thread's first board event (its `read`) | 26.842 |",
+         "read_at", 26.842),
+        ("codex-doorbell-probe-ack", "| Acknowledgment | 30.804 |", "ack_at", 30.804)):
+    CLAIMS.append(Claim(id=_cid, doc=CODEX_SPEC, needle=_needle, artifacts=(DOORBELL_PROBE,),
+                        value=_probe_delta(_field), stated=_stated, places=3))
+
+
+def test_codex_doorbell_probe_record_backs_its_outcome():
+    record = _load_artifact(DOORBELL_PROBE)
+    assert record["harness"] == "evals/codex_doorbell_probe.py"
+    assert record["timeline"]["outcome"] == "rung, turn taken, acknowledged"
+    assert '"rung, turn taken,\nacknowledged"' in _read_doc(CODEX_SPEC)
