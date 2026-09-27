@@ -19,14 +19,16 @@ from typing import Any, Callable, Protocol
 from pseudolife_memory.utils import no_redirect
 
 
-# Boundaries for _mentions. A dot is a boundary unless a word character sits
-# on its far side, so "the bench server." names "bench server" but "node"
-# does not match inside "node.js" (nor "v1" inside "v1.2"). An apostrophe
-# glued to a word on both sides is part of that word ("don't" does not name
-# "Don"), except before a possessive "s" ("the bench server's config" names
-# "bench server") — the same apostrophe rule as the pin-scope test.
+# Boundaries for _mentions. A dot AFTER a name is a boundary unless a word
+# character follows it, so "the bench server." names "bench server" but
+# "node" does not match inside "node.js" (nor "v1" inside "v1.2"). A dot
+# BEFORE a name always blocks it, so a dotfile path (".env",
+# ".claude/settings.json") does not name the entity its stem spells. An
+# apostrophe glued to a word on both sides is part of that word ("don't"
+# does not name "Don"), except before a possessive "s" ("the bench
+# server's config" names "bench server") — the pin-scope test's rule.
 _APOS = "'’"
-_MENTION_BEFORE = rf"(?<!\w)(?<!\w\.)(?<!\w[{_APOS}])"
+_MENTION_BEFORE = rf"(?<![\w.])(?<!\w[{_APOS}])"
 _MENTION_AFTER = rf"(?!\w)(?!\.\w)(?![{_APOS}](?!s(?!\w))\w)"
 # Separators inside a NAME match any run of each other, so "payments db"
 # and "payments-db" name the same entity (the run cortex._norm_key folds,
@@ -35,6 +37,9 @@ _MENTION_AFTER = rf"(?!\w)(?!\.\w)(?![{_APOS}](?!s(?!\w))\w)"
 _NAME_SEP = r"[\s_\-/]+"
 
 
+# re's own cache holds 512 patterns, so a larger vocabulary recompiled every
+# name on every seeding. 8192 compiled patterns measured ~12 MB (tracemalloc,
+# 2026-09-27, three-token names); past it this degrades to recompiling.
 @functools.lru_cache(maxsize=8192)
 def _mention_re(name: str) -> re.Pattern[str]:
     pieces = re.split(f"({_NAME_SEP})", name)
@@ -51,10 +56,10 @@ def _mentions(text: str, name: str) -> bool:
     """Word-bounded, case-insensitive: does ``text`` name ``name``?
 
     Hyphens are boundaries, so 'k8s' matches 'k8s-prod cluster' (as the
-    pin-scope test ``service._entity_in_query`` also treats them). A dot
-    bounds only when no word character follows it, apostrophes bound only
-    a possessive 's', and the name's own separators fold (see the
-    constants above). Began as a copy of ``ladder_sweep.value_present``,
+    pin-scope test ``service._entity_in_query`` also treats them). A
+    trailing dot bounds only when no word character follows it, a leading
+    dot never does, an apostrophe inside a word bounds only a possessive
+    's', and the name's own separators fold (see the constants above). Began as a copy of ``ladder_sweep.value_present``,
     whose any-adjacent-dot exclusion missed a name a sentence ends on;
     that scorer is left as it is, since changing it would move the
     scores it has already produced."""

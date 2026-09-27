@@ -13,9 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   word. "Start the bench server." named no entity, so the walk seeded from
   whatever the search hits mentioned instead. The same blind spot hid every
   name that ends a sentence in a hit text, where the matcher also picks
-  fallback seeds and ranks re-queries. A period now counts as a boundary
-  unless a word character follows it, so "node" still does not match
-  inside "node.js" and "v1" not inside "v1.2".
+  fallback seeds and ranks re-queries. A period after a name now counts as
+  a boundary unless a word character follows it, so "node" still does not
+  match inside "node.js" and "v1" not inside "v1.2". A period before a name
+  still blocks it, so a dotfile path such as ".env" does not name "env".
 - Two more alignments with the constraint-pin scope test
   (`_entity_in_query`) that `memory_search` uses. A name's own separators
   (space, `_`, `-`, `/`) now match each other, so "payments db" and
@@ -32,8 +33,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hit-derived variants moved: the retired liberal seeder went 0.28 → 0.295
   (its June figure was 0.262) and the rejected ranked-and-capped variant
   0.75 → 0.625. Artifacts: `evals/results/seed_bench-2026-09-27-mentions-*.json`.
-  Compiled patterns are cached per name, which also takes seeding over a
-  3,000-name vocabulary from about 220 ms to about 60-115 ms.
+  Compiled patterns are now cached per name, so a vocabulary larger than
+  `re`'s own 512-pattern cache no longer recompiles every name on every
+  seeding.
 
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on

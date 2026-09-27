@@ -72,6 +72,15 @@ def test_mentions_sentence_final_period_is_a_boundary():
     assert rc._mentions("we deploy node.js here", "node.js")
     assert rc._mentions("we deploy node.js.", "node.js")
     assert not rc._mentions("pinned to v1.2 today", "v1")
+    assert rc._mentions("i like c++.", "c++")    # metacharacters escaped
+
+
+def test_mentions_a_dot_before_a_name_still_blocks_it():
+    # Only the TRAILING dot changed: a dotfile path in a hit text does not
+    # name the entity its stem happens to spell.
+    assert not rc._mentions("see .env file", "env")
+    assert not rc._mentions("edit .claude/settings.json", "claude")
+    assert not rc._mentions("activate .venv first", "venv")
 
 
 def test_mentions_folds_the_names_own_separators():
@@ -84,15 +93,22 @@ def test_mentions_folds_the_names_own_separators():
     assert not rc._mentions("the payments database host", "payments db")
     # The TEXT's boundaries are not folded: "_" stays part of a word.
     assert not rc._mentions("see pseudolife_memory/recall.py", "pseudolife")
+    # Only INTERNAL separators fold; a leading one stays literal.
+    assert rc._mentions("GET /api now", "/api")
+    assert not rc._mentions("GET api now", "/api")
+    assert not rc._mentions("GET -api now", "/api")
 
 
 def test_mentions_contraction_is_not_a_boundary_but_possessive_is():
     assert not rc._mentions("don't do it", "don")
     assert not rc._mentions("don’t do it", "don")
     assert not rc._mentions("ask o'brien", "brien")
+    assert not rc._mentions("ask o’brien", "brien")
     assert rc._mentions("the bench server's config", "bench server")
     assert rc._mentions("the bench server’s config", "bench server")
     assert rc._mentions("Don's laptop", "don")
+    # Only a whole-word 's' is possessive: "o'sullivan" does not name "o".
+    assert not rc._mentions("ask o'sullivan", "o")
 
 
 def test_mentions_hyphen_is_a_boundary():
