@@ -14,7 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   were status overwrites nobody was sent. A full `pytest` run now mirrors
   its lock as the board lease `full-suite` (`BoardMirror` in
   `pseudolife_memory/lease_cli.py`): a queued run is a board waiter, a
-  running one the holder, with its pid and worktree as the purpose and an
+  running one the holder, with its pid and worktree name (never its path) as the purpose and an
   expected end from the median of the last five timed runs
   (`full-suite.durations.jsonl` beside the lock; 25 minutes until five are
   on record; only runs that ran their tests are timed). The OS lock stays the

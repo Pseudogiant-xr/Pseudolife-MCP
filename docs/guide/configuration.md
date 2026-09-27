@@ -294,7 +294,7 @@ hold that lasts as long as the server's pid does. The order is the reverse of
 lock another process holds is waited for, or given up on at once with
 `--timeout 0`, exit `75`), the board second, and both are released when PID
 exits, or when the hold is stopped (`128+N`), which leaves PID running.
-`--worktree` names the checkout in the notices below; `--expect` is the
+`--worktree` names the checkout in the notices below, by its name, never its path (a path names the OS user); `--expect` is the
 expected end the board shows. All board traffic (the lease, its renewals, the
 notices below, the release) runs on a thread of its own after the OS lock has
 moved, so a slow or failing daemon never delays the lock; the release side gets

@@ -144,7 +144,7 @@ function Start-GpuLease {
     }
     $arguments = @($cli.Lead) + @(
         'lease', 'hold', 'gpu', '--while-pid', "$ServerPid", '--purpose', $Purpose,
-        '--worktree', $script:RepoRoot, '--timeout', '0')
+        '--worktree', (Split-Path $script:RepoRoot -Leaf), '--timeout', '0')
     if ($ExpectMinutes -gt 0) { $arguments += @('--expect', "${ExpectMinutes}m") }
     try {
         $hold = Start-Process -FilePath $cli.File `

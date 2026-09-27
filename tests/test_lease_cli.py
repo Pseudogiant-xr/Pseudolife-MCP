@@ -1215,7 +1215,8 @@ def test_hold_keeps_the_lease_while_the_pid_lives_then_releases(lease_env, sleep
     assert capsys.readouterr().out == ""
 
 
-def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monkeypatch):
+def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monkeypatch,
+                                                       tmp_path):
     monkeypatch.setenv("PSEUDOLIFE_AGENT_PROJECT", "Pseudolife-MCP")
     peers = [
         peer("a" * 32, "suite-runner", "SUITE-START 8f3d; suite=running",
@@ -1232,8 +1233,9 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
     child = sleeper(0.5)
 
+    worktree = str(tmp_path / "checkouts" / "wt-bench")
     assert _run(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "20m",
-                 "--worktree", "wt-bench"], daemon) == 0
+                 "--worktree", worktree], daemon) == 0
 
     sends = daemon.bodies("send")
     acquired = [body for body in sends if "acquired" in body["text"]]
@@ -1247,6 +1249,10 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
     assert f"pid {child.pid}" in text and "wt-bench" in text and "expected end" in text
     assert "SUITE-START" not in text
     assert "released" in released[0]["text"] and "wt-bench" in released[0]["text"]
+    # The checkout's name, never its path (which names the OS user).
+    for body in sends:
+        assert worktree not in body["text"] and str(tmp_path) not in body["text"]
+    assert str(tmp_path) not in daemon.bodies("register")[0]["status"]
     # The peer list was asked with this run's address, and the sends followed
     # the lease call and preceded the release.
     actions = daemon.actions()

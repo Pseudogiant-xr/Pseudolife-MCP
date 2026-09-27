@@ -679,7 +679,7 @@ def board_mirror(directory: Path, worktree, board_environ, *, transport=None):
         return None
     worktree = Path(worktree)
     return BoardMirror(
-        SUITE_LEASE, purpose=f"pytest pid {os.getpid()} in {worktree.name} ({worktree})",
+        SUITE_LEASE, purpose=f"pytest pid {os.getpid()} in {worktree.name}",
         expect=expected_seconds(directory), worktree=str(worktree),
         environ=board_environ, transport=transport)
 

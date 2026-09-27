@@ -1122,11 +1122,16 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
         body = daemon.bodies("lease")[0]
         assert body["name"] == "full-suite" and body["expect"] == 700
         assert ROOT.name in body["purpose"] and "pytest" in body["purpose"]
+        # A worktree's name only: its path names the OS user, and board rows
+        # reach audit exports (orchestrator review, 2026-09-28).
+        assert str(ROOT) not in body["purpose"]
+        assert str(ROOT) not in daemon.bodies("register")[0]["status"]
         acquired = [b for b in daemon.bodies("send") if "acquired" in b["text"]]
         assert sorted(b["to"] for b in acquired) == sorted(p * 32 for p in "abc")
         text = acquired[0]["text"]
         assert text.startswith("LEASE full-suite acquired")
         assert f"pid {os.getpid()}" in text and ROOT.name in text and "expected end" in text
+        assert str(ROOT) not in text
     finally:
         suite_lock.release(held_lock)
     assert daemon.actions()[-1] == "release"

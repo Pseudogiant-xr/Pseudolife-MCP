@@ -905,7 +905,9 @@ class BoardMirror:
         self.purpose = purpose[:MAX_PURPOSE]
         self.expect = expect
         self.ttl = ttl
-        self.worktree = worktree or os.getcwd()
+        # Its name only, never its path: a path names the OS user, and board
+        # rows reach audit exports (orchestrator review, 2026-09-28).
+        self.worktree = Path(worktree or os.getcwd()).name or str(worktree)
         self.pid = os.getpid() if pid is None else pid
         self._environ = _Environment(os.environ if environ is None else environ)
         self._transport = transport
@@ -1635,7 +1637,8 @@ def _parsers():
                       help=f"what it is for, shown on the board (at most {MAX_PURPOSE} "
                            f"characters)")
     hold.add_argument("--worktree", default="", metavar="PATH",
-                      help="named in the notices to peers (default: the current directory)")
+                      help="the checkout whose name (never its path) the notices give "
+                           "(default: the current directory)")
     hold.add_argument("--no-board", action="store_true",
                       help="skip the agent board and hold the local lock alone")
     hold.add_argument("--timeout", type=_seconds(0, None), metavar="DURATION",
