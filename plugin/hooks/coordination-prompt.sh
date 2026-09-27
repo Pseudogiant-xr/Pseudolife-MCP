@@ -36,6 +36,13 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
             ;;
     esac
     FILE="$DIGEST_DIR/$KEY.txt"
+    # When this turn began, for the Stop hook's park gate (v48): it asks the
+    # daemon whether the session parked since then. Best effort.
+    if [ -n "$KEY" ]; then
+        printf '%s\n' "$(date +%s)" > "$DIGEST_DIR/$KEY.turn.$$" 2>/dev/null &&
+            mv -f "$DIGEST_DIR/$KEY.turn.$$" "$DIGEST_DIR/$KEY.turn" 2>/dev/null ||
+            rm -f "$DIGEST_DIR/$KEY.turn.$$" 2>/dev/null
+    fi
     if [ -n "$KEY" ] && [ -f "$FILE" ] && [ ! -L "$FILE" ]; then
         SEEN="$DIGEST_DIR/$KEY.seen"
         # One read, one snapshot: the writer replaces the file atomically.

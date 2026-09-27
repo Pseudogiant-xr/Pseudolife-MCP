@@ -1307,49 +1307,41 @@ class MemoryPolicyConfig:
 
 @dataclass
 class WakeConfig:
-    """Caps on the rings that start a model turn in an idle session.
+    """Caps on the rings the daemon decides at send (schema v48).
 
-    Wake is on by default and policy-gated (maintainer decision 2026-09-28,
-    superseding the 2026-09-25 opt-in): a message rings a parked session
-    only when it plausibly clears the need the park record declares. The
-    policy gate keeps the effective rate low; these caps are the guarantee
-    against a loop between two woken sessions, a chatty sender, or a
-    fan-out that would start a dozen unattended turns at once. The figures
-    are the 2026-09-28 design decision, grounded in the 2026-09-23/24
-    fifteen-session board trial: the Stop hook's 20 wakes an hour per
-    session was already in force there, no sender-recipient pair exceeded
-    10 wakes an hour and no request or handoff would have crossed 6, while
-    fan-out bursts were 2.8% of traffic. A cap of 0 rings nobody; the off
-    switch stays ``PSEUDOLIFE_AGENT_COORDINATION=0`` on the client.
+    A ring is an unattended model turn in the recipient, so every one is
+    bounded. The four caps come from the 2026-09-23/24 messageboard trial
+    (ten, then fifteen sessions over two evenings): the Claude Stop hook
+    already capped wakes at 20 an hour per session, and the busiest session
+    received 32 messages in an evening; no sender-recipient pair exchanged
+    more than 10 messages in an hour, so 20 rings per recipient per hour
+    is above any pair the trial saw; no request or hand-off thread ran to
+    more than 6 messages, so 6 urgent rings per sender per hour covers a
+    whole thread of them; fan-out bursts were 2.8% of the traffic, so a
+    30 s stagger between one sender's rings delays little. The nightly
+    total (200) is the design's starting value, not a measurement: about
+    the trial's whole evening of messages, every one rung. A cap of 0
+    rings nobody (or never honours ``urgent``). ``active_seconds`` is the
+    window in which a recipient's own last board action makes new mail
+    ``hinted`` (its next tool result carries it) rather than rung, and
+    ``nudge_interval_seconds`` bounds the ring that asks an idle, unparked
+    session for a park record; both are judgment calls, at least 1.
     """
 
-    # Kept field for field with the park-record branch's WakeConfig, which
-    # replaces this copy when the two stack.
-    # Rings one recipient may receive in any hour, counting every wake,
-    # including the ones no sender caused (a partial ack, an expiry).
     per_recipient_per_hour: int = 20
-    # Rings one sender may cause with ``urgent`` in any hour.
     urgent_per_sender_per_hour: int = 6
-    # Rings across the whole board in one night (a UTC day).
     nightly_total: int = 200
-    # Seconds between two rings caused by one fan-out send.
     fan_out_stagger_seconds: int = 30
-    # A recipient active this recently gets a hint in its next tool result
-    # instead of a ring.
     active_seconds: int = 60
-    # At most one ring per this interval asking an idle, unparked session
-    # to set a park record.
     nudge_interval_seconds: int = 3600
 
     def __post_init__(self) -> None:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
                      "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"):
             value = getattr(self, name)
-            # 0 on a cap means "rings nobody" (or "never urgent"); the two
-            # windows must be at least a second.
             floor = 1 if name in {"active_seconds", "nudge_interval_seconds"} else 0
             if type(value) is not int or value < floor:
-                raise ValueError(f"coordination.wake.{name} must be an integer of at least {floor}")
+                raise ValueError(f"coordination.wake.{name} must be a whole number of at least {floor}")
 
 
 @dataclass
@@ -1381,7 +1373,7 @@ class CoordinationConfig:
     # bounded. The log is cut on UTC day boundaries, so an event stays up to
     # a day longer than this.
     audit_retention_days: int = 90
-    # Caps on wake rings; see WakeConfig.
+    # The wake caps (schema v48); see WakeConfig.
     wake: WakeConfig = field(default_factory=WakeConfig)
 
     def __post_init__(self) -> None:
@@ -1390,7 +1382,7 @@ class CoordinationConfig:
         if isinstance(self.wake, dict):
             self.wake = WakeConfig(**self.wake)
         if not isinstance(self.wake, WakeConfig):
-            raise ValueError("coordination.wake must be a mapping of caps")
+            raise ValueError("coordination.wake must be a mapping of wake caps")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
             raise ValueError("coordination.awareness_limit must be an integer in 1..20")
         if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:

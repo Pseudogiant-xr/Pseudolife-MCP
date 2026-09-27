@@ -74,7 +74,19 @@ def _payload(session_id=SESSION, **extra):
                        "stop_hook_active": False, **extra})
 
 
-def _digest(tmp_path, watermark, body, key=None):
+def _ring(tmp_path, watermark, reason="rung anyone", key=None):
+    """The marker the shim writes for a ring the daemon decided (v48)."""
+    directory = tmp_path / "digests"
+    directory.mkdir(exist_ok=True)
+    target = directory / f"{key or _key()}.ring"
+    partial = target.with_suffix(".tmp")
+    partial.write_bytes(f"{watermark}\n{reason}\n".encode())
+    os.replace(partial, target)
+
+
+def _digest(tmp_path, watermark, body, key=None, ring=True):
+    """A digest as the shim writes it, with (by default) a ring marker for
+    the same watermark: since v48 the hook fires only on a decided ring."""
     directory = tmp_path / "digests"
     directory.mkdir(exist_ok=True)
     # The shim replaces the file atomically; do the same so a polling hook
@@ -83,6 +95,8 @@ def _digest(tmp_path, watermark, body, key=None):
     partial = target.with_suffix(".tmp")
     partial.write_bytes((f"{watermark}\n{body}\n" if body else f"{watermark}\n").encode())
     os.replace(partial, target)
+    if ring:
+        _ring(tmp_path, watermark, ring if isinstance(ring, str) else "rung anyone", key)
     return directory
 
 
@@ -605,3 +619,248 @@ def test_exits_when_claude_code_is_gone(tmp_path):
         parent.wait()
     code, out, err = _finish(process)
     assert (code, out, err) == (0, "", "")
+
+
+
+# --- the daemon decides, the hook rings (v48) ------------------------------
+
+def test_a_digest_change_without_a_ring_does_not_wake(tmp_path):
+    """New mail alone no longer wakes the session: the shim writes
+    ``<key>.ring`` only for a ring the daemon decided (chatter to a parked
+    session is withheld), and the hook fires only on a ring past ``.seen``."""
+    _digest(tmp_path, 3, BODY, ring=False)
+    result, _ = _run(_env(tmp_path, wait=8))
+    assert (result.returncode, result.stderr) == (0, "")
+    assert _read_seen(tmp_path) is None
+
+
+def test_a_ring_names_its_reason_in_the_ledger(tmp_path):
+    _digest(tmp_path, 3, BODY, ring="rung clears")
+    result, _ = _run(_env(tmp_path, wait=3540))
+    assert result.returncode == 2 and _woke(result.stderr)
+    ledger = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+    assert [line.split("\t")[1:4] + line.split("\t")[5:] for line in ledger] == [
+        ["wait", _key()[:8], "3", "rung clears"]]
+
+
+def test_a_ring_for_a_digest_already_seen_holds_fire(tmp_path):
+    """The session read the mail while active (the prompt hook or a hint
+    moved ``.seen``): the ring is stale and the hook waits for the next."""
+    _digest(tmp_path, 3, BODY, ring="rung anyone")
+    _seen(tmp_path, 3)
+    result, _ = _run(_env(tmp_path, wait=8))
+    assert (result.returncode, result.stderr) == (0, "")
+
+
+def test_a_ring_behind_a_newer_digest_still_wakes(tmp_path):
+    """Chatter arriving after the ring changes the digest (a new watermark)
+    but the rung mail is still unseen, so the wake prints the current digest."""
+    _digest(tmp_path, 5, LATER, ring=False)
+    _ring(tmp_path, 4, "rung clearer")
+    result, _ = _run(_env(tmp_path, wait=3540))
+    assert result.returncode == 2 and _woke(result.stderr, LATER)
+    assert _read_seen(tmp_path) == "5"
+
+
+def test_a_nudge_asks_for_a_park_record(tmp_path):
+    _digest(tmp_path, 3, BODY, ring="nudged no_park")
+    result, _ = _run(_env(tmp_path, wait=3540))
+    assert result.returncode == 2
+    assert _woke(result.stderr.split("\nSet your park status", 1)[0])
+    assert "set your park status" in result.stderr.lower()
+    assert "park_reason" in result.stderr
+
+
+@pytest.mark.parametrize("ring", ["", "x\nrung anyone\n", "3\n", "3\n\n"])
+def test_a_malformed_ring_never_wakes(tmp_path, ring):
+    _digest(tmp_path, 3, BODY, ring=False)
+    (tmp_path / "digests" / f"{_key()}.ring").write_text(ring)
+    result, _ = _run(_env(tmp_path, wait=8))
+    assert (result.returncode, result.stderr) == (0, "")
+
+
+# --- the park gate -----------------------------------------------------------
+
+GATE_MESSAGE = ("Before ending: update your board status with why you stopped and what you need "
+                "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
+                "park_resume=...)")
+
+
+def _gate_daemon(answer):
+    """A fixture daemon answering the park gate with ``answer`` and
+    recording each request's path and bearer."""
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            requests.append((self.path, self.headers.get("Authorization")))
+            body = answer.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    return server, requests
+
+
+def _agent(tmp_path, agent_id="a" * 32, key=None):
+    directory = tmp_path / "digests"
+    directory.mkdir(exist_ok=True)
+    (directory / f"{key or _key()}.agent").write_text(f"{agent_id}\n")
+
+
+def _turn(tmp_path, stamp, key=None):
+    (tmp_path / "digests" / f"{key or _key()}.turn").write_text(f"{stamp}\n")
+
+
+def _gate_env(tmp_path, server, **extra):
+    return _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                PSEUDOLIFE_MCP_TOKEN="fixture-token", **extra)
+
+
+def test_an_unparked_session_is_asked_once_to_park(tmp_path):
+    """At turn end the hook asks the daemon whether this address parked; a
+    block ends the turn with the request as the wake text, at once, and
+    the turn that follows (stop_hook_active) is not asked again."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        _turn(tmp_path, 1700000000)
+        result, elapsed = _run(_gate_env(tmp_path, server))
+        assert result.returncode == 2 and result.stdout == ""
+        assert result.stderr == GATE_MESSAGE + "\n"
+        assert elapsed < 8
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32 + "&since=1700000000",
+                             "Bearer fixture-token")]
+        ledger = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert [line.split("\t")[1:2] + line.split("\t")[5:] for line in ledger] == [
+            ["gate", "block"]]
+        result, _ = _run(_gate_env(tmp_path, server), _payload(stop_hook_active=True))
+        assert (result.returncode, result.stderr) == (0, "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_parked_session_ends_its_turn_quietly(tmp_path):
+    server, requests = _gate_daemon("allow\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        result, _ = _run(_gate_env(tmp_path, server))
+        assert (result.returncode, result.stderr) == (0, "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, "Bearer fixture-token")]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("agent", ["", "not an id\n", "A" * 32 + "\n", "a" * 31 + "\n"])
+def test_without_a_board_address_the_gate_is_not_asked(tmp_path, agent):
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        if agent:
+            (tmp_path / "digests" / f"{_key()}.agent").write_text(agent)
+        result, _ = _run(_gate_env(tmp_path, server))
+        assert (result.returncode, result.stderr, requests) == (0, "", [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
+    server, _ = _gate_daemon("allow\n")
+    port = server.server_port
+    server.shutdown()
+    server.server_close()
+    _digest(tmp_path, 3, "", ring=False)
+    _agent(tmp_path)
+    env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
+               PSEUDOLIFE_MCP_TOKEN="fixture-token")
+    result, _ = _run(env)
+    assert (result.returncode, result.stderr) == (0, "")
+
+
+def test_the_gate_reads_a_private_token_file(tmp_path):
+    server, requests = _gate_daemon("allow\n")
+    try:
+        token_file = tmp_path / "token"
+        token_file.write_text("file-token\n")
+        token_file.chmod(0o600)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert [bearer for _, bearer in requests] == ["Bearer file-token"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_prompt_hook_stamps_the_turn_start(tmp_path):
+    """The gate's ``since`` is when the turn began, which only the prompt
+    hook knows; it leaves the stamp beside the digest."""
+    from tests.test_codex_hooks import bash_run
+    _digest(tmp_path, 3, "", ring=False)
+    env = _env(tmp_path)
+    before = int(time.time())
+    result = bash_run(ROOT / "plugin/hooks/coordination-prompt.sh",
+                      input=json.dumps({"session_id": SESSION, "prompt": "hi"}), env=env)
+    assert result.returncode == 0
+    stamp = (tmp_path / "digests" / f"{_key()}.turn").read_text().strip()
+    assert stamp.isdigit() and before <= int(stamp) <= int(time.time())
+    result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationPrompt",
+                      input=json.dumps({"session_id": SESSION, "prompt": "hi"}), env=env)
+    assert result.returncode == 0
+    stamp = (tmp_path / "digests" / f"{_key()}.turn").read_text().strip()
+    assert stamp.isdigit() and before <= int(stamp) <= int(time.time())
+
+
+def test_lifecycle_ps1_stop_asks_an_unparked_codex_thread_to_park(tmp_path):
+    """Codex runs the native command synchronously: the gate answers with
+    the Stop decision Codex documents (JSON on stdout, exit 0), and stays
+    silent when the daemon allows or the turn was already continued."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        env = _env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        _digest(tmp_path, 3, BODY, ring=False)
+        _agent(tmp_path)
+        _turn(tmp_path, 1700000000)
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                          input=_payload(), env=env)
+        assert result.returncode == 0 and result.stderr == ""
+        assert json.loads(result.stdout) == {"decision": "block", "reason": GATE_MESSAGE}
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32 + "&since=1700000000",
+                             "Bearer fixture-token")]
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                          input=_payload(stop_hook_active=True), env=env)
+        assert (result.returncode, result.stdout, len(requests)) == (0, "", 1)
+    finally:
+        server.shutdown()
+        server.server_close()
+    server, requests = _gate_daemon("allow\n")
+    try:
+        env = _env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                          input=_payload(), env=env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+    # The .seen marker is the wake hook's, and Codex has none: untouched.
+    assert _read_seen(tmp_path) is None

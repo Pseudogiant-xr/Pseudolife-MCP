@@ -23,7 +23,8 @@ from pseudolife_memory.storage.coordination import CoordinationClockChanged
 _PARAMETERS = {
     "context": {"agent_id", "nonce"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled"},
-    "update": {"project", "task", "status", "expect", "children"},
+    "update": {"project", "task", "status", "expect", "children", "park_reason", "park_needs",
+               "park_clear_by", "park_resume", "park_expires"},
     "agents": {"project", "task", "limit"},
     # v45 resource leases. ``leases`` lists with the bearer alone, like the
     # awareness roster; acquiring and releasing act as the caller's instance.
@@ -33,7 +34,7 @@ _PARAMETERS = {
     "attach": {"attachment_id", "wake_enabled"},
     "heartbeat": {"attachment_id", "generation", "active"},
     "detach": {"attachment_id", "generation"},
-    "send": {"to", "text", "request_id", "reply_to"},
+    "send": {"to", "text", "request_id", "reply_to", "clears", "urgent"},
     "receive": {"after", "limit", "attachment_id", "generation"},
     "ack": {"message_id"},
     "attempt": {"message_id", "attachment_id", "generation"},
@@ -73,6 +74,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "lease_not_held", "lease_queue_full",
     # v46: a body, status or lease purpose shaped like a credential (a 400).
     "secret_like_body",
+    # v48: the park record and the send's wake fields.
+    "invalid_park", "invalid_clears", "invalid_urgent",
 })
 
 
@@ -97,7 +100,11 @@ CHECKIN_TEXT = (
     "unavailable, say so and continue independently. A subagent shares its "
     "parent's board address, so it only reads the board (list, receive without "
     "ack, memory_search); status, ack and send belong to the parent, which can "
-    "name its subagents with memory_agents(action=update, children=[...]).")
+    "name its subagents with memory_agents(action=update, children=[...]). "
+    "When you stop, park: memory_agents(action=update, park_reason=<done|blocked|"
+    "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
+    "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
+    "cleared>), so mail wakes you only when it clears that need.")
 # The compact form for MCP initialization, which the shim appends only when
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
@@ -107,6 +114,48 @@ CHECKIN_INSTRUCTION = (
     "Agent board at task start: memory_agents update project, task, status, "
     "then list peers; memory_message receive, then ack after reading. "
     "Subagents only read the board.")
+
+
+# What the Stop hook shows when a turn ends without a park record (v48).
+# Served by ``GET /api/hook/park-gate`` behind the word ``block``; the hook
+# ends the turn with it once (``stop_hook_active`` then holds it back).
+PARK_GATE_MESSAGE = (
+    "Before ending: update your board status with why you stopped and what you need "
+    "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
+    "park_resume=...)")
+
+
+def park_gate(service, headers: Mapping[str, str], *, agent, since,
+              token_map=None, token=None) -> str:
+    """Body for ``GET /api/hook/park-gate?agent=<id>&since=<epoch>``: the
+    Stop hook's one daemon call. Line 1 is ``allow`` or ``block``, and a
+    block carries the message to show on line 2. Open (``allow``) wherever
+    the board is not served to this bearer, for an address that is not a
+    32-hex id, for one the bearer's principal does not own, and on any
+    failure: the gate asks, it never holds a turn on an error."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return "allow\n"
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)):
+        return "allow\n"
+    stamp = None
+    if since is not None:
+        try:
+            stamp = float(since)
+        except (TypeError, ValueError):
+            stamp = None
+        if stamp is not None and not (0 <= stamp < 1e12):
+            stamp = None
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            verdict = _store(service).park_gate(agent, principal, since=stamp)
+    except Exception:  # noqa: BLE001 - the gate never holds a turn on an error
+        return "allow\n"
+    if verdict.get("gate") != "block":
+        return "allow\n"
+    return f"block\n{PARK_GATE_MESSAGE}\n"
 
 
 def unavailable_reason(service, headers: Mapping[str, str], *,
@@ -244,8 +293,10 @@ def _mailbox(service):
 
 
 def _store(service):
-    from pseudolife_memory.storage.coordination import CoordinationStore
-    return CoordinationStore(_mailbox(service))
+    from pseudolife_memory.storage.coordination import CoordinationStore, WakePolicy
+    wake = getattr(service.config.coordination, "wake", None)
+    return CoordinationStore(_mailbox(service),
+                             wake=None if wake is None else WakePolicy.from_config(wake))
 
 
 def _dispatch(service, action: str, parameters: dict, *, headers=None,
@@ -378,12 +429,19 @@ def _present(**fields):
 
 
 def agents(service, *, action="list", project=None, task=None, status=None, lease=None,
-           expect=None, children=None):
+           expect=None, children=None, park_reason=None, park_needs=None, park_clear_by=None,
+           park_resume=None, park_expires=None):
     """Model surface: scope is relevance, never an identity or permission key.
 
     ``claim`` and ``release`` are session-held resource leases (v45): a
-    claim's ``status`` is its purpose, ``expect`` its expected duration."""
-    if children is not None and action != "update":
+    claim's ``status`` is its purpose, ``expect`` its expected duration.
+    The ``park_*`` fields are the park record (v48); an empty
+    ``park_reason`` is the tool's way to send null, which clears it."""
+    park = _present(park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
+                    park_expires=park_expires)
+    if park_reason is not None:
+        park["park_reason"] = park_reason or None
+    if (children is not None or park) and action != "update":
         raise ValueError("unexpected_parameter")
     if action == "list":
         if status is not None or lease is not None or expect is not None:
@@ -396,8 +454,8 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
     if action == "update":
         if lease is not None:
             raise ValueError("unexpected_parameter")
-        return dispatch(service, "update", _present(project=project, task=task, status=status,
-                                                    expect=expect, children=children))
+        return dispatch(service, "update", {**_present(project=project, task=task, status=status,
+                                                       expect=expect, children=children), **park})
     if action not in {"claim", "release"}:
         raise ValueError("unknown_coordination_action")
     if lease is None:

@@ -114,3 +114,21 @@ def test_missing_send_arguments_are_a_validation_error(monkeypatch):
         dispatch(service(allowed=["default"]), "send", {}, headers={
             "authorization": "Bearer fixture-secret", "x-pl-agent": "a",
             "x-pl-agent-key": "private"})
+
+
+def test_wake_caps_are_configurable_and_bounded():
+    from pseudolife_memory.utils.config import CoordinationConfig, WakeConfig, _dict_to_dataclass
+    wake = CoordinationConfig().wake
+    assert (wake.per_recipient_per_hour, wake.urgent_per_sender_per_hour, wake.nightly_total,
+            wake.fan_out_stagger_seconds, wake.active_seconds, wake.nudge_interval_seconds
+            ) == (20, 6, 200, 30, 60, 3600)
+    loaded = _dict_to_dataclass(CoordinationConfig, {"wake": {"nightly_total": 50}})
+    assert loaded.wake == WakeConfig(nightly_total=50)
+    for bad in ({"per_recipient_per_hour": -1}, {"nightly_total": -1}, {"fan_out_stagger_seconds": "30"},
+                {"urgent_per_sender_per_hour": True}, {"active_seconds": 0},
+                {"nudge_interval_seconds": 0}, {"per_recipient_per_hour": 2.0}):
+        with pytest.raises(ValueError, match="coordination.wake"):
+            WakeConfig(**bad)
+    # A cap of 0 is allowed: it rings nobody.
+    assert WakeConfig(per_recipient_per_hour=0, urgent_per_sender_per_hour=0, nightly_total=0,
+                      fan_out_stagger_seconds=0).nightly_total == 0

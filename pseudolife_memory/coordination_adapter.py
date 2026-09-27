@@ -7,6 +7,7 @@ from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -215,6 +216,15 @@ class CoordinationAdapter:
         self._delivered_watermark = 0
         self._hint_calls_since = 0
         self._digest_write_reported = False
+        # The daemon decides, the shim rings (v48). A heartbeat or attach
+        # answer may carry one ``wake``: ``(decision, reason, ring_at)``.
+        # ``_ring_timer`` writes the ``.ring`` marker the Stop hook fires
+        # on at ``ring_at``; ``_ring_offer`` is the same ring for the Codex
+        # doorbell, which takes it through ``ring_due`` once it is due. The
+        # ``.agent`` file names this address for the hook's park gate.
+        self._ring_timer = None
+        self._ring_offer = None
+        self._agent_written = None
         # Called with this adapter after every mailbox update (attach,
         # heartbeat, re-attach): the Codex doorbell reads the new state here.
         # It runs on the heartbeat task, so it must return at once.
@@ -288,9 +298,68 @@ class CoordinationAdapter:
         tool-result hint here or by a prompt hook through the shared marker."""
         return self._read_seen()
 
-    def note_delivery(self, kind: str, size: int) -> None:
-        """Record a delivery made outside the adapter in the digest ledger."""
-        self._ledger(kind, self._digest_watermark, size)
+    def note_delivery(self, kind: str, size: int, reason: str = "") -> None:
+        """Record a delivery made outside the adapter in the digest ledger;
+        a ring names the daemon's decision and reason."""
+        self._ledger(kind, self._digest_watermark, size, reason)
+
+    def ring_due(self):
+        """The ring the daemon decided, once its ``ring_at`` has come, as
+        ``(decision, reason)``; taken once. The Codex doorbell asks at the
+        moment it would otherwise ring. ``None`` when nothing is due."""
+        offer = self._ring_offer
+        if offer is None or time.time() < offer[2]:
+            return None
+        self._ring_offer = None
+        return offer[0], offer[1]
+
+    def _note_wake(self, result) -> None:
+        """Take a ``wake`` off an attach or heartbeat answer. Anything but a
+        well-formed ring is ignored: a daemon from before v48 sends none,
+        and nothing here may ring on a guess."""
+        wake = result.get("wake")
+        if not isinstance(wake, dict):
+            return
+        decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
+        if (decision not in {"rung", "nudged"} or not isinstance(reason, str)
+                or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
+                or not math.isfinite(ring_at)):
+            return
+        reason = "".join(c for c in " ".join(reason.split())[:60]
+                         if c.isalnum() or c in " _-") or "unknown"
+        ring = (decision, reason, float(ring_at))
+        self._ring_offer = ring
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+        # A far-off ring_at (a stepped clock) still rings within minutes.
+        delay = min(max(0.0, ring[2] - time.time()), 300.0)
+        try:
+            self._ring_timer = asyncio.get_running_loop().call_later(delay, self._write_ring, ring)
+        except RuntimeError:
+            self._write_ring(ring)
+
+    def _write_ring(self, ring) -> None:
+        """Write ``<key>.ring``: the digest watermark the ring is for, then
+        the decision and reason; the Stop hook fires on a ring past its
+        ``.seen`` marker, and says so for a nudge."""
+        self._ring_timer = None
+        if self._closing or self.digest_path is None:
+            return
+        decision, reason, _ = ring
+        body = f"{self._digest_watermark}\n{decision} {reason}\n"
+        if self._write_private(self._ring_path(), body):
+            self._ledger("ring", self._digest_watermark, len(body), f"{decision} {reason}")
+
+    def _write_agent(self) -> None:
+        """Name this address beside the digest for the Stop hook's park
+        gate; rewritten when a re-attach registered a fresh one."""
+        if self.digest_path is None or self._identity is None:
+            return
+        agent_id = self._identity.get("agent_id")
+        if not isinstance(agent_id, str) or agent_id == self._agent_written:
+            return
+        if self._write_private(self._agent_path(), f"{agent_id}\n"):
+            self._agent_written = agent_id
 
     def deliver_hint(self) -> str | None:
         """The hint to attach to a tool result: a failure notice every call,
@@ -330,6 +399,10 @@ class CoordinationAdapter:
         self._pending_preview = (preview if isinstance(preview, list)
                                  and all(_preview_entry(entry) for entry in preview) else [])
         self._refresh_digest()
+        # After the digest, so the ring marker names the watermark that
+        # lists the rung mail.
+        self._write_agent()
+        self._note_wake(result)
         observer = self.mailbox_observer
         if observer is not None:
             try:
@@ -381,6 +454,12 @@ class CoordinationAdapter:
     def _seen_path(self):
         return self.digest_path.with_suffix(".seen") if self.digest_path is not None else None
 
+    def _ring_path(self):
+        return self.digest_path.with_suffix(".ring") if self.digest_path is not None else None
+
+    def _agent_path(self):
+        return self.digest_path.with_suffix(".agent") if self.digest_path is not None else None
+
     def _read_seen(self) -> int:
         seen = self._delivered_watermark
         path = self._seen_path()
@@ -416,10 +495,12 @@ class CoordinationAdapter:
         cutoff = time.time() - self.STALE_DIGEST_SECONDS
         try:
             with os.scandir(self.digest_path.parent) as entries:
+                mine = (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path())
                 for entry in entries:
-                    if (entry.name.endswith((".txt", ".seen")) and entry.is_file(follow_symlinks=False)
+                    if (entry.name.endswith((".txt", ".seen", ".ring", ".agent"))
+                            and entry.is_file(follow_symlinks=False)
                             and entry.stat(follow_symlinks=False).st_mtime < cutoff
-                            and Path(entry.path) not in (self.digest_path, self._seen_path())):
+                            and Path(entry.path) not in mine):
                         with suppress(OSError):
                             os.unlink(entry.path)
         except OSError:
@@ -454,20 +535,24 @@ class CoordinationAdapter:
                       "tool-result hints continue.", file=sys.stderr)
             return False
 
-    def _ledger(self, kind: str, watermark: int, size: int) -> None:
+    def _ledger(self, kind: str, watermark: int, size: int, reason: str = "") -> None:
         """One line per delivery for the token-cost measurement; the prompt
-        hooks append to the same file."""
+        hooks append to the same file. A ring adds a sixth column, the
+        daemon's decision and reason."""
         if self.digest_path is None:
             return
         try:
             with open(self.digest_path.parent / "ledger.log", "a", encoding="utf-8") as handle:
                 handle.write(f"{int(time.time())}\t{kind}\t{self.digest_path.stem[:8]}\t"
-                             f"{watermark}\t{size}\n")
+                             f"{watermark}\t{size}" + (f"\t{reason}" if reason else "") + "\n")
         except OSError:
             pass
 
     def _remove_digest(self) -> None:
-        for path in (self.digest_path, self._seen_path()):
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+            self._ring_timer = None
+        for path in (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path()):
             if path is not None:
                 with suppress(OSError):
                     path.unlink()
