@@ -73,6 +73,7 @@ def test_mentions_sentence_final_period_is_a_boundary():
     assert rc._mentions("we deploy node.js.", "node.js")
     assert not rc._mentions("pinned to v1.2 today", "v1")
     assert rc._mentions("i like c++.", "c++")    # metacharacters escaped
+    assert not rc._mentions("axb here", "a.b")   # "." is not a wildcard
 
 
 def test_mentions_a_dot_before_a_name_still_blocks_it():
@@ -116,6 +117,82 @@ def test_mentions_hyphen_is_a_boundary():
     # opposite): a hyphenated compound names each hyphen-bounded run.
     assert rc._mentions("k8s-prod cluster", "k8s")
     assert rc._mentions("k8s-prod cluster", "k8s-prod")
+
+
+def _nfd(s):
+    import unicodedata
+    return unicodedata.normalize("NFD", s)
+
+
+def test_mentions_treats_combining_marks_as_part_of_a_word():
+    """A combining mark (a decomposed accent, a Devanagari vowel sign or
+    virama) is not ``\\w`` to Python's ``re``, but it belongs to the letter
+    before it: a name must not end or start next to one."""
+    assert not rc._mentions(_nfd("the café server"), "cafe")
+    assert not rc._mentions(_nfd("josé said"), "jose")
+    assert not rc._mentions("हिंदी text", "हि")       # sign after the name
+    assert not rc._mentions("रामायण कब", "राम")       # vowel sign after
+    assert not rc._mentions("सम्मान", "मान")          # virama before
+    # A mark that is the name's own last character is still the name.
+    assert rc._mentions("हि text", "हि")
+    assert rc._mentions("राम कब?", "राम")
+    assert rc._mentions(_nfd("the café server"), _nfd("café"))
+    assert rc._mentions(_nfd("meet at the café."), _nfd("café"))
+
+
+def test_mentions_nfc_control_keeps_matching():
+    """Precomposed letters were already word characters; nothing moves."""
+    assert rc._mentions("the café server", "café")
+    assert rc._mentions("meet at the café.", "café")
+    assert rc._mentions("the café's menu", "café")
+    assert not rc._mentions("the café server", "caf")
+    assert not rc._mentions("the café server", "cafe")
+
+
+@pytest.mark.parametrize("text,name", [
+    ("the café server", "cafe"),     # mark right after the name
+    ("josé said", "jose"),
+    ("ask é'brien", "brien"),        # mark before a glued apostrophe
+    ("ask don'ṡ note", "don"),       # 's' + dot above is not possessive 's
+    ("the café server", "the"),      # far from any mark: unchanged
+    ("see the josé file", "file"),
+])
+def test_mentions_same_verdict_for_nfd_and_nfc_text(text, name):
+    """An ASCII name is the same under NFD, so decomposing the text around
+    it must not change whether the text names it."""
+    import unicodedata
+    nfc = unicodedata.normalize("NFC", text)
+    assert rc._mentions(_nfd(text), name) == rc._mentions(nfc, name)
+
+
+def test_mentions_mark_after_a_dot_or_apostrophe_blocks_like_a_letter():
+    assert not rc._mentions("deploy node.\u0301x", "node")
+    assert rc._mentions("deploy node. next", "node")
+    # A mark is not a possessive "s", so it glues the apostrophe.
+    assert not rc._mentions("ask don'\u0301 now", "don")
+
+
+def test_mentions_keeps_looking_past_a_mark_bounded_candidate():
+    assert rc._mentions(_nfd("josé met jose"), "jose")
+    assert rc._mentions("सम्मान and मान", "मान")
+    # The next clean match can overlap the rejected one.
+    assert rc._mentions("\u0301a a a", "a a")
+
+
+@pytest.mark.parametrize("entity,query", [
+    ("cafe", _nfd("the café server")),
+    ("jose", _nfd("josé said")),
+    ("हि", "हिंदी text"),
+    ("राम", "रामायण कब"),
+    ("मान", "सम्मान"),
+    ("हि", "हि text"),
+    ("राम", "राम कब?"),
+])
+def test_mentions_agrees_with_pin_scope_test_on_combining_marks(entity, query):
+    """recall._mentions and service._entity_in_query share one boundary
+    rule; on mark-bounded names they must give the same answer."""
+    from pseudolife_memory.service import _entity_in_query
+    assert rc._mentions(query, entity) == _entity_in_query(entity, query)
 
 
 def test_mechanical_seeds_query_ending_in_a_period():
