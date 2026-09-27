@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — the coordination check-in says when to send a message, not only how)
+- The served check-in (`CHECKIN_TEXT`, what `GET /api/hook/coordination-start`
+  prints at session start) listed the board's verbs and never said when a
+  message is due. A 2026-09-27 review of six sessions found 15 status
+  updates, 9 peer lists and 7 receives against no sends until a human told
+  one session to broadcast. The check-in keeps its mechanical steps and adds
+  two field-neutral rules. Before using something shared, look for whoever
+  holds it or has it booked: if someone does, message them that you are
+  next, even when their status says when they expect to finish, because a
+  status line is not a queue; if the board shows it free, use it and say so
+  in your status. And keep your status true. The Codex form
+  (`CHECKIN_INSTRUCTION`, appended to the MCP instructions, 508 of Codex's
+  512 characters with the subagent sentence from the 2026-09-27 subagent
+  entry below) carries the first rule with its boundary: "Need what a peer
+  holds? Message them you're next. Free? Use it, update status." An
+  unbounded Codex form over-sent on held-out situations; the bounded one
+  gained on both held-out sets and never over-sent (`-codex`, `-codex4`).
+  Both were scored without the closing "Subagents only read the board.",
+  which is about who may write, not when to send.
+- Measured with a new bench, `evals/coordination_checkin_bench.py`: four
+  teams that share something (a lab, an agency, a data team, one developer
+  with two CLIs) x five candidate rules x a situation where a message is due
+  and one where it is not, one tool-free `claude -p` decision per run, plus
+  two held-out sets. Three candidate rules were cut: removing them changed no
+  decision in 120 pairs: the model already did what they ask, with no
+  check-in or with the old check-in's mechanical steps. The
+  shared-resource rule took three wordings; the second won on the situations
+  it was reworded against and over-sent on held-out ones (-0.208 against the
+  old check-in, `-heldout`). The shipped third wording, on the second
+  held-out set frozen before it was scored, beats the old check-in by +0.062
+  [-0.062, +0.208] over 48 pairs, which cannot be told apart from zero; on the
+  main set by +0.075 [-0.008, +0.175] over 120 pairs; and the second wording
+  by +0.167 [+0.000, +0.375] on the frozen set (artifact:
+  `evals/results/coordination-checkin-bench-checkin-rules-20260928-final.json`;
+  `evals/README.md` walks through all nine runs, two of which re-scored the
+  frozen set at +0.042 each).
+- Host-specific vocabulary belongs in the daemon's
+  `<data_dir>/hook-instructions.md`, served after the memory core.
+  `examples/hook-instructions.md` is the maintainer host's copy (suite and
+  GPU status words, the lease holder, the `ops/.env` pre-flight, host-shaped
+  symptoms); the configuration guide says how a Docker install copies it
+  into the data volume. The project `CLAUDE.md` gains two bullets: an
+  announcement is a message to the peers whose status shows the resource,
+  with pid, worktree and ETA, and a holder is never assumed idle from
+  process stats; a host-shaped symptom is broadcast before it is debugged.
+
 ### Added (2026-09-28 — one `memory_message` send reaches a whole project or the whole board, and ids can be given by prefix, schema v48)
 - `memory_message(action="send")` takes `to: "project:<name>"` (every
   attached, non-idle agent in that project but the sender) and `to: "all"`
