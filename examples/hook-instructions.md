@@ -1,0 +1,19 @@
+## House rules for this host (served after the memory core)
+
+This is one host's dialect for the served check-in's "when to send" rules: one Windows machine, one full test suite at a time, one GPU, several Claude Code and Codex sessions in separate worktrees. Copy it to `<data_dir>/hook-instructions.md` and edit the vocabulary to your own shared things; the daemon serves it whole only while it stays under 3,500 bytes.
+
+## Status vocabulary
+
+Every status line carries a suite word and a GPU word, plus the worktree name: `suite=queued` while you wait for the lock, `suite=running` while you hold it, `suite=idle` the moment the run ends; `gpu=<what you run>` while you hold the GPU, `gpu=idle` otherwise. A full suite run also names its pid and its expected end: `suite=running pid=<pid> <worktree> ETA <hh:mm>`. A peer decides from these words alone, so keep them current: a status that still says `suite=running` after the run ended blocks the next waiter.
+
+## Shared things and who to message
+
+The full test suite (the conftest lock, one slot) and the GPU are the shared things here. Before a full run, list peers and message every peer whose status shows `suite=running` or `suite=queued`: your `SUITE-START`, with pid, worktree and ETA, goes to them, not into your own status only. `SUITE-END` goes to the same peers and to anyone who asked. Before any GPU launch, message the peer whose status or lease shows `gpu=` and wait for the answer; VRAM in use is a holder, not a stale line. Never decide a holder is idle from process stats, a quiet board or an old timestamp.
+
+## Pre-flight before a full run
+
+Check that the worktree's `ops/.env` carries the bench Postgres password; a run without it fails every database test with an auth error and still holds the lock for its whole length. Check no holder file exists under the locks directory and no status shows `suite=running`. A run with the lock switched off leaves no holder file, so the board check is not optional.
+
+## Host-shaped symptoms
+
+If a test, a tool or a process fails in a way that has nothing to do with your change (a hung interpreter, a paging-file error, a database refusing a password, a daemon that stopped answering), message every active peer before you start debugging it. On this host that failure is usually breaking their run too.

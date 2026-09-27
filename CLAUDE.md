@@ -115,6 +115,22 @@ took 143 CUDA OOMs.
   the coordination board (`memory_agents` / `memory_message`) and keep
   `suite=running|idle` in your status: the lock queues runs, the board lets
   peers plan around the queue.
+- **An announcement is a message, not a status line** (2026-09-28). Send
+  `SUITE-START` / `SUITE-END`, a GPU launch or any saturating window with
+  `memory_message` to every peer whose status shows the resource
+  (`suite=running`, `suite=queued`, `gpu=`), with your pid, worktree and
+  ETA; keep `suite=running|queued|idle` in your own status as well. The
+  status is what a peer sees when it looks; the message is what it acts
+  on, and a peer may not look until its next turn. Never infer that a
+  holder is idle from process stats, a quiet board or an old timestamp:
+  ask them. This host's dialect for the served check-in's rules is
+  `examples/hook-instructions.md`.
+- **A host-shaped symptom is broadcast before it is debugged**: a hung
+  interpreter, os error 1455, a database refusing its password, a daemon
+  that stopped answering, or anything else that fails in a way unrelated to
+  your change. Message every active peer first, then debug: on this host it
+  is usually breaking their run too (2026-09-28: several sessions timed out
+  on one hung `python3` alias and each investigated it alone).
 - **CPU- or memory-saturating work never overlaps a full suite**
   (maintainer rule 2026-09-25). That means load or stress repros (CPU
   burners, memory hogs), benchmark sweeps, parallel stress loops, and

@@ -86,6 +86,28 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # Served by ``GET /api/hook/coordination-start`` to the plugin's startup hook,
 # and only to a caller that can use the board: a check-in that must fail would
 # cost every session start a failed tool call.
+#
+# The mechanical steps come first. The "when to send" part after them dates
+# from 2026-09-27/28: a review of six sessions found 15 status updates, 9 peer
+# lists and 7 receives against 0 sends until a human told one session to
+# broadcast; the text named the verbs and never said when a message is due.
+# Five candidate rules were measured with evals/coordination_checkin_bench.py
+# (four field-neutral teams x five rules x send/no-send, claude-sonnet-5; the
+# artifacts are evals/results/coordination-checkin-bench-checkin-rules-
+# 20260928*.json). Two moved decisions and are kept: the shared-resource rule
+# (its first wording, "check who holds it and message them", moved nothing,
+# because the model read a holder's posted ETA as making a message
+# pointless; "you are next ... a status line is not a queue" is the reworded
+# form) and keep-your-status-true. Three were cut because removing them
+# changed no decision in 120 pairs: "a message is what a peer must act on",
+# "tell every active peer before debugging what you did not break", and
+# "message everyone waiting when you clear something". The model already did
+# all three with no check-in at all, so the bench cannot say they are
+# useless, only that it could not see them help. An install's own words for
+# its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
+# hook-instructions.md is one host's), served after the memory core. The
+# closing subagent sentence (#425) is about who may write, not when to send,
+# and was not part of the measured text.
 CHECKIN_TEXT = (
     "Pseudolife coordination: at the first task and on resume, use "
     "memory_agents(action=list) to check peers and memory_agents(action=update, "
@@ -94,7 +116,13 @@ CHECKIN_TEXT = (
     "memory_message(action=ack, message_id=<id>) after reading. On a "
     "pending-message hint, receive again. Changed-message alerts are brief; "
     "receive is the source of full messages. If coordination tools are "
-    "unavailable, say so and continue independently. A subagent shares its "
+    "unavailable, say so and continue independently. When to send: Before using "
+    "something shared (anything only one of you can use at a time, or that slows "
+    "down for everyone), check who holds it and message them that you are next "
+    "and what you need, even when their status shows when they expect to finish: "
+    "a status line is not a queue, and do not guess that they are idle. Keep "
+    "your status true: what you hold, what you are waiting on, when you expect "
+    "to finish. A peer may not see mail until its next turn. A subagent shares its "
     "parent's board address, so it only reads the board (list, receive without "
     "ack, memory_search); status, ack and send belong to the parent, which can "
     "name its subagents with memory_agents(action=update, children=[...]).")
@@ -102,10 +130,14 @@ CHECKIN_TEXT = (
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
-# Daemon text plus this stays within Codex's 512-character budget.
+# Daemon text plus this is exactly Codex's 512-character budget. It carries
+# the shared-resource rule, the one that moved decisions most: in the same
+# bench this form (without the subagent sentence from #425) scored 0.97
+# against 1.00 for the full text, where a form carrying the two cut rules
+# scored 0.90, the same as the pre-rules text (2026-09-28).
 CHECKIN_INSTRUCTION = (
-    "Agent board at task start: memory_agents update project, task, status, "
-    "then list peers; memory_message receive, then ack after reading. "
+    "Board: memory_agents update, list; memory_message receive, ack. Before "
+    "using a shared thing, message its holder you're next; status isn't a queue. "
     "Subagents only read the board.")
 
 

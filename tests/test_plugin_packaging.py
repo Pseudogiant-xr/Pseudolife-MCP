@@ -474,3 +474,40 @@ def test_memory_loop_block_explains_replacement_currency():
     from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "`current: false`" in text and "search again" in text
+
+
+# Host-shaped vocabulary that belongs in a per-install hook-instructions.md,
+# never in the served core (2026-09-27 review: a research lab, an agency, a
+# data team and a solo developer must all read the check-in naturally).
+_HOST_WORDS = ("suite=", "gpu=", "SUITE-START", "SUITE-END", "pytest", "Postgres",
+               "worktree", "VRAM", "ops/.env", "conftest")
+
+
+def test_checkin_says_when_to_send_not_only_how():
+    """Six sessions reviewed on 2026-09-27 made 15 status updates, 9 lists and
+    7 receives and sent nothing until a human told one to. The check-in
+    listed the verbs and never said when a message is due. It keeps its
+    mechanical steps and adds the two field-neutral rules that moved
+    decisions in evals/coordination_checkin_bench.py (2026-09-28); three
+    others that moved nothing were cut. Both texts are served exactly as
+    measured: the arm files under evals/results/coordination-checkin-arms/
+    must stay inside them, so a reword means a new bench run."""
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
+    arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
+    measured = (arms / "cut134-20260928.txt").read_text(encoding="utf-8").strip()
+    assert measured in CHECKIN_TEXT
+    assert (arms / "codex2-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
+    for phrase in ("check who holds it and message them that you are next",
+                   "a status line is not a queue", "Keep your status true"):
+        assert phrase in CHECKIN_TEXT, phrase
+    for cut in ("a message is what a peer must act on", "before you debug it",
+                "message everyone waiting on it"):
+        assert cut not in CHECKIN_TEXT, cut
+    # The mechanical steps stay, in front of the rules.
+    assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")
+    assert "message its holder" in CHECKIN_INSTRUCTION
+    for verb in ("update", "list", "receive", "ack"):
+        assert verb in CHECKIN_INSTRUCTION
+    for text in (CHECKIN_TEXT, CHECKIN_INSTRUCTION):
+        for word in _HOST_WORDS:
+            assert word.lower() not in text.lower(), word

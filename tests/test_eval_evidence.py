@@ -9941,6 +9941,95 @@ for _cid, _needle, _value, _stated, _places in (
                         value=_value, stated=_stated, places=_places))
 
 
+# ── the coordination check-in rules (evals/README.md + CHANGELOG, 2026-09-28) ──
+# evals/coordination_checkin_bench.py: five runs, all 120 pairs per
+# comparison. The shipped-text run carries the headline; the board-frame
+# run, the five-rule task-frame run and two ablations explain why three of
+# the five candidate rules were cut.
+_CCB = RESULTS + "coordination-checkin-bench-checkin-rules-20260928"
+CCB_BOARD, CCB_TASK = _CCB + ".json", _CCB + "-task.json"
+CCB_ABL, CCB_ABL2, CCB_SHIP = _CCB + "-ablation.json", _CCB + "-ablation2.json", _CCB + "-shipped.json"
+
+
+def _ccb_delta(key, field="delta", i=None):
+    def value(d):
+        v = d["comparisons"][key][field]
+        return v if i is None else v[i]
+    return value
+
+
+def _ccb_arm(arm, metric, rule=None):
+    def value(d):
+        a = d["summary"]["per_arm"][arm]
+        return a[metric] if rule is None else a[metric][rule]
+    return value
+
+
+for _cid, _doc, _needle, _art, _value, _stated, _places in (
+        ("ccb-board-new-old", EVALS, "new minus old +0.000 over 120 pairs", CCB_BOARD,
+         _ccb_delta("new - old"), 0.0, 3),
+        ("ccb-board-spend", EVALS, "(no suffix, $2.01)", CCB_BOARD,
+         lambda d: d["total_usd"], 2.01, 2),
+        ("ccb-task-new-old", EVALS, "$2.32): new minus old +0.100", CCB_TASK,
+         _ccb_delta("new - old"), 0.100, 3),
+        ("ccb-task-spend", EVALS, "$2.32): new minus old +0.100", CCB_TASK,
+         lambda d: d["total_usd"], 2.32, 2),
+        ("ccb-task-rule2", EVALS, "shared-resource rule (+0.375)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["shared_resource"]["delta"],
+         0.375, 3),
+        ("ccb-task-rule5", EVALS, "keep-your-status-true (+0.125)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["status_true"]["delta"],
+         0.125, 3),
+        ("ccb-ablation-cut13", EVALS, "(+0.000 over 120 pairs). The Codex", CCB_ABL,
+         _ccb_delta("cut13 - new"), 0.0, 3),
+        ("ccb-ablation-codex", EVALS, "form carrying only them scored 0.90", CCB_ABL,
+         _ccb_arm("codex", "accuracy"), 0.90, 2),
+        ("ccb-ablation2-cut134", EVALS, "changed nothing (+0.000 over 120 pairs)", CCB_ABL2,
+         _ccb_delta("cut134 - cut13"), 0.0, 3),
+        ("ccb-ablation2-codex2", EVALS, "shared-resource rule instead scored 0.97", CCB_ABL2,
+         _ccb_arm("codex2", "accuracy"), 0.97, 2),
+        ("ccb-ship-spend", EVALS, "(`-shipped`, $2.23)", CCB_SHIP,
+         lambda d: d["total_usd"], 2.23, 2),
+        ("ccb-ship-none-acc", EVALS, "| no check-in | 0.86 | 0.72 | 1.00 |", CCB_SHIP,
+         _ccb_arm("none", "accuracy"), 0.86, 2),
+        ("ccb-ship-none-send", EVALS, "| no check-in | 0.86 | 0.72 | 1.00 |", CCB_SHIP,
+         _ccb_arm("none", "send_recall"), 0.72, 2),
+        ("ccb-ship-none-hold", EVALS, "| no check-in | 0.86 | 0.72 | 1.00 |", CCB_SHIP,
+         _ccb_arm("none", "no_send_specificity"), 1.0, 2),
+        ("ccb-ship-old-acc", EVALS, "| old check-in | 0.89 | 0.78 | 1.00 |", CCB_SHIP,
+         _ccb_arm("old", "accuracy"), 0.89, 2),
+        ("ccb-ship-old-send", EVALS, "| old check-in | 0.89 | 0.78 | 1.00 |", CCB_SHIP,
+         _ccb_arm("old", "send_recall"), 0.78, 2),
+        ("ccb-ship-old-hold", EVALS, "| old check-in | 0.89 | 0.78 | 1.00 |", CCB_SHIP,
+         _ccb_arm("old", "no_send_specificity"), 1.0, 2),
+        ("ccb-ship-new-acc", EVALS, "| shipped check-in | 1.00 | 1.00 | 1.00 |", CCB_SHIP,
+         _ccb_arm("new", "accuracy"), 1.0, 2),
+        ("ccb-ship-new-send", EVALS, "| shipped check-in | 1.00 | 1.00 | 1.00 |", CCB_SHIP,
+         _ccb_arm("new", "send_recall"), 1.0, 2),
+        ("ccb-ship-new-hold", EVALS, "| shipped check-in | 1.00 | 1.00 | 1.00 |", CCB_SHIP,
+         _ccb_arm("new", "no_send_specificity"), 1.0, 2),
+        ("ccb-ship-delta", EVALS, "New minus old: +0.108 [+0.025, +0.208] over 120 pairs",
+         CCB_SHIP, _ccb_delta("new - old"), 0.108, 3),
+        ("ccb-ship-ci-lo", EVALS, "New minus old: +0.108 [+0.025, +0.208] over 120 pairs",
+         CCB_SHIP, _ccb_delta("new - old", "ci95", 0), 0.025, 3),
+        ("ccb-ship-ci-hi", EVALS, "New minus old: +0.108 [+0.025, +0.208] over 120 pairs",
+         CCB_SHIP, _ccb_delta("new - old", "ci95", 1), 0.208, 3),
+        ("ccb-ship-aa", EVALS, "difference of -0.008 [-0.033, +0.000]", CCB_SHIP,
+         _ccb_delta("new@aa - new"), -0.008, 3),
+        ("ccb-ship-rule2-old", EVALS, "send scenarios 0.62 to 1.00", CCB_SHIP,
+         _ccb_arm("old", "per_rule", "shared_resource"), 0.62, 2),
+        ("ccb-ship-rule5-old", EVALS, "keep-your-status-true 0.83 to 1.00", CCB_SHIP,
+         _ccb_arm("old", "per_rule", "status_true"), 0.83, 2),
+        ("ccb-changelog-delta", CHANGELOG, "+0.108 [+0.025, +0.208] over 120 pairs", CCB_SHIP,
+         _ccb_delta("new - old"), 0.108, 3),
+        ("ccb-changelog-aa", CHANGELOG, "(A/A -0.008)", CCB_SHIP,
+         _ccb_delta("new@aa - new"), -0.008, 3),
+        ("ccb-changelog-send", CHANGELOG, "going from 0.78 to 1.00", CCB_SHIP,
+         _ccb_arm("old", "send_recall"), 0.78, 2)):
+    CLAIMS.append(Claim(id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+                        value=_value, stated=_stated, places=_places))
+
+
 # ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
 # evals/seed_bench.py before and after the _mentions boundary change, plus
 # a control that patches the old matcher back in on the new tree (it

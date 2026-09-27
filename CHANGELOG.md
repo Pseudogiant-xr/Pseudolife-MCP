@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — the coordination check-in says when to send a message, not only how)
+- The served check-in (`CHECKIN_TEXT`, what `GET /api/hook/coordination-start`
+  prints at session start) listed the board's verbs and never said when a
+  message is due. A 2026-09-27 review of six sessions found 15 status
+  updates, 9 peer lists and 7 receives against no sends until a human told
+  one session to broadcast. The check-in keeps its mechanical steps and adds
+  two field-neutral rules: before using something shared, message whoever
+  holds it that you are next, even when their status says when they expect
+  to finish, because a status line is not a queue; and keep your status
+  true. The Codex form (`CHECKIN_INSTRUCTION`, appended to the MCP
+  instructions inside Codex's 512-character budget) carries the first, and
+  with the subagent sentence from the entry below fills that budget exactly.
+- Measured with a new bench, `evals/coordination_checkin_bench.py`: four
+  teams that share something (a lab, an agency, a data team, one developer
+  with two CLIs) x five candidate rules x a situation where a message is due
+  and one where it is not, one tool-free `claude -p` decision per run. Of
+  five candidate rules, two moved decisions and ship. The other three were
+  cut, because removing them changed no decision in 120 pairs: the model
+  already followed them with no check-in at all. Against the old check-in,
+  the shipped one raised accuracy by +0.108 [+0.025, +0.208] over 120 pairs
+  (A/A -0.008), with due messages sent going from 0.78 to 1.00 and no message
+  sent where none was due in any arm (artifact:
+  `evals/results/coordination-checkin-bench-checkin-rules-20260928-shipped.json`;
+  the earlier runs and the two ablations are the `-20260928*` siblings, and
+  `evals/README.md` walks through all five).
+- Host-specific vocabulary belongs in the daemon's
+  `<data_dir>/hook-instructions.md`, served after the memory core.
+  `examples/hook-instructions.md` is the maintainer host's copy (suite and
+  GPU status words, the lease holder, the `ops/.env` pre-flight, host-shaped
+  symptoms); the configuration guide says how a Docker install copies it
+  into the data volume. The project `CLAUDE.md` gains two bullets: an
+  announcement is a message to the peers whose status shows the resource,
+  with pid, worktree and ETA, and a holder is never assumed idle from
+  process stats; a host-shaped symptom is broadcast before it is debugged.
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the
   parent's shim, so its board calls carry the parent's identity (probed

@@ -4086,6 +4086,93 @@ A/A floor narrows roughly with the square root of the number of pairs).
 
 ---
 
+# Coordination check-in bench (`coordination_checkin_bench.py`)
+
+Does the served coordination check-in (`CHECKIN_TEXT` in
+`pseudolife_memory/coordination.py`, what the plugin's startup hook prints)
+change *when* an agent messages a peer? The 2026-09-27 review of six
+sessions found 15 status updates, 9 peer lists and 7 receives against no
+sends until a human asked for one; the text listed the verbs and never said
+when a message was due. The question is one decision, so each run is one
+tool-free `claude -p` call (own system prompt, no settings files, no MCP
+servers, a throwaway config dir and a working directory outside the home
+directory, as the memory-policy bench does) that reads the arm's check-in
+text, a team, a board and a situation, and answers with one of three board
+actions: send a message now (and to whom), only update its status, or
+nothing.
+
+- **Scenarios** (`coordination_checkin_scenarios.py`): four teams that share
+  something (a lab with one GPU and a results database; an agency with a
+  style guide and a review calendar; a data team with a warehouse query
+  slot and a vendor API quota; one developer with two CLI sessions, one
+  test suite and one local database) x five rules x one situation where a
+  message is due and one where it is not: 40 in all. Situations never use
+  the words message, send, tell, notify or broadcast.
+- **Arms**: `none` (no check-in), `old` (the text served before the rules,
+  pinned verbatim in the fixtures with its SHA-256 in the test), `new` (the
+  constant now); `label@suffix` is an A/A copy for the noise floor.
+- **Scoring**: correct when a send scenario gets a message and a no-send
+  scenario gets status or nothing; `addressed` (send scenarios) when the
+  message names the peer the rule points at, or everyone for rule 3.
+  Paired on (scenario, replicate), cluster-bootstrap 95% CIs over
+  scenarios, per rule and split by expectation, so a rule that does not
+  move its own scenarios is visible.
+
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms none,old,new,new@aa --replicates 3
+    python -m evals.coordination_checkin_bench run --tag <tag> --arms new,cut         --arm-file cut=evals/results/coordination-checkin-arms/<file>.txt
+    python -m evals.coordination_checkin_bench report evals/results/coordination-checkin-bench-<tag>.json
+
+Two frames put the question. `board` (bench v1) asks for a board decision
+outright; `task` (the default since v2) asks for the agent's next step in its
+own work, with the board action as one field of it. The arm texts are
+recorded in each artifact; ablation texts are committed under
+`evals/results/coordination-checkin-arms/` and passed with `--arm-file`.
+
+**2026-09-28 (claude-sonnet-5, medium effort, 40 scenarios x 3 replicates,
+120 pairs per comparison, every run valid).** Five artifacts,
+`coordination-checkin-bench-checkin-rules-20260928*.json`, in the order run:
+
+1. *Board frame, five rules, first wording* (no suffix, $2.01). The new text
+   scored exactly like the old one: new minus old +0.000 over 120 pairs.
+   Every arm, no check-in included, sent whenever a situation named a
+   peer, so four rules sat at ceiling. The frame and the scenarios were
+   too easy; the shared-resource rule's first wording ("check who holds it
+   and message them") also moved nothing, because the model read a
+   holder's posted ETA as making a message pointless.
+2. *Task frame, five rules, rule 2 reworded, send situations that leave the
+   affected peer to the board* (`-task`, $2.32): new minus old +0.100
+   [+0.025, +0.200]; all of it from the shared-resource rule (+0.375) and
+   keep-your-status-true (+0.125). "A message is what a peer must act on"
+   and "tell every active peer before debugging what you did not break"
+   scored 1.00 in every arm, no check-in included; "message everyone
+   waiting when you clear something" scored 1.00 in the old arm too.
+3. *Ablation* (`-ablation`, $1.78): the text without those first two rules
+   decided exactly like the full text (+0.000 over 120 pairs). The Codex
+   form carrying only them scored 0.90, the old text's accuracy.
+4. *Ablation* (`-ablation2`, $1.73): dropping the waiting rule as well
+   changed nothing (+0.000 over 120 pairs). A Codex form carrying the
+   shared-resource rule instead scored 0.97.
+5. *The shipped texts* (`-shipped`, $2.23): the check-in with the two rules
+   that moved decisions, against the old text, no text and an A/A copy.
+
+| arm | accuracy | due messages sent | no-send held |
+|---|---|---|---|
+| no check-in | 0.86 | 0.72 | 1.00 |
+| old check-in | 0.89 | 0.78 | 1.00 |
+| shipped check-in | 1.00 | 1.00 | 1.00 |
+
+New minus old: +0.108 [+0.025, +0.208] over 120 pairs, against an A/A
+difference of -0.008 [-0.033, +0.000]. The shared-resource rule moved its
+send scenarios 0.62 to 1.00 and keep-your-status-true 0.83 to 1.00; no arm
+sent a message where none was due. The three cut rules are not shown to be
+useless: the model already followed them with no check-in at all, so this
+bench could not see them help. What it cannot measure either is the
+session the review saw, where the agent is deep in its own work and the
+board is out of mind; one decision in a short prompt is an upper bound on
+attention.
+
+---
+
 # LongMemEval-V2 pilot (`lme_v2_smoke.py`)
 
 [LongMemEval-V2](https://arxiv.org/abs/2605.12493) swaps chat sessions for
