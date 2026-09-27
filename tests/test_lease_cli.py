@@ -1504,11 +1504,13 @@ def test_the_launcher_gate_sees_a_held_gpu_lease_and_holds_one(lease_env, tmp_pa
     script = f"""
 . '{helper}'
 $py = '{sys.executable}'
-$server = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru -WindowStyle Hidden
+$hidden = @{{}}
+if ($IsWindows) {{ $hidden.WindowStyle = 'Hidden' }}
+$server = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru @hidden
 $before = Test-GpuLeaseHeld
 Start-GpuLease -ServerPid $server.Id -Purpose 'probe'
 $during = Test-GpuLeaseHeld
-$second = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru -WindowStyle Hidden
+$second = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru @hidden
 $keep = $script:GpuLeaseProcess
 Start-GpuLease -ServerPid $second.Id -Purpose 'probe-2'
 $secondHold = $script:GpuLeaseProcess

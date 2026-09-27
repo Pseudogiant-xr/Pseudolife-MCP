@@ -146,10 +146,14 @@ function Start-GpuLease {
         'lease', 'hold', 'gpu', '--while-pid', "$ServerPid", '--purpose', $Purpose,
         '--worktree', (Split-Path $script:RepoRoot -Leaf), '--timeout', '0')
     if ($ExpectMinutes -gt 0) { $arguments += @('--expect', "${ExpectMinutes}m") }
+    # -WindowStyle exists only on Windows; PowerShell elsewhere refuses it
+    # (CI's Linux and macOS lanes, 2026-09-28).
+    $hidden = @{}
+    if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { $hidden.WindowStyle = 'Hidden' }
     try {
         $hold = Start-Process -FilePath $cli.File `
             -ArgumentList (ConvertTo-CommandLine $arguments) `
-            -WorkingDirectory $script:RepoRoot -WindowStyle Hidden -PassThru -ErrorAction Stop
+            -WorkingDirectory $script:RepoRoot @hidden -PassThru -ErrorAction Stop
     } catch {
         Write-Warning "could not start the gpu lease hold: $_"
         $script:GpuLeaseProcess = $null
