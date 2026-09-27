@@ -131,6 +131,14 @@ MAX_PARK_NEEDS = 120
 MAX_PARK_RESUME = 240
 MAX_PARK_CLEAR_BY = 120
 MAX_CLEARS = 120
+# A park must not withhold mail forever once its clearer is gone: a new
+# park without ``park_expires`` expires after PARK_DEFAULT_TTL, and none may
+# be set past PARK_MAX_TTL; an expired park is an idle session (nudged).
+# Starting values from the board orchestrator's review of PR #433
+# (2026-09-28), awaiting the maintainer, not measurements: 12 h covers one
+# overnight run, a week the longest lease a session may hold.
+PARK_DEFAULT_TTL = 12 * 3600
+PARK_MAX_TTL = 7 * 86400
 _PARK_TEXT_LIMITS = {"park_needs": MAX_PARK_NEEDS, "park_clear_by": MAX_PARK_CLEAR_BY,
                      "park_resume": MAX_PARK_RESUME}
 PARK_FIELDS = ("park_reason", "park_needs", "park_clear_by", "park_resume", "park_expires")
@@ -291,14 +299,15 @@ class WakePolicy:
 def _need_matches(clears: str, needs: str) -> bool:
     """Whether a message's ``clears`` names the recipient's ``park_needs``:
     the same words, case and spacing aside, or the words of one as a run of
-    whole words inside the other. Whole words only, so a one-letter
-    ``clears`` cannot match any need and ring past the urgent cap."""
+    whole words inside the other, holding at least one word of four letters
+    or more. So neither a letter nor a filler word ("the", "of") matches
+    any need and rings past the urgent cap."""
     left = re.findall(r"\w+", clears.lower())
     right = re.findall(r"\w+", needs.lower())
     if not left or not right:
         return False
     short, long = (left, right) if len(left) <= len(right) else (right, left)
-    if len("".join(short)) < 3:
+    if not any(len(word) >= 4 for word in short):
         return False
     return any(long[i:i + len(short)] == short for i in range(len(long) - len(short) + 1))
 
@@ -1068,6 +1077,14 @@ class CoordinationStore:
                     raise CoordinationError("invalid_park")
                 else:
                     fields["park_set_at"] = now
+                    # Only a park that would have no expiry gets the default:
+                    # a refinement, or a new reason, keeps the standing one.
+                    standing = row.get("park_expires") if parked else None
+                    if "park_expires" not in fields and standing is None:
+                        fields["park_expires"] = now + PARK_DEFAULT_TTL
+                    expires = fields.get("park_expires")
+                    if expires is not None and expires > now + PARK_MAX_TTL:
+                        raise CoordinationError("invalid_park")
             elif "status" in fields and parked:
                 fields.update(_PARK_CLEARED)
             # Only a real change reaches the row and the log, so a status

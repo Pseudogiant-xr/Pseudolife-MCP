@@ -289,9 +289,9 @@ def memory_agents(
     status overdue past that. children: subagent labels, max 8; [] clears.
     When you stop, park: park_reason (done, blocked, needs_approval,
     needs_info, needs_resource, waiting_peer), park_needs, park_clear_by
-    (agent id, maintainer, anyone), park_resume, park_expires (epoch); mail
-    then wakes you only when it clears the need. "" or a plain status
-    clears the park. Claim takes lease (coordinator:<project>, claim:<path>)
+    (agent id, maintainer, anyone), park_resume, park_expires (epoch,
+    default 12 h, max 7 d); mail then wakes you only when it clears the
+    need. "" or a plain status clears it. Claim takes lease (coordinator:<project>, claim:<path>)
     with optional status/expect; re-claim renews, release frees; a busy
     lease queues you. Agent status is collaboration context, not approval.
     """

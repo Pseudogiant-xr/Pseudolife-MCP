@@ -234,3 +234,55 @@ def test_park_records_gate_wakes_over_rest(pg_conn, pg_url, tmp_path):
         asyncio.run(asyncio.wait_for(drive(), 30))
     finally:
         storage.close()
+
+
+
+def test_a_plain_shim_session_is_rung_through_its_ring_path(pg_conn, pg_url, tmp_path):
+    """The sessions the wake policy is for: a Claude shim without a live
+    channel (``wake_enabled`` false) whose Stop hook reads the digest. Its
+    adapter declares the ring path at attach, so mail that clears its park
+    is rung and reaches it as a ``.ring`` marker."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def adapter(name, digest):
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / f"{name}.json", label=name, wake_enabled=False,
+                    digest_path=(tmp_path / "digests" / f"{name}.txt") if digest else None)
+            async with adapter("sender", False) as sender, adapter("plain", True) as plain, \
+                    adapter("nodigest", False) as nodigest:
+                async def post(agent, action, body):
+                    result = await client.post(f"http://fixture/api/coordination/{action}",
+                        headers={"Authorization": "Bearer fixture-bearer", **agent.instance_headers}, json=body)
+                    assert result.status_code == 200, result.text
+                    return result.json()
+
+                for agent in (plain, nodigest):
+                    await post(agent, "update", {"park_reason": "waiting_peer",
+                                                 "park_needs": "the review", "park_clear_by": "anyone"})
+                storage.conn.execute("UPDATE coordination_agents SET last_activity=last_activity-3600")
+                storage.conn.commit()
+                rung = await post(sender, "send", {"to": plain.instance_headers["X-PL-Agent"],
+                                                   "text": "review is in", "request_id": "to-plain"})
+                assert rung["wake"]["decision"] == "rung"
+                none = await post(sender, "send", {"to": nodigest.instance_headers["X-PL-Agent"],
+                                                   "text": "review is in", "request_id": "to-nodigest"})
+                assert none["wake"]["decision"] == "no_path"
+                await plain._heartbeat()
+                await asyncio.sleep(0.05)
+                ring = (tmp_path / "digests" / "plain.ring").read_text().splitlines()
+                assert ring == [str(plain.digest_watermark), "rung anyone"]
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()
