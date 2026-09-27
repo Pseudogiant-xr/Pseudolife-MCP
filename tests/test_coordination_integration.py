@@ -114,3 +114,47 @@ def test_default_config_board_serves_the_singular_token_only(pg_conn, pg_url, tm
         asyncio.run(asyncio.wait_for(drive(), 20))
     finally:
         storage.close()
+
+
+def test_parent_names_its_children_over_rest(pg_conn, pg_url, tmp_path):
+    """``children`` travels the REST update like the other fields and comes
+    back on the peer list; omitting it leaves it, an empty list clears it."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def adapter(name):
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / f"{name}.json", label=name)
+            async with adapter("parent") as parent, adapter("peer") as peer:
+                async def post(agent, action, body):
+                    result = await client.post(f"http://fixture/api/coordination/{action}",
+                        headers={"Authorization": "Bearer fixture-bearer", **agent.instance_headers}, json=body)
+                    assert result.status_code == 200, result.text
+                    return result.json()
+
+                async def seen():
+                    parent_id = parent.instance_headers["X-PL-Agent"]
+                    rows = (await post(peer, "agents", {}))["agents"]
+                    row = next(r for r in rows if r["agent_id"] == parent_id)
+                    return [c["label"] for c in row["children"]]
+
+                await post(parent, "update", {"children": ["review storage", "tests"]})
+                assert await seen() == ["review storage", "tests"]
+                await post(parent, "update", {"status": "orchestrating"})
+                assert await seen() == ["review storage", "tests"]
+                await post(parent, "update", {"children": []})
+                assert await seen() == []
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 20))
+    finally:
+        storage.close()

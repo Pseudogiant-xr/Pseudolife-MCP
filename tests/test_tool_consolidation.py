@@ -381,6 +381,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # and update's expect (+295 on a core-tier tool, after trimming its own
     # docstring): minimal 5,232, core 11,495, full 17,783. Core fits with 5
     # to spare; the opt-in full cap moves deliberately, 17,500 -> 17,800.
+    # 2026-09-27: memory_agents gained update's children (v47), paid for by
+    # trimming the same docstring, caps unchanged: minimal 5,232, core
+    # 11,496, full 17,784.
     budgets = {"minimal": 5250, "core": 11500, "full": 17800}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
