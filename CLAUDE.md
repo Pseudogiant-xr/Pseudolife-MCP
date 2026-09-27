@@ -127,10 +127,12 @@ took 143 CUDA OOMs.
   anything else that pegs the CPU or commits several GB (a model server, a
   large in-memory eval) on the maintainer's host. First check no full suite
   is running: `pseudolife-mcp lease check full-suite` exits 1 while one
-  holds the lock (any slot, or the board lease), naming its pid, worktree
-  and expected end, and `lease check gpu` does the same for the bench
-  server; gate scripts on that exit code. A run with
-  `PSEUDOLIFE_SUITE_LOCK=off` still holds the OS lock the check probes.
+  holds the lock (any slot), naming its pid, worktree and expected end, and
+  `lease check gpu` does the same for the bench server; gate scripts on
+  that exit code (0 free; anything else means the check itself failed). A
+  run with `PSEUDOLIFE_SUITE_LOCK=off` takes neither the lock nor the
+  lease, so no check sees it: also look for `suite=running` in
+  `memory_agents` list, which is why that status still matters.
   Announce the window on the board, bound it with a fixed
   duration and a stop switch (a sentinel file), and stop at once if a suite
   starts. On 2026-09-25 a 16-worker × 25-min burner ran at 100% CPU beside

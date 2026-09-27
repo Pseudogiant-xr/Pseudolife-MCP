@@ -113,6 +113,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -151,6 +152,9 @@ DEFAULT_EXPECT_SECONDS = 25 * 60
 BOARD_ENVIRONMENT = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE",
                      "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_AGENT_PROJECT")
 SUITE_LEASE = "full-suite"
+# How long a run that leaves the queue without the lock (refused, stale
+# tree, Ctrl-C) waits for the board to drop its place.
+ABORT_BUDGET = 5.0
 
 # A waiter creates its ticket, then locks it, so for a moment a new ticket
 # looks abandoned. A free ticket younger than this is passed over but not
@@ -476,11 +480,13 @@ def _take_a_slot(directory: Path, handles: dict[int, IO[bytes]],
     return None
 
 
-def _mirror_call(mirror, method: str, out: IO[str]) -> None:
+def _mirror_call(mirror, method: str, out: IO[str], *args) -> None:
     """One call on the board mirror; whatever it raises is one line, never
-    the run's problem."""
+    the run's problem. The mirror does its board traffic on its own thread,
+    so ``waiting`` and ``hold`` return at once and ``release`` within its
+    budget."""
     try:
-        getattr(mirror, method)()
+        getattr(mirror, method)(*args)
     except Exception as exc:  # noqa: BLE001 — the board never stops a run
         print(f"full-suite lock: the board mirror failed on {method} "
               f"({type(exc).__name__}); the run continues", file=out, flush=True)
@@ -548,6 +554,10 @@ def acquire(directory: Path, mode: str, *, worktree: str,
     except BaseException:  # refused, a lock error, or Ctrl-C while queued
         for handle in handles.values():
             handle.close()
+        if mirror is not None:
+            # Out of the board's queue too, or give back an early grant:
+            # otherwise `lease check` shows a run that is not there.
+            _mirror_call(mirror, "release", out, ABORT_BUDGET)
         raise
     for index, handle in handles.items():
         if index != slot:
@@ -574,27 +584,30 @@ def acquire(directory: Path, mode: str, *, worktree: str,
     return held
 
 
-def release(held: HeldLock) -> None:
-    # The board first, while this process still holds the lock: the notice
-    # to peers and the board release describe a hold that is ending, never
-    # a successor's.
-    if held.mirror is not None:
-        _mirror_call(held.mirror, "release", sys.stderr)
-    if held.taken_at:
+def release(held: HeldLock, *, record: bool = True) -> None:
+    """Free the lock, then tell the board. ``record`` times the run for the
+    next one's expected end: conftest passes False for a run that did not
+    run its tests (interrupted, a collection or usage error), so aborts do
+    not drag the median down."""
+    if record and held.taken_at:
         try:
             record_duration(held.directory, time.monotonic() - held.taken_at,
                             worktree=held.worktree)
-        except OSError:
+        except (OSError, ValueError):
             pass  # a record for the next run's estimate; the lock is what counts
     # Drop the record before unlocking, so it never describes a successor.
-    record = read_holder(held.directory, held.slot)
-    if record is not None and record.get("pid") == os.getpid():
+    holder = read_holder(held.directory, held.slot)
+    if holder is not None and holder.get("pid") == os.getpid():
         try:
             (held.directory / _slot_file(HOLDER_FILE, held.slot)).unlink()
         except OSError:
             pass  # a waiter is reading it; the next holder overwrites it
     _unlock(held.file)
     held.file.close()
+    # The board last, as `lease run` does: a slow daemon must never keep the
+    # lock from the next run. The mirror waits at most its release budget.
+    if held.mirror is not None:
+        _mirror_call(held.mirror, "release", sys.stderr)
 
 
 def record_duration(directory: Path, seconds: float, *, worktree: str) -> None:
@@ -615,7 +628,7 @@ def expected_seconds(directory: Path) -> int:
     EXPECT_SAMPLE recorded runs, else DEFAULT_EXPECT_SECONDS."""
     try:
         lines = (directory / DURATIONS_FILE).read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except (OSError, ValueError):  # ValueError: not UTF-8
         return DEFAULT_EXPECT_SECONDS
     seconds = []
     for line in lines:
@@ -623,7 +636,9 @@ def expected_seconds(directory: Path) -> int:
             value = json.loads(line).get("seconds")
         except (ValueError, AttributeError):
             continue
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        # Bounded as well as finite: json reads Infinity, NaN and 1e400.
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and 0 < value <= 7 * 86400):
             seconds.append(float(value))
     recent = sorted(seconds[-EXPECT_SAMPLE:])
     if not recent:
@@ -633,10 +648,21 @@ def expected_seconds(directory: Path) -> int:
     return max(1, int(round(median)))
 
 
+class _BoardEnvironment(dict):
+    """A dict whose repr names its keys only: it carries the bearer, and a
+    traceback shown with locals (pytest -l) must not print it."""
+
+    def __repr__(self) -> str:
+        return f"<board environment: {', '.join(sorted(self))}>"
+
+    __str__ = __repr__
+
+
 def board_environment(environ) -> dict[str, str]:
     """The environment the board mirror needs, copied before the suite's
     client isolation strips it (tests/client_environment.py)."""
-    return {name: environ[name] for name in BOARD_ENVIRONMENT if name in environ}
+    return _BoardEnvironment(
+        {name: environ[name] for name in BOARD_ENVIRONMENT if name in environ})
 
 
 def board_mirror(directory: Path, worktree, board_environ, *, transport=None):
@@ -722,7 +748,9 @@ def take_for_session(config, environ, tests_root: Path,
     error, without ever taking the lock, when tree code this process
     imported, its ini file, or one of ``read_files`` (files conftest read
     at import) changed on disk while it queued. ``mirror`` is the board's
-    view of the lock (:func:`board_mirror`), used only when the lock is."""
+    view of the lock (:func:`board_mirror`), or a callable that builds it,
+    called only for a run that takes the lock, before the fingerprint, so
+    the modules it imports are fingerprinted with the rest."""
     import pytest
 
     if hasattr(config, "workerinput"):
@@ -744,6 +772,8 @@ def take_for_session(config, environ, tests_root: Path,
                              for name in LISTING_OPTIONS)):
         return None
     directory = lock_dir(environ)
+    if callable(mirror):
+        mirror = mirror()
     # What this process already runs or read from the tree, fingerprinted
     # before it can wait: the module docstring has the 2026-09-25 run that
     # went stale. pytest read the ini file before conftest was imported.

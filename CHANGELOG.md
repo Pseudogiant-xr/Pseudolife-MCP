@@ -15,33 +15,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its lock as the board lease `full-suite` (`BoardMirror` in
   `pseudolife_memory/lease_cli.py`): a queued run is a board waiter, a
   running one the holder, with its pid and worktree as the purpose and an
-  expected end from the median of the last five recorded run times
+  expected end from the median of the last five timed runs
   (`full-suite.durations.jsonl` beside the lock; 25 minutes until five are
-  on record). The OS lock stays the truth: a board that is unreachable,
-  refuses, or shows another holder costs one line on stderr and never
-  delays or stops the run; `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither.
-  conftest reads the bearer and daemon URL at import, before the suite's
-  client isolation strips them.
+  on record; only runs that ran their tests are timed). The OS lock stays the
+  truth: all board traffic runs on the mirror's own thread, the lock is
+  freed before the board hears, a run that leaves the queue gives its board
+  place back, and a board that is unreachable, slow, refuses, or shows
+  another holder costs one line on stderr and never delays or stops the run;
+  `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. conftest reads the bearer
+  and daemon URL at import, before the suite's client isolation strips them,
+  and builds the mirror only for a run that takes the lock.
 - `pseudolife-mcp lease hold NAME --while-pid PID` holds a lease for a
   process the command did not start: the OS lock first (the process already
   owns the resource; `--timeout 0` gives up at once, exit 75), the board
-  second, both released when PID exits or the hold is stopped. `Start-Qwen`
-  refuses to launch while `lease check gpu` says the lease is held (the VRAM
-  busy-check stays as the guard against anything that takes no lease) and
-  holds `gpu` for the server it starts; `Stop-Qwen` ends the hold with the
-  server. Without the CLI on the host the lease steps warn once and the
-  server runs unleased, as before.
+  second, the lock freed before the board is told when PID exits or the hold
+  is stopped. `Start-Qwen` refuses to launch while `lease check gpu` says the
+  lease is held (the VRAM busy-check stays as the guard against anything that
+  takes no lease), holds `gpu` for its server from the launch on, so the lease
+  covers the model load, and says so when the hold could not take the lock;
+  `Stop-Qwen` ends the hold with the server. It runs the CLI from the
+  checkout (`PSEUDOLIFE_LEASE_PYTHON`, the checkout's `.venv`, or `python -m`),
+  and a `pseudolife-mcp` on PATH only after that. Without any, the lease
+  steps warn once and the server runs unleased, as before.
 - `pseudolife-mcp lease check NAME [--json]` is the launch gate for
-  orchestrators: exit 0 when free, 1 when the OS lock or the board says held,
-  with the holder and expected end. For `full-suite` it probes the suite's
-  own lock and its slots, with the holder record's pid, worktree and start.
+  orchestrators: exit 0 when free, 1 when held, 70 when the check itself
+  failed, with the holder and expected end. The OS lock decides wherever its
+  file exists; a board holder beside a free local lock is shown as stale. For
+  `full-suite` it probes the suite's own lock and its slots, with the holder
+  record's pid, worktree and start.
 - Acquiring and releasing (`hold`, and the suite's mirror) send one board
-  message each to the attached peers of the same project whose status says
-  `suite=running`, `suite=queued` or `gpu=`, and to any peer parked with
-  `park_clear_by` naming the lease (read where present; a sibling change
-  defines it), at most 20 per event, with pid, worktree and expected end.
-  `CLAUDE.md`'s full-suite rule and `docs/guide/configuration.md` now say to
-  read `lease check` instead of hand-announcing.
+  message each to the peers of the same project that it concerns: live
+  agents (attached, or registered without an adapter) whose status says
+  `suite=running`, `suite=queued` or `gpu=`, and agents parked with
+  `park_clear_by` naming the lease, attached or not (read where present; a
+  sibling change defines it). At most 20 per event, with pid, worktree and
+  expected end. `CLAUDE.md`'s full-suite rule and
+  `docs/guide/configuration.md` now say to read `lease check` instead of
+  hand-announcing.
 
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the

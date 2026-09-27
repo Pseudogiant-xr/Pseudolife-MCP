@@ -95,6 +95,7 @@ from pseudolife_memory import os_lock
 
 EXIT_USAGE = 2
 EXIT_NESTED = 64  # sysexits EX_USAGE: run inside a run of the same lease
+EXIT_SOFTWARE = 70  # sysexits EX_SOFTWARE: `lease check` itself failed
 EXIT_LOCK_ERROR = 71  # sysexits EX_OSERR
 EXIT_TEMPFAIL = 75  # sysexits EX_TEMPFAIL
 EXIT_CANNOT_RUN = 126
@@ -406,18 +407,19 @@ class _Board:
             raise _Refused("the daemon's registration reply carried no address")
         self._agent_id, self._credential = agent_id, credential
 
-    def agents(self) -> list[dict]:
+    def agents(self, *, timeout: float = ANNOUNCE_TIMEOUT) -> list[dict]:
         """The peers the board lists for this address (bounded page)."""
-        reply = self._post("agents", {"limit": LIST_LIMIT}, timeout=ANNOUNCE_TIMEOUT)
+        reply = self._post("agents", {"limit": LIST_LIMIT}, timeout=timeout)
         agents = reply.get("agents")
         if not isinstance(agents, list):
             raise _Refused("the daemon's agents reply was not understood")
         return [agent for agent in agents
                 if isinstance(agent, dict) and isinstance(agent.get("agent_id"), str)]
 
-    def send(self, to: str, text: str, request_id: str) -> None:
+    def send(self, to: str, text: str, request_id: str, *,
+             timeout: float = ANNOUNCE_TIMEOUT) -> None:
         self._post("send", {"to": to, "text": text, "request_id": request_id},
-                   timeout=ANNOUNCE_TIMEOUT)
+                   timeout=timeout)
 
     def lease(self, name: str, ttl: int, *, expect: int | None = None,
               purpose: str | None = None) -> dict:
@@ -823,43 +825,76 @@ def _run(args, command: list[str], transport) -> int:
 
 # --- the mirror of a lock this process holds --------------------------------------
 
-def _concerned(agent: dict, name: str, project: str) -> bool:
-    """Whether a listed peer is told about ``name``: live (attached, or
-    registered without an adapter, never detached or revoked), in
-    ``project`` when one is known (compared without case: the board has the
-    same repo under three spellings), and either working around the suite
-    or the GPU by its status or parked until this lease clears.
-    ``park_clear_by`` is a sibling change's field; it is read flat or under
-    ``park`` where present, a name or a list of names."""
-    if agent.get("lifecycle") not in (None, "attached", "registered"):
-        return False
-    if project and str(agent.get("project") or "").lower() != project.lower():
-        return False
-    if _CONCERNED_STATUS.search(str(agent.get("status") or "")):
-        return True
+def _clear_by(agent: dict):
+    """A peer's ``park_clear_by`` (a sibling change's field), flat or under
+    ``park``, as a list of names; empty when it has none."""
     clear_by = agent.get("park_clear_by")
     if clear_by is None and isinstance(agent.get("park"), dict):
         clear_by = agent["park"].get("clear_by")
     if isinstance(clear_by, str):
-        return clear_by == name
+        return [clear_by]
     if isinstance(clear_by, (list, tuple)):
-        return name in clear_by
-    return False
+        return [item for item in clear_by if isinstance(item, str)]
+    return []
+
+
+def _concerned(agent: dict, name: str, project: str) -> bool:
+    """Whether a listed peer is told about ``name``. In ``project`` when one
+    is known, compared without case (the board holds this repo as
+    Pseudolife-MCP, PseudoLife-MCP and pseudolife-mcp). Then either parked
+    until this lease clears (``park_clear_by``), attached or detached, since
+    mail waits for a parked session; or live (attached, or registered
+    without an adapter) and working around the suite or the GPU by its
+    status (``suite=running``, ``suite=queued``, ``gpu=``). Both leases go
+    to both groups on purpose: a GPU server beside a full suite is the
+    contention (2026-09-23: 143 CUDA OOMs). Revoked addresses never."""
+    lifecycle = agent.get("lifecycle")
+    if lifecycle == "revoked":
+        return False
+    if project and str(agent.get("project") or "").lower() != project.lower():
+        return False
+    if name in _clear_by(agent):
+        return True
+    if lifecycle not in (None, "attached", "registered"):
+        return False
+    return bool(_CONCERNED_STATUS.search(str(agent.get("status") or "")))
+
+
+class _Environment(dict):
+    """The board's environment (bearer, daemon URL, project), whose repr
+    names its keys only: a traceback shown with locals must not print the
+    bearer."""
+
+    def __repr__(self) -> str:
+        return f"<board environment: {', '.join(sorted(self))}>"
+
+    __str__ = __repr__
+
+
+# How long the release side may take (the notice to peers, then freeing the
+# board lease), and the acquire side's notice. Both run on the mirror's own
+# thread after the OS lock has moved, so they bound only how long a board
+# record can trail the lock, never the work: a mirror that runs out of time
+# leaves its board lease to lapse at its ttl.
+RELEASE_BUDGET = 20.0
+ABORT_BUDGET = 5.0
+ANNOUNCE_BUDGET = 30.0
 
 
 class BoardMirror:
     """The board's view of an OS lock this process holds or waits for.
 
     Used by ``lease hold`` and by the test suite's lock (tests/suite_lock.py):
-    :meth:`waiting` on each poll while the OS lock is held elsewhere, so the
-    holder sees a waiter; :meth:`hold` once the OS lock is taken, which takes
-    or keeps the board lease, renews it every ttl/3 and tells the peers;
-    :meth:`release` at the end, which tells them again and frees the board
-    lease. The OS lock is the truth throughout: nothing here waits on the
-    board, and every board failure ends in one line on stderr and the work
-    going on. A board that grants the lease while the OS lock is still held
-    by a run it does not show, or that shows another holder while this
-    process has the OS lock, is reported once and left to catch up.
+    :meth:`waiting` while the OS lock is held elsewhere, so the holder sees a
+    waiter; :meth:`hold` once the OS lock is taken, which takes or keeps the
+    board lease, renews it every ttl/3 and tells the peers; :meth:`release`
+    after the OS lock is freed, which tells them again and frees the board
+    lease. All board traffic runs on one background thread: :meth:`waiting`
+    and :meth:`hold` return at once, and :meth:`release` waits at most its
+    budget. The OS lock is the truth throughout; every board failure ends in
+    one line on stderr and the work going on. A board that grants the lease
+    before the OS lock does, or shows another holder while this process has
+    the OS lock, is reported once and left to catch up.
     """
 
     def __init__(self, name: str, *, purpose: str = "", expect: int | None = None,
@@ -871,28 +906,109 @@ class BoardMirror:
         self.ttl = ttl
         self.worktree = worktree or os.getcwd()
         self.pid = os.getpid() if pid is None else pid
-        self._environ = dict(os.environ if environ is None else environ)
+        self._environ = _Environment(os.environ if environ is None else environ)
         self._transport = transport
         self._no_board = no_board
         self._board: _Board | None = None
-        self._renewer: _Renewer | None = None
-        self._connected = False
+        self._state_lock = threading.Lock()
+        self._wake = threading.Event()
+        self._state: str | None = None  # waiting, holding, released
+        self._thread: threading.Thread | None = None
+        self._deadline = 0.0  # the release side's, set by release()
         self._failing_since: float | None = None
-        self._next_wait = 0.0
         self._granted_early = False
+        self._warned_lost = False
         self._held_since: float | None = None
 
-    @property
-    def held_on_board(self) -> bool:
-        return self._renewer is not None
+    def waiting(self) -> None:
+        """While this process waits for the OS lock: queue on the board (the
+        worker asks every BOARD_POLL seconds)."""
+        self._set("waiting")
+
+    def hold(self) -> None:
+        """Once this process holds the OS lock: take or keep the board lease,
+        renew it, and tell the peers, all on the worker thread."""
+        self._held_since = time.time()
+        self._set("holding")
+
+    def release(self, budget: float = RELEASE_BUDGET) -> None:
+        """Tell the peers (if they were told of the hold), free the board
+        lease, close; waits at most ``budget`` seconds for the worker."""
+        with self._state_lock:
+            thread = self._thread
+            self._state = "released"
+            self._deadline = time.monotonic() + budget
+        self._wake.set()
+        if thread is not None:
+            thread.join(budget + 1)
+
+    def _set(self, state: str) -> None:
+        with self._state_lock:
+            if self._state == "released":
+                return
+            self._state = state
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._work, name=f"lease-mirror-{self.name}", daemon=True)
+                self._thread.start()
+        self._wake.set()
+
+    def _current(self) -> str | None:
+        with self._state_lock:
+            return self._state
+
+    # -- the worker --
+
+    def _work(self) -> None:
+        announced = False
+        try:
+            self._connect()
+            next_call = 0.0
+            holding = False
+            while self._board is not None:
+                state = self._current()
+                if state == "released":
+                    break
+                now = time.monotonic()
+                if state == "holding" and not holding:
+                    holding = True
+                    reply = self._lease()
+                    if reply is not None and reply["state"] != "held":
+                        self._not_held(reply)
+                    if self._board is not None and self._current() == "holding":
+                        self._announce("acquired", time.monotonic() + ANNOUNCE_BUDGET)
+                        announced = True
+                    next_call = time.monotonic() + _renew_interval(self.ttl)
+                elif now >= next_call:
+                    reply = self._lease()
+                    interval = BOARD_POLL if state == "waiting" else _renew_interval(self.ttl)
+                    if reply is None:
+                        interval = min(TRANSIENT_RETRY, interval)
+                    elif state == "waiting" and reply["state"] == "held":
+                        self._early_grant()
+                    elif state == "holding" and reply["state"] != "held":
+                        self._lost()
+                    next_call = time.monotonic() + interval
+                self._wake.wait(max(0.0, next_call - time.monotonic()))
+                self._wake.clear()
+            board = self._board
+            if board is not None:
+                if announced:
+                    self._announce("released", self._deadline)
+                if time.monotonic() < self._deadline:
+                    board.release_quietly(self.name)
+        except Exception as exc:  # noqa: BLE001 — the board never stops the work
+            _say(f"lease: the board mirror of {self.name!r} stopped "
+                 f"({type(exc).__name__}); the local lock is unaffected")
+        finally:
+            if self._board is not None:
+                self._board.close()
+                self._board = None
 
     def _connect(self) -> None:
-        if self._connected:
-            return
-        self._connected = True
         try:
             self._board, skipped = _connect(self._no_board, self._transport, self._environ)
-        except Exception as exc:  # noqa: BLE001 — a board failure never stops the work
+        except Exception as exc:  # noqa: BLE001
             self._board, skipped = None, f"the board failed unexpectedly ({type(exc).__name__})"
         if self._board is None:
             self._skip(skipped or "no board")
@@ -926,64 +1042,31 @@ class BoardMirror:
         except _Refused as exc:
             self._skip(str(exc))
             return None
-        except Exception as exc:  # noqa: BLE001
-            self._skip(f"the board failed unexpectedly ({type(exc).__name__})")
-            return None
         self._failing_since = None
         return reply
 
-    def waiting(self) -> None:
-        """While this process waits for the OS lock: queue on the board, at
-        most every BOARD_POLL seconds, so the holder and the peers see the
-        wait. A grant that arrives before the OS lock does is kept, as
-        ``lease run`` keeps one, and said once."""
-        now = time.monotonic()
-        if now < self._next_wait:
-            return
-        self._next_wait = now + BOARD_POLL
-        self._connect()
-        reply = self._lease()
-        if reply is not None and reply["state"] == "held" and not self._granted_early:
+    def _early_grant(self) -> None:
+        if not self._granted_early:
             self._granted_early = True
             _say(f"lease: the board granted {self.name!r} before the local lock did (its "
                  f"holder is a run the board does not show); the board lease is kept while "
                  f"this process waits for the lock")
 
-    def hold(self) -> None:
-        """Once this process holds the OS lock: take or keep the board lease,
-        renew it in the background, and tell the peers."""
-        self._held_since = time.time()
-        self._connect()
-        reply = self._lease()
-        if self._board is None:
-            return
-        if reply is not None and reply["state"] != "held":
-            holder = reply.get("holder")
-            who = (_describe_holder(holder, time.time())
-                   + _expected_text(holder.get("expected_end"), time.time())
-                   if isinstance(holder, dict) else "nobody the board names")
-            _say(f"lease: the board shows {self.name!r} held by {who}; this process holds "
-                 f"the OS lock, which is the truth, and carries on; the board lease follows "
-                 f"when that hold frees or expires")
-        self._renewer = _Renewer(self._board, self.name, self.ttl, self.expect, self.purpose)
-        self._renewer.start()
-        self._announce("acquired")
+    def _not_held(self, reply: dict) -> None:
+        holder = reply.get("holder")
+        now = time.time()
+        who = (_describe_holder(holder, now) + _expected_text(holder.get("expected_end"), now)
+               if isinstance(holder, dict) else "nobody the board names")
+        _say(f"lease: the board shows {self.name!r} held by {who}; this process holds the "
+             f"OS lock, which is the truth, and carries on; the board lease follows when "
+             f"that hold frees or expires")
+        self._warned_lost = True
 
-    def release(self) -> None:
-        """Tell the peers, free the board lease (or leave its queue), close."""
-        if self._renewer is not None:
-            self._renewer.stop()
-            self._renewer = None
-        board = self._board
-        if board is None:
-            return
-        try:
-            if self._held_since is not None:
-                self._announce("released")
-            board.release_quietly(self.name)
-        finally:
-            board.close()
-            self._board = None
+    def _lost(self) -> None:
+        if not self._warned_lost:
+            self._warned_lost = True
+            _say(f"lease: warning: the board no longer shows this process holding "
+                 f"{self.name!r}; the local lock, which is what excludes, is still held")
 
     def _text(self, event: str) -> str:
         head = f"LEASE {self.name} {event}: pid {self.pid}, worktree {self.worktree}"
@@ -999,13 +1082,20 @@ class BoardMirror:
         return (f"{head}{tail}. The OS lock is the truth; `pseudolife-mcp lease check "
                 f"{self.name}` shows it. Automatic notice, no reply needed.")
 
-    def _announce(self, event: str) -> None:
-        """Mail the peers the lease concerns; bounded, best effort."""
+    def _announce(self, event: str, deadline: float) -> None:
+        """Mail the peers the lease concerns, until ``deadline``; best effort.
+        An acquire notice stops early if the hold ends meanwhile."""
         board = self._board
         if board is None or not board.registered:
             return
+
+        def left() -> float:
+            return deadline - time.monotonic()
+
+        if left() <= 0:
+            return
         try:
-            peers = board.agents()
+            peers = board.agents(timeout=min(ANNOUNCE_TIMEOUT, left()))
         except Exception as exc:  # noqa: BLE001 — a courtesy, never a failure
             _say(f"lease: could not list the peers to tell about {self.name!r} "
                  f"({_clean(str(exc), MAX_PURPOSE)})")
@@ -1017,15 +1107,18 @@ class BoardMirror:
         text = self._text(event)
         stamp = int(self._held_since or time.time())
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", self.name)[:40]
+        failed = []
         for to in recipients[:ANNOUNCE_MAX]:
+            if left() <= 0 or (event == "acquired" and self._current() == "released"):
+                break
             request_id = f"lease-{event}-{safe}-{self.pid}-{stamp}-{to[:8]}"[:120]
             try:
-                board.send(to, text, request_id)
+                board.send(to, text, request_id, timeout=min(ANNOUNCE_TIMEOUT, left()))
             except Exception as exc:  # noqa: BLE001 — the rest may still get through
-                _say(f"lease: could not tell {_clean(to[:8])} about {self.name!r} "
-                     f"({_clean(str(exc), MAX_PURPOSE)})")
-                if isinstance(exc, _Refused):
-                    break
+                failed.append(f"{_clean(to[:8])} ({_clean(str(exc), 80)})")
+        if failed:
+            _say(f"lease: could not tell {len(failed)} peer(s) about {self.name!r}: "
+                 + "; ".join(failed))
 
 
 # --- lease hold ----------------------------------------------------------------------
@@ -1108,12 +1201,14 @@ def _hold(args, transport) -> int:
         return 128 + signum
     finally:
         state["cleaning"] = True
+        # The OS lock first, as in `run`: the board only hears after, on the
+        # mirror's thread, within its budget.
+        lock.release()
         if mirror is not None:
             try:
                 mirror.release()
-            except Exception:  # noqa: BLE001 — the lock is released regardless
+            except Exception:  # noqa: BLE001 — the lock is already released
                 pass
-        lock.release()
         _restore_handlers(previous)
 
 
@@ -1186,6 +1281,17 @@ def _local_text(local: dict) -> str:
 
 
 def _check(args, transport) -> int:
+    """Exit 1 when held, 0 when free, EXIT_SOFTWARE when the check itself
+    failed: a gate that reads 1 as held must never refuse on a crash."""
+    try:
+        return _check_lease(args, transport)
+    except Exception as exc:  # noqa: BLE001
+        _say(f"lease: check of {args.name!r} failed ({type(exc).__name__}: "
+             f"{_clean(str(exc), MAX_PURPOSE)}); neither held nor free is known")
+        return EXIT_SOFTWARE
+
+
+def _check_lease(args, transport) -> int:
     local = _local_state(args.name)
     board: dict = {"available": False, "reason": None, "holder": None, "expected_end": None,
                    "stale": False, "queued": 0, "queue": []}
@@ -1211,7 +1317,16 @@ def _check(args, transport) -> int:
         finally:
             client.close()
     board["reason"] = reason
-    held = local["state"] == "held" or board["holder"] is not None
+    # The OS lock is the truth wherever it exists: a board holder beside a
+    # free local lock is a record that outlived its process (a hold killed
+    # outright) and lapses at its ttl. Only a lease with no lock file here,
+    # a session-held claim or a name never taken on this machine, is the
+    # board's to decide.
+    if local["state"] is None:
+        held = board["holder"] is not None
+    else:
+        held = local["state"] == "held"
+    board_stale = board["holder"] is not None and local["state"] == "free"
     if args.json:
         print(json.dumps({"name": args.name, "held": held, "local": local, "board": board},
                          indent=2))
@@ -1222,7 +1337,9 @@ def _check(args, transport) -> int:
     if board["available"]:
         if board["holder"] is not None:
             lines.append("  board: held by " + _describe_holder(board["holder"], now)
-                         + _expected_text(board["expected_end"], now, board["stale"]))
+                         + _expected_text(board["expected_end"], now, board["stale"])
+                         + ("; stale: the local lock is free, so this record outlived its "
+                            "holder and lapses at its ttl" if board_stale else ""))
             if board["queued"]:
                 lines.append(f"  board queue ({board['queued']}): " + "; ".join(
                     _describe_waiter(entry) for entry in board["queue"]
@@ -1515,9 +1632,11 @@ def _parsers():
     check = actions.add_parser(
         "check", help="exit 0 when a lease is free, 1 when it is held",
         description="The launch gate: print the lease's holder (OS lock and board) and "
-                    "its expected end, and exit 0 when it is free or 1 when it is held. "
-                    "For full-suite the test suite's own lock is probed, with its holder "
-                    "record. Without a board, the local lock decides.")
+                    "its expected end, and exit 0 when it is free, 1 when it is held, or "
+                    "70 when the check itself failed. The local lock decides wherever its "
+                    "file exists; a board holder beside a free lock is shown as stale. For "
+                    "full-suite the test suite's own lock is probed, with its holder "
+                    "record.")
     check.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to check")
     check.add_argument("--json", action="store_true", help="print one JSON report")
     listing = actions.add_parser(

@@ -1367,3 +1367,126 @@ def test_qwen_server_script_still_parses():
     result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", probe],
                             capture_output=True, text=True, timeout=START_TIMEOUT)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- review findings (2026-09-28) ------------------------------------------------
+
+def test_check_trusts_a_free_local_lock_over_a_leftover_board_holder(lease_env, capsys):
+    # A hold killed outright drops its OS lock at once while its board lease
+    # lapses at the ttl: the lock is the truth, the board record is stale.
+    lease_env.mkdir(parents=True, exist_ok=True)
+    free = os_lock.OsLock(lease_env / os_lock.lock_file_name("gpu"))
+    assert free.acquire()
+    free.release()
+    now = time.time()
+    daemon = FakeDaemon(leases=[(200, {"leases": [
+        {"name": "gpu", "holder": _holder(label="killed-hold"), "fence": 3,
+         "expires_at": now + 90, "expected_end": None, "stale": False,
+         "queued": 0, "queue": []}], "truncated": False})])
+    assert _run(["check", "gpu"], daemon) == 0
+    out = capsys.readouterr().out
+    assert "lease gpu: free" in out and "killed-hold" in out and "stale" in out
+    assert _run(["check", "gpu", "--json"], daemon) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["held"] is False and report["board"]["holder"]["label"] == "killed-hold"
+
+
+def test_a_check_that_fails_is_never_mistaken_for_held(lease_env, monkeypatch, capsys):
+    def broken(name):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lease_cli, "_local_state", broken)
+    code = _run(["check", "gpu"], FakeDaemon())
+    assert code not in (0, 1) and code == lease_cli.EXIT_SOFTWARE
+    assert "RuntimeError" in capsys.readouterr().err
+
+
+def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
+    peers = [peer(p * 32, f"runner-{p}", "suite=running") for p in "abc"]
+
+    def send(request):
+        body = json.loads(request.content)
+        if body["to"] == "a" * 32:
+            return 400, {"error": "recipient_not_found"}
+        return SENT()
+
+    daemon = FakeDaemon(agents=[AGENTS(*peers)], send=[send])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
+    assert told == {"a" * 32, "b" * 32, "c" * 32}
+
+
+def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper):
+    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached", park_clear_by="gpu"),
+             peer("b" * 32, "gone", "suite=running", lifecycle="detached"),
+             peer("c" * 32, "revoked", "parked", lifecycle="revoked", park_clear_by="gpu")]
+    daemon = FakeDaemon(agents=[AGENTS(*peers)])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    assert {body["to"] for body in daemon.bodies("send")} == {"a" * 32}
+
+
+def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):
+    seen = {}
+    real = lease_cli.BoardMirror.release
+
+    def release(self, *args, **kwargs):
+        seen["lock"] = os_lock.probe(lease_env / "lease-gpu.lock")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "release", release)
+    child = sleeper(0.3)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], FakeDaemon()) == 0
+    assert seen["lock"] is False
+
+
+# --- the PowerShell launcher against the real CLI ----------------------------------
+#
+# The mocked harness in test_regression_gate_inputs.py cannot see how
+# qwen_server.ps1 finds and calls the CLI; this runs the real helpers against a
+# temp lock directory (no board: no token, unroutable daemon URL).
+
+def _pwsh_or_skip():
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("pwsh is not installed")
+    return pwsh
+
+
+def _pwsh(script, env):
+    return subprocess.run([_pwsh_or_skip(), "-NoProfile", "-NonInteractive", "-Command", script],
+                          capture_output=True, text=True, timeout=START_TIMEOUT * 2, env=env)
+
+
+def test_the_launcher_gate_sees_a_held_gpu_lease_and_holds_one(lease_env, tmp_path):
+    _pwsh_or_skip()
+    env = dict(os.environ)
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    env.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+    env[os_lock.LOCK_DIR_ENV] = str(lease_env)
+    env["PSEUDOLIFE_LEASE_PYTHON"] = sys.executable
+    helper = (ROOT / "evals" / "qwen_server.ps1").as_posix()
+    script = f"""
+. '{helper}'
+$py = '{sys.executable}'
+$server = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru -WindowStyle Hidden
+$before = Test-GpuLeaseHeld
+Start-GpuLease -ServerPid $server.Id -Purpose 'probe'
+$during = Test-GpuLeaseHeld
+$second = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru -WindowStyle Hidden
+$keep = $script:GpuLeaseProcess
+Start-GpuLease -ServerPid $second.Id -Purpose 'probe-2'
+$secondHold = $script:GpuLeaseProcess
+$script:GpuLeaseProcess = $keep
+$server.Kill(); $server.WaitForExit()
+Stop-GpuLease -WaitSeconds 20
+$after = Test-GpuLeaseHeld
+$second.Kill()
+Write-Output ("RESULT=" + ($null -eq $before) + "," + ($null -ne $during) + "," + ($null -eq $secondHold) + "," + ($null -eq $after))
+"""
+    result = _pwsh(script, env)
+    line = next((l for l in result.stdout.splitlines() if l.startswith("RESULT=")), None)
+    assert line == "RESULT=True,True,True,True", result.stdout + result.stderr
+    # The second hold found the lock taken and said so, instead of "started".
+    assert "could not take the gpu lease" in result.stdout + result.stderr

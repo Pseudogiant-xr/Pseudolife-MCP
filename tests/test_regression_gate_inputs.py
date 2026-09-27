@@ -52,10 +52,11 @@ def test_missing_bank_directory_preserves_prior_results_and_does_not_launch(tmp_
         ("foreign", False, True, 4242, False, None, None, (False, 0, 0, 0),
          "not serving Qwen3.8-27B-UD-Q4_K_XL.gguf"),
         ("", True, True, 4242, False, None, None, (False, 0, 0, 0), "port 1234 is occupied"),
-        # A launch that answers holds the gpu lease for its server's pid.
+        # A launch holds the gpu lease for its server's pid from the start,
+        # whether or not the server comes up; a failed launch holds nothing.
         ("", False, True, 4242, False, None, None, (True, 1, 1, 1), "gpu lease hold started"),
         ("", False, True, 9999, False, None, None, (False, 1, 1, 1), ""),
-        ("", False, False, 4242, False, None, None, (False, 1, 1, 0), ""),
+        ("", False, False, 4242, False, None, None, (False, 1, 1, 1), ""),
         ("", False, True, 4242, True, None, None, (False, 1, 0, 0), ""),
         # Nothing to reuse and the GPU is busy: hold, never launch.
         ("", False, True, 4242, False, 6000, None, (False, 0, 0, 0), "GPU BUSY"),
@@ -102,6 +103,7 @@ function Get-NetTCPConnection {{
 }}
 function Test-GpuBusy {{ return $script:mockBusy }}
 function Test-GpuLeaseHeld {{ return $script:mockLeased }}
+function Get-LeaseCli {{ return [pscustomobject]@{{ File = 'python'; Lead = @('-m', 'pseudolife_memory.cli') }} }}
 function Start-Sleep {{}}
 function Test-Path {{ return $false }}
 function Wait-QwenEndpoint {{ return $script:mockReady }}
@@ -109,7 +111,10 @@ function Start-Process {{
     param($FilePath, $ArgumentList)
     if ("$ArgumentList" -match 'lease hold gpu --while-pid 4242 ') {{
         $script:holds++
-        return [pscustomobject]@{{Id=77; HasExited=$true}}
+        $hold = [pscustomobject]@{{Id=77; HasExited=$false}}
+        $hold | Add-Member ScriptMethod Kill {{ $this.HasExited=$true }}
+        $hold | Add-Member ScriptMethod WaitForExit {{ param($ms) $this.HasExited=$true; return $true }}
+        return $hold
     }}
     $script:launches++
     if ($script:mockLaunchFails) {{ throw 'mock launch failure' }}

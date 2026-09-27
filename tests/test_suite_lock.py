@@ -1046,6 +1046,17 @@ def _mirror(directory, daemon, environ=BOARD_ENV, worktree=ROOT):
     return suite_lock.board_mirror(directory, worktree, environ, transport=daemon.transport)
 
 
+def _stderr_until(capsys, text, timeout=START_TIMEOUT):
+    """The stderr seen until ``text`` appears in it: the mirror talks to the
+    board on its own thread, so its lines arrive after the lock is taken."""
+    seen = ""
+    deadline = time.monotonic() + timeout
+    while text not in seen and time.monotonic() < deadline:
+        seen += capsys.readouterr().err
+        time.sleep(0.02)
+    return seen
+
+
 def test_board_environment_keeps_only_what_the_mirror_needs():
     # conftest snapshots these before tests/client_environment.py strips the
     # token and points the daemon URL at an unroutable port.
@@ -1103,6 +1114,9 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
                                             mirror=_mirror(tmp_path, daemon))
     try:
         assert held_lock is not None
+        # The board hears on the mirror's thread, after the lock is taken.
+        assert _wait_for(lambda: sum("acquired" in b["text"]
+                                     for b in daemon.bodies("send")) == 3)
         assert daemon.actions()[:2] == ["register", "lease"]
         assert daemon.bodies("register")[0]["label"] == "lease-hold"
         body = daemon.bodies("lease")[0]
@@ -1162,7 +1176,7 @@ def test_an_unreachable_board_never_stops_the_run(tmp_path, quick_board, capsys)
                                             mirror=_mirror(tmp_path, daemon))
     try:
         assert held_lock is not None
-        err = capsys.readouterr().err
+        err = _stderr_until(capsys, "board skipped")
         assert err.count("board skipped") == 1 and "unreachable" in err
     finally:
         suite_lock.release(held_lock)
@@ -1178,7 +1192,7 @@ def test_a_board_that_shows_another_holder_does_not_stop_the_run(tmp_path, quick
                                             mirror=_mirror(tmp_path, daemon))
     try:
         assert held_lock is not None
-        err = capsys.readouterr().err
+        err = _stderr_until(capsys, "stale-run")
         assert "stale-run" in err and "OS lock" in err
         assert err.count("full-suite") >= 1
     finally:
@@ -1193,7 +1207,7 @@ def test_without_a_token_the_mirror_is_skipped_in_one_line(tmp_path, quick_board
                                             mirror=_mirror(tmp_path, daemon, environ={}))
     try:
         assert held_lock is not None
-        err = capsys.readouterr().err
+        err = _stderr_until(capsys, "board skipped")
         assert err.count("board skipped") == 1 and "PSEUDOLIFE_MCP_TOKEN" in err
     finally:
         suite_lock.release(held_lock)
@@ -1207,3 +1221,120 @@ def test_the_mirror_is_optional_and_off_by_default(tmp_path):
         assert held_lock is not None and held_lock.mirror is None
     finally:
         suite_lock.release(held_lock)
+
+
+# --- review findings (2026-09-28): the board never delays, never outlives ------
+#
+# A slow board must cost the run nothing: the mirror's board traffic runs on
+# its own thread, and the OS lock is released before the board is told.
+
+
+class _SlowDaemon(FakeDaemon):
+    """Every board call takes ``delay`` seconds."""
+
+    def __init__(self, delay, **kwargs):
+        super().__init__(**kwargs)
+        self.delay = delay
+
+    def handler(self, request):
+        time.sleep(self.delay)
+        return super().handler(request)
+
+
+def _wait_for(predicate, timeout=START_TIMEOUT):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick_board):
+    peers = [peer(p * 32, f"runner-{p}", "suite=queued") for p in "abcd"]
+    daemon = _SlowDaemon(1.0, lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
+    started = time.monotonic()
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w",
+                                   mirror=_mirror(tmp_path, daemon))
+    assert time.monotonic() - started < 0.9  # not one board call on the way in
+    freed = {}
+
+    class _Watch:
+        """Wraps the mirror's release to see whether the OS lock is still held."""
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def release(self, *args, **kwargs):
+            freed.setdefault("at_release", suite_lock_is_free(tmp_path))  # the first call
+            return self.inner.release(*args, **kwargs)
+
+    held_lock.mirror = _Watch(held_lock.mirror)
+    suite_lock.release(held_lock)
+    assert freed["at_release"] is True  # the lock went first, then the board
+
+
+def suite_lock_is_free(directory):
+    from pseudolife_memory import os_lock
+    return os_lock.probe(directory / suite_lock.LOCK_FILE) is False
+
+
+def test_a_run_that_leaves_the_queue_frees_its_board_place(held, quick_board):
+    # A queued run refused (fail mode, TreeChanged or Ctrl-C) must not leave a
+    # board waiter or an early grant behind it for `lease check` to report.
+    daemon = FakeDaemon(lease=[HELD("full-suite")])
+    mirror = _mirror(held.dir, daemon)
+
+    def refuse():
+        if daemon.actions().count("lease") >= 1:
+            raise suite_lock.TreeChanged("changed")
+
+    with pytest.raises(suite_lock.TreeChanged):
+        suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02, notice_every=60,
+                           out=io.StringIO(), check=refuse, mirror=mirror)
+    assert _wait_for(lambda: "release" in daemon.actions())
+    assert daemon.actions()[-1] == "release"
+
+
+def test_a_corrupt_durations_file_falls_back_to_the_default(tmp_path):
+    (tmp_path / suite_lock.DURATIONS_FILE).write_text(
+        '{"seconds": Infinity}\n{"seconds": NaN}\n{"seconds": 1e400}\n', encoding="utf-8")
+    assert suite_lock.expected_seconds(tmp_path) == suite_lock.DEFAULT_EXPECT_SECONDS
+    (tmp_path / suite_lock.DURATIONS_FILE).write_bytes(b"\xff\xfe\x00garbage")
+    assert suite_lock.expected_seconds(tmp_path) == suite_lock.DEFAULT_EXPECT_SECONDS
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w")
+    suite_lock.release(held_lock)  # an unreadable file never stops the unlock
+    assert suite_lock_is_free(tmp_path)
+
+
+def test_only_runs_that_ran_their_tests_are_timed(tmp_path):
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w")
+    suite_lock.release(held_lock, record=False)  # interrupted, collection error...
+    assert not (tmp_path / suite_lock.DURATIONS_FILE).exists()
+    source = (TESTS / "conftest.py").read_text(encoding="utf-8")
+    assert "record=" in source and "exitstatus" in source
+
+
+def test_the_mirror_is_built_only_for_a_run_that_takes_the_lock(held):
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(held.dir), "PSEUDOLIFE_SUITE_LOCK": "fail"}
+
+    def factory():
+        raise AssertionError("a targeted run built the board mirror")
+
+    assert suite_lock.take_for_session(_config(["tests/test_bm25.py"]), environ, TESTS,
+                                       mirror=factory) is None
+    built = []
+    with pytest.raises(pytest.UsageError):  # full, and refused: the factory ran first
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                    mirror=lambda: built.append(1))
+    assert built == [1]
+
+
+def test_the_board_environment_never_shows_its_token():
+    env = suite_lock.board_environment({"PSEUDOLIFE_MCP_TOKEN": "tok-SECRET-x",
+                                        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"})
+    assert env["PSEUDOLIFE_MCP_TOKEN"] == "tok-SECRET-x"
+    assert "tok-SECRET" not in repr(env) and "tok-SECRET" not in str(env)
