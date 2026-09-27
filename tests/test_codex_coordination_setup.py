@@ -52,7 +52,8 @@ def test_enable_uses_scoped_cas_and_private_backup(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     path.write_text("# user's unrelated config\n")
     client = Client(tmp_path)
-    monkeypatch.setattr(setup, "probe", lambda url, token: token == "private-fixture")
+    monkeypatch.setattr(setup, "probe", lambda url, token:
+                        "ready" if token == "private-fixture" else "unavailable")
     result = setup.configure(client, tmp_path, tmp_path, "enable")
     assert result["status"] == "enabled"
     assert "private-fixture" not in json.dumps(result)
@@ -64,7 +65,7 @@ def test_enable_uses_scoped_cas_and_private_backup(tmp_path, monkeypatch):
     values = {e["keyPath"].split('.')[-1].strip('"'): e["value"] for e in request["edits"]}
     assert values["PSEUDOLIFE_AGENT_COORDINATION"] == "1"
     assert values["PSEUDOLIFE_WRITER_ID"] == "codex"
-    assert values["PSEUDOLIFE_AGENT_WAKE"] == "0"
+    assert "PSEUDOLIFE_AGENT_WAKE" not in values  # absent already means pull-only
     assert values["PSEUDOLIFE_AGENT_STATE_DIR"] == str(tmp_path / "pseudolife" / "agents")
     assert "PSEUDOLIFE_MCP_TOKEN" not in values
     assert Path(result["backup"]).read_text() == path.read_text()
@@ -501,7 +502,8 @@ def test_credentials_cli_accepts_explicit_tokenless_installer_origin(
 def test_enable_refuses_unsafe_or_unready_config_without_write(tmp_path, monkeypatch, problem):
     client = Client(tmp_path)
     server = client.config["config"]["mcp_servers"]["pseudolife-memory"]
-    monkeypatch.setattr(setup, "probe", lambda *args: problem != "daemon")
+    monkeypatch.setattr(setup, "probe",
+                        lambda *args: "unavailable" if problem == "daemon" else "ready")
     if problem == "token":
         server["env"].pop("PSEUDOLIFE_MCP_TOKEN")
         monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "not-forwarded-to-mcp")
@@ -518,7 +520,7 @@ def test_enable_refuses_unsafe_or_unready_config_without_write(tmp_path, monkeyp
 
 def test_check_never_writes_and_disable_needs_no_daemon(tmp_path, monkeypatch):
     client = Client(tmp_path)
-    monkeypatch.setattr(setup, "probe", lambda *args: False)
+    monkeypatch.setattr(setup, "probe", lambda *args: "unavailable")
     result = setup.configure(client, tmp_path, tmp_path, "check")
     assert result["status"] == "needs-configuration"
     assert len(client.calls) == 1
@@ -533,7 +535,7 @@ def test_already_enabled_configuration_is_idempotent(tmp_path, monkeypatch):
     client = Client(tmp_path)
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"].update(setup.ENABLED_ENV)
     client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_AGENT_STATE_DIR"] = str(tmp_path / "agents")
-    monkeypatch.setattr(setup, "probe", lambda *args: True)
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
     result = setup.configure(client, tmp_path, tmp_path, "enable")
     assert result["status"] == "enabled"
     assert len(client.calls) == 1
@@ -543,7 +545,7 @@ def test_check_requires_codex_writer_and_enabled_server(tmp_path, monkeypatch):
     client = Client(tmp_path)
     server = client.config["config"]["mcp_servers"]["pseudolife-memory"]
     server["env"]["PSEUDOLIFE_AGENT_COORDINATION"] = "1"
-    monkeypatch.setattr(setup, "probe", lambda *args: True)
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
     assert setup.configure(client, tmp_path, tmp_path, "check")["status"] == "needs-configuration"
     server["env"]["PSEUDOLIFE_WRITER_ID"] = "codex"
     server["enabled"] = False
@@ -558,9 +560,106 @@ def test_enable_verifies_effective_values_after_write(tmp_path, monkeypatch):
                 self.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_WRITER_ID"] = "other"
             return result
 
-    monkeypatch.setattr(setup, "probe", lambda *args: True)
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
     with pytest.raises(setup.SetupError, match="effective"):
         setup.configure(Overridden(tmp_path), tmp_path, tmp_path, "enable")
+
+
+@pytest.mark.parametrize("wake", ["1", "0", "true"])
+def test_enable_preserves_an_existing_wake_setting(tmp_path, monkeypatch, wake):
+    """Re-running --enable must not reset live delivery someone turned on."""
+    client = Client(tmp_path)
+    for config in (client.config["config"], client.config["layers"][0]["config"]):
+        config["mcp_servers"]["pseudolife-memory"]["env"]["PSEUDOLIFE_AGENT_WAKE"] = wake
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
+    setup.configure(client, tmp_path, tmp_path, "enable")
+    edits = next(params["edits"] for method, params in client.calls
+                 if method == "config/batchWrite")
+    assert not any(e["keyPath"].endswith('"PSEUDOLIFE_AGENT_WAKE"') for e in edits)
+    env = client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]
+    assert env["PSEUDOLIFE_AGENT_WAKE"] == wake
+
+
+def test_enable_reports_live_wake_only_with_the_bridge(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    env = client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]
+    env["PSEUDOLIFE_AGENT_WAKE"] = "1"
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
+    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "pull-only"
+    env.update({"PSEUDOLIFE_CODEX_SERVER_URL": "ws://127.0.0.1:4500",
+                "PSEUDOLIFE_CODEX_SERVER_TOKEN": "bridge-fixture"})
+    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "live"
+
+
+def _codex_writer(client):
+    env = client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]
+    env["PSEUDOLIFE_WRITER_ID"] = "codex"
+    return env
+
+
+def test_check_treats_unset_coordination_as_default_on_when_served(
+        tmp_path, monkeypatch):
+    """Unset is the default since the board went on by default: the shim asks
+    the daemon at startup, so --check asks it the same question."""
+    client = Client(tmp_path)
+    env = _codex_writer(client)
+    asked = []
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
+    monkeypatch.setattr(setup, "served", lambda url, token: asked.append(token) or True)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "ready (default-on)"
+    assert result["coordination_mode"] == "default-on"
+    assert asked == ["private-fixture"]
+    assert len(client.calls) == 1  # still read-only
+
+    monkeypatch.setattr(setup, "served", lambda *args: False)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "needs-configuration"
+
+    env["PSEUDOLIFE_AGENT_COORDINATION"] = "0"  # an explicit opt-out stays off
+    monkeypatch.setattr(setup, "served", lambda *args: True)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "needs-configuration"
+    assert result["coordination_mode"] == "disabled"
+
+
+def test_check_reports_explicit_mode_distinctly(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    _codex_writer(client)["PSEUDOLIFE_AGENT_COORDINATION"] = "1"
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
+    monkeypatch.setattr(setup, "served", lambda *args: pytest.fail(
+        "an explicit opt-in skips the default-mode question, as the shim does"))
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "ready (explicit)"
+    assert result["coordination_mode"] == "explicit"
+
+
+PRINCIPAL_REASON = ("principal not allowed on the board (add 'codex' to "
+                    "coordination.allowed_principals in config.yaml)")
+
+
+@pytest.mark.parametrize("setting", [None, "1"])
+def test_check_names_an_unlisted_principal(tmp_path, monkeypatch, setting):
+    """A token-map principal is off the board until listed (2026-09-25
+    decision); the shim then leaves coordination off silently, so --check
+    must say why."""
+    client = Client(tmp_path)
+    env = _codex_writer(client)
+    if setting:
+        env["PSEUDOLIFE_AGENT_COORDINATION"] = setting
+    monkeypatch.setattr(setup, "probe", lambda *args: "principal_not_allowed")
+    monkeypatch.setattr(setup, "served", lambda *args: False)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "needs-configuration"
+    assert result["reason"] == PRINCIPAL_REASON
+
+
+def test_enable_refusal_names_an_unlisted_principal(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    monkeypatch.setattr(setup, "probe", lambda *args: "principal_not_allowed")
+    with pytest.raises(setup.SetupError, match="add 'codex' to coordination.allowed_principals"):
+        setup.configure(client, tmp_path, tmp_path, "enable")
+    assert all(method != "config/batchWrite" for method, _ in client.calls)
 
 
 def test_coordination_route_exposes_authenticated_readiness_boundary():
@@ -601,20 +700,19 @@ def test_probe_uses_authenticated_read_only_gate(monkeypatch):
                         io.BytesIO(b'{"error":"instance_authentication_required"}'))
 
     monkeypatch.setattr(setup, "urlopen", respond)
-    assert setup.probe("http://127.0.0.1:8765", "fixture-token")
+    assert setup.probe("http://127.0.0.1:8765", "fixture-token") == "ready"
     assert seen[0].full_url.endswith("/api/coordination/agents")
     assert seen[0].data == b"{}"
     assert hmac.compare_digest(
         seen[0].get_header("Authorization") or "", "Bearer fixture-token")
-    assert not setup.probe("http://user:password@127.0.0.1:8765", "fixture-token")
-    assert not setup.probe("http://127.0.0.1:8765/base", "fixture-token")
+    assert setup.probe("http://user:password@127.0.0.1:8765", "fixture-token") == "unavailable"
+    assert setup.probe("http://127.0.0.1:8765/base", "fixture-token") == "unavailable"
 
 
 @pytest.mark.parametrize(("status", "body"), [
     (400, b'{"error":"instance_authentication_required"}'),
     (401, b'{"error":"authentication_required"}'),
     (401, b'{"error":"unauthorized"}'),
-    (403, b'{"error":"principal_not_allowed"}'),
     (401, b'not-json'),
 ])
 def test_probe_rejects_other_status_and_error_pairs(monkeypatch, status, body):
@@ -625,7 +723,78 @@ def test_probe_rejects_other_status_and_error_pairs(monkeypatch, status, body):
         raise HTTPError(request.full_url, status, "fixture", {}, io.BytesIO(body))
 
     monkeypatch.setattr(setup, "urlopen", respond)
-    assert not setup.probe("http://127.0.0.1:8765", "fixture-token")
+    assert setup.probe("http://127.0.0.1:8765", "fixture-token") == "unavailable"
+
+
+@pytest.mark.parametrize(("status", "body", "code"), [
+    (403, b'{"error":"principal_not_allowed"}', "principal_not_allowed"),
+    (400, b'{"error":"principal_not_allowed"}', "unavailable"),
+])
+def test_probe_names_an_unlisted_principal(monkeypatch, status, body, code):
+    from urllib.error import HTTPError
+    import io
+
+    def respond(request, timeout):
+        raise HTTPError(request.full_url, status, "fixture", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(setup, "urlopen", respond)
+    assert setup.probe("http://127.0.0.1:8765", "fixture-token") == code
+
+
+@pytest.mark.parametrize(("body", "code"), [
+    (b'{"enabled": false}', "disabled"),
+    (b'{"agents": []}', "unavailable"),
+    (b'not-json', "unavailable"),
+])
+def test_probe_names_a_disabled_board(monkeypatch, body, code):
+    import io
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(setup, "urlopen", lambda request, timeout: Response(body))
+    assert setup.probe("http://127.0.0.1:8765", "fixture-token") == code
+
+
+def test_served_asks_the_shims_default_mode_question(monkeypatch):
+    """The same GET the shim's startup probe makes: a non-empty check-in
+    means the daemon serves the board to this bearer."""
+    import io
+    seen = []
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    body = [b"Pseudolife coordination: ...\n"]
+
+    def respond(request, timeout):
+        seen.append(request)
+        return Response(body[0])
+
+    monkeypatch.setattr(setup, "urlopen", respond)
+    assert setup.served("http://127.0.0.1:8765", "fixture-token") is True
+    assert seen[0].full_url.endswith("/api/hook/coordination-start")
+    assert seen[0].get_method() == "GET"
+    assert hmac.compare_digest(
+        seen[0].get_header("Authorization") or "", "Bearer fixture-token")
+    body[0] = b"\n"
+    assert setup.served("http://127.0.0.1:8765", "fixture-token") is False
+    assert setup.served("http://user:password@127.0.0.1:8765", "fixture-token") is False
+    assert setup.served("http://127.0.0.1:8765", None) is False
+
+    def fail(request, timeout):
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(setup, "urlopen", fail)
+    assert setup.served("http://127.0.0.1:8765", "fixture-token") is False
 
 
 # urllib's default handler re-sends a POST answered 301/302/303 as a GET
@@ -675,7 +844,7 @@ def test_probe_refuses_redirect_without_forwarding_authorization(status):
         passed = setup.probe(f"http://127.0.0.1:{redirect.server_port}", "fixture-token")
         assert sent == [True]  # The probe really ran, with the bearer.
         assert forwarded == []
-        assert passed is False
+        assert passed == "unavailable"
     finally:
         for server in (redirect, target):
             server.shutdown()
