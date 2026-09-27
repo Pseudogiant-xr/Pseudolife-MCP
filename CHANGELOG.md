@@ -22,6 +22,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still pins it. `memory_recall` seeds through its own raw-text matcher
   (`recall._mentions`), which already treats `?`, `,` and `'s` as
   boundaries and is left as it is.
+### Changed (2026-09-27 — the standing memory block says where hard rules belong)
+- A rule stored only in the bank ("hold the GPU run when VRAM is in use")
+  was missed when a session asked about its task rather than about the
+  rule. In `memory_search`, constraint pinning serves a `constraint` fact
+  ahead of the ranking only when the query names the fact's entity (in
+  `memory_recall`, only on the walk's seeds), and a session asks about the
+  task it is doing, not the rule it is about to break — probed on the live
+  bank on 2026-09-27 while checking a client's local memory files against
+  it. The standing memory block (`examples/CLAUDE.memory.md`,
+  byte-identical to `MEMORY_LOOP_BLOCK`, which the `full_separate_hook`
+  policy variant serves) now says so at the constraint label: name a
+  rule's entity the way a task would say it, and keep any rule that must
+  hold however the task is phrased in the standing instructions too, with
+  the bank holding its why and its history. `docs/guide/retrieval.md`
+  explains the consequence beside the mechanism, including the
+  punctuation limit of the bounded match; `memory-model.md` points there.
+  No retrieval behaviour changes.
 
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on
