@@ -304,7 +304,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection checks stay in one script; `lifecycle.ps1` does the same for
   Codex on Windows. `ops/setup-codex-hooks.py` now reads the fixed line from
   `install-hook.ps1`; the `ops/install-hook.*` fallback moved to the note
-  too (next entry).
+  too (see the entry above, "installs without the plugin get the
+  memory-change note too").
 - New `MemoryService.memory_changes_since(since, session_key=)`: counts and
   the newest of each kind, scanned under the service lock that every entry
   and lesson write holds while stamping, so its `now` (rounded down) is a
