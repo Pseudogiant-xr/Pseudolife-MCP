@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — a full test suite the bench Postgres rejects refuses to start)
+- The PG-backed tests take the dev server's password from
+  `PSEUDOLIFE_TEST_PG_PASSWORD`, else `ops/.env`, else the compose default.
+  A fresh worktree has no `ops/.env`, or a copy of `ops/.env.example`, so a
+  full suite launched from one resolved the compose default, the server
+  rejected it, and the run went to the end with every PG-backed test
+  ERRORing on setup: 1,424 setup errors in one run on 2026-09-27 (twice that
+  day, and on 2026-09-24 before), each holding the machine's one full-suite
+  slot for 20-25 minutes and gating nothing.
+- `tests/conftest.py` now connects once to the dev server's admin database
+  with the resolved password before a full run queues for the suite lock.
+  A server that answers and rejects it stops the run with a usage error
+  naming the password's source (the missing file, the template copy, the
+  example placeholder, a rotated `ops/.env`, or the override) and the fix:
+  copy `ops/.env` from the main checkout, or export
+  `PSEUDOLIFE_TEST_PG_PASSWORD` (or, when that override is the rejected
+  password, to correct or unset it). The password itself is never printed.
+  A server that accepts it, or that does not answer, lets the run start as
+  before: the PG-backed tests still skip without a server. A targeted run is
+  never refused; it prints one line saying its PG-backed tests will error,
+  and runs. It first checks for a listener on the port for at most 0.5 s, so
+  on a machine without the dev server it does not wait out libpq's connect
+  timeout (3.09 s measured to a closed loopback port). The check gates on the lock's own conditions, so an xdist worker,
+  `PSEUDOLIFE_SUITE_LOCK=off` and GitHub Actions (which hands the fixtures a
+  full `PSEUDOLIFE_TEST_DATABASE_URL`, itself a reason to skip the check)
+  never see it (`tests/pg_defaults.py`, `full_run_password_preflight`;
+  `tests/suite_lock.py`, `session_kind` and `take_for_session`'s
+  `preflight` hook).
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a

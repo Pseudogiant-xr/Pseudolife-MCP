@@ -19,6 +19,7 @@ from __future__ import annotations
 import errno
 import functools
 import os
+import sys
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -28,6 +29,11 @@ DEV_HOST_PORT = "127.0.0.1:5433"
 DEV_ROLE = "pseudolife"
 # The compose stack's env file; the installer writes POSTGRES_PASSWORD there.
 ENV_FILE = Path(__file__).resolve().parent.parent / "ops" / ".env"
+# The template beside it, and the placeholder its commented-out line carries.
+# A fresh worktree may hold a copy of the template as ops/.env (pinned
+# against the file by tests/test_pg_defaults.py).
+EXAMPLE_ENV_FILE = ENV_FILE.with_name(".env.example")
+EXAMPLE_PASSWORD = "change-me"
 # What the server says when it is THERE but will not have you: bad password
 # (28P01), and the rest of SQLSTATE class 28 — unknown role, no pg_hba entry.
 _AUTH_FAILURE_MARKERS = ("password authentication failed",
@@ -167,6 +173,145 @@ def default_password(env: os._Environ | dict | None = None,
     if explicit:
         return explicit
     return env_file_password(env_file) or COMPOSE_DEFAULT_PASSWORD
+
+
+def describe_password_source(env: os._Environ | dict | None = None,
+                             env_file: Path | None = None,
+                             example_file: Path | None = None) -> str:
+    """Where :func:`default_password` found the dev server's password, in
+    words and never the value: the explicit override, ``ops/.env``, or the
+    compose default and why it came to that (the file is missing, is a copy
+    of ``ops/.env.example``, or sets no ``POSTGRES_PASSWORD``). The template
+    placeholder is named as such. A file the parser refuses yields the
+    parser's value-free diagnosis instead of raising."""
+    env = os.environ if env is None else env
+    if env.get("PSEUDOLIFE_TEST_PG_PASSWORD"):
+        return "PSEUDOLIFE_TEST_PG_PASSWORD"
+    path = ENV_FILE if env_file is None else env_file
+    example = EXAMPLE_ENV_FILE if example_file is None else example_file
+    try:
+        text = path.read_bytes()
+    except OSError:
+        return "the compose default password, as ops/.env is missing"
+    try:
+        if text == example.read_bytes():
+            return ("the compose default password, as ops/.env is a copy of "
+                    "ops/.env.example")
+    except OSError:
+        pass  # no template to compare with; the parse below still decides
+    try:
+        value = env_file_password(path)
+    except ValueError as exc:
+        return f"the compose default password, as ops/.env is unusable ({exc})"
+    if value is None:
+        return ("the compose default password, as ops/.env sets no "
+                "POSTGRES_PASSWORD")
+    if value == EXAMPLE_PASSWORD:
+        return "the example POSTGRES_PASSWORD from ops/.env"
+    return "POSTGRES_PASSWORD from ops/.env"
+
+
+# How long a quick probe waits for the dev server's port to accept a TCP
+# connection before calling it absent. libpq's own wait to a closed loopback
+# port was 3.09 s on the maintainer's Windows host (2026-09-28), which every
+# targeted run on a machine without the dev server would otherwise pay; a
+# local listener accepts in well under a millisecond.
+QUICK_PROBE_TIMEOUT_S = 0.5
+
+
+def probe_dev_server(env: os._Environ | dict | None = None,
+                     env_file: Path | None = None, *,
+                     connect_timeout: int = 3, quick: bool = False) -> str:
+    """Connect once to the dev server's admin database with the password
+    :func:`default_password` resolves. ``ok`` when it lets us in, ``auth``
+    when it answered and refused the credentials, ``absent`` when nothing
+    answered, ``other`` for any other failure (which the fixtures report per
+    test), including an ``ops/.env`` the parser refuses. ``quick`` first
+    checks that the port accepts a TCP connection within
+    :data:`QUICK_PROBE_TIMEOUT_S`. Nothing here raises, and no frame keeps
+    the exception."""
+    __tracebackhide__ = True
+    import socket
+
+    import psycopg
+
+    if quick:
+        host, _, port = DEV_HOST_PORT.rpartition(":")
+        try:
+            socket.create_connection((host, int(port)),
+                                     timeout=QUICK_PROBE_TIMEOUT_S).close()
+        except OSError:
+            return "absent"
+    try:
+        url = RedactedUrl(default_admin_url(env, env_file))
+        with psycopg.connect(url, connect_timeout=connect_timeout):
+            return "ok"
+    except Exception as exc:  # noqa: BLE001 - classified, never re-raised
+        if is_auth_failure(exc):
+            return "auth"
+        if is_server_unavailable(exc):
+            return "absent"
+        return "other"
+
+
+_PASSWORD_FIX = (
+    "Fix: copy ops/.env from the main checkout into this worktree's ops/, or "
+    "export PSEUDOLIFE_TEST_PG_PASSWORD (its POSTGRES_PASSWORD value) for the "
+    "pytest process"
+)
+_OVERRIDE_FIX = (
+    "Fix: correct or unset PSEUDOLIFE_TEST_PG_PASSWORD, which takes "
+    "precedence over ops/.env"
+)
+
+
+def full_run_password_preflight(kind: str,
+                                env: os._Environ | dict | None = None,
+                                env_file: Path | None = None, *,
+                                example_file: Path | None = None,
+                                probe=None, out=None) -> str | None:
+    """Before a full run takes the suite lock: the refusal message when the
+    dev server answers but rejects the password the suite resolved, else
+    ``None``. A ``targeted`` run gets one line on ``out`` (stderr) and is
+    never refused; any other ``kind`` (an xdist worker, the lock off, as on
+    GitHub Actions) is not checked at all. An explicit
+    ``PSEUDOLIFE_TEST_DATABASE_URL`` is used verbatim by the fixtures, so
+    there is nothing to check either. The message names the password's
+    source, never its value.
+
+    Measured 2026-09-27, twice: a full suite from a fresh worktree whose
+    ops/.env was missing or the template copy ran to the end with 1,424
+    PG-backed tests ERRORing on setup, holding the machine's one full-suite
+    slot for a run that gated nothing.
+    """
+    if kind not in ("full", "targeted"):
+        return None
+    env = os.environ if env is None else env
+    if env.get("PSEUDOLIFE_TEST_DATABASE_URL"):
+        return None
+    try:
+        import psycopg  # noqa: F401
+    except ImportError:
+        return None  # the PG-backed suites skip themselves
+    probe = probe_dev_server if probe is None else probe
+    # A targeted run is never refused, so it only looks for a listener
+    # briefly; a full run waits out libpq's timeout once, before ~20 minutes.
+    if probe(env, env_file, quick=kind == "targeted") != "auth":
+        return None
+    source = describe_password_source(env, env_file, example_file)
+    rejected = (f"the test Postgres at {DEV_HOST_PORT} is reachable but "
+                f"rejects {source}")
+    # The override wins over ops/.env, so copying the file cannot fix it.
+    fix = (_OVERRIDE_FIX if source == "PSEUDOLIFE_TEST_PG_PASSWORD"
+           else _PASSWORD_FIX)
+    if kind == "targeted":
+        print(f"note: {rejected}; any PG-backed test in this run will ERROR "
+              f"on setup. {fix}.", file=out or sys.stderr, flush=True)
+        return None
+    return (f"refusing the full suite: {rejected}. Every PG-backed test would "
+            f"ERROR on setup (1,424 in one 2026-09-27 run) and the run would "
+            f"gate nothing, at the cost of the machine's full-suite slot. "
+            f"{fix}. Targeted runs still start.")
 
 
 def default_admin_url(env: os._Environ | dict | None = None,
