@@ -648,6 +648,7 @@ def test_password_source_names_a_missing_or_example_env_file_without_the_value(t
     # parser's value-free diagnosis rather than raising out of pytest_configure.
     env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED_SECRET_VALUE\n", encoding="utf-8")
     described = describe({}, env_file, example)
+    assert "POSTGRES_PASSWORD cannot be parsed" in described
     assert "Compose variable expansion" in described
     assert "UNSUPPORTED_SECRET_VALUE" not in described
 

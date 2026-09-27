@@ -201,8 +201,14 @@ def describe_password_source(env: os._Environ | dict | None = None,
         pass  # no template to compare with; the parse below still decides
     try:
         value = env_file_password(path)
-    except ValueError as exc:
-        return f"the compose default password, as ops/.env is unusable ({exc})"
+    except ValueError:
+        # A fixed diagnosis, not the parser's message: that one is value-free
+        # too, but it is derived from the password line, and CodeQL's
+        # clear-text-logging query traced it into the printed note (#432).
+        return ("the compose default password, as ops/.env's "
+                "POSTGRES_PASSWORD cannot be parsed (unsupported Compose "
+                "variable expansion, an unterminated quote, or text after "
+                "the value; use a single-quoted literal)")
     if value is None:
         return ("the compose default password, as ops/.env sets no "
                 "POSTGRES_PASSWORD")
