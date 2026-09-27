@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ import pytest
 
 from pseudolife_memory.coordination import dispatch
 from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401
-from tests.test_codex_hooks import ROOT, bash_run, isolated_env, pwsh_run
+from tests.test_codex_hooks import ROOT, bash_exe, bash_run, isolated_env, pwsh_run
 from tests.test_coordination_adapter import FakeDaemon, adapter
 from tests.test_coordination_dispatch_isolation import PRINCIPAL, coordinating  # noqa: F401
 from tests.test_coordination_roster_hygiene import _heartbeats, _wait_for
@@ -910,7 +911,217 @@ def test_compaction_does_not_adopt_a_record_confirmed_for_another_session(tmp_pa
     _claude_hook("coordination-start.sh", env, "this-session", source="compact")
     own = _claude_hook("coordination-prompt.sh", env, "this-session")
     assert own.rstrip("\n").endswith(BODY)
-    assert record.read_text(encoding="utf-8").split() == [_sha("this-session")] * 2
+    lines = record.read_text(encoding="utf-8").splitlines()
+    assert lines[:2] == [_sha("this-session")] * 2
+    assert len(lines) == 4 and re.fullmatch(r"[0-9a-f]{64}", lines[2])  # this process's identity
+    assert re.fullmatch(EXPIRY_LINE, lines[3])
+
+
+# Claude Code gives every plugin SessionEnd hook 1.5 s, whatever hooks.json
+# asks for: the SessionEnd budget is shared and only a settings.json
+# `timeout` raises it (code.claude.com/docs/en/hooks.md). Measured on
+# 2.1.280 on 2026-09-27: a plugin hook with `"timeout": 10` was cancelled at
+# 1.51 s, while a settings.json hook with `"timeout": 60` ran for the 8.7 s
+# it asked for. The handoff record must land inside that budget, so the
+# process creation identity it is bound to is measured once at SessionStart
+# (line 3 of the process record) and read back at SessionEnd; `ps -W`, the
+# only probe of a Windows PID under Git Bash, took 1.6-3.5 s a call on the
+# loaded 2026-09-23 test machine (65 ms idle on 2026-09-27).
+#
+# The identity text is not stable for ever: Git Bash's `ps -W` prints a
+# process's start as HH:MM:SS for its first 24 hours and as "Mon DD" after
+# (msys2-runtime winsup/utils/ps.cc), both in local time, and macOS's
+# `ps -o lstart` is local time too (code review of #429, 2026-09-28). Line 4
+# says until when (epoch seconds) line 3 reads the same, and under which UTC
+# offset; `0 -` is an identity that never changes (Linux's boot id and start
+# ticks). SessionEnd trusts line 3 only inside that window.
+PLUGIN_SESSION_END_BUDGET = 1.5
+EXPIRY_LINE = r"[0-9]{1,12} (-|[+-][0-9]{4})"
+
+
+def _bash_now_and_zone():
+    out = subprocess.run([bash_exe(), "-c", "date '+%s %z'"], capture_output=True, text=True,
+                         check=True, timeout=60).stdout.split()
+    return int(out[0]), out[1]
+
+
+def _other_zone(zone):
+    return "+0000" if zone != "+0000" else "+0100"
+
+
+def test_session_start_records_the_creation_identity_session_end_hands_off(tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    record = directory / f"claude-{env['CLAUDE_PID']}.host"
+    lines = record.read_text(encoding="utf-8").splitlines()
+    assert lines[:2] == [_sha("launch-session")] * 2
+    assert len(lines) == 4 and re.fullmatch(r"[0-9a-f]{64}", lines[2])
+    assert re.fullmatch(EXPIRY_LINE, lines[3])
+    # The Python resolver (wait-mail) still follows a four-line record.
+    from pseudolife_memory.coordination_identity import resolve_digest_path
+    assert resolve_digest_path("launch-session", env={
+        "CLAUDE_CODE_SESSION_ID": "launch-session", "CLAUDE_PID": env["CLAUDE_PID"],
+        "PSEUDOLIFE_DIGEST_DIR": str(directory)}) == directory / f"{_sha('launch-session')}.txt"
+    # A planted identity tells a read of the record from a fresh measurement.
+    _plant(record, f"{lines[0]}\n{lines[1]}\n{_sha('planted identity')}\n{lines[3]}\n")
+    # An invalid daemon URL skips the episode-close request, so the timing
+    # below is the handoff work alone.
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "ftp://invalid"
+    timings = []
+    for _ in range(3):
+        started = time.monotonic()
+        _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+        timings.append(time.monotonic() - started)
+        switch = (directory / f"claude-{env['CLAUDE_PID']}.switch").read_text(encoding="utf-8").splitlines()
+        assert switch[1:] == [_sha("planted identity"), _sha("launch-session")]
+    if not os.environ.get("CI"):
+        # Not on a CI runner: windows-latest spent 19 s on this script's
+        # process creation alone (run 35603265565, 2026-09-21). The fastest
+        # of three: a single run beside another session's full suite took
+        # 1.8 s on 2026-09-28, all of it process creation; that no `ps -W`
+        # runs here is pinned by the stub tests below, not by this clock.
+        assert min(timings) < PLUGIN_SESSION_END_BUDGET, timings
+
+
+@pytest.mark.parametrize("expiry,trusted", [
+    ("{later} {zone}", True),     # inside the window, same UTC offset
+    ("0 {zone}", True),           # a start that no longer changes form ("Mon DD", macOS)
+    ("0 -", True),                # absolute (Linux)
+    ("{past} {zone}", False),     # past it: `ps -W` now prints the start as "Mon DD"
+    ("{later} {other}", False),   # the UTC offset moved (a DST change): local times shifted
+    (None, False),                # no line 4
+    ("{later}", False),           # malformed
+    ("{later} {zone} x", False),
+    ("08x {zone}", False),
+])
+def test_session_end_trusts_the_recorded_identity_only_inside_its_window(expiry, trusted, tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    now, zone = _bash_now_and_zone()
+    record = f"{_sha('launch-session')}\n{_sha('launch-session')}\n{_sha('planted identity')}\n"
+    if expiry is not None:
+        record += expiry.format(later=now + 3600, past=now - 5, zone=zone, other=_other_zone(zone)) + "\n"
+    _plant(directory / f"claude-{env['CLAUDE_PID']}.host", record)
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    switch = (directory / f"claude-{env['CLAUDE_PID']}.switch").read_text(encoding="utf-8").splitlines()
+    assert switch[2] == _sha("launch-session")
+    if trusted:
+        assert switch[1] == _sha("planted identity")
+    else:
+        # Measured afresh, so the next SessionStart's own measurement matches.
+        assert re.fullmatch(r"[0-9a-f]{64}", switch[1]) and switch[1] != _sha("planted identity")
+        _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+        assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
+
+
+def _identity_expiry(row, ostype):
+    """Run coordination-start.sh's identity_expiry on one identity line."""
+    script = (ROOT / "plugin/hooks/coordination-start.sh").read_text(encoding="utf-8")
+    function = re.search(r"^identity_expiry\(\) \{.*?^\}$", script, re.M | re.S)[0]
+    return subprocess.run([bash_exe(), "-c", f'{function}\nOSTYPE={ostype}\nidentity_expiry "$1"', "-", row],
+                          capture_output=True, text=True, check=True, timeout=60).stdout
+
+
+def _gnu_date():
+    """The HH:MM:SS branch runs only under Git Bash, whose `date` is GNU's;
+    macOS's BSD `date` has no -d (the CI macOS lane, 2026-09-28)."""
+    return subprocess.run([bash_exe(), "-c", "date -d 12:00:00 +%s"], capture_output=True,
+                          timeout=60).returncode == 0
+
+
+def test_identity_expiry_of_a_start_under_24_hours_old():
+    if not _gnu_date():
+        pytest.skip("GNU date (Git Bash's) is needed to resolve an HH:MM:SS start")
+    now, zone = _bash_now_and_zone()
+    started = time.localtime(now - 600)
+    stime = time.strftime("%H:%M:%S", started)
+    row = f"  4229792       0       0      35488  ?              0 {stime} C:\\Claude\\claude.exe"
+    flagged = f"I 4229792       0       0      35488  ?              0 {stime} C:\\Claude\\claude.exe"
+    for line in (row, flagged):
+        until, offset = _identity_expiry(line, "msys").split()
+        # 24 h from the start, less an hour (DST) and two minutes (handoff).
+        assert abs(int(until) - (now - 600 + 86400 - 3720)) <= 60, (line, until)
+        assert offset == zone
+
+
+def test_identity_expiry_of_the_stable_forms():
+    _, zone = _bash_now_and_zone()
+    older = f"  4229792       0       0      35488  ?              0 Sep 27 C:\\Program Files\\claude.exe"
+    assert _identity_expiry(older, "msys") == f"0 {zone}"
+    assert _identity_expiry("Sat Sep 27 14:03:22 2026", "darwin24") == f"0 {zone}"
+    assert _identity_expiry("0b5e2a1c-boot 123456", "linux-gnu") == "0 -"
+
+
+# A stand-in for Git Bash's `ps -W`: an exported bash function wins over
+# PATH, which Git's bin/bash.exe launcher rewrites. Each call is counted.
+# The first prints the start as HH:MM:SS, 30 s ahead of the time of day, so
+# the process is 30 s short of 24 hours old; later calls print it as "Mon
+# DD" (after the 24-hour mark) unless PS_STUB_FIXED keeps the first form.
+_PS_STUB = r"""() {
+    local n=0 stime
+    [ -f "$PS_STUB_CALLS" ] && n=$(cat "$PS_STUB_CALLS")
+    echo $((n + 1)) > "$PS_STUB_CALLS"
+    [ "$n" = 0 ] && date -d '+30 seconds' +%H:%M:%S > "$PS_STUB_CALLS.first"
+    stime=$(cat "$PS_STUB_CALLS.first")
+    [ "$n" = 0 ] || [ -n "$PS_STUB_FIXED" ] || stime='Sep 27'
+    echo '      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND'
+    printf '  4229792       0       0      %s  ?              0 %s C:\\Claude\\claude.exe\n' "$CLAUDE_PID" "$stime"
+}"""
+
+
+def _ps_stub_env(tmp_path, **extra):
+    env = _claude_env(tmp_path, pid="35488")
+    env.update({"BASH_FUNC_ps%%": _PS_STUB, "PS_STUB_CALLS": str(tmp_path / "ps-calls"), **extra})
+    return env
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Git Bash `ps -W` identity")
+def test_a_clear_after_the_24_hour_mark_still_carries_the_record(tmp_path):
+    """Code review of #429: a process that turns 24 hours old between its
+    SessionStart and a /clear prints its start in another form, so the
+    identity cached at SessionStart no longer matches. SessionEnd must see
+    the cache has expired and measure afresh, and the handoff must carry."""
+    env = _ps_stub_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    record = (directory / "claude-35488.host").read_text(encoding="utf-8").splitlines()
+    assert record[:2] == [_sha("launch-session"), _sha("cleared-session")]  # carried
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
+    assert (tmp_path / "ps-calls").read_text().strip() == "3"  # start, end (expired), start
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Git Bash `ps -W` identity")
+def test_session_end_skips_ps_while_the_cached_identity_holds(tmp_path):
+    env = _ps_stub_env(tmp_path, PS_STUB_FIXED="1")
+    # A start 30 s ahead of the time of day reads as yesterday: expired. Plant
+    # a start ten minutes ago instead, so the cache is good for most of a day.
+    (tmp_path / "ps-calls").write_text("1\n")
+    (tmp_path / "ps-calls.first").write_text(time.strftime("%H:%M:%S", time.localtime(time.time() - 600)) + "\n")
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    assert (tmp_path / "ps-calls").read_text().strip() == "3"  # 1 planted + start + start: none at the end
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
+    assert (directory / "claude-35488.host").read_text(encoding="utf-8").splitlines()[1] == _sha("cleared-session")
+
+
+def test_session_end_measures_the_identity_when_the_record_carries_none(tmp_path):
+    """A record written by the previous hooks has two lines: the handoff
+    still works, measured at SessionEnd as before."""
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _plant(directory / f"claude-{env['CLAUDE_PID']}.host",
+           f"{_sha('launch-session')}\n{_sha('launch-session')}\n")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    switch = (directory / f"claude-{env['CLAUDE_PID']}.switch").read_text(encoding="utf-8").splitlines()
+    assert len(switch) == 3 and re.fullmatch(r"[0-9a-f]{64}", switch[1])
+    assert switch[2] == _sha("launch-session")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
 
 
 def test_a_resume_handoff_left_by_a_dead_process_with_the_same_pid_is_not_trusted(tmp_path):

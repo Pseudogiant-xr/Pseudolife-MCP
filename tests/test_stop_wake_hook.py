@@ -531,9 +531,9 @@ def test_a_symlinked_host_record_is_refused(tmp_path):
     assert result.returncode == 2 and _woke(result.stderr)
 
 
-# --- parent liveness (POSIX only: a Windows PID is not visible to kill -0) ---
+# --- parent liveness -------------------------------------------------------
 
-@pytest.mark.skipif(os.name == "nt", reason="Git Bash cannot probe a Windows PID cheaply")
+@pytest.mark.skipif(os.name == "nt", reason="kill -0 cannot see a Windows PID; see the test below")
 def test_exits_when_claude_code_is_gone(tmp_path):
     _digest(tmp_path, 3, BODY)
     _seen(tmp_path, 3)
@@ -547,4 +547,24 @@ def test_exits_when_claude_code_is_gone(tmp_path):
         parent.kill()
         parent.wait()
     code, out, err = _finish(process)
+    assert (code, out, err) == (0, "", "")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows PID probe")
+def test_exits_when_claude_code_is_gone_on_windows(tmp_path):
+    """Under Git Bash CLAUDE_PID is a Windows PID that kill -0 cannot see
+    (hooks ran under Git Bash /usr/bin/bash on 2.1.280, 2026-09-27). The hook
+    lists it through `ps -W` at arm time and then once a minute, so an
+    orphaned watcher ends within that minute instead of running its hour."""
+    _digest(tmp_path, 3, BODY)
+    _seen(tmp_path, 3)
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    try:
+        process = _start(_env(tmp_path, wait=3540, CLAUDE_PID=str(parent.pid)))
+        time.sleep(3)
+        assert process.poll() is None
+    finally:
+        parent.kill()
+        parent.wait()
+    code, out, err = _finish(process, timeout=_constant("PARENT_CHECK") + DEADLINE)
     assert (code, out, err) == (0, "", "")

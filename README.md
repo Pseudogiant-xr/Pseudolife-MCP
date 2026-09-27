@@ -927,7 +927,10 @@ verification. Session episodes also work without hooks through the daemon:
 **Current Codex runtimes enable hooks by default, including Windows.**
 Availability depends on the application/runtime and policy, not the model.
 If `[features] hooks = false` is intentional, keep it and use the standing
-`AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
+`AGENTS.md` block. Codex runs the plugin's Windows hooks as native
+PowerShell 7 commands; Claude Code runs their Bash commands through Git
+Bash, so it needs Git for Windows installed (see
+[plugin/README.md](plugin/README.md#windows)).
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
