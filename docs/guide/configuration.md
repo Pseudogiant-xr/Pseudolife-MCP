@@ -1016,9 +1016,10 @@ The **park record** lives on the agent row and is set through
 | `park_needs` | What would clear it, one line (120 characters) |
 | `park_clear_by` | Who can: an agent id, `maintainer`, a lease name, or `anyone` (120) |
 | `park_resume` | What to do once cleared (240) |
-| `park_expires` | An epoch after which the park no longer stands |
+| `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
-An omitted field stays. A plain status update while parked clears the record,
+An omitted field stays; a refinement or a new reason keeps the standing
+expiry. A plain status update while parked clears the record,
 since a session that is working is not parked; a task or `children` update
 leaves it. A park field on its own refines a standing park and is refused
 (`invalid_park`) on an unparked row, as are an unknown reason and a bad
@@ -1038,7 +1039,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
 | `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's; at least three letters), or `urgent` within the sender's cap | `ring_at` |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |

@@ -71,7 +71,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `park_reason` is one of `done`, `blocked`, `needs_approval`, `needs_info`,
   `needs_resource`, `waiting_peer`; `park_needs` (120 characters) says what,
   `park_clear_by` (120) an agent id, `maintainer`, a lease name or `anyone`,
-  `park_resume` (240) what to do once cleared, `park_expires` an epoch. An
+  `park_resume` (240) what to do once cleared, `park_expires` an epoch
+  (a park set without one expires after 12 hours, and none may be set more
+  than 7 days ahead, so a park whose clearer vanished cannot withhold mail
+  forever: the board orchestrator's call on review, awaiting the
+  maintainer's). An
   omitted field stays; `park_reason=""` (REST: `null`) clears the record,
   and so does a plain status update, since a session that is working is
   not parked; a park field alone refines a standing park (`invalid_park`
@@ -88,7 +92,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live channel nor a ring path, with the parked need); `rung` (parked with
   a need the mail plausibly clears: the sender is `park_clear_by`,
   `park_clear_by` is `anyone`, the send's new `clears` names the need in
-  whole words, or the sender set `urgent`), with `ring_at`; `withheld`
+  whole words, including one of four letters or more, or the sender set
+  `urgent`), with `ring_at`; `withheld`
   (parked with a need the mail does not clear) with `park_needs` and
   `park_clear_by`, so the sender knows what would wake it; `nudged` (idle,
   no park record: rung at most once an hour, with a request to park);

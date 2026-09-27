@@ -671,7 +671,9 @@ def test_rings_have_a_nightly_total(store):
     a = store.register("alice")
     b, c, d = (_wake_capable(store) for _ in range(3))
     for agent in (b, c, d):
-        store.update(*creds(agent), park_reason="blocked", park_needs="x", park_clear_by="anyone")
+        # Past the default expiry: the test runs a day on.
+        store.update(*creds(agent), park_reason="blocked", park_needs="x", park_clear_by="anyone",
+                     park_expires=1000.0 + 3 * 86400)
         _idle(store, agent)
     assert _wake(store, a, b)["decision"] == "rung"
     assert _wake(store, a, c)["decision"] == "rung"
@@ -847,3 +849,43 @@ def test_a_served_ring_is_served_again_within_a_heartbeat(store):
     assert store.heartbeat(*creds(b), **beat)["wake"] == first
     store.test_time[0] += 30
     assert store.heartbeat(*creds(b), **beat)["wake"] is None
+
+
+# --- park expiry (orchestrator decision 2026-09-28, pending the maintainer) --
+
+def test_a_new_park_expires_by_default_and_is_capped(store):
+    """A park whose clearer vanished must not withhold mail forever: a new
+    park without ``park_expires`` gets PARK_DEFAULT_TTL, a refinement keeps
+    the standing expiry, and one past PARK_MAX_TTL is refused."""
+    from pseudolife_memory.storage.coordination import PARK_DEFAULT_TTL, PARK_MAX_TTL
+    assert (PARK_DEFAULT_TTL, PARK_MAX_TTL) == (12 * 3600, 7 * 86400)
+    a = store.register("alice")
+    out = store.update(*creds(a), park_reason="waiting_peer", park_needs="a review")
+    assert out["park_expires"] == 1000.0 + PARK_DEFAULT_TTL
+    store.test_time[0] = 2000.0
+    out = store.update(*creds(a), park_needs="a review of the diff")
+    assert out["park_expires"] == 1000.0 + PARK_DEFAULT_TTL
+    # A new reason keeps the standing expiry too.
+    out = store.update(*creds(a), park_reason="blocked")
+    assert out["park_expires"] == 1000.0 + PARK_DEFAULT_TTL
+    # Cleared, then parked again: the default runs from now.
+    store.update(*creds(a), park_reason=None)
+    out = store.update(*creds(a), park_reason="blocked")
+    assert out["park_expires"] == 2000.0 + PARK_DEFAULT_TTL
+    assert store.update(*creds(a), park_expires=2000.0 + PARK_MAX_TTL)["park_expires"] == \
+        2000.0 + PARK_MAX_TTL
+    with pytest.raises(CoordinationError, match="invalid_park"):
+        store.update(*creds(a), park_expires=2000.0 + PARK_MAX_TTL + 1)
+
+
+def test_clears_needs_a_distinctive_word(store):
+    """A whole-word match of a filler word ("the", "of") is no match: the
+    run must hold a word of four letters or more."""
+    a = store.register("alice")
+    b = _wake_capable(store)
+    store.update(*creds(b), park_reason="needs_info", park_needs="review of the storage diff",
+                 park_clear_by="maintainer")
+    _idle(store, b)
+    for filler in ("the", "of the", "diff"[:3]):
+        assert _wake(store, a, b, clears=filler)["decision"] == "withheld", filler
+    assert _wake(store, a, b, clears="the storage")["decision"] == "rung"

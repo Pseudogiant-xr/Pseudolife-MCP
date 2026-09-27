@@ -330,7 +330,7 @@ fire() {
 $BODY"
     case "$RING_REASON" in
         nudged*) text="$text
-Set your park status before you stop: memory_agents(action=update, park_reason=..., park_needs=..., park_clear_by=..., park_resume=...), so mail wakes you only when it clears that need." ;;
+Set your park status before you stop: memory_agents(action=update, park_reason=..., park_needs=..., park_clear_by=..., park_resume=..., park_expires=<epoch, default 12 h>), so mail wakes you only when it clears that need." ;;
     esac
     printf '%s\n' "$text" >&3
     # The prompt hook may have moved the marker while this watcher slept:

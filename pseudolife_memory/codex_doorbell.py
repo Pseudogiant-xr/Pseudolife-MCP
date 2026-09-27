@@ -114,7 +114,7 @@ def doorbell_text(count: int, nudge: bool = False) -> str:
             "the user authorized. If nothing is pending, end the turn.")
     if nudge:
         text += (" Then set your park status with memory_agents update park_reason, "
-                 "park_needs, park_clear_by and park_resume.")
+                 "park_needs, park_clear_by, park_resume and park_expires.")
     return text
 
 
