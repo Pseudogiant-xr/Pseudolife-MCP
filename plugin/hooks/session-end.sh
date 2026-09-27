@@ -31,16 +31,22 @@ SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\
 REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 
 # Coordination digest key, first: Claude Code gives a plugin SessionEnd hook
-# 1.5s, whatever hooks.json says, and the connection checks and curl below
-# can use all of it. /clear or /resume inside a running process keeps its
-# shim, so the session ending here hands the process's record (see
+# 1.5s, whatever hooks.json says (the SessionEnd budget is shared, and only
+# a settings.json timeout raises it; on 2.1.280 a plugin hook asking for
+# 10 s was cancelled at 1.5 s, 2026-09-27), and the connection checks and
+# curl below can use all of it. /clear or /resume inside a running process
+# keeps its shim, so the session ending here hands the process's record (see
 # coordination-start.sh) to the next one: time, this process's creation identity
-# and the ending session's key. A record not confirmed for the ending
-# session (none yet under older hooks, or another process's) is first
-# replaced by that session's own key, which is right unless an earlier
-# /clear under older hooks already moved it. Without a creation identity no
-# handoff is written, and the next session starts from its own key.
-# Same helpers as coordination-start.sh.
+# and the ending session's key. The identity is read from the record's
+# third line, which SessionStart measured with seconds to spare; it is
+# measured here only for a record without one (written before 2026-09-28,
+# or not confirmed for the ending session), because the Windows probe,
+# `ps -W`, took seconds a call on a loaded host. A record not confirmed
+# for the ending session (none yet under older hooks, or another process's)
+# is first replaced by that session's own key, which is right unless an
+# earlier /clear under older hooks already moved it. Without a creation
+# identity no handoff is written, and the next session starts from its own
+# key. Same helpers as coordination-start.sh.
 sha256_of() {  # $1 = text
     printf '%s' "$1" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
 }
@@ -80,18 +86,34 @@ case "$REASON" in
                     KEY=$(sha256_of "$SID")
                     RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
                     SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
-                    LINE1="" LINE2=""
+                    LINE1="" LINE2="" LINE3=""
                     if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
-                        { IFS= read -r LINE1; IFS= read -r LINE2; } 2>/dev/null < "$RECORD"
+                        { IFS= read -r LINE1; IFS= read -r LINE2; IFS= read -r LINE3; } 2>/dev/null < "$RECORD"
                     fi
                     case "$LINE1" in ''|*[!0-9a-f]*) LINE1="" ;; esac
+                    case "$LINE3" in ''|*[!0-9a-f]*) LINE3="" ;; esac
+                    [ "${#LINE3}" -eq 64 ] || LINE3=""
                     if [ -n "$KEY" ]; then
-                        if [ "${#LINE1}" -ne 64 ] || [ "$LINE2" != "$KEY" ]; then
-                            write_lines "$RECORD" "$KEY" "$KEY"
+                        WHO="" CONFIRMED=""
+                        if [ "${#LINE1}" -eq 64 ] && [ "$LINE2" = "$KEY" ]; then
+                            CONFIRMED=1
+                            WHO="$LINE3"
                         fi
-                        IDENTITY=$(process_identity "$CLAUDE_PID")
-                        [ -n "$IDENTITY" ] &&
-                            write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$(sha256_of "$IDENTITY")" "$KEY"
+                        if [ -z "$WHO" ]; then
+                            # No identity on record (the previous hooks wrote
+                            # it, or it is another session's): measure here.
+                            IDENTITY=$(process_identity "$CLAUDE_PID")
+                            [ -n "$IDENTITY" ] && WHO=$(sha256_of "$IDENTITY")
+                        fi
+                        if [ -z "$CONFIRMED" ]; then
+                            if [ -n "$WHO" ]; then
+                                write_lines "$RECORD" "$KEY" "$KEY" "$WHO"
+                            else
+                                write_lines "$RECORD" "$KEY" "$KEY"
+                            fi
+                        fi
+                        [ -n "$WHO" ] &&
+                            write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$WHO" "$KEY"
                     fi
                 fi
                 ;;

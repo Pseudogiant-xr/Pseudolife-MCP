@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -910,7 +911,61 @@ def test_compaction_does_not_adopt_a_record_confirmed_for_another_session(tmp_pa
     _claude_hook("coordination-start.sh", env, "this-session", source="compact")
     own = _claude_hook("coordination-prompt.sh", env, "this-session")
     assert own.rstrip("\n").endswith(BODY)
-    assert record.read_text(encoding="utf-8").split() == [_sha("this-session")] * 2
+    lines = record.read_text(encoding="utf-8").split()
+    assert lines[:2] == [_sha("this-session")] * 2
+    assert len(lines) == 3 and re.fullmatch(r"[0-9a-f]{64}", lines[2])  # this process's identity
+
+
+# Claude Code gives every plugin SessionEnd hook 1.5 s, whatever hooks.json
+# asks for: the SessionEnd budget is shared and only a settings.json
+# `timeout` raises it (code.claude.com/docs/en/hooks.md). Measured on
+# 2.1.280 on 2026-09-27: a plugin hook with `"timeout": 10` was cancelled at
+# 1.51 s, while a settings.json hook with `"timeout": 60` ran for the 8.7 s
+# it asked for. The handoff record must land inside that budget, so the
+# process creation identity it is bound to is measured once at SessionStart
+# (line 3 of the process record) and read back at SessionEnd; `ps -W`, the
+# only probe of a Windows PID under Git Bash, took 1.6-3.5 s a call on the
+# loaded 2026-09-23 test machine (65 ms idle on 2026-09-27).
+PLUGIN_SESSION_END_BUDGET = 1.5
+
+
+def test_session_start_records_the_creation_identity_session_end_hands_off(tmp_path):
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _claude_hook("coordination-start.sh", env, "launch-session", source="startup")
+    record = directory / f"claude-{env['CLAUDE_PID']}.host"
+    lines = record.read_text(encoding="utf-8").splitlines()
+    assert lines[:2] == [_sha("launch-session")] * 2
+    assert len(lines) == 3 and re.fullmatch(r"[0-9a-f]{64}", lines[2])
+    # A planted identity tells a read of the record from a fresh measurement.
+    _plant(record, f"{lines[0]}\n{lines[1]}\n{_sha('planted identity')}\n")
+    # An invalid daemon URL skips the episode-close request, so the timing
+    # below is the handoff work alone.
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "ftp://invalid"
+    started = time.monotonic()
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    elapsed = time.monotonic() - started
+    switch = (directory / f"claude-{env['CLAUDE_PID']}.switch").read_text(encoding="utf-8").splitlines()
+    assert switch[1:] == [_sha("planted identity"), _sha("launch-session")]
+    if not os.environ.get("CI"):
+        # Not on a CI runner: windows-latest spent 19 s on this script's
+        # process creation alone (run 35603265565, 2026-09-21).
+        assert elapsed < PLUGIN_SESSION_END_BUDGET, elapsed
+
+
+def test_session_end_measures_the_identity_when_the_record_carries_none(tmp_path):
+    """A record written by the previous hooks has two lines: the handoff
+    still works, measured at SessionEnd as before."""
+    env = _claude_env(tmp_path)
+    directory = _write_digest(tmp_path, _sha("launch-session"), 3, BODY)
+    _plant(directory / f"claude-{env['CLAUDE_PID']}.host",
+           f"{_sha('launch-session')}\n{_sha('launch-session')}\n")
+    _claude_hook("session-end.sh", env, "launch-session", reason="clear")
+    switch = (directory / f"claude-{env['CLAUDE_PID']}.switch").read_text(encoding="utf-8").splitlines()
+    assert len(switch) == 3 and re.fullmatch(r"[0-9a-f]{64}", switch[1])
+    assert switch[2] == _sha("launch-session")
+    _claude_hook("coordination-start.sh", env, "cleared-session", source="clear")
+    assert _claude_hook("coordination-prompt.sh", env, "cleared-session").rstrip("\n").endswith(BODY)
 
 
 def test_a_resume_handoff_left_by_a_dead_process_with_the_same_pid_is_not_trusted(tmp_path):

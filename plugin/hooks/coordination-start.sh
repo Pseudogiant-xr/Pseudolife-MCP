@@ -11,13 +11,18 @@ SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"
 # (env-vars docs, 2026-09-23). The shim writes its digest under its launch
 # id, so the hooks keep one record per Claude Code process, named by the
 # CLAUDE_PID Claude Code exports to hooks (not to MCP servers): line 1 the
-# shim's key, line 2 the key of the session the record is confirmed for.
+# shim's key, line 2 the key of the session the record is confirmed for,
+# line 3 the sha256 of this process's creation identity (below), measured
+# here, where SessionStart has seconds, so that session-end.sh only reads it
+# inside the 1.5 s Claude Code gives a plugin SessionEnd hook (records from
+# before 2026-09-28 have two lines; session-end.sh measures for those).
 # The prompt hook follows line 1 only while line 2 names its own session.
 # A launch writes the session's own key. /clear and /resume carry the record
 # forward only through the handoff session-end.sh has just left
 # (claude-$CLAUDE_PID.switch: time, the creation identity of the process
-# that wrote it, the key of the session that ended); compaction only when
-# the record is already confirmed for this session. Anything unproven is
+# that wrote it, the key of the session that ended), checked against a fresh
+# measurement here, never against the record; compaction only when the
+# record is already confirmed for this session. Anything unproven is
 # replaced by the session's own key, so a record a dead process left behind
 # is never followed, even when its PID comes back. The env id equals the
 # stdin id only in a hook Claude Code started for this session: a host run
@@ -61,6 +66,24 @@ process_identity() {
     esac
     [ -n "$line" ] && printf '%s' "$line"
 }
+# Sets IDENT to the sha256 of this process's creation identity ('' where
+# the host offers none), measuring at most once per run.
+IDENT="" IDENT_MEASURED=""
+measure_identity() {
+    local identity
+    [ -z "$IDENT_MEASURED" ] || return 0
+    IDENT_MEASURED=1
+    identity=$(process_identity "$CLAUDE_PID")
+    [ -n "$identity" ] && IDENT=$(sha256_of "$identity")
+}
+write_record() {  # $1 = the shim's key, $2 = the key it is confirmed for
+    measure_identity
+    if [ -n "$IDENT" ]; then
+        write_lines "$RECORD" "$1" "$2" "$IDENT"
+    else
+        write_lines "$RECORD" "$1" "$2"
+    fi
+}
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     KEY=$(sha256_of "$SID")
@@ -93,17 +116,17 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
                         if [ -n "$STAMP" ] && [ "$FROM" = "$FOR" ] &&
                                 [ "${#STAMP}" -le 12 ] && [ "${#NOW}" -le 12 ] &&
                                 [ $((NOW - STAMP)) -ge 0 ] && [ $((NOW - STAMP)) -le 60 ]; then
-                            IDENTITY=$(process_identity "$CLAUDE_PID")
-                            [ -n "$IDENTITY" ] && [ "$(sha256_of "$IDENTITY")" = "$WHO" ] && CARRY=1
+                            measure_identity
+                            [ -n "$IDENT" ] && [ "$IDENT" = "$WHO" ] && CARRY=1
                         fi
                         ;;
                 esac
                 if [ -n "$CARRY" ]; then
                     # Refreshed as well, so the sweep keeps a live record.
-                    write_lines "$RECORD" "$SHIM" "$KEY"
+                    write_record "$SHIM" "$KEY"
                     KEY="$SHIM"
                 else
-                    write_lines "$RECORD" "$KEY" "$KEY"
+                    write_record "$KEY" "$KEY"
                 fi
                 rm -f "$SWITCH" 2>/dev/null
                 if [ "$SRC" = startup ]; then

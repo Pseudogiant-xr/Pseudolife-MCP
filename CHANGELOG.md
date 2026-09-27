@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — the plugin's Windows hooks: Git Bash is the requirement, the /clear handoff fits its budget, an orphaned wake watcher stops)
+- Claude Code runs the plugin's hook commands through Git Bash on Windows,
+  found by its own rules (`CLAUDE_CODE_GIT_BASH_PATH`, then the default Git
+  for Windows directories, then the `git` on PATH), and falls back to
+  PowerShell only when it finds none; it ignores the `commandWindows`
+  field, which is Codex's. Measured on Claude Code 2.1.280 on 2026-09-27:
+  with every Git directory removed from PATH and `bash` on PATH resolving
+  to the WSL launcher, the hooks still ran under
+  `C:\Program Files\Git\bin\bash.exe`, and the `commandWindows` command
+  never ran. Without Git Bash every plugin hook fails silently in
+  PowerShell, so Git for Windows is now a stated requirement (README,
+  `plugin/README.md`, `docs/guide/providers.md`), and
+  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`), fails
+  with `GitBashMissing` when there is none, and warns when `bash` on PATH
+  is the WSL launcher (`bash_on_path_is_wsl_launcher`), which does not
+  affect Claude Code but breaks tools that look bash up on PATH. The
+  2026-07-16 plugin design note, which said hooks ran in PowerShell by
+  default on Windows, carries a dated correction.
+- Claude Code gives a plugin's SessionEnd hooks 1.5 s in total, whatever
+  `timeout` hooks.json sets: a settings.json hook with `"timeout": 60` ran
+  the 8.7 s it asked for, the plugin hook asking for 10 s was cancelled at
+  1.5 s (2.1.280, 2026-09-27). The `/clear` and `/resume` digest handoff
+  measured the process creation identity inside that budget with `ps -W`,
+  which took seconds a call on the loaded 2026-09-23 test host (65 ms idle
+  on 2026-09-27). SessionStart now measures it, with seconds to spare, into
+  a third line of `claude-<pid>.host`, and SessionEnd reads it, measuring
+  only for a record the previous hooks wrote; SessionStart still checks a
+  handoff against a fresh measurement, never against the record. The
+  handoff work took about 0.3 s on the maintainer's host; the episode-close
+  request still follows it and may be cut short, as before (the idle
+  reaper is the backstop). Two-line records stay valid.
+- The opt-in Stop hook could not tell whether Claude Code was still running
+  on Windows (`kill -0` cannot see a Windows PID), so a watcher orphaned by
+  a crash ran its full hour. It now lists the process through `ps -W` at
+  arm time and once a minute, and ends within the minute of it going away;
+  a listing that fails leaves the watch alone. Linux and macOS are
+  unchanged.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks`.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a

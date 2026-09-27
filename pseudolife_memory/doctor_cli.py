@@ -7,7 +7,72 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
+
+# Where Claude Code looks for bash.exe on Windows when CLAUDE_CODE_GIT_BASH_PATH
+# is not set, before the `git` on PATH (code.claude.com/docs/en/troubleshoot-install.md).
+GIT_BASH_DEFAULTS = (r"C:\Program Files\Git\bin\bash.exe",
+                     r"C:\Program Files (x86)\Git\bin\bash.exe")
+_BASH_NAMES = {"bash.exe", "sh.exe", "bash", "sh"}
+# The WSL launcher lives in System32; the Store build's alias in WindowsApps.
+_WSL_LAUNCHER_DIRS = {"system32", "windowsapps"}
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def find_git_bash(env, *, defaults=GIT_BASH_DEFAULTS, which=shutil.which) -> str | None:
+    """The bash.exe Claude Code would run hook commands with, by its rules:
+    ``CLAUDE_CODE_GIT_BASH_PATH`` when it names an existing bash or sh
+    binary, then the default Git for Windows install directories, then
+    ``bin\\bash.exe`` two levels up from the ``git`` on PATH (``cmd\\git.exe``
+    or ``mingw64\\bin\\git.exe``). ``None`` when none exists: Claude Code then
+    runs hooks in PowerShell, where the plugin's Bash commands fail."""
+    configured = env.get("CLAUDE_CODE_GIT_BASH_PATH")
+    if configured:
+        path = Path(configured)
+        if path.name.lower() in _BASH_NAMES and path.is_file():
+            return configured
+    for candidate in defaults:
+        if Path(candidate).is_file():
+            return candidate
+    git = which("git")
+    if git:
+        candidate = Path(git).parent.parent / "bin" / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def git_bash_report(env, *, defaults=GIT_BASH_DEFAULTS, which=shutil.which) -> dict:
+    """The Windows half of the report: the Git Bash Claude Code would use,
+    what a bare ``bash`` on PATH runs, and recovery text when either is
+    wrong. ``bash`` resolving to the WSL launcher does not affect Claude
+    Code, which never looks bash up on PATH, but breaks any tool that does
+    (the 2026-09-12 Codex hook failures ran plugin scripts under WSL)."""
+    git_bash = find_git_bash(env, defaults=defaults, which=which)
+    bash_on_path = which("bash")
+    is_wsl_launcher = bool(bash_on_path
+                           and Path(bash_on_path).parent.name.lower() in _WSL_LAUNCHER_DIRS)
+    report = {"git_bash": git_bash, "bash_on_path": bash_on_path,
+              "bash_on_path_is_wsl_launcher": is_wsl_launcher}
+    if git_bash is None:
+        report["git_bash_recovery"] = (
+            "Claude Code runs the plugin's hook commands through Git Bash and found "
+            "none: install Git for Windows (the default location, or put its cmd "
+            "directory on PATH), or set CLAUDE_CODE_GIT_BASH_PATH to its bin\\bash.exe "
+            "in the env block of ~/.claude/settings.json; then restart Claude Code. "
+            "Codex hooks run in PowerShell and are unaffected.")
+    elif is_wsl_launcher:
+        report["git_bash_recovery"] = (
+            f"`bash` on PATH is the WSL launcher ({bash_on_path}). Claude Code still "
+            f"runs the plugin hooks through {git_bash}, but a bare `bash` in a "
+            "terminal or another tool opens WSL, which cannot read the plugin's "
+            "Windows paths: put Git's bin directory ahead of System32 on PATH, or "
+            "call that bash.exe by its full path.")
+    return report
 
 
 async def _handshake() -> dict:
@@ -45,6 +110,8 @@ def run_doctor() -> None:
             report[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             report[package] = "not installed"
+    if _windows():
+        report.update(git_bash_report(os.environ))
     try:
         _require_mcp_sdk_v2()
         health = probe_health(_daemon_url(), timeout=min(args.timeout, 2))
@@ -80,5 +147,13 @@ def run_doctor() -> None:
         # or URL credentials. The exception type plus recovery is sufficient.
         report["error"] = type(exc).__name__
         report["recovery"] = "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
+    # No Git Bash fails the report whatever the daemon said: the shim works,
+    # the Claude Code plugin hooks do not. An earlier error keeps its name
+    # and recovery; the Git Bash advice is in git_bash_recovery either way.
+    if "git_bash" in report and report["git_bash"] is None:
+        report["ok"] = False
+        if "error" not in report:
+            report["error"] = "GitBashMissing"
+            report["recovery"] = report["git_bash_recovery"]
     print(json.dumps(report, indent=2))
     raise SystemExit(0 if report["ok"] else 1)
