@@ -158,3 +158,79 @@ def test_parent_names_its_children_over_rest(pg_conn, pg_url, tmp_path):
         asyncio.run(asyncio.wait_for(drive(), 20))
     finally:
         storage.close()
+
+
+
+def test_park_records_gate_wakes_over_rest(pg_conn, pg_url, tmp_path):
+    """End to end on the bench Postgres: a session parks over REST, peers
+    see the record, chatter to it is withheld with the need, mail that
+    clears the need is rung and reaches the parked adapter's next heartbeat
+    as a ring marker, and the Stop-hook park gate answers for both."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def adapter(name, wake=False):
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / f"{name}.json", label=name, wake_enabled=wake,
+                    digest_path=tmp_path / "digests" / f"{name}.txt")
+            async with adapter("sender") as sender, adapter("parked", True) as parked:
+                async def post(agent, action, body):
+                    result = await client.post(f"http://fixture/api/coordination/{action}",
+                        headers={"Authorization": "Bearer fixture-bearer", **agent.instance_headers}, json=body)
+                    assert result.status_code == 200, result.text
+                    return result.json()
+
+                async def gate(agent, since=None):
+                    query = "?agent=" + agent.instance_headers["X-PL-Agent"]
+                    if since is not None:
+                        query += f"&since={since}"
+                    result = await client.get("http://fixture/api/hook/park-gate" + query,
+                                              headers={"Authorization": "Bearer fixture-bearer"})
+                    assert result.status_code == 200, result.text
+                    return result.text.split("\n")[0]
+
+                parked_id = parked.instance_headers["X-PL-Agent"]
+                assert (tmp_path / "digests" / "parked.agent").read_text().strip() == parked_id
+                assert await gate(parked) == "block"
+                row = await post(parked, "update", {"status": "waiting for the review",
+                    "park_reason": "waiting_peer", "park_needs": "review of the storage diff",
+                    "park_clear_by": "anyone", "park_resume": "apply the review and push"})
+                assert row["park_reason"] == "waiting_peer"
+                assert await gate(parked) == "allow"
+                listed = next(r for r in (await post(sender, "agents", {}))["agents"]
+                              if r["agent_id"] == parked_id)
+                assert (listed["park_needs"], listed["park_clear_by"]) == (
+                    "review of the storage diff", "anyone")
+                # Idle: the attach a moment ago counted as activity.
+                storage.conn.execute("UPDATE coordination_agents SET last_activity=last_activity-3600")
+                storage.conn.commit()
+                first = await post(sender, "send", {"to": parked_id, "text": "the review is in",
+                                                    "request_id": "clears-it",
+                                                    "clears": "review of the storage diff"})
+                assert first["wake"]["decision"] == "rung"
+                await parked._heartbeat()
+                await asyncio.sleep(0.05)
+                ring = (tmp_path / "digests" / "parked.ring").read_text().splitlines()
+                assert ring == [str(parked.digest_watermark), "rung anyone"]
+                # Parked, but silent this turn: asked again.
+                assert await gate(parked, since=4102444800) == "block"
+                await post(parked, "update", {"status": "applying the review"})
+                assert await gate(parked) == "block"
+            # A bearer that cannot use the board gets no answer.
+            result = await client.get("http://fixture/api/hook/park-gate?agent=" + parked_id,
+                                      headers={"Authorization": "Bearer wrong"})
+            assert (result.status_code, result.text) == (200, "")
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()

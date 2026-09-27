@@ -194,18 +194,49 @@ function Get-PseudolifeConnection {
 }
 
 $rawInput = [Console]::In.ReadToEnd()
-# Stop carries Claude Code's opt-in wake hook (stop-wake.sh), which Claude
-# runs through the bash command. Codex loads the same hooks.json and runs
-# this one instead: for Codex it is a silent no-op.
-if ($Event -eq 'Stop') { exit 0 }
 $sessionId = ''
 $startReason = ''
+$stopHookActive = $false
 try {
     $parsedInput = $rawInput | ConvertFrom-Json
     $sessionId = [string]$parsedInput.session_id
     $startReason = [string]$parsedInput.source
     if (-not $startReason) { $startReason = [string]$parsedInput.session_start_reason }
+    $stopHookActive = ($parsedInput.stop_hook_active -eq $true)
 } catch {}
+
+# Stop carries Claude Code's wake hook (stop-wake.sh), which Claude runs
+# through the bash command. Codex loads the same hooks.json and runs this
+# one instead, and gets only the park gate (schema v48): when the turn is
+# not itself a Stop continuation and the shim has named this thread's board
+# address in <key>.agent, one bounded request asks the daemon whether the
+# thread parked since the turn began (the <key>.turn stamp CoordinationPrompt
+# leaves). A block is returned the way Codex documents for Stop, JSON on
+# stdout with exit 0: {"decision":"block","reason":<the daemon's message>},
+# which Codex turns into a continuation prompt; a continuation's Stop
+# carries stop_hook_active and is not asked. Allow, no address, or no
+# answer prints nothing. Nothing else happens on Stop: no episode close,
+# no .seen marker.
+$gateQuery = $null
+if ($Event -eq 'Stop') {
+    if ($stopHookActive -or $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { exit 0 }
+    try {
+        $digestDir = Get-DigestDir
+        $key = Get-DigestKey $sessionId
+        $agentPath = Join-Path $digestDir "$key.agent"
+        if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf) -or
+            ((Get-Item -LiteralPath $agentPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 0 }
+        $agentId = ([IO.File]::ReadAllText($agentPath) -split "`r?`n")[0].Trim()
+        if ($agentId -cnotmatch '^[0-9a-f]{32}\z') { exit 0 }
+        $gateQuery = "agent=$agentId"
+        $turnPath = Join-Path $digestDir "$key.turn"
+        if ((Test-Path -LiteralPath $turnPath -PathType Leaf) -and
+            -not ((Get-Item -LiteralPath $turnPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $since = ([IO.File]::ReadAllText($turnPath) -split "`r?`n")[0].Trim()
+            if ($since -cmatch '^[0-9]{1,12}\z') { $gateQuery += "&since=$since" }
+        }
+    } catch { exit 0 }
+}
 
 # The per-turn memory-change note (UserPromptSubmit), as in session-start.sh
 # memory-changes: no request without a safe session id.
@@ -215,6 +246,13 @@ if ($Event -eq 'CoordinationPrompt') {
     try {
         $digest = Read-TurnDigest $sessionId
         if ($digest) { Write-Context $digest }
+    } catch {}
+    # When this turn began, for the Stop park gate. Best effort.
+    try {
+        if ($sessionId -cmatch '^[A-Za-z0-9._-]{1,128}\z' -and (Test-Path -LiteralPath (Get-DigestDir) -PathType Container)) {
+            $turnPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.turn')
+            [IO.File]::WriteAllText($turnPath, "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())`n")
+        }
     } catch {}
     exit 0
 }
@@ -278,6 +316,22 @@ try {
     } else { $null }
     $token = if ($managedTokenless) { '' } else { Get-PseudolifeToken $tokenFile }
     if ($token) { $headers.Authorization = "Bearer $token" }
+    if ($Event -eq 'Stop') {
+        # The park gate's one request; no answer, or anything but "block"
+        # on its first line, is allow. Two seconds, inside the hook budget.
+        $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/park-gate?$gateQuery" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0
+        $text = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        $lines = $text -split "`r?`n"
+        if ($lines[0] -ceq 'block') {
+            $reason = (($lines | Select-Object -Skip 1) -join "`n").TrimEnd("`n")
+            if (-not $reason) {
+                $reason = 'Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)'
+            }
+            [ordered]@{ decision = 'block'; reason = $reason } |
+                ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii
+        }
+        exit 0
+    }
     if ($Event -eq 'CoordinationStart') {
         # The daemon serves the check-in, or an empty body when this bearer
         # cannot use the board. One request, no retry: at most two seconds

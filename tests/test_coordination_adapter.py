@@ -1268,3 +1268,107 @@ def test_saved_identity_survives_a_failed_attach(tmp_path):
         assert daemon.actions().count("register") == 1
 
     asyncio.run(asyncio.wait_for(drive(), 4))
+
+
+# --- the daemon decides, the shim rings (v48) ------------------------------
+
+def _preview(*ids):
+    return [{"message_id": message_id, "sender_agent_id": "f" * 32, "sender_label": "peer",
+             "created_at": 1789900000.0 + index, "excerpt": "note"}
+            for index, message_id in enumerate(ids)]
+
+
+def _mailbox_daemon(answers):
+    """A daemon whose attach and heartbeat answers come from ``answers``:
+    ``(count, preview, wake)`` per call."""
+    daemon = FakeDaemon()
+    answers = iter(answers)
+
+    def hook(action, body):
+        if action not in {"attach", "heartbeat"}:
+            return None
+        count, preview, wake = next(answers)
+        return httpx.Response(200, json={"generation": 3, "lease_until": "later",
+                                         "pending_count": count, "pending_preview": preview,
+                                         "wake": wake})
+    daemon.hook = hook
+    return daemon
+
+
+def test_a_daemon_ring_becomes_a_marker_beside_the_digest(tmp_path):
+    """A heartbeat carrying ``wake`` writes ``<key>.ring`` for the Stop hook
+    (the digest watermark, then the decision and its reason) and offers the
+    same ring to the Codex doorbell once; ``<key>.agent`` names the address
+    from attach on, so the hook can ask the park gate; both leave with the
+    digest. A mailbox update without ``wake`` writes no marker."""
+    daemon = _mailbox_daemon([(0, [], None),
+                              (1, _preview("m1"), None),
+                              (2, _preview("m1", "m2"),
+                               {"decision": "rung", "reason": "anyone", "ring_at": 0.0}),
+                              (2, _preview("m1", "m2"), None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                assert (tmp_path / "digest.agent").read_text() == "agent-a\n"
+                assert coordination.ring_due() is None
+                await coordination._heartbeat()
+                assert not (tmp_path / "digest.ring").exists()
+                assert coordination.ring_due() is None
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)      # a due ring is written at once
+                assert (tmp_path / "digest.ring").read_text() == (
+                    f"{coordination.digest_watermark}\nrung anyone\n")
+                assert coordination.ring_due() == ("rung", "anyone")
+                assert coordination.ring_due() is None
+                await coordination._heartbeat()  # nothing new: the marker stands
+                assert (tmp_path / "digest.ring").read_text().startswith(
+                    f"{coordination.digest_watermark}\n")
+            for suffix in (".txt", ".seen", ".ring", ".agent"):
+                assert not (tmp_path / f"digest{suffix}").exists(), suffix
+
+    asyncio.run(drive())
+    ledger = (tmp_path / "ledger.log").read_text().splitlines()
+    assert [line.split("\t")[1:2] + line.split("\t")[5:] for line in ledger] == [
+        ["ring", "rung anyone"]]
+
+
+def test_a_staggered_ring_waits_for_its_time(tmp_path):
+    """The daemon staggers a fan-out burst by setting ``ring_at`` ahead; the
+    marker and the doorbell's offer both wait for it."""
+    daemon = _mailbox_daemon([(0, [], None),
+                              (1, _preview("m1"),
+                               {"decision": "nudged", "reason": "no_park", "ring_at": time.time() + 0.6})])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                await asyncio.sleep(0.1)
+                assert not (tmp_path / "digest.ring").exists()
+                assert coordination.ring_due() is None
+                await asyncio.sleep(0.8)
+                assert (tmp_path / "digest.ring").read_text().endswith("\nnudged no_park\n")
+                assert coordination.ring_due() == ("nudged", "no_park")
+
+    asyncio.run(drive())
+
+
+def test_a_malformed_wake_answer_rings_nothing(tmp_path):
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), "ring!"),
+                              (1, _preview("m1"), {"decision": "rung"}),
+                              (1, _preview("m1"), {"decision": 7, "reason": "x", "ring_at": 0})])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                for _ in range(3):
+                    await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert not (tmp_path / "digest.ring").exists()
+                assert coordination.ring_due() is None
+
+    asyncio.run(drive())

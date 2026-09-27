@@ -12,15 +12,34 @@
 # stderr carries one line saying what this is, then the shim's digest, which
 # already reads as agent-origin, not user authority.
 #
-# It fires when the digest's watermark (line 1) is past the <key>.seen marker
-# and the body is non-empty. Mail that landed during the turn therefore fires
-# at once, and a digest the session already saw (through the prompt hook, the
-# tool-result hint or an earlier wake) does not fire again at the next turn
-# end; SessionStart clears .seen on resume and compact, so pending mail can
-# wake the session once more after those. Firing prints first, then advances
+# The daemon decides, this hook rings (schema v48, maintainer decision
+# 2026-09-28). Every send gets a wake decision in the daemon; for a ring
+# (rung: mail that clears what the parked recipient declared it needs, or
+# nudged: an idle session that never parked) the shim writes <key>.ring
+# beside the digest: line 1 the digest watermark the ring is for, line 2 the
+# decision and its reason. It fires when that ring is past the <key>.seen
+# marker, the digest's watermark (line 1) is past it too and the body is
+# non-empty. Chatter, mail the daemon withheld, an acknowledgement changing
+# the digest: none of these ring. Mail the session already saw (through the
+# prompt hook, the tool-result hint or an earlier wake) does not fire again
+# at the next turn end; SessionStart clears .seen on resume and compact, so a
+# pending ring can wake the session once more after those. Firing prints
+# first (a nudge adds one sentence asking for a park record), then advances
 # .seen, so those paths stay quiet about it, then appends a "wait" line to
-# the ledger. A marker that cannot advance means no wake at all: it would
-# otherwise fire again at every turn end.
+# the ledger with the ring's reason. A marker that cannot advance means no
+# wake at all: it would otherwise fire again at every turn end.
+#
+# Before arming the wait, the park gate: when the turn that just ended is
+# not itself a stop-hook continuation (stop_hook_active), and the shim has
+# named this session's board address in <key>.agent, one bounded request
+# asks the daemon (GET /api/hook/park-gate?agent=<id>&since=<turn start>,
+# the start from the <key>.turn stamp the prompt hook leaves) whether the
+# session parked. "block" ends the turn at once with the daemon's message
+# as the wake text, once: the continuation's Stop carries
+# stop_hook_active=true and is not asked. The daemon answers allow for a
+# parked or done session; no answer (a daemon that is down, a bearer it
+# refuses) is allow too, so the gate never holds a turn on an error. It
+# appends a "gate" line to the ledger when it blocks.
 #
 # One watcher per session: every firing writes a fresh token to <key>.wake,
 # and an older watcher that finds another token there exits quietly at its
@@ -91,7 +110,72 @@ FILE="$DIGEST_DIR/$KEY.txt"
 SEEN="$DIGEST_DIR/$KEY.seen"
 LEASE="$DIGEST_DIR/$KEY.wake"
 WAKES="$DIGEST_DIR/$KEY.wakes"
+RING="$DIGEST_DIR/$KEY.ring"
+AGENT="$DIGEST_DIR/$KEY.agent"
+TURN="$DIGEST_DIR/$KEY.turn"
 [ -L "$FILE" ] && exit 0
+
+# The park gate's one request. The daemon URL and bearer come from the
+# hook's environment the way the other hooks read them (PSEUDOLIFE_MCP_TOKEN,
+# or a regular PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file
+# is lifecycle.ps1's concern, which runs this gate for Codex. Prints the
+# body; any failure prints nothing, which is allow.
+gate_answer() {
+    local url="${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}" token="" rest
+    local file="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
+    url=${url%/}
+    case "$url" in http://*|https://*) ;; *) return 1 ;; esac
+    case "$url" in *\?*|*\#*|*@*) return 1 ;; esac
+    rest=${url#*://}
+    case "$rest" in ''|*/*) return 1 ;; esac
+    if [ -n "$file" ]; then
+        [ -f "$file" ] && [ ! -L "$file" ] || return 1
+        token=$(cat "$file")
+        token=${token//[$'\r\n']/}
+        case "$token" in ''|*[[:space:]]*) return 1 ;; esac
+    else
+        token="${PSEUDOLIFE_MCP_TOKEN:-}"
+    fi
+    local auth=()
+    [ -n "$token" ] && auth=(-H "Authorization: Bearer $token")
+    curl -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
+        "${auth[@]}" "$url/api/hook/park-gate?$1"
+}
+
+ACTIVE=$(printf '%s' "$INPUT" |
+         grep -o '[{,][[:space:]]*"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
+if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
+    AGENT_ID=""
+    IFS= read -r AGENT_ID < "$AGENT"
+    AGENT_ID=${AGENT_ID%$'\r'}
+    case "$AGENT_ID" in *[!0-9a-f]*) AGENT_ID="" ;; esac
+    [ "${#AGENT_ID}" -eq 32 ] || AGENT_ID=""
+    if [ -n "$AGENT_ID" ]; then
+        SINCE=""
+        if [ -f "$TURN" ] && [ ! -L "$TURN" ]; then
+            IFS= read -r SINCE < "$TURN"
+            SINCE=${SINCE%$'\r'}
+        fi
+        case "$SINCE" in ''|*[!0-9]*) SINCE="" ;; esac
+        [ "${#SINCE}" -le 12 ] || SINCE=""
+        QUERY="agent=$AGENT_ID"
+        [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
+        ANSWER=$(gate_answer "$QUERY")
+        ANSWER=${ANSWER//$'\r'/}
+        case "$ANSWER" in
+            block|block$'\n'*)
+                MESSAGE=""
+                case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
+                while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
+                [ -n "$MESSAGE" ] || MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
+                printf '%s\n' "$MESSAGE" >&3
+                printf '%s\tgate\t%s\t0\t%s\tblock\n' "$(date +%s)" "${KEY:0:8}" \
+                    "$(( ${#MESSAGE} + 1 ))" >> "$DIGEST_DIR/ledger.log"
+                exit 2
+                ;;
+        esac
+    fi
+fi
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
 case "$WAIT" in ''|*[!0-9]*) WAIT=$MAX_WAIT ;; esac
@@ -123,6 +207,24 @@ read_seen() {
     [ -f "$SEEN" ] && IFS= read -r SEEN_AT < "$SEEN"
     SEEN_AT=${SEEN_AT//[$'\r\n ']/}
     case "$SEEN_AT" in ''|*[!0-9]*) SEEN_AT=0 ;; esac
+}
+
+# Sets RING_AT and RING_REASON from the shim's ring marker; true when the
+# daemon decided a ring this session has not seen. Anything but a regular
+# file with a watermark and a reason is no ring: the hook rings on the
+# daemon's word, never on a guess.
+ring_past_seen() {
+    RING_AT=0
+    RING_REASON=""
+    [ -f "$RING" ] && [ ! -L "$RING" ] || return 1
+    { IFS= read -r RING_AT; IFS= read -r RING_REASON; } < "$RING"
+    RING_AT=${RING_AT//[$'\r\n ']/}
+    RING_REASON=${RING_REASON%$'\r'}
+    case "$RING_AT" in ''|*[!0-9]*) return 1 ;; esac
+    [ "${#RING_AT}" -le 12 ] || return 1
+    RING_AT=$((10#$RING_AT))
+    case "$RING_REASON" in ''|*[!-A-Za-z0-9_\ ]*) return 1 ;; esac
+    [ "$RING_AT" -gt "$SEEN_AT" ]
 }
 
 # Sets NOW, and RECENT to the wake times still inside the window; true while
@@ -180,7 +282,8 @@ wait_for_mail() {
             read_seen
             case "$WATERMARK" in
                 ''|*[!0-9]*) ;;
-                *) if [ -n "$BODY" ] && [ "$WATERMARK" -gt "$SEEN_AT" ] && wake_budget_ok; then
+                *) if [ -n "$BODY" ] && [ "$WATERMARK" -gt "$SEEN_AT" ] && ring_past_seen \
+                        && wake_budget_ok; then
                        return 0
                    fi ;;
             esac
@@ -198,6 +301,10 @@ fire() {
     if [ -e "$SEEN" ] && [ ! -f "$SEEN" ]; then return; fi
     text="Pseudolife board mail woke this session (Claude Code labels this delivery a Stop hook error; nothing failed):
 $BODY"
+    case "$RING_REASON" in
+        nudged*) text="$text
+Set your park status before you stop: memory_agents(action=update, park_reason=..., park_needs=..., park_clear_by=..., park_resume=...), so mail wakes you only when it clears that need." ;;
+    esac
     printf '%s\n' "$text" >&3
     # The prompt hook may have moved the marker while this watcher slept:
     # only ever raise it.
@@ -209,8 +316,8 @@ $BODY"
     read_seen
     [ "$SEEN_AT" -ge "$WATERMARK" ] || return
     printf '%s%s\n' "$RECENT" "$NOW" > "$WAKES.$$" && mv -f "$WAKES.$$" "$WAKES"
-    printf '%s\twait\t%s\t%s\t%s\n' "$NOW" "${KEY:0:8}" "$WATERMARK" "$(( ${#text} + 1 ))" \
-        >> "$DIGEST_DIR/ledger.log"
+    printf '%s\twait\t%s\t%s\t%s\t%s\n' "$NOW" "${KEY:0:8}" "$WATERMARK" "$(( ${#text} + 1 ))" \
+        "$RING_REASON" >> "$DIGEST_DIR/ledger.log"
     exit 2
 }
 

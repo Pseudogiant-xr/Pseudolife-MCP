@@ -242,9 +242,13 @@ policy restrictions remain in place.
 
 The plugin's `hooks.json` also carries Claude Code's opt-in wake hook on
 `Stop`, so Codex 0.148 and later lists a fourth PseudoLife hook (earlier
-releases skip async hooks there). It is a no-op in Codex: the native command
-exits at once, and the bash command stops at its opt-in check or the script
-exits unless Claude Code started it. Setup approves it with the other three, and disabling it in
+releases skip async hooks there). In Codex the native command runs only the
+[Stop-hook park gate](configuration.md#waking-an-idle-claude-code-session-the-stop-hook):
+one request asking the daemon whether the thread parked, answered with
+Codex's documented `{"decision": "block", "reason": ...}` when it did not,
+and nothing otherwise; the wake itself is Claude Code's, and the bash
+command stops at its opt-in check or the script exits unless Claude Code
+started it. Setup approves it with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.

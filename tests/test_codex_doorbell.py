@@ -153,14 +153,24 @@ class Mailbox:
         self.seen = 0
         self.mailbox_observer = None
         self.deliveries = []
+        self.reasons = []
         if ids:
             self.set(*ids, notify=False)
+
+    # The daemon's decision the adapter offers (v48): standing by default,
+    # so the arrival tests keep their meaning; a test clears it to show the
+    # gate holds.
+    ring = ("rung", "anyone")
+
+    def ring_due(self):
+        return self.ring
 
     def delivered_watermark(self):
         return self.seen
 
-    def note_delivery(self, kind, size):
+    def note_delivery(self, kind, size, reason=""):
         self.deliveries.append(kind)
+        self.reasons.append(reason)
 
     def set(self, *ids, notify=True):
         preview = [{"message_id": message_id, "sender_agent_id": "f" * 32,
@@ -1148,3 +1158,89 @@ def test_shim_arms_the_doorbell_only_on_opt_in(monkeypatch, tmp_path, capsys):
     assert "PSEUDOLIFE_CODEX_BIN is not an absolute path to an existing file" in missing
     assert "no codex CLI found on PATH" in unfound
     assert "PSEUDOLIFE_CODEX_DOORBELL needs PSEUDOLIFE_AGENT_COORDINATION=1" in uncoordinated
+
+
+# --- the daemon decides, the doorbell rings (v48) --------------------------
+
+def test_without_a_daemon_decision_the_doorbell_holds(tmp_path):
+    """New mail alone no longer rings: the daemon's wake decision, offered
+    by the adapter once it is due, is what lets ``codex queue`` run. The
+    arrival stays owed, so a later decision for it still rings."""
+    command, log = _stub(tmp_path)
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        box = Mailbox()
+        box.ring = None
+        bell.watch(THREAD, box)
+        now[0] += 60
+        box.set("m1")                 # chatter: withheld by the daemon
+        await _settle(bell)
+        assert _argv(log) == []
+        now[0] += 60
+        box.ring = ("rung", "clears")
+        box.set("m1")                 # the next heartbeat carries a decision
+        await _settle(bell)
+        return box
+
+    box = asyncio.run(drive())
+    assert _argv(log) == [_queued(1)]
+    assert box.deliveries == ["bell"]
+    assert box.reasons == ["rung clears"]
+
+
+def test_a_nudge_asks_the_thread_to_park(tmp_path):
+    command, log = _stub(tmp_path)
+    now = [1000.0]
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        box = Mailbox()
+        box.ring = ("nudged", "no_park")
+        bell.watch(THREAD, box)
+        now[0] += 60
+        box.set("m1", "m2")
+        await _settle(bell)
+        return box
+
+    box = asyncio.run(drive())
+    [argv] = _argv(log)
+    assert argv[:4] == ["queue", "--thread", THREAD, "--message"]
+    assert argv[4] == doorbell_text(2, nudge=True)
+    assert argv[4].startswith(doorbell_text(2))
+    assert "park_reason" in argv[4] and "memory_agents update" in argv[4]
+    assert re.fullmatch(r"[A-Za-z0-9 .,:\[\]_-]+", argv[4]), argv[4]
+    assert box.reasons == ["nudged no_park"]
+
+
+def test_the_decision_is_asked_only_when_the_doorbell_would_ring(tmp_path):
+    """An active thread is not rung, and the daemon's offer is not spent on
+    it: the offer is taken only at the moment the bell would run."""
+    command, log = _stub(tmp_path)
+    now = [1000.0]
+    taken = []
+
+    async def drive():
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        box = Mailbox()
+        box.ring = ("rung", "anyone")
+        original = box.ring_due
+
+        def ring_due():
+            taken.append(now[0])
+            return original()
+        box.ring_due = ring_due
+        bell.watch(THREAD, box)
+        bell.note_call(THREAD, "memory_search", {"query": "x"})
+        now[0] += 10
+        box.set("m1")                 # active ten seconds ago: hold
+        await _settle(bell)
+        assert taken == []
+        now[0] += 60
+        box.set("m1")
+        await _settle(bell)
+
+    asyncio.run(drive())
+    assert taken == [1070.0]
+    assert _argv(log) == [_queued(1)]
