@@ -263,6 +263,20 @@ def test_recovery_still_records_on_a_restore_that_predates_the_body_column(store
         store.storage.conn.execute(COORDINATION_SCHEMA_SQL)
 
 
+def test_rebind_works_on_a_restore_that_predates_the_children_column(store):
+    """A pre-v47 backup restores without coordination_agents.children, and
+    rebind runs before any schema pass: the row it returns has none."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    a = store.register("alice")
+    store.storage.conn.execute("ALTER TABLE coordination_agents DROP COLUMN children")
+    try:
+        assert store.recover() == {"revoked": 1, "audited": True}
+        rebound = store.rebind(a["agent_id"], "alice")
+        assert rebound["audited"] is True and rebound["children"] == []
+    finally:
+        store.storage.conn.execute(COORDINATION_SCHEMA_SQL)
+
+
 def test_the_recovery_cli_says_when_the_restored_bank_cannot_record_it(
         store, pg_url, tmp_path, monkeypatch, capsys):
     from tests.test_coordination_recovery import invoke, settings

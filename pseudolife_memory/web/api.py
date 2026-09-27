@@ -54,13 +54,13 @@ async def _send_json(send, status: int, payload: Any) -> None:
 
 
 async def _send_bytes(send, status: int, body: bytes, content_type: str,
-                      cache: str = "no-cache") -> None:
+                      cache: str = "no-cache", extra_headers=()) -> None:
     await send({
         "type": "http.response.start",
         "status": status,
         "headers": [(b"content-type", content_type.encode()),
                     (b"content-length", str(len(body)).encode()),
-                    (b"cache-control", cache.encode())],
+                    (b"cache-control", cache.encode()), *extra_headers],
     })
     await send({"type": "http.response.body", "body": body})
 
@@ -424,8 +424,13 @@ def build_console_app(
                        for k, v in scope.get("headers", [])}
             reason = unavailable_reason(service, headers, token_map=token_map, token=token)
             text = "" if reason else CHECKIN_TEXT + "\n"
+            # X-PL-Board names why the board is off, so the installer and
+            # doctor report the daemon's reason instead of guessing one.
+            # The codes reveal no more than /api's own 401 already does.
+            state = f"off; reason={reason}" if reason else "on"
             await _send_bytes(send, 200, text.encode("utf-8"),
-                              "text/plain; charset=utf-8", "no-store")
+                              "text/plain; charset=utf-8", "no-store",
+                              [(b"x-pl-board", state.encode("ascii"))])
             return
 
         # 5) console REST API (token-gated like /mcp)

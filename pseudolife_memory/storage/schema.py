@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 47
+SCHEMA_META_VERSION = 48
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -617,10 +617,24 @@ BEGIN
         ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body_salt TEXT;
     END IF;
 END $$;
--- v47: one send may reach several recipients (``to: "project:<name>"`` or
+-- v47: the subagents an orchestrating session runs under its own address, as
+-- [{label, since}]. A subagent shares its parent's shim and so its board
+-- identity; the parent names them here instead of giving them addresses.
+-- Guarded like the v46 columns, so a routine start takes no ACCESS EXCLUSIVE
+-- lock on the table once the column exists.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_agents'::regclass
+                     AND attname = 'children' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_agents
+            ADD COLUMN IF NOT EXISTS children JSONB NOT NULL DEFAULT '[]';
+    END IF;
+END $$;
+-- v48: one send may reach several recipients (``to: "project:<name>"`` or
 -- ``"all"``) under one request id, one row each, so the sender's request key
 -- admits the recipient. The unique index is created first, so the table is
--- never without a request key. The pre-v47 key is found by its columns
+-- never without a request key. The pre-v48 key is found by its columns
 -- (exactly sender_agent_id and request_id), not by the name Postgres gave
 -- it, and dropped only where it exists: a pass over a migrated bank then
 -- adds no ALTER TABLE of its own.

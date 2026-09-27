@@ -114,6 +114,11 @@ class CoordinationConnection:
 MAX_TEXT_BYTES = 8192
 MAX_LABEL = 120
 MAX_SCOPE = 120
+# v47: the subagents a session names under its own address. Room for a
+# short work-item label each, and a list small enough to read at a glance
+# in a peer listing, like the 240-character status.
+MAX_CHILDREN = 8
+MAX_CHILD_LABEL = 40
 MAX_PAGE = 50
 MAX_PENDING = 256
 # Recipients one send may reach through ``to: "project:<name>"`` or ``"all"``:
@@ -342,7 +347,7 @@ def _resolved(ids, *, missing, ambiguous):
 def _fingerprint(to, text, reply_to, expires_at):
     """A send's request fingerprint over its resolved recipient (a burst:
     its address as given) and resolved parent. The same digest a full-id
-    send has always stored, so pre-v47 request keys still match."""
+    send has always stored, so pre-v48 request keys still match."""
     return _hash(json.dumps([to, text, reply_to, expires_at], ensure_ascii=False,
                             separators=(",", ":")))
 
@@ -984,6 +989,9 @@ class CoordinationStore:
                 "episode", "capabilities", "wake_enabled", "created_at",
                 "last_activity", "lifecycle")
         result = {k: row[k] for k in keys}
+        # Offline rebind runs on a restored bank before any schema pass, so
+        # a pre-v47 row has no children column.
+        result["children"] = row.get("children", [])
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
         return result
@@ -1036,6 +1044,16 @@ class CoordinationStore:
                     _refuse_secret(item)
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
+            elif key == "children":
+                # Labels only: update() stamps each one's ``since``.
+                if not isinstance(value, list) or len(value) > MAX_CHILDREN:
+                    raise CoordinationError("invalid_children")
+                for label in value:
+                    _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    # Hashed into the update event, like the status.
+                    _refuse_secret(label)
+                if len(set(value)) != len(value):
+                    raise CoordinationError("invalid_children")
             else:
                 raise CoordinationError("invalid_update")
         return fields
@@ -1054,12 +1072,18 @@ class CoordinationStore:
             now = self.clock()
             # Only a real change reaches the row and the log, so a status
             # update that never used an expectation logs what it always did.
+            if "children" in fields:
+                # A label carried over keeps the time it first appeared.
+                since = {child["label"]: child["since"] for child in row["children"]}
+                fields["children"] = [{"label": label, "since": since.get(label, now)}
+                                      for label in fields["children"]]
             if expect is not None:
                 fields["status_expires_at"] = now + expect
             elif "status" in fields and row["status_expires_at"] is not None:
                 fields["status_expires_at"] = None
             assignments = [f"{key}=%s" for key in fields]
-            values = [Jsonb(v) if k == "capabilities" else v for k, v in fields.items()]
+            values = [Jsonb(v) if k in {"capabilities", "children"} else v
+                      for k, v in fields.items()]
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET " + ",".join(assignments + ["last_activity=%s"])
                 + " WHERE agent_id=%s", (*values, now, agent_id))
@@ -2249,7 +2273,7 @@ class CoordinationStore:
                 "other_copies": siblings}
 
     def _burst_siblings(self, message_id, sender, payload):
-        """The other messages of the burst ``message_id`` was sent in (v47:
+        """The other messages of the burst ``message_id`` was sent in (v48:
         the same sender and request id), which each keep their own copy of
         the body until they are redacted too. Empty for a direct send."""
         if payload is None or "fanout" not in payload:

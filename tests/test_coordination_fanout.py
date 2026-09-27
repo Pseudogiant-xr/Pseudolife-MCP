@@ -10,7 +10,7 @@ the list shows with ``adapter_available``. One request id covers the burst,
 so a retry returns the same receipts; the burst is atomic, so a retry never
 sees half of one. The audit log keeps one ``send`` event per recipient, each
 with its own body and salt, so ``verify``, ``redact`` and ``export --agent``
-need no new event kind; schema v47 lets the mailbox rows share the request
+need no new event kind; schema v48 lets the mailbox rows share the request
 id.
 """
 import pytest
@@ -91,7 +91,7 @@ def test_one_request_id_covers_the_burst_so_a_retry_returns_the_same_receipts(st
         store.send(*creds(sender), to="project:p", text="changed", request_id="r")
     with pytest.raises(CoordinationError, match="request_conflict"):
         store.send(*creds(sender), to=a["agent_id"], text="fix", request_id="r")
-    # The rows share the request id (schema v47) and the recipients each got
+    # The rows share the request id (schema v48) and the recipients each got
     # the message once.
     assert store.storage.conn.execute(
         "SELECT count(*) FROM coordination_messages WHERE request_id='r'").fetchone()[0] == 2
@@ -241,8 +241,8 @@ def test_over_rest_a_burst_returns_per_recipient_receipts(pg_conn, pg_url):
     _run(storage, drive)
 
 
-def test_v47_replaces_the_sender_request_key_with_one_that_admits_a_recipient(pg_conn):
-    """A bank created before v47 carries the two-column unique constraint;
+def test_v48_replaces_the_sender_request_key_with_one_that_admits_a_recipient(pg_conn):
+    """A bank created before v48 carries the two-column unique constraint;
     the schema pass must drop it (guarded, so an open export never blocks
     the pass) and the three-column unique index must be there either way."""
     pg_conn.autocommit = True
