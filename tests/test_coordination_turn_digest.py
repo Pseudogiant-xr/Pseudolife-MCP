@@ -1023,7 +1023,16 @@ def _identity_expiry(row, ostype):
                           capture_output=True, text=True, check=True, timeout=60).stdout
 
 
-def test_identity_expiry_follows_the_ps_start_time_forms():
+def _gnu_date():
+    """The HH:MM:SS branch runs only under Git Bash, whose `date` is GNU's;
+    macOS's BSD `date` has no -d (the CI macOS lane, 2026-09-28)."""
+    return subprocess.run([bash_exe(), "-c", "date -d 12:00:00 +%s"], capture_output=True,
+                          timeout=60).returncode == 0
+
+
+def test_identity_expiry_of_a_start_under_24_hours_old():
+    if not _gnu_date():
+        pytest.skip("GNU date (Git Bash's) is needed to resolve an HH:MM:SS start")
     now, zone = _bash_now_and_zone()
     started = time.localtime(now - 600)
     stime = time.strftime("%H:%M:%S", started)
@@ -1034,6 +1043,10 @@ def test_identity_expiry_follows_the_ps_start_time_forms():
         # 24 h from the start, less an hour (DST) and two minutes (handoff).
         assert abs(int(until) - (now - 600 + 86400 - 3720)) <= 60, (line, until)
         assert offset == zone
+
+
+def test_identity_expiry_of_the_stable_forms():
+    _, zone = _bash_now_and_zone()
     older = f"  4229792       0       0      35488  ?              0 Sep 27 C:\\Program Files\\claude.exe"
     assert _identity_expiry(older, "msys") == f"0 {zone}"
     assert _identity_expiry("Sat Sep 27 14:03:22 2026", "darwin24") == f"0 {zone}"
