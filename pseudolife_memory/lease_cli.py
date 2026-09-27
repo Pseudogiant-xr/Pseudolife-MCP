@@ -295,7 +295,12 @@ def _queued_notice(name: str, reply: dict) -> str:
 # --- the board -------------------------------------------------------------------
 
 class _Refused(Exception):
-    """The board cannot be used for this run; the message says why."""
+    """The board cannot be used for this run; the message says why, and
+    ``code`` is the daemon's error code when it gave one."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class _Transient(Exception):
@@ -348,7 +353,7 @@ def _decode(response) -> dict:
     detail = f"HTTP {status}" + (f" {code}" if code else "")
     if status == 429 or status >= 500 or code == "lease_queue_full":
         raise _Transient(detail)
-    raise _Refused(f"{_refusal_text(status, code)} ({detail})")
+    raise _Refused(f"{_refusal_text(status, code)} ({detail})", code)
 
 
 class _Board:
@@ -394,6 +399,10 @@ class _Board:
     @property
     def agent_id(self) -> str | None:
         return self._agent_id
+
+    def forget(self) -> None:
+        """Drop this run's address, so the next call registers a new one."""
+        self._agent_id = self._credential = None
 
     def register(self, *, task: str, project: str, label: str = LABEL,
                  status: str = "") -> None:
@@ -1026,9 +1035,16 @@ class BoardMirror:
             self._board = None
         _say(f"lease: board skipped: {why}; {self.name!r} is held by the local lock alone")
 
-    def _lease(self) -> dict | None:
+    # The daemon forgot this run's address: a run queued behind holders the
+    # board does not show makes no board calls after handing back an early
+    # grant, and the daemon retires an ephemeral address an hour after its
+    # last activity. Seen live 2026-09-28 06:17, after a 135-minute wait.
+    _FORGOTTEN = frozenset({"instance_not_found", "invalid_credential"})
+
+    def _lease(self, *, retry: bool = True) -> dict | None:
         """One ``lease`` call, registering first; None when the board is
-        unusable (dropped, with one line) or failing for the moment."""
+        unusable (dropped, with one line) or failing for the moment. An
+        address the daemon no longer knows is registered again, once."""
         board = self._board
         if board is None:
             return None
@@ -1047,6 +1063,9 @@ class BoardMirror:
                 self._skip(f"the board kept failing for {_span(now - self._failing_since)} ({exc})")
             return None
         except _Refused as exc:
+            if retry and exc.code in self._FORGOTTEN and board.registered:
+                board.forget()
+                return self._lease(retry=False)
             self._skip(str(exc))
             return None
         self._failing_since = None

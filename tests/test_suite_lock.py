@@ -1370,3 +1370,40 @@ def test_a_waiter_hands_back_a_board_grant_it_has_no_lock_for(held, quick_board)
         thread.join(START_TIMEOUT)
     assert _wait_for(lambda: daemon.actions().count("lease") == 2)  # taken with the lock
     suite_lock.release(result["held"])
+
+
+def test_a_waiter_whose_board_address_expired_registers_again_at_hold(held, quick_board,
+                                                                       capsys):
+    # Seen live 2026-09-28 06:17: a run queued 135 min after handing back an
+    # early grant made no board calls meanwhile, the daemon retired its
+    # ephemeral address (one hour idle), and hold() got instance_not_found
+    # and skipped the board. It registers once more and holds.
+    renewed = {"agent_id": "9" * 32, "credential": "cred-SECRET-second", "label": "lease-hold"}
+    daemon = FakeDaemon(
+        register=[(200, {"agent_id": AGENT, "credential": "cred-SECRET-first",
+                         "label": "lease-hold"}), (200, renewed)],
+        lease=[HELD("full-suite"), (404, {"error": "instance_not_found"}), HELD("full-suite")])
+    result = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02,
+                                            notice_every=60, out=io.StringIO(),
+                                            mirror=_mirror(held.dir, daemon))
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert _wait_for(lambda: "release" in daemon.actions())  # the hand-back
+    finally:
+        held.holder.send_release()
+        thread.join(START_TIMEOUT)
+    try:
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 3)
+        assert daemon.actions().count("register") == 2
+        err = _stderr_until(capsys, "never-printed", timeout=0.5)
+        assert "board skipped" not in err
+        held_calls = [call for call in daemon.calls if call[0] == "lease"]
+        assert held_calls[-1][1]["x-pl-agent"] == "9" * 32  # the new address
+    finally:
+        suite_lock.release(result["held"])
+    assert daemon.actions()[-1] == "release"

@@ -20,7 +20,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on record; only runs that ran their tests are timed). The OS lock stays the
   truth: all board traffic runs on the mirror's own thread, the lock is
   freed before the board hears, a run that leaves the queue gives its board
-  place back, a waiter hands back a grant it has no lock for, and a board that is unreachable, slow, refuses, or shows
+  place back, a waiter hands back a grant it has no lock for (and
+  registers a new board address if the daemon retired its old one during a
+  long wait), and a board that is unreachable, slow, refuses, or shows
   another holder costs one line on stderr and never delays or stops the run;
   `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. conftest reads the bearer
   and daemon URL at import, before the suite's client isolation strips them,
