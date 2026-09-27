@@ -879,15 +879,16 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. A
-legacy adapter registers a fresh address on its next start only when the authenticated
-daemon explicitly confirms that the saved address no longer exists. It keeps
+write that carries no instance credential. An
+adapter with saved state registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists (pruned
+after seven idle days with no retained mail, or absent from a restored
+database, where `rebind` cannot restore it either). A bank-bound client first
+verifies that the daemon is still its saved bank and principal. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential preserves the saved address and requires corrected authentication
-or the deliberate restore/rebind procedure; an HTTP status alone never proves
-that an address should be replaced.
-Bank-bound clients preserve their address even when it is missing on the server;
-use deliberate recovery rather than silently registering a replacement.
+credential, or a different bank or principal, preserves the saved address and
+requires corrected authentication or the deliberate restore/rebind procedure;
+an HTTP status alone never proves that an address should be replaced.
 
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;

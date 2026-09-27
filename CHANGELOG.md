@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — a Claude Code session resumed after its board address was pruned gets a new one)
+- A Claude Code session whose shim keeps agent state
+  (`PSEUDOLIFE_AGENT_STATE_DIR`) re-attaches to its saved board address on
+  `claude --resume`. The daemon removes a resumable address seven days after
+  its last activity or lease, once no retained message names it. Resuming
+  after that failed startup attach with `instance_not_found`, and the shim
+  kept the state file, so every later resume of that session failed the same
+  way and it never got a board address again (memory kept working). The
+  retire-and-re-register path ran only for adapters without a credential
+  provider, and the shim and the Codex registry always pass one.
+- A bank-bound adapter now takes the same path: the saved state moves aside
+  with a `.stale` suffix and a fresh address is registered. This reverses the
+  rule, added 2026-09-13, that bank-bound clients keep an address the server
+  no longer has. The daemon returns `instance_not_found` only when the
+  address row is missing, every request first re-verifies the saved bank and
+  principal, and `rebind` refuses a missing row, so the recovery that rule
+  pointed to could not restore the address. A rejected bearer or instance
+  credential, or a different bank or principal, still preserves the saved
+  address.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a
