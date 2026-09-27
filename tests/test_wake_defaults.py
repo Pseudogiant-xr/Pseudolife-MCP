@@ -30,7 +30,8 @@ from pseudolife_memory.utils.config import (
 
 PATHEXT = ".COM;.EXE;.BAT;.CMD"
 CAPS = {"per_recipient_per_hour": 20, "urgent_per_sender_per_hour": 6,
-        "nightly_total": 200, "fan_out_stagger_seconds": 30.0}
+        "nightly_total": 200, "fan_out_stagger_seconds": 30}
+PLUGIN = "pseudolife-memory@pseudolife-mcp"
 
 
 def _fake_cli(directory: Path) -> Path:
@@ -61,12 +62,27 @@ def test_wake_caps_default_to_the_decided_figures():
 def test_wake_caps_are_read_from_config_yaml(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text("coordination:\n  wake:\n    per_recipient_per_hour: 5\n"
-                 "    nightly_total: 40\n    fan_out_stagger_seconds: 2.5\n")
+                 "    nightly_total: 40\n    fan_out_stagger_seconds: 5\n")
     wake = load_config(p).coordination.wake
     assert (wake.per_recipient_per_hour, wake.nightly_total,
-            wake.fan_out_stagger_seconds) == (5, 40, 2.5)
+            wake.fan_out_stagger_seconds) == (5, 40, 5)
     # Omitted keys keep the decided defaults, as the rest of the block does.
     assert wake.urgent_per_sender_per_hour == 6
+
+
+def test_a_zero_nightly_total_rings_nobody_and_the_rate_caps_need_one():
+    """``nightly_total: 0`` stops every ring from the daemon side; a
+    per-recipient or urgent cap of 0 is refused, so a typo cannot pass for
+    that switch. Whole numbers only: the stagger is whole seconds."""
+    wake = WakeConfig(nightly_total=0, fan_out_stagger_seconds=0)
+    assert (wake.nightly_total, wake.fan_out_stagger_seconds) == (0, 0)
+    for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour"):
+        with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
+            WakeConfig(**{name: 0})
+    for name, value in (("fan_out_stagger_seconds", 2.5), ("nightly_total", -1),
+                        ("per_recipient_per_hour", True)):
+        with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
+            WakeConfig(**{name: value})
 
 
 # --- caps on /health ---------------------------------------------------------
@@ -221,21 +237,40 @@ def doctor_home(monkeypatch, tmp_path):
     return home
 
 
-def _register_claude(home: Path, env: dict | None = None) -> None:
-    (home / ".claude.json").write_text(json.dumps(
+def _register_claude(home: Path, env: dict | None = None, *, plugin: bool | None = True,
+                     config_dir: Path | None = None) -> None:
+    """The MCP registration, plus the plugin that carries the Stop hook:
+    ``plugin`` True installs and enables it, False installs it disabled, None
+    leaves it out. With ``config_dir`` (CLAUDE_CONFIG_DIR) everything,
+    ``.claude.json`` included, lives in that directory."""
+    registration = (config_dir or home) / ".claude.json"
+    config_dir = config_dir or home / ".claude"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    registration.write_text(json.dumps(
         {"mcpServers": {"pseudolife-memory": {"command": "pseudolife-mcp"}}}))
+    settings = {}
     if env is not None:
-        (home / ".claude" / "settings.json").write_text(json.dumps({"env": env}))
+        settings["env"] = env
+    if plugin is not None:
+        (config_dir / "plugins").mkdir(exist_ok=True)
+        (config_dir / "plugins" / "installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {PLUGIN: [{"scope": "user"}]}}))
+        settings["enabledPlugins"] = {PLUGIN: plugin}
+    if settings:
+        (config_dir / "settings.json").write_text(json.dumps(settings))
 
 
-def _register_codex(home: Path, env: dict | None = None, forwarded: list | None = None) -> None:
+def _register_codex(home: Path, env: dict | None = None, forwarded: list | None = None,
+                    *, codex_home: Path | None = None) -> None:
+    codex_home = codex_home or home / ".codex"
+    codex_home.mkdir(parents=True, exist_ok=True)
     lines = ['[mcp_servers.pseudolife-memory]', 'command = "pseudolife-mcp"']
     if forwarded:
         lines.append("env_vars = " + json.dumps(forwarded))
     if env:
         lines.append("[mcp_servers.pseudolife-memory.env]")
         lines += [f'{key} = "{value}"' for key, value in env.items()]
-    (home / ".codex" / "config.toml").write_text("\n".join(lines) + "\n")
+    (codex_home / "config.toml").write_text("\n".join(lines) + "\n")
 
 
 def _doctor(monkeypatch, capsys, health):
@@ -326,3 +361,30 @@ def test_doctor_never_lets_a_broken_client_config_hide_the_report(monkeypatch, c
     assert report["wake"]["claude_code"] == {"registered": "unknown (unreadable ~/.claude.json)"}
     assert report["wake"]["codex"] == {"registered": "unknown (unreadable config.toml)"}
     assert report["wake"]["caps"] == CAPS
+
+
+def test_doctor_reports_the_stop_hook_off_without_the_plugin(monkeypatch, capsys, doctor_home):
+    """The Stop hook ships only in the plugin: an MCP registration from the
+    installer or ops/install-hook.* alone has no wake path, and a plugin
+    disabled in enabledPlugins runs no hooks."""
+    _register_claude(doctor_home, plugin=None)
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["claude_code"] == {"registered": True,
+                                             "stop_hook": "off (plugin not installed)"}
+    _register_claude(doctor_home, plugin=False)
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["claude_code"]["stop_hook"] == "off (plugin disabled)"
+
+
+def test_doctor_follows_claude_config_dir_and_codex_home(monkeypatch, capsys, doctor_home, tmp_path):
+    claude_dir, codex_home = tmp_path / "claude-config", tmp_path / "codex-home"
+    _register_claude(doctor_home, {"PSEUDOLIFE_AGENT_WAKE_HOOK": "0"}, config_dir=claude_dir)
+    _register_codex(doctor_home, {"PSEUDOLIFE_CODEX_DOORBELL": "0"}, codex_home=codex_home)
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["claude_code"] == {"registered": False}
+    assert report["wake"]["codex"] == {"registered": False}
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_dir))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["claude_code"]["stop_hook"] == "off (PSEUDOLIFE_AGENT_WAKE_HOOK=0)"
+    assert report["wake"]["codex"]["doorbell"] == "off (PSEUDOLIFE_CODEX_DOORBELL=0)"

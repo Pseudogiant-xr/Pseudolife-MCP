@@ -65,9 +65,11 @@ a whole number of days, default 90, and `0` keeps the log forever.
 `wake` caps the rings that start a model turn in an idle session. Wake is on
 by default and policy-gated (maintainer decision, 2026-09-28): a message rings
 a parked session only when it plausibly clears the need the session's park
-record declares, so the caps are the guarantee, not the usual rate. They are
-whole numbers of rings, `0` or more (`0` rings nobody), except the stagger,
-which is seconds. `per_recipient_per_hour` counts every wake one recipient
+record declares, so the caps are the guarantee, not the usual rate. Every
+value is a whole number. The two hourly caps are at least `1`;
+`nightly_total: 0` rings nobody, and a stagger of `0` rings a fan-out at once
+(whole seconds). A value outside those bounds stops the daemon's config from
+loading, so a typo cannot pass for an off switch. `per_recipient_per_hour` counts every wake one recipient
 gets in any hour, including the ones no sender caused (a partial
 acknowledgment, an expiry). `urgent_per_sender_per_hour` counts the rings one
 sender may cause with `urgent`. `nightly_total` bounds the whole board in one
@@ -79,8 +81,9 @@ sender-recipient pair exceeded 10 wakes an hour and no request or handoff
 would have crossed 6; fan-out bursts were 2.8% of traffic). `/health` reports
 the caps in force, and `pseudolife-mcp doctor` prints them beside each
 registered client's wake path (`stop_hook` for Claude Code, `doorbell` for
-Codex: `on`, or `off` with the setting that turned it off, or `off (no codex
-CLI)`). The client-side switches are `PSEUDOLIFE_AGENT_COORDINATION=0` (the
+Codex: `on`, or `off` with the setting that turned it off, `off (no codex
+CLI)`, or, for Claude Code, `off (plugin not installed)` / `off (plugin
+disabled)`, since only the plugin carries the Stop hook). The client-side switches are `PSEUDOLIFE_AGENT_COORDINATION=0` (the
 master off switch for that client), `PSEUDOLIFE_AGENT_WAKE_HOOK=0` (the
 [Stop hook](#waking-an-idle-claude-code-session-the-stop-hook)) and
 `PSEUDOLIFE_CODEX_DOORBELL=0` (the [Codex doorbell](#codex-doorbell)).

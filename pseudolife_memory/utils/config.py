@@ -1323,6 +1323,8 @@ class WakeConfig:
     switch stays ``PSEUDOLIFE_AGENT_COORDINATION=0`` on the client.
     """
 
+    # Kept field for field with the park-record branch's WakeConfig, which
+    # replaces this copy when the two stack.
     # Rings one recipient may receive in any hour, counting every wake,
     # including the ones no sender caused (a partial ack, an expiry).
     per_recipient_per_hour: int = 20
@@ -1331,19 +1333,21 @@ class WakeConfig:
     # Rings across the whole board in one night (a UTC day).
     nightly_total: int = 200
     # Seconds between two rings caused by one fan-out send.
-    fan_out_stagger_seconds: float = 30.0
+    fan_out_stagger_seconds: int = 30
+    # A recipient active this recently gets a hint in its next tool result
+    # instead of a ring.
+    active_seconds: int = 60
+    # At most one ring per this interval asking an idle, unparked session
+    # to set a park record.
+    nudge_interval_seconds: int = 3600
 
     def __post_init__(self) -> None:
-        for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total"):
+        for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
+                     "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"):
             value = getattr(self, name)
-            if type(value) is not int or value < 0:
-                raise ValueError(f"coordination.wake.{name} must be a whole number of "
-                                 "rings, 0 or more (0 rings nobody)")
-        stagger = self.fan_out_stagger_seconds
-        if type(stagger) not in (int, float) or stagger < 0:
-            raise ValueError("coordination.wake.fan_out_stagger_seconds must be a number "
-                             "of seconds, 0 or more")
-        self.fan_out_stagger_seconds = float(stagger)
+            floor = 0 if name in {"nightly_total", "fan_out_stagger_seconds"} else 1
+            if type(value) is not int or value < floor:
+                raise ValueError(f"coordination.wake.{name} must be an integer of at least {floor}")
 
 
 @dataclass

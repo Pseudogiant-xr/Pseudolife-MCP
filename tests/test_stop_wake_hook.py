@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -211,6 +212,22 @@ def test_the_command_holds_the_opt_outs(tmp_path, change, expected):
                             capture_output=True, text=True, timeout=DEADLINE)
     assert result.returncode == expected, result.stderr
     assert (result.returncode == 2) == _woke(result.stderr)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Claude Code runs hook commands in Git Bash on Windows")
+@pytest.mark.parametrize("flag,expected", [("", 2), ("0", 0)])
+def test_the_command_runs_under_posix_sh(tmp_path, flag, expected):
+    """Claude Code runs a hook command with ``sh -c`` on Linux and macOS,
+    which is dash on Debian and Ubuntu: the command must be POSIX sh, not
+    bash, as well as honour the opt-out there."""
+    shell = shutil.which("dash") or shutil.which("sh")
+    if shell is None:
+        pytest.skip("no POSIX sh on this host")
+    env = _env(tmp_path, PSEUDOLIFE_AGENT_WAKE_HOOK=flag)
+    _digest(tmp_path, 3, BODY)
+    result = subprocess.run([shell, "-c", _stop_hook()["command"]], input=_payload(), env=env,
+                            capture_output=True, text=True, timeout=DEADLINE)
+    assert result.returncode == expected, result.stderr
 
 
 # --- no-ops -----------------------------------------------------------------

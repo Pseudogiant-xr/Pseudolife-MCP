@@ -32,6 +32,7 @@ async def _handshake() -> dict:
 _OFF = {"0", "false", "no", "off"}
 _YES = {"1", "true", "yes", "on"}
 _CODEX_SERVER = "pseudolife-memory"
+_PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
 
 
 def _read_toml(text: str) -> dict:
@@ -43,34 +44,45 @@ def _read_toml(text: str) -> dict:
 
 
 def _claude_code_wake(health_enabled: bool | None) -> dict:
-    """Claude Code's wake path is the plugin's Stop hook, which reads the
+    """Claude Code's wake path is the plugin's Stop hook: the plugin must be
+    installed (``plugins/installed_plugins.json``) and not disabled in
+    settings.json ``enabledPlugins``; an MCP registration alone, from the
+    installer or ``ops/install-hook.*``, has no Stop hook. The hook reads the
     ``env`` block of settings.json (Claude Code passes it to the processes it
     starts) over the launching environment."""
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
     home = Path.home()
     registration = Path(config_dir) / ".claude.json" if config_dir else home / ".claude.json"
     config_dir = Path(config_dir) if config_dir else home / ".claude"
-    registered = False
+    installed = config_dir / "plugins" / "installed_plugins.json"
+    registered = plugin_installed = False
     try:
         if registration.is_file():
             text = registration.read_text(encoding="utf-8")
             json.loads(text)
             registered = _CODEX_SERVER in text
-        installed = config_dir / "plugins" / "installed_plugins.json"
-        if not registered and installed.is_file():
-            registered = _CODEX_SERVER in installed.read_text(encoding="utf-8")
+        if installed.is_file():
+            record = json.loads(installed.read_text(encoding="utf-8"))
+            plugins = record.get("plugins", record) if isinstance(record, dict) else {}
+            plugin_installed = isinstance(plugins, dict) and bool(plugins.get(_PLUGIN_ID))
     except (OSError, ValueError):
         return {"registered": "unknown (unreadable ~/.claude.json)"}
-    if not registered:
+    if not (registered or plugin_installed):
         return {"registered": False}
-    env: dict = {}
+    settings_data: dict = {}
     settings = config_dir / "settings.json"
     try:
         if settings.is_file():
-            block = json.loads(settings.read_text(encoding="utf-8")).get("env")
-            env = block if isinstance(block, dict) else {}
+            loaded = json.loads(settings.read_text(encoding="utf-8"))
+            settings_data = loaded if isinstance(loaded, dict) else {}
     except (OSError, ValueError):
         return {"registered": True, "stop_hook": "unknown (unreadable settings.json)"}
+    env = settings_data.get("env") if isinstance(settings_data.get("env"), dict) else {}
+    enabled = settings_data.get("enabledPlugins")
+    if not plugin_installed:
+        return {"registered": True, "stop_hook": "off (plugin not installed)"}
+    if isinstance(enabled, dict) and enabled.get(_PLUGIN_ID) is False:
+        return {"registered": True, "stop_hook": "off (plugin disabled)"}
 
     def effective(key):
         return str(env.get(key, os.environ.get(key, "")) or "").strip()

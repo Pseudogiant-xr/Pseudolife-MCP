@@ -38,10 +38,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The wake caps are operator-configurable under `coordination.wake` in
   `config.yaml`: `per_recipient_per_hour` (20, counting every wake),
   `urgent_per_sender_per_hour` (6), `nightly_total` (200) and
-  `fan_out_stagger_seconds` (30); whole numbers of rings, `0` rings nobody.
+  `fan_out_stagger_seconds` (30), all whole numbers; the two hourly caps are
+  at least 1, and `nightly_total: 0` rings nobody.
   `/health` reports `coordination: {enabled, wake: {...}}`, and
   `pseudolife-mcp doctor` gains a `wake` section: each registered client's
-  wake path (`claude_code.stop_hook`, read from the settings.json `env`
+  wake path (`claude_code.stop_hook`, `off` unless the plugin is installed
+  and enabled, since only the plugin carries the Stop hook, then read from the settings.json `env`
   block over the shell; `codex.doorbell`, read from the MCP server's `env`
   table and forwarded `env_vars`, plus the CLI lookup) as `on`, `off (<the
   setting>)` or `off (no codex CLI)`, and the caps in force, or why they

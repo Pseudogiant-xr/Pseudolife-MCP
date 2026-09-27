@@ -78,31 +78,35 @@ Procedure, all synthetic content, no message bodies recorded:
    desktop app installed; `memory_message` approved in the recipient's tool
    configuration; `PSEUDOLIFE_CODEX_DOORBELL` unset or a yes in the Codex
    server's `env` table.
-2. Start the recorder on the host, then a fresh Codex task (desktop app or
-   `codex` CLI) that makes one Pseudolife call, so the shim watches it:
-   `python -m evals.codex_doorbell_probe --recipient <its board agent id>
-   --out evals/results/codex-doorbell-probe-<date>.json`. The id comes from
-   `memory_agents list`. The recorder polls `/api/agents` and the digest
-   ledger; it stores timestamps and counts only.
+2. Start a fresh Codex task (desktop app or `codex` CLI) and have it make
+   one Pseudolife call, so the shim watches it. Its board agent id is the
+   newest `principal=codex` agent in `memory_agents list`.
 3. Park the task with a need (`memory_agents update` with a park record:
    reason `waiting_peer`, the need, `park_clear_by` set to the sender's
    agent id, an expiry) and end its turn. Until the park record lands
    daemon-side, the pre-policy path is probed instead: any new addressed
    mail rings.
-4. From another session, send the task one message that clears the need
-   (tagged `clears=<need>`, or from the named clearer).
-5. Observe, in order: a `bell` line in `ledger.log` (the shim ran
-   `codex queue`), the task's `last_activity` advancing on the board (the
-   app-server dispatched the notice and the task took a turn), and the
-   message acknowledged (`memory_message ack` from the task). The recorder
-   writes the deltas between them. Where `pseudolife-mcp board-audit export`
-   is available, pass `--export <file>` to count the `send`, first-read and
-   `ack` events too.
-6. Record the Codex CLI and app versions, the shim version, the three
-   timestamps, the counts, and any timeout (the CLI has 20 s; app-servers
-   poll for queued messages about every 10 s) in the JSON the recorder
-   writes, commit it under `evals/results/`, and replace the status line
-   above with the run's date and outcome.
+4. Start the recorder's watch on the host, then, from another session, send
+   the task one message that clears the need (tagged `clears=<need>`, or
+   from the named clearer):
+   `python -m evals.codex_doorbell_probe --recipient <agent id> --watch 300
+   --out evals/results/codex-doorbell-probe-<date>.json`. It reads only the
+   digest ledger (`ledger.log`), prints `bell queued` when the shim ran
+   `codex queue`, and writes a first record with the bell times.
+5. Once the task has taken its turn and answered, export the audit log with
+   `pseudolife-mcp board-audit export --out <private file>` (the database
+   owner's credentials; keep the file private, it holds bodies) and rerun
+   the recorder with `--export <that file> --force`. The rerun builds the
+   timeline from the export and the ledger: the clearing `send`, the bell,
+   the first board event the task caused after it (the evidence of a turn),
+   its first `read` and its `ack`, with the deltas between them and an
+   outcome naming the step that did not happen, if one did not. The record
+   holds timestamps, counts and version strings only.
+6. Commit the record under `evals/results/` with the Codex CLI and app
+   versions noted (the recorder writes the CLI's and the shim's), and any
+   timeout (the CLI has 20 s; app-servers poll for queued messages about
+   every 10 s), and replace the status line above with the run's date and
+   outcome.
 
 A run whose task never took a turn is a finding, not a failure of the
 recorder: it names the step that did not happen (no bell, bell but no turn,
