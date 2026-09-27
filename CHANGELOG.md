@@ -24,7 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PSEUDOLIFE_TEST_PG_PASSWORD` (or, when that override is the rejected
   password, to correct or unset it). The password itself is never printed.
   A server that accepts it, or that does not answer, lets the run start as
-  before: the PG-backed tests still skip without a server. A targeted run is
+  before: the PG-backed tests still skip without a server. Any other answer
+  (too many connections, a missing admin database) also lets it start, by
+  design: only a clean credential rejection is sure to fail every PG-backed
+  test, and the fixtures report the rest per test. A targeted run is
   never refused; it prints one line saying its PG-backed tests will error,
   and runs. It first checks for a listener on the port for at most 0.5 s, so
   on a machine without the dev server it does not wait out libpq's connect

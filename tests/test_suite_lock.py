@@ -381,6 +381,27 @@ def test_the_preflight_runs_for_gated_runs_only_and_before_the_lock(tmp_path):
         suite_lock.release(held_lock)
 
 
+def test_a_refusing_preflight_wins_over_a_held_lock(held):
+    # The ordering, told apart: with another process holding the lock in
+    # fail mode, a preflight that ran after queueing would never be reached
+    # (the busy refusal comes first). Only a preflight run before the queue
+    # raises its own refusal, and leaves no ticket behind.
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(held.dir),
+               "PSEUDOLIFE_SUITE_LOCK": "fail"}
+
+    class Refused(Exception):
+        pass
+
+    def refuse(kind: str) -> None:
+        raise Refused(kind)
+
+    with pytest.raises(Refused, match="full"):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS, preflight=refuse)
+    queue_dir = held.dir / suite_lock.QUEUE_DIR
+    assert not queue_dir.exists() or not list(queue_dir.iterdir())
+    assert suite_lock.read_holder(held.dir)["pid"] == held.pid
+
+
 def _lock_backend():
     return ((suite_lock.msvcrt, "locking") if os.name == "nt"
             else (suite_lock.fcntl, "flock"))
