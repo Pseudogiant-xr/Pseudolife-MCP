@@ -886,9 +886,12 @@ class CoordinationStore:
 
     def _public(self, row):
         keys = ("agent_id", "principal", "label", "project", "task", "status",
-                "children", "episode", "capabilities", "wake_enabled", "created_at",
+                "episode", "capabilities", "wake_enabled", "created_at",
                 "last_activity", "lifecycle")
         result = {k: row[k] for k in keys}
+        # Offline rebind runs on a restored bank before any schema pass, so
+        # a pre-v47 row has no children column.
+        result["children"] = row.get("children", [])
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
         return result
