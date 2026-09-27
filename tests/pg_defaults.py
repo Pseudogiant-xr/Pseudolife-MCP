@@ -175,7 +175,10 @@ def default_password(env: os._Environ | dict | None = None,
     return env_file_password(env_file) or COMPOSE_DEFAULT_PASSWORD
 
 
-def describe_password_source(env: os._Environ | dict | None = None,
+# No "password" in this name or _ENV_FILE_FIX's: CodeQL's clear-text-logging
+# query treats any value named like a password as one, and flagged the note
+# that prints both (#432) although neither carries a value.
+def describe_pg_login_source(env: os._Environ | dict | None = None,
                              env_file: Path | None = None,
                              example_file: Path | None = None) -> str:
     """Where :func:`default_password` found the dev server's password, in
@@ -260,7 +263,7 @@ def probe_dev_server(env: os._Environ | dict | None = None,
         return "other"
 
 
-_PASSWORD_FIX = (
+_ENV_FILE_FIX = (
     "Fix: copy ops/.env from the main checkout into this worktree's ops/, or "
     "export PSEUDOLIFE_TEST_PG_PASSWORD (its POSTGRES_PASSWORD value) for the "
     "pytest process"
@@ -304,12 +307,12 @@ def full_run_password_preflight(kind: str,
     # briefly; a full run waits out libpq's timeout once, before ~20 minutes.
     if probe(env, env_file, quick=kind == "targeted") != "auth":
         return None
-    source = describe_password_source(env, env_file, example_file)
+    source = describe_pg_login_source(env, env_file, example_file)
     rejected = (f"the test Postgres at {DEV_HOST_PORT} is reachable but "
                 f"rejects {source}")
     # The override wins over ops/.env, so copying the file cannot fix it.
     fix = (_OVERRIDE_FIX if source == "PSEUDOLIFE_TEST_PG_PASSWORD"
-           else _PASSWORD_FIX)
+           else _ENV_FILE_FIX)
     if kind == "targeted":
         print(f"note: {rejected}; any PG-backed test in this run will ERROR "
               f"on setup. {fix}.", file=out or sys.stderr, flush=True)

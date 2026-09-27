@@ -625,7 +625,7 @@ def _example_env(tmp_path: Path) -> Path:
 def test_password_source_names_a_missing_or_example_env_file_without_the_value(tmp_path):
     example = _example_env(tmp_path)
     env_file = tmp_path / ".env"
-    describe = pg_defaults.describe_password_source
+    describe = pg_defaults.describe_pg_login_source
 
     assert "ops/.env is missing" in describe({}, env_file, example)
     env_file.write_bytes(example.read_bytes())
