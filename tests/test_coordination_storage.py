@@ -367,3 +367,56 @@ def test_received_messages_are_labelled_agent_origin(store):
     message = store.receive(*creds(b))["messages"][0]
     assert message["origin"] == "agent"
     assert message["sender_principal"] == "alice"
+
+
+def _children(row):
+    return [(child["label"], child["since"]) for child in row["children"]]
+
+
+def test_children_are_set_kept_and_cleared_by_their_parent(store):
+    """A parent names the subagents working under its address. The daemon
+    stamps ``since``; a label carried into the next update keeps its time."""
+    a, b = pair(store)
+    assert store.authenticate(*creds(a))["children"] == []
+    store.update(*creds(a), status="orchestrating", children=["review storage", "tests"])
+    listed = store.list_agents(*creds(b))["agents"][0]
+    assert _children(listed) == [("review storage", 1000.0), ("tests", 1000.0)]
+    store.test_time[0] = 1010.0
+    store.update(*creds(a), status="still orchestrating")
+    assert _children(store.authenticate(*creds(a))) == [("review storage", 1000.0),
+                                                         ("tests", 1000.0)]
+    store.test_time[0] = 1020.0
+    out = store.update(*creds(a), children=["tests", "docs"])
+    assert _children(out) == [("tests", 1000.0), ("docs", 1020.0)]
+    # A children-only update is not a new status.
+    assert store.list_agents(*creds(b))["agents"][0]["status_set_at"] == 1010.0
+    assert store.update(*creds(a), children=[])["children"] == []
+    assert store.list_agents(*creds(b))["agents"][0]["children"] == []
+
+
+@pytest.mark.parametrize("children", [
+    [f"child {i}" for i in range(9)],  # over the 8-entry cap
+    ["y" * 41],                                     # over the 40-character cap
+    [""], ["   "], ["line\nbreak"], [7], "tests", {"label": "tests"},
+    ["tests", "tests"],
+])
+def test_children_are_bounded(store, children):
+    a = store.register("alice")
+    store.update(*creds(a), children=["kept"])
+    with pytest.raises(CoordinationError, match="invalid_children"):
+        store.update(*creds(a), children=children)
+    assert _children(store.authenticate(*creds(a))) == [("kept", 1000.0)]
+
+
+def test_children_at_the_caps_are_accepted(store):
+    a = store.register("alice")
+    labels = [f"{i}" + "z" * 39 for i in range(8)]
+    assert [c["label"] for c in store.update(*creds(a), children=labels)["children"]] == labels
+
+
+def test_credential_shaped_child_label_is_refused(store):
+    a = store.register("alice")
+    shaped = "gh" + "p_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"  # 40 characters
+    assert len(shaped) == 40
+    with pytest.raises(CoordinationError, match="secret_like_body"):
+        store.update(*creds(a), children=[shaped])

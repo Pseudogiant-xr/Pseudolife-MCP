@@ -23,7 +23,7 @@ from pseudolife_memory.storage.coordination import CoordinationClockChanged
 _PARAMETERS = {
     "context": {"agent_id", "nonce"},
     "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled"},
-    "update": {"project", "task", "status", "expect"},
+    "update": {"project", "task", "status", "expect", "children"},
     "agents": {"project", "task", "limit"},
     # v45 resource leases. ``leases`` lists with the bearer alone, like the
     # awareness roster; acquiring and releasing act as the caller's instance.
@@ -57,7 +57,7 @@ PUBLIC_ERROR_CODES = frozenset({
     "instance_authentication_required", "coordination_requires_postgres",
     "attachment_required", "attachment_busy", "stale_attachment",
     "attachment_already_waiting", "wait_capacity_exceeded", "invalid_wait_seconds",
-    "invalid_capabilities", "invalid_cursor", "invalid_expiry", "invalid_limit",
+    "invalid_capabilities", "invalid_children", "invalid_cursor", "invalid_expiry", "invalid_limit",
     "invalid_rebind", "invalid_reply", "invalid_text", "invalid_update",
     "invalid_wake_enabled", "invalid_active", "invalid_message_id", "message_not_found",
     "message_not_pending",
@@ -94,15 +94,19 @@ CHECKIN_TEXT = (
     "memory_message(action=ack, message_id=<id>) after reading. On a "
     "pending-message hint, receive again. Changed-message alerts are brief; "
     "receive is the source of full messages. If coordination tools are "
-    "unavailable, say so and continue independently.")
+    "unavailable, say so and continue independently. A subagent shares its "
+    "parent's board address, so it only reads the board (list, receive without "
+    "ack, memory_search); status, ack and send belong to the parent, which can "
+    "name its subagents with memory_agents(action=update, children=[...]).")
 # The compact form for MCP initialization, which the shim appends only when
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
 # Daemon text plus this stays within Codex's 512-character budget.
 CHECKIN_INSTRUCTION = (
-    "Agent board at task start: memory_agents update project, task, and status, "
-    "then list peers; memory_message receive, then acknowledge after reading.")
+    "Agent board at task start: memory_agents update project, task, status, "
+    "then list peers; memory_message receive, then ack after reading. "
+    "Subagents only read the board.")
 
 
 def unavailable_reason(service, headers: Mapping[str, str], *,
@@ -374,11 +378,13 @@ def _present(**fields):
 
 
 def agents(service, *, action="list", project=None, task=None, status=None, lease=None,
-           expect=None):
+           expect=None, children=None):
     """Model surface: scope is relevance, never an identity or permission key.
 
     ``claim`` and ``release`` are session-held resource leases (v45): a
     claim's ``status`` is its purpose, ``expect`` its expected duration."""
+    if children is not None and action != "update":
+        raise ValueError("unexpected_parameter")
     if action == "list":
         if status is not None or lease is not None or expect is not None:
             raise ValueError("unexpected_parameter")
@@ -391,7 +397,7 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
         if lease is not None:
             raise ValueError("unexpected_parameter")
         return dispatch(service, "update", _present(project=project, task=task, status=status,
-                                                    expect=expect))
+                                                    expect=expect, children=children))
     if action not in {"claim", "release"}:
         raise ValueError("unknown_coordination_action")
     if lease is None:
