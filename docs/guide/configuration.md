@@ -1038,7 +1038,12 @@ generation's replay cursor. An explicit authentication or identity rejection
 preserves state and stops retries with the rejected credential. File-backed
 clients observe the credential source and resume after a replacement authenticates
 to the saved bank and principal. An authority mismatch remains closed until the
-credential again matches the saved authority; it never creates a replacement address. Do not
+credential again matches the saved authority; it never creates a replacement address. A
+saved address the daemon reports missing while the shim runs (the host slept or
+the daemon was unreachable past the seven-day retention) also stops background
+delivery and keeps the state file, but the notice says to restart the session:
+`rebind` cannot restore a missing address, and the next start retires the state
+and registers a new one. Do not
 infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before
