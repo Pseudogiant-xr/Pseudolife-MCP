@@ -36,6 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   environment or settings already supply is left alone. The shared work
   lives in the new `ops/client_credentials.py`, which writes token files
   through the same owner-only writer as the Codex and Claude Desktop paths.
+- With the state directory now set by default, a Claude Code session keeps
+  one board address across `claude --resume <id>` instead of taking a new
+  one per launch. That address registers as resumable, so the daemon keeps it
+  for seven days after its last activity rather than one hour: the board
+  now holds about a week of Claude Code sessions, as it already did for
+  Codex threads. A session resumed after its address was removed runs
+  without one. A new test drives two launches of one session, and one of
+  another, through the shim and the adapter to pin this.
 - The installers' final ladder and `pseudolife-mcp doctor` (a new `board`
   field) print one line: `on - token present, principal allowed`, or `off -`
   and the reason. The reason is the daemon's own, from a new `X-PL-Board`

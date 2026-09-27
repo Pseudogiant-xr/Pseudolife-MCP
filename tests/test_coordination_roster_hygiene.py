@@ -9,6 +9,7 @@ kept every parked shim looking as busy as a working one, and the list tool
 returned all of them.
 """
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -561,6 +562,79 @@ def test_an_explicit_state_file_still_wins_over_the_session_directory(monkeypatc
            "PSEUDOLIFE_AGENT_STATE_DIR": str(tmp_path / "agents"),
            "CLAUDE_CODE_SESSION_ID": str(uuid.uuid4())}
     assert _session_proxy(monkeypatch, env, tmp_path) == str(tmp_path / "fixed.json")
+
+
+class _SessionBank:
+    """A daemon that keeps every address it registers, as the live one does
+    until its retention window: attach and detach succeed only under an
+    address and key it issued."""
+
+    def __init__(self):
+        self.keys = {}
+        self.registrations = []
+
+    async def __call__(self, request):
+        action = request.url.path.rsplit("/", 1)[-1]
+        if action == "context":
+            return httpx.Response(200, json={
+                "bank_id": "22222222-2222-4222-8222-222222222222", "principal": "claude-code"})
+        if action == "register":
+            self.registrations.append(json.loads(request.content))
+            agent = f"agent-{len(self.keys) + 1}"
+            self.keys[agent] = f"key-{len(self.keys) + 1}"
+            return httpx.Response(200, json={"agent_id": agent, "credential": self.keys[agent]})
+        if self.keys.get(request.headers.get("x-pl-agent")) != request.headers.get("x-pl-agent-key"):
+            return httpx.Response(404, json={"error": "instance_not_found"})
+        return httpx.Response(200, json={"generation": 1, "lease_until": 0, "pending_count": 0})
+
+
+def test_a_resumed_claude_session_reattaches_to_its_address_and_another_session_gets_its_own(
+        monkeypatch, tmp_path):
+    """The per-session identity model end to end, shim through adapter to
+    the state file. ``claude --resume <id>`` relaunches the shim with the
+    same CLAUDE_CODE_SESSION_ID, and that launch must re-attach to the
+    address the first launch registered instead of registering another; a
+    second session registers its own. Both register as resumable, which is
+    what gives them the seven-day retention rather than the one-hour one."""
+    from pseudolife_memory import coordination_adapter, shim
+    bank = _SessionBank()
+    real = coordination_adapter.CoordinationAdapter
+    clients = []
+
+    def on_the_bank(*args, **kwargs):
+        clients.append(httpx.AsyncClient(transport=httpx.MockTransport(bank)))
+        return real(*args, client=clients[-1], **kwargs)
+
+    seen = []
+
+    async def proxy(*args, **kwargs):
+        seen.append(kwargs["agent_headers"]["X-PL-Agent"])
+
+    monkeypatch.setattr(coordination_adapter, "CoordinationAdapter", on_the_bank)
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    for name in ("PSEUDOLIFE_WRITER_ID", "PSEUDOLIFE_AGENT_STATE", "PSEUDOLIFE_AGENT_WAKE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agents"))
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(tmp_path / "digests"))
+
+    def launch(session_id):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", session_id)
+        asyncio.run(shim._run_session_proxy("http://fixture", "token", session_id))
+        return seen[-1]
+
+    first, second = str(uuid.uuid4()), str(uuid.uuid4())
+    address = launch(first)
+    assert launch(first) == address
+    other = launch(second)
+    assert other != address
+    assert launch(second) == other
+    assert [r["capabilities"]["resumable"] for r in bank.registrations] == [True, True]
+
+    async def close():
+        for client in clients:
+            await client.aclose()
+    asyncio.run(close())
 
 
 # --- one board identity per session ------------------------------------------
