@@ -1028,7 +1028,7 @@ def test_the_scan_finds_the_modules_conftest_imports_at_load():
 # or shows someone else holding never stops the run.
 
 from tests.fake_board import (  # noqa: E402
-    AGENT, AGENTS, HELD, QUEUED, TOKEN, FakeDaemon, holder_record, peer,
+    AGENT, AGENTS, HELD, QUEUED, TOKEN, FakeDaemon, holder_record, peer, released_last,
 )
 
 BOARD_ENV = {"PSEUDOLIFE_MCP_TOKEN": TOKEN, "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1"}
@@ -1134,7 +1134,7 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
         assert str(ROOT) not in text
     finally:
         suite_lock.release(held_lock)
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     released = [b for b in daemon.bodies("send") if "released" in b["text"]]
     assert sorted(b["to"] for b in released) == sorted(p * 32 for p in "abc")
     assert suite_lock.read_holder(tmp_path) is None
@@ -1171,7 +1171,7 @@ def test_a_queued_run_is_a_board_waiter_until_it_takes_the_lock(held, quick_boar
     # Once it holds the OS lock it asks again, and the board grants it.
     assert daemon.actions().count("lease") >= 2
     suite_lock.release(result["held"])
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_an_unreachable_board_never_stops_the_run(tmp_path, quick_board, capsys):
@@ -1202,7 +1202,7 @@ def test_a_board_that_shows_another_holder_does_not_stop_the_run(tmp_path, quick
         assert err.count("full-suite") >= 1
     finally:
         suite_lock.release(held_lock)
-    assert daemon.actions()[-1] == "release"  # leaves the board queue too
+    assert released_last(daemon)  # leaves the board queue too
 
 
 def test_without_a_token_the_mirror_is_skipped_in_one_line(tmp_path, quick_board, capsys):
@@ -1287,21 +1287,30 @@ def suite_lock_is_free(directory):
     return os_lock.probe(directory / suite_lock.LOCK_FILE) is False
 
 
-def test_a_run_that_leaves_the_queue_frees_its_board_place(held, quick_board):
-    # A queued run refused (fail mode, TreeChanged or Ctrl-C) must not leave a
-    # board waiter or an early grant behind it for `lease check` to report.
-    daemon = FakeDaemon(lease=[HELD("full-suite")])
+@pytest.mark.parametrize("abort", [suite_lock.TreeChanged("changed"), KeyboardInterrupt()],
+                         ids=["tree-changed", "ctrl-c"])
+def test_a_run_that_leaves_the_queue_frees_its_board_place(held, quick_board, abort):
+    # A queued run that leaves the queue (TreeChanged, Ctrl-C, fail mode)
+    # must not leave its board waiter behind for peers to see. The board
+    # answers queued, not held: a grant would be handed back on its own, and
+    # the release it sends would pass this test without the abort path
+    # (orchestrator re-review, 2026-09-28).
+    daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
+                                      holder=holder_record(label="holder-run"))])
     mirror = _mirror(held.dir, daemon)
+    fired = {}
 
     def refuse():
         if daemon.actions().count("lease") >= 1:
-            raise suite_lock.TreeChanged("changed")
+            fired["at"] = len(daemon.calls)
+            raise abort
 
-    with pytest.raises(suite_lock.TreeChanged):
+    with pytest.raises(type(abort)):
         suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02, notice_every=60,
                            out=io.StringIO(), check=refuse, mirror=mirror)
+    assert "release" not in daemon.actions()[:fired["at"]]
     assert _wait_for(lambda: "release" in daemon.actions())
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_a_corrupt_durations_file_falls_back_to_the_default(tmp_path):
@@ -1406,4 +1415,4 @@ def test_a_waiter_whose_board_address_expired_registers_again_at_hold(held, quic
         assert held_calls[-1][1]["x-pl-agent"] == "9" * 32  # the new address
     finally:
         suite_lock.release(result["held"])
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)

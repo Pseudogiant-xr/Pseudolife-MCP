@@ -102,3 +102,14 @@ class FakeDaemon:
 
     def bodies(self, action: str) -> list[dict]:
         return [call[2] for call in self.calls if call[0] == action]
+
+
+def released_last(daemon: FakeDaemon) -> bool:
+    """Whether the board lease was released and nothing followed but the
+    released notice (the peer listing and sends): the board lets go first,
+    so a peer told "released" finds the lease free."""
+    actions = daemon.actions()
+    if "release" not in actions:
+        return False
+    last = len(actions) - 1 - actions[::-1].index("release")
+    return all(action in ("agents", "send") for action in actions[last + 1:])

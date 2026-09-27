@@ -232,7 +232,7 @@ def test_exit_status_follows_shell_conventions():
 # tests/fake_board.py: the scripted daemon, shared with the suite lock's tests.
 
 from tests.fake_board import (  # noqa: E402
-    AGENT, AGENTS, CREDENTIAL, HELD, QUEUED, SENT, TOKEN, FakeDaemon, peer,
+    AGENT, AGENTS, CREDENTIAL, HELD, QUEUED, SENT, TOKEN, FakeDaemon, peer, released_last,
 )
 from tests.fake_board import holder_record as _holder  # noqa: E402
 
@@ -323,7 +323,7 @@ def test_a_held_lease_runs_the_command_then_releases(lease_env, tmp_path, monkey
     assert code == 0
     assert _ran(marker)["held"] == "suite,gpu"  # appended to the inherited value
     assert daemon.actions()[0] == "register"
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert daemon.bodies("register") == [{
         "label": "lease-run", "project": "pseudolife",
         "task": f"gpu: {os.path.basename(sys.executable)}", "status": "",
@@ -365,7 +365,7 @@ def test_a_queued_run_reports_its_place_then_runs_once_held(lease_env, tmp_path,
     assert "position 2 of 2" in err and "position 1 of 1" in err
     assert "other-run" in err and "reviewer" in err and "nightly eval" in err
     assert daemon.actions().count("lease") >= 3
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_every_lease_call_repeats_the_same_expect(lease_env, tmp_path):
@@ -411,7 +411,7 @@ def test_a_holder_without_a_board_lease_delays_the_run_while_renewing(
                 if action == "lease" and at < started]
     assert len(renewals) >= 3  # the board lease was kept alive during the wait
     assert all(body.get("expect") == 300 for body in daemon.bodies("lease"))
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_the_exit_code_propagates_and_release_follows_a_failure(lease_env, tmp_path):
@@ -419,7 +419,7 @@ def test_the_exit_code_propagates_and_release_follows_a_failure(lease_env, tmp_p
     command, marker = _command(tmp_path, exit_code=7)
     assert _run(["run", "gpu", "--", *command], daemon) == 7
     assert marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -428,7 +428,7 @@ def test_a_missing_command_exits_127_and_releases(lease_env, tmp_path, capsys):
     code = _run(["run", "gpu", "--", str(tmp_path / "no-such-program")], daemon)
     assert code == 127
     assert "not found" in capsys.readouterr().err
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -442,7 +442,7 @@ def test_timeout_while_queued_exits_75_without_running(lease_env, tmp_path, caps
     assert time.monotonic() - started >= 0.9
     assert not marker.exists()
     assert "gave up" in capsys.readouterr().err
-    assert daemon.actions()[-1] == "release"  # leaves the queue
+    assert released_last(daemon)  # leaves the queue
     assert os_lock.probe(lease_env / "lease-gpu.lock") in (None, False)
 
 
@@ -455,7 +455,7 @@ def test_timeout_on_the_local_lock_exits_75_without_running(lease_env, tmp_path)
     finally:
         blocker.release()
     assert not marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_transient_board_errors_while_acquiring_are_retried(lease_env, tmp_path, capsys):
@@ -585,7 +585,7 @@ def test_renewal_survives_a_transient_error_and_warns_once_when_lost(
     # Renewals go on after the loss: the same call is what takes the lease
     # back when the board grants it again.
     assert daemon.actions().count("lease") >= 6
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, capsys):
@@ -597,7 +597,7 @@ def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, ca
     assert marker.exists()
     assert capsys.readouterr().err.count("no longer shows") == 1
     assert daemon.actions().count("lease") == 2
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 @pytest.fixture
@@ -708,7 +708,7 @@ def test_ctrl_c_lets_the_command_finish_its_own_cleanup(lease_env, tmp_path, sig
 
     assert code == 130
     assert marker.exists()  # it finished on its own; nothing terminated it
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -726,7 +726,7 @@ def test_ctrl_c_stops_a_command_that_keeps_running_then_exits_130(
 
     assert code == 130
     assert children and not orphaned  # stopped by main, not left running
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -776,7 +776,7 @@ def test_ctrl_c_while_waiting_releases_and_exits_130(lease_env, tmp_path, signal
     code = _run(["run", "gpu", "--", *command], daemon)
     assert code == 130
     assert not marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 @pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
@@ -811,7 +811,7 @@ def test_a_stop_signal_stops_the_command_releases_and_exits_128_plus_n(
     assert code == 128 + signum
     assert children and not orphaned
     assert restored is unhandled  # main put the previous handler back
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -1206,7 +1206,7 @@ def test_hold_keeps_the_lease_while_the_pid_lives_then_releases(lease_env, sleep
     assert seen.get("held_at") is not None
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
     assert daemon.actions()[0] == "register"
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert daemon.bodies("register")[0]["label"] == "lease-hold"
     assert daemon.bodies("lease")[0] == {"name": "gpu", "ttl": 120, "expect": 1800,
                                          "purpose": "bench server"}
@@ -1253,11 +1253,16 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
     for body in sends:
         assert worktree not in body["text"] and str(tmp_path) not in body["text"]
     assert str(tmp_path) not in daemon.bodies("register")[0]["status"]
-    # The peer list was asked with this run's address, and the sends followed
-    # the lease call and preceded the release.
+    # The peer list was asked with this run's address; the acquired notices
+    # followed the lease call, and the released ones follow the board
+    # release, so a peer told "released" finds the lease free.
     actions = daemon.actions()
     assert actions.index("agents") > actions.index("lease")
-    assert actions[-1] == "release" and "send" in actions[:-1]
+    release_at = len(actions) - 1 - actions[::-1].index("release")
+    texts = [call[2].get("text", "") for call in daemon.calls]
+    assert all(i > release_at for i, t in enumerate(texts) if "released" in t)
+    assert all(i < release_at for i, t in enumerate(texts) if "acquired" in t)
+    assert released_last(daemon)
     for action, headers, _body, _at in daemon.calls:
         if action in ("agents", "send"):
             assert headers["x-pl-agent"] == AGENT
@@ -1323,7 +1328,7 @@ def test_hold_is_stopped_by_a_signal_and_releases(lease_env, sleeper, capsys):
         timer.cancel()
     assert code == 130
     assert child.poll() is None  # the process it followed is not its to stop
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
     assert "interrupted" in capsys.readouterr().err
 
@@ -1377,24 +1382,47 @@ def test_qwen_server_script_still_parses():
 
 # --- review findings (2026-09-28) ------------------------------------------------
 
-def test_check_trusts_a_free_local_lock_over_a_leftover_board_holder(lease_env, capsys):
-    # A hold killed outright drops its OS lock at once while its board lease
-    # lapses at the ttl: the lock is the truth, the board record is stale.
-    lease_env.mkdir(parents=True, exist_ok=True)
-    free = os_lock.OsLock(lease_env / os_lock.lock_file_name("gpu"))
-    assert free.acquire()
-    free.release()
+def _board_holding(label, name="gpu"):
     now = time.time()
-    daemon = FakeDaemon(leases=[(200, {"leases": [
-        {"name": "gpu", "holder": _holder(label="killed-hold"), "fence": 3,
+    return FakeDaemon(leases=[(200, {"leases": [
+        {"name": name, "holder": _holder(label=label), "fence": 3,
          "expires_at": now + 90, "expected_end": None, "stale": False,
          "queued": 0, "queue": []}], "truncated": False})])
+
+
+def _free_lock_file(lease_env, name="gpu"):
+    lease_env.mkdir(parents=True, exist_ok=True)
+    free = os_lock.OsLock(lease_env / os_lock.lock_file_name(name))
+    assert free.acquire()
+    free.release()  # the file stays: a lock file is never deleted
+
+
+@pytest.mark.parametrize("label", [lease_cli.HOLD_LABEL, lease_cli.LABEL])
+def test_check_trusts_a_free_local_lock_over_a_leftover_process_mirror(lease_env, capsys,
+                                                                       label):
+    # A `lease hold` or `lease run` killed outright drops its OS lock at once
+    # while its board record lapses at the ttl: the lock is the truth for a
+    # process-held lease, and that board record is stale.
+    _free_lock_file(lease_env)
+    daemon = _board_holding(label)
     assert _run(["check", "gpu"], daemon) == 0
     out = capsys.readouterr().out
-    assert "lease gpu: free" in out and "killed-hold" in out and "stale" in out
+    assert "lease gpu: free" in out and label in out and "stale" in out
     assert _run(["check", "gpu", "--json"], daemon) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["held"] is False and report["board"]["holder"]["label"] == "killed-hold"
+    assert report["held"] is False and report["board"]["holder"]["label"] == label
+
+
+def test_check_counts_a_session_claim_as_held_beside_a_free_lock(lease_env, capsys):
+    # A session that claimed gpu (memory_agents claim) before loading a model
+    # holds it on the board only; the lock file exists from an earlier run
+    # and is free. No local process can speak for that claim, so it counts
+    # until it is released or lapses (orchestrator re-review, 2026-09-28).
+    _free_lock_file(lease_env)
+    daemon = _board_holding("claude-code")
+    assert _run(["check", "gpu"], daemon) == 1
+    out = capsys.readouterr().out
+    assert "lease gpu: held" in out and "claude-code" in out and "stale" not in out
 
 
 def test_a_check_that_fails_is_never_mistaken_for_held(lease_env, monkeypatch, capsys):

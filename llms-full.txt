@@ -4133,10 +4133,13 @@ else the checkout's `.venv`, else `python` on PATH, each as
 process CPU: it prints the local lock's state and the board's holder with the
 expected end, and exits `0` when the lease is free, `1` when it is held, and
 `70` when the check itself failed, which a gate must not read as held
-(`--json` for one report). The OS lock decides wherever its file exists: a
-board holder beside a free local lock is a record that outlived its process (a
-hold killed outright) and is shown as stale, not held. Only a name with no lock
-file on this machine, such as a session-held claim, is the board's to decide.
+(`--json` for one report). It is held when the local lock is held, or when the
+board shows a holder. The one exception: a board record left by a process
+mirror (`lease-hold` or `lease-run`) beside a free local lock outlived its
+process (killed outright), is shown as stale, and lapses at its ttl. Any other
+board holder, such as a session that claimed the lease with `memory_agents` or
+a run on another machine or account, counts as held until it is released or
+lapses, since no local lock can speak for it.
 For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
 slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with

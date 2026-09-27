@@ -41,8 +41,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   steps warn once and the server runs unleased, as before.
 - `pseudolife-mcp lease check NAME [--json]` is the launch gate for
   orchestrators: exit 0 when free, 1 when held, 70 when the check itself
-  failed, with the holder and expected end. The OS lock decides wherever its
-  file exists; a board holder beside a free local lock is shown as stale. For
+  failed, with the holder and expected end. It is held when the local lock
+  or the board says so, except that a process mirror's board record beside a
+  free local lock is shown as stale; a session's claim counts as held. For
   `full-suite` it probes the suite's own lock and its slots, with the holder
   record's pid, worktree and start.
 - Acquiring and releasing (`hold`, and the suite's mirror) send one board

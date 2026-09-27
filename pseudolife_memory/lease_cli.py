@@ -106,6 +106,9 @@ DEFAULT_URL = "http://127.0.0.1:8765"
 HELD_ENV = "PSEUDOLIFE_LEASES_HELD"
 LABEL = "lease-run"
 HOLD_LABEL = "lease-hold"  # a mirror of a lock this process holds (hold, conftest)
+# Board holders that only ever mirror a local OS lock: beside a free lock,
+# their record is stale (see _check_lease).
+_PROCESS_LABELS = frozenset({LABEL, HOLD_LABEL})
 # The test suite's own lock (tests/suite_lock.py); only ever probed here. Its
 # file names are that module's: slot 0 keeps the bare names, slot k inserts
 # the slot number, and the holder record beside each names pid and worktree.
@@ -442,15 +445,19 @@ class _Board:
             raise _Refused("the daemon's lease reply was not understood")
         return reply
 
-    def release_quietly(self, name: str) -> None:
-        """Release or leave the queue, best effort: a lease this address
-        neither holds nor waits for (``lease_not_held``) is already gone."""
+    def release_quietly(self, name: str) -> bool:
+        """Release or leave the queue, best effort; True when the board has
+        let go (a lease this address neither holds nor waits for,
+        ``lease_not_held``, is already gone)."""
         if not self.registered:
-            return
+            return True
         try:
             self._post("release", {"name": name}, timeout=RELEASE_TIMEOUT)
+        except _Refused as exc:
+            return exc.code == "lease_not_held"
         except Exception:  # noqa: BLE001 — cleanup must not replace the exit code
-            pass
+            return False
+        return True
 
     def leases(self, name: str | None = None) -> tuple[list[dict], bool]:
         reply = self._post("leases", {"name": name} if name else {"limit": LIST_LIMIT},
@@ -1009,10 +1016,12 @@ class BoardMirror:
                 self._wake.clear()
             board = self._board
             if board is not None:
-                if announced:
-                    self._announce("released", self._deadline)
+                # Free the board lease first: a successor told "released"
+                # must find it free, not still held by this run.
                 if time.monotonic() < self._deadline:
                     board.release_quietly(self.name)
+                if announced:
+                    self._announce("released", self._deadline)
         except Exception as exc:  # noqa: BLE001 — the board never stops the work
             _say(f"lease: the board mirror of {self.name!r} stopped "
                  f"({type(exc).__name__}); the local lock is unaffected")
@@ -1077,12 +1086,14 @@ class BoardMirror:
         the board would name a queued run as the holder: give it back, and
         ask no more until this process holds the lock (asking again would
         only be granted again, churning the audit log every poll)."""
+        if self._board is not None and not self._board.release_quietly(self.name):
+            return  # asked again at the next poll, which hands it back again
+        first = not self._granted_early
         self._granted_early = True
-        if self._board is not None:
-            self._board.release_quietly(self.name)
-        _say(f"lease: the board had no holder for {self.name!r} while its local lock is "
-             f"held by a run the board does not show; not claiming it until this process "
-             f"holds the lock")
+        if first:
+            _say(f"lease: the board had no holder for {self.name!r} while its local lock "
+                 f"is held by a run the board does not show; not claiming it until this "
+                 f"process holds the lock")
 
     def _not_held(self, reply: dict) -> None:
         holder = reply.get("holder")
@@ -1349,16 +1360,19 @@ def _check_lease(args, transport) -> int:
         finally:
             client.close()
     board["reason"] = reason
-    # The OS lock is the truth wherever it exists: a board holder beside a
-    # free local lock is a record that outlived its process (a hold killed
-    # outright) and lapses at its ttl. Only a lease with no lock file here,
-    # a session-held claim or a name never taken on this machine, is the
-    # board's to decide.
-    if local["state"] is None:
-        held = board["holder"] is not None
-    else:
-        held = local["state"] == "held"
-    board_stale = board["holder"] is not None and local["state"] == "free"
+    # The OS lock is the truth for a process-held lease: a board record left
+    # by a process mirror (`lease hold`, the suite's mirror, `lease run`)
+    # beside a free local lock outlived its process (killed outright) and
+    # lapses at its ttl. Any other board holder, such as a session's claim
+    # (memory_agents claim) or a run on another machine or account, has no
+    # local lock that could speak for it, so it counts until it is released
+    # or lapses. Lock files are never deleted, so "free" is the usual state
+    # of an idle lease here, not a sign that nobody holds it (orchestrator
+    # re-review, 2026-09-28).
+    holder = board["holder"]
+    board_stale = (holder is not None and local["state"] == "free"
+                   and holder.get("label") in _PROCESS_LABELS)
+    held = local["state"] == "held" or (holder is not None and not board_stale)
     if args.json:
         print(json.dumps({"name": args.name, "held": held, "local": local, "board": board},
                          indent=2))
