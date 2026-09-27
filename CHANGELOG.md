@@ -25,6 +25,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   job that forbids nesting), the CLI runs as before, with taskkill as the kill.
   POSIX is unchanged: the CLI's process group is killed.
 
+### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
+- `pseudolife-mcp prompt-hook`, which installs without the plugin run on
+  every user prompt, took a median of about 270 ms a turn on the
+  maintainer's Windows host. About half of that was importing the shim
+  module for three small helpers, because the shim's own imports pull in
+  httpx and, through it, rich. The daemon URL check (`_daemon_url`,
+  `_validated_daemon_url`, `DEFAULT_URL`) and the redirect-refusing handler
+  (`_NoRedirectHandler`) now live in `pseudolife_memory/daemon_url.py`,
+  which imports only the standard library. The shim re-exports them under
+  the same names, and the hook takes them from the new module, so it no
+  longer imports the shim. `pseudolife-mcp briefing` still imports the
+  shim for its health probe; it runs once per session, not every turn.
+  Measured 2026-09-27 against a stub daemon (runs of 10 spawns): medians
+  of 132-136 ms, down from 266-275 ms.
+  Behaviour is unchanged, error text included. A test fails if the hook
+  path imports the shim, httpx or rich again.
+- Deploy with `ops/update.ps1 -All`: the hook runs from the client-side
+  shim runtime (or, on the Docker tier, inside the daemon image), and a
+  daemon-only deploy does not update the shim runtime.
+
 ### Fixed (2026-09-26 — a redaction no longer reports a clean-up Postgres skipped as done)
 - `board-audit redact` reported `"vacuumed": true` even when Postgres had
   skipped part of its clean-up. A role that may not vacuum or analyze a table
