@@ -166,17 +166,17 @@ def test_mentions_same_verdict_for_nfd_and_nfc_text(text, name):
 
 
 def test_mentions_mark_after_a_dot_or_apostrophe_blocks_like_a_letter():
-    assert not rc._mentions("deploy node.́x", "node")
+    assert not rc._mentions("deploy node.\u0301x", "node")
     assert rc._mentions("deploy node. next", "node")
     # A mark is not a possessive "s", so it glues the apostrophe.
-    assert not rc._mentions("ask don'́ now", "don")
+    assert not rc._mentions("ask don'\u0301 now", "don")
 
 
 def test_mentions_keeps_looking_past_a_mark_bounded_candidate():
     assert rc._mentions(_nfd("josé met jose"), "jose")
     assert rc._mentions("सम्मान and मान", "मान")
     # The next clean match can overlap the rejected one.
-    assert rc._mentions("́a a a", "a a")
+    assert rc._mentions("\u0301a a a", "a a")
 
 
 @pytest.mark.parametrize("entity,query", [
