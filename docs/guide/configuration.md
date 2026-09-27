@@ -1152,9 +1152,11 @@ sessions can keep waking each other, so wakes are capped (below).
 - A watcher waits at most 3540 s after the turn that armed it; the hook's
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer is not woken; its mail still appears on its next prompt. On Linux and
-  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
-  Claude Code ends a waiting hook at teardown.
+  longer is not woken; its mail still appears on its next prompt. The watcher
+  also stops when Claude Code exits: at once on Linux and macOS, and within
+  a minute on Windows, where it lists the process through `ps -W` at arm
+  time and then once a minute (a Windows PID is invisible to `kill -0`). In
+  `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
   native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
   command stops at the flag check, and the script exits unless Claude Code
