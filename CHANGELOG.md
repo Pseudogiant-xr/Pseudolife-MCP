@@ -24,7 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   principal, and `rebind` refuses a missing row, so the recovery that rule
   pointed to could not restore the address. A rejected bearer or instance
   credential, or a different bank or principal, still preserves the saved
-  address.
+  address. Unchanged too: pre-2026-09-13 state not yet bound to a bank stops
+  earlier, at the ownership proof, when its address is gone, because that
+  answer does not tell a missing address from a different principal.
 
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
