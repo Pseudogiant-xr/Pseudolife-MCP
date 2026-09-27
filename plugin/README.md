@@ -72,7 +72,8 @@ hook commands in PowerShell, where every command here fails (`bash` is not
 found, or opens WSL, which cannot read the plugin's Windows paths), and the
 session gets no briefing, no per-turn note and no episode close.
 `pseudolife-mcp doctor` reports the bash.exe Claude Code would use
-(`git_bash`) and fails with `GitBashMissing` when there is none; it also
+(`git_bash`, reading `CLAUDE_CODE_GIT_BASH_PATH` from the settings `env`
+block too) and fails with `GitBashMissing` when there is none; it also
 warns when `bash` on PATH is the WSL launcher, which breaks tools that do
 look it up.
 

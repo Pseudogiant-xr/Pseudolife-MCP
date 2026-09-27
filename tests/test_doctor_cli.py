@@ -52,18 +52,50 @@ def test_git_bash_is_found_the_way_claude_code_finds_it(tmp_path):
     assert doctor_cli.find_git_bash({}, defaults=defaults, which=lambda _: None) is None
 
 
+def test_git_bash_path_is_read_from_the_claude_settings_env_block(tmp_path):
+    """The docs (and this module's own recovery text) put
+    CLAUDE_CODE_GIT_BASH_PATH in the env block of ~/.claude/settings.json,
+    which Claude Code applies to its own environment; doctor runs outside it
+    (orchestrator review of #429, 2026-09-28)."""
+    git = _git_layout(tmp_path)
+    config = tmp_path / "claude-config"
+    config.mkdir()
+    (config / "settings.json").write_text(json.dumps(
+        {"env": {"CLAUDE_CODE_GIT_BASH_PATH": str(git / "bin/bash.exe"), "OTHER": 1}}), encoding="utf-8")
+    env = {"CLAUDE_CONFIG_DIR": str(config)}
+    assert doctor_cli.claude_settings_env(env) == {"CLAUDE_CODE_GIT_BASH_PATH": str(git / "bin/bash.exe")}
+    report = doctor_cli.git_bash_report(env, defaults=(), which=lambda _: None)
+    assert report["git_bash"] == str(git / "bin/bash.exe") and "git_bash_recovery" not in report
+    # The settings block wins over the process environment, as in Claude Code.
+    report = doctor_cli.git_bash_report({**env, "CLAUDE_CODE_GIT_BASH_PATH": str(tmp_path / "missing/bash.exe")},
+                                        defaults=(), which=lambda _: None)
+    assert report["git_bash"] == str(git / "bin/bash.exe")
+    for broken in ("{not json", "[]", '{"env": ["x"]}', '{"env": {"CLAUDE_CODE_GIT_BASH_PATH": 3}}'):
+        (config / "settings.json").write_text(broken, encoding="utf-8")
+        assert doctor_cli.claude_settings_env(env) == {}
+    (config / "settings.json").unlink()
+    assert doctor_cli.claude_settings_env(env) == {}
+    # Without CLAUDE_CONFIG_DIR the user settings live under ~/.claude.
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude/settings.json").write_text(json.dumps({"env": {"A": "b"}}), encoding="utf-8")
+    assert doctor_cli.claude_settings_env({}, home=home) == {"A": "b"}
+
+
 def test_git_bash_report_flags_the_wsl_launcher_on_path(tmp_path):
     git = _git_layout(tmp_path)
     system32 = tmp_path / "Windows/System32/bash.exe"
     system32.parent.mkdir(parents=True)
     system32.write_bytes(b"")
     which = {"git": str(git / "cmd/git.exe"), "bash": str(system32)}.get
-    report = doctor_cli.git_bash_report({}, defaults=(), which=which)
+    # An empty config dir: never the real ~/.claude/settings.json of the host.
+    no_settings = {"CLAUDE_CONFIG_DIR": str(tmp_path / "no-claude-config")}
+    report = doctor_cli.git_bash_report(no_settings, defaults=(), which=which)
     assert Path(report["git_bash"]) == git / "bin/bash.exe"
     assert report["bash_on_path"] == str(system32)
     assert report["bash_on_path_is_wsl_launcher"] is True
     assert "Claude Code" in report["git_bash_recovery"] and "PATH" in report["git_bash_recovery"]
-    clean = doctor_cli.git_bash_report({}, defaults=(), which={"git": str(git / "cmd/git.exe"),
+    clean = doctor_cli.git_bash_report(no_settings, defaults=(), which={"git": str(git / "cmd/git.exe"),
                                                                 "bash": str(git / "bin/bash.exe")}.get)
     assert clean["bash_on_path_is_wsl_launcher"] is False and "git_bash_recovery" not in clean
 

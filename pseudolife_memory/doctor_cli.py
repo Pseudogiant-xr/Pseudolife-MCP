@@ -23,13 +23,34 @@ def _windows() -> bool:
     return os.name == "nt"
 
 
+def claude_settings_env(env, *, home: Path | None = None) -> dict:
+    """The string entries of the ``env`` block in Claude Code's user settings
+    (``$CLAUDE_CONFIG_DIR/settings.json``, else ``~/.claude/settings.json``),
+    which Claude Code applies to its own environment and where its docs put
+    ``CLAUDE_CODE_GIT_BASH_PATH``. ``{}`` when the file is absent or not a
+    JSON object with an ``env`` object."""
+    base = (Path(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR")
+            else (home or Path.home()) / ".claude")
+    try:
+        settings = json.loads((base / "settings.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {}
+    block = settings.get("env") if isinstance(settings, dict) else None
+    if not isinstance(block, dict):
+        return {}
+    return {key: value for key, value in block.items()
+            if isinstance(key, str) and isinstance(value, str)}
+
+
 def find_git_bash(env, *, defaults=GIT_BASH_DEFAULTS, which=shutil.which) -> str | None:
     """The bash.exe Claude Code would run hook commands with, by its rules:
     ``CLAUDE_CODE_GIT_BASH_PATH`` when it names an existing bash or sh
     binary, then the default Git for Windows install directories, then
-    ``bin\\bash.exe`` two levels up from the ``git`` on PATH (``cmd\\git.exe``
-    or ``mingw64\\bin\\git.exe``). ``None`` when none exists: Claude Code then
-    runs hooks in PowerShell, where the plugin's Bash commands fail."""
+    ``bin\\bash.exe`` two directories up from the ``git`` on PATH (Git's
+    ``cmd\\git.exe``, the one its installer puts on PATH; a
+    ``mingw64\\bin\\git.exe`` does not resolve, in Claude Code either).
+    ``None`` when none exists: Claude Code then runs hooks in PowerShell,
+    where the plugin's Bash commands fail."""
     configured = env.get("CLAUDE_CODE_GIT_BASH_PATH")
     if configured:
         path = Path(configured)
@@ -51,7 +72,12 @@ def git_bash_report(env, *, defaults=GIT_BASH_DEFAULTS, which=shutil.which) -> d
     what a bare ``bash`` on PATH runs, and recovery text when either is
     wrong. ``bash`` resolving to the WSL launcher does not affect Claude
     Code, which never looks bash up on PATH, but breaks any tool that does
-    (the 2026-09-12 Codex hook failures ran plugin scripts under WSL)."""
+    (the 2026-09-12 Codex hook failures ran plugin scripts under WSL).
+    ``CLAUDE_CODE_GIT_BASH_PATH`` from the Claude Code settings env block
+    wins over this process's environment, as it does inside Claude Code."""
+    configured = claude_settings_env(env).get("CLAUDE_CODE_GIT_BASH_PATH")
+    if configured:
+        env = {**env, "CLAUDE_CODE_GIT_BASH_PATH": configured}
     git_bash = find_git_bash(env, defaults=defaults, which=which)
     bash_on_path = which("bash")
     is_wsl_launcher = bool(bash_on_path

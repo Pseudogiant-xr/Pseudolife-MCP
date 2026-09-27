@@ -18,7 +18,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   never ran. Without Git Bash every plugin hook fails silently in
   PowerShell, so Git for Windows is now a stated requirement (README,
   `plugin/README.md`, `docs/guide/providers.md`), and
-  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`), fails
+  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`,
+  honouring `CLAUDE_CODE_GIT_BASH_PATH` from the process environment or the
+  `env` block of `~/.claude/settings.json`, which wins as in Claude Code), fails
   with `GitBashMissing` when there is none, and warns when `bash` on PATH
   is the WSL launcher (`bash_on_path_is_wsl_launcher`), which does not
   affect Claude Code but breaks tools that look bash up on PATH. The
