@@ -345,14 +345,16 @@ the query names none, so a task-phrased recall can pin a rule the query
 never names — but once the query names any known entity, that fallback
 does not run. Two consequences. When you store a rule, name its entity
 the way the task would say it (`bench server`, not `GPU pre-flight
-rule`), knowing the bounded match treats only whitespace and `._-/` as
-separators: an entity followed by `?`, `,` or `'s` in the query is not a
-match (a limit of `_entity_in_query`, not a design). And a rule that must
-hold *however* the task is phrased — a safety rule, a "never do X" —
-belongs in the agent's standing-instruction surface too (the CLAUDE.md /
-AGENTS.md block, or the client's own always-loaded memory), with the bank
-holding its why, its history and its corrections: an always-loaded line
-fires without a query; a bank entry fires only when the query reaches it.
+rule`). The bounded match ends at whitespace, punctuation or a
+possessive `'s`, so "should I start the bench server?" and "the bench
+server's config" name it as well; in `memory_recall`, whose seeds come
+from a raw-text match over entity names, a `.` straight after the name
+does not end it. And a rule that must hold *however* the task is
+phrased — a safety rule, a "never do X" — belongs in the agent's
+standing-instruction surface too (the CLAUDE.md / AGENTS.md block, or
+the client's own always-loaded memory), with the bank holding its why,
+its history and its corrections: an always-loaded line fires without a
+query; a bank entry fires only when the query reaches it.
 
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
