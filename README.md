@@ -116,7 +116,8 @@ default, behind bearer authentication. Without `coordination.allowed_principals`
 in the daemon's `config.yaml`, only the singular `PSEUDOLIFE_MCP_TOKEN`
 principal is admitted. A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map stays
 off the board until an operator lists it (`allowed_principals: [default, codex]`).
-Until then the shim leaves coordination off without an error.
+Until then a shim on the default setting leaves coordination off without an
+error; one pinned with `--enable` shows an attach-unavailable hint instead.
 `python ops/setup-codex-coordination.py --check` reports `ready (default-on)`
 or names the cause. See
 [Codex CLI and desktop](docs/guide/configuration.md#codex-cli-and-desktop).

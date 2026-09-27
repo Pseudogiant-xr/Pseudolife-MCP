@@ -70,8 +70,10 @@ is admitted: principals of a `PSEUDOLIFE_MCP_TOKENS` map are separately
 trusted identities and join the board only when listed (an explicit list
 replaces the default; include `default` to keep it). An upgrade that already
 authenticates clients through a map therefore finds them off the board until
-they are listed. A shim whose bearer is unlisted leaves coordination off at
-startup without an error, and memory keeps working. For Codex,
+they are listed. On the default setting, a shim whose bearer is unlisted
+leaves coordination off at startup without an error, and memory keeps
+working; with `PSEUDOLIFE_AGENT_COORDINATION=1` it shows a
+coordination-unavailable hint instead. For Codex,
 `ops/setup-codex-coordination.py --check` names this cause
 ([Codex CLI and desktop](#codex-cli-and-desktop)). Mailbox operations
 require PostgreSQL, configured
@@ -335,8 +337,9 @@ python ops/setup-codex-coordination.py --check
 The check is read-only. Coordination is on by default, so a registration
 without `PSEUDOLIFE_AGENT_COORDINATION` reports `ready (default-on)` when the
 daemon serves the board to its bearer, the same question the shim asks at
-startup. Nothing more is needed then. When it reports `needs-configuration`,
-its `reason` names what to fix where it can tell.
+startup. Nothing more is needed then. When it reports `needs-configuration`
+because the daemon refuses the bearer's principal, its `reason` says so
+(below).
 
 `python ops/setup-codex-coordination.py --enable` is only for pinning explicit
 mode (`PSEUDOLIFE_AGENT_COORDINATION=1`), after which the check reports
@@ -353,8 +356,10 @@ server after changing its environment.
 
 A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
 off the board until an operator lists it: without `allowed_principals` only
-`default` is admitted. The shim's startup question then leaves coordination
-off with no error, and memory keeps working. The check reports
+`default` is admitted. On the default setting the shim's startup question
+then leaves coordination off with no error, and memory keeps working. In
+explicit mode each task instead gets an "identity attachment unavailable"
+hint. In either mode the check reports
 `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
 Add the principal the map gives that bearer, keeping `default` if the
 singular token should stay on the board, and restart the daemon:

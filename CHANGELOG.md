@@ -28,8 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
   `--enable`'s refusal names the same cause. A Codex principal from a
   `PSEUDOLIFE_MCP_TOKENS` map is off the board until it is listed (the
-  2026-09-25 default, unchanged), and in that state the shim leaves
-  coordination off without an error. The coordination section of the
+  2026-09-25 default, unchanged). In that state a shim on the default
+  setting leaves coordination off without an error, and one pinned with
+  `--enable` shows only an attach-unavailable hint. The coordination section of the
   configuration guide and the README's Codex setup now say this for
   upgraders.
 
