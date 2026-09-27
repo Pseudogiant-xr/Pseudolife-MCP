@@ -206,6 +206,30 @@ def test_startup_checkin_is_served_only_where_the_board_works(token, token_map, 
     assert body == ((CHECKIN_TEXT + "\n").encode() if served else b"")
 
 
+@pytest.mark.parametrize("token,token_map,bearer,settings,state", [
+    ("fixture-secret", None, b"Bearer fixture-secret", {}, "on"),
+    ("fixture-secret", None, b"Bearer fixture-secret", {"enabled": False}, "off; reason=disabled"),
+    (None, None, None, {}, "off; reason=authentication_required"),
+    ("fixture-secret", None, b"Bearer wrong", {}, "off; reason=unauthorized"),
+    (None, {"map-secret": "editor"}, b"Bearer map-secret", {},
+     "off; reason=principal_not_allowed"),
+    ("fixture-secret", None, b"Bearer fixture-secret", {"db_url": None},
+     "off; reason=coordination_requires_postgres"),
+], ids=["available", "disabled", "open-install", "wrong-bearer", "unlisted-principal",
+        "file-mode"])
+def test_startup_checkin_names_why_the_board_is_off(token, token_map, bearer, settings, state):
+    """The installer's and doctor's one-line board status read the reason
+    from the daemon instead of guessing it client-side."""
+    from tests.asgi_helpers import call_with_headers
+    app = build_console_app(stub_mcp, token, lambda: {}, _board_service(**settings),
+                            token_map=token_map)
+    headers = [(b"authorization", bearer)] if bearer else []
+    status, response, _ = call_with_headers(app, "GET", "/api/hook/coordination-start",
+                                            headers=headers)
+    assert status == 200
+    assert response[b"x-pl-board"] == state.encode()
+
+
 def test_startup_checkin_route_is_get_only_and_browser_gated():
     app = build_console_app(stub_mcp, None, lambda: {}, _board_service())
     status, _ = call(app, "POST", "/api/hook/coordination-start")

@@ -282,6 +282,9 @@ def _doctor(monkeypatch, capsys, health):
     monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
     monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
     monkeypatch.setattr(shim, "probe_health", lambda *a, **kw: health)
+    # The board line asks the daemon over the network; not what these test.
+    if hasattr(doctor_cli, "_board_line"):
+        monkeypatch.setattr(doctor_cli, "_board_line", lambda timeout: "fixture")
     monkeypatch.setattr(doctor_cli, "_handshake", AsyncMock(return_value={
         "instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}))
     with pytest.raises(SystemExit):
