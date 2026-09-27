@@ -91,8 +91,9 @@ extraction quality per model.
 Full parity. The [plugin](../../plugin/README.md) is the recommended
 hooks/commands layer — it is the only path that registers the session
 identity with the daemon (SessionStart forwards Claude Code's own
-`session_id`) and closes the episode on SessionEnd. Its opt-in `Stop` hook can
-also wake an idle session when board mail arrives (see
+`session_id`) and closes the episode on SessionEnd. Its `Stop` hook (on by
+default since 2026-09-28, `PSEUDOLIFE_AGENT_WAKE_HOOK=0` turns it off) also
+wakes an idle session when board mail that clears its declared need arrives (see
 [Configuration](configuration.md#waking-an-idle-claude-code-session-the-stop-hook)).
 `ops/install-hook.*`
 is the non-plugin fallback: it installs the SessionStart briefing
@@ -240,11 +241,14 @@ incomplete or unrecognized plugin bundle requires review rather than
 automatically granting trust. Disabled hooks and intentional feature or
 policy restrictions remain in place.
 
-The plugin's `hooks.json` also carries Claude Code's opt-in wake hook on
-`Stop`, so Codex 0.148 and later lists a fourth PseudoLife hook (earlier
-releases skip async hooks there). It is a no-op in Codex: the native command
-exits at once, and the bash command stops at its opt-in check or the script
-exits unless Claude Code started it. Setup approves it with the other three, and disabling it in
+The plugin's `hooks.json` also carries Claude Code's wake hook on
+`Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
+fourth PseudoLife hook (earlier releases skip async hooks there). It is a
+no-op in Codex: the native command exits at once, and the bash script exits
+unless Claude Code started it. Codex's own wake path is the
+[doorbell](configuration.md#codex-doorbell), also on by default when a
+`codex` CLI is found; a woken task needs `memory_message` approved, or it
+stalls on a prompt. Setup approves it with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.

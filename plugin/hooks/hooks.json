@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"$PSEUDOLIFE_AGENT_WAKE_HOOK\" != 1 ] || bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\"",
+            "command": "case \"$PSEUDOLIFE_AGENT_WAKE_HOOK\" in 0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) exit 0 ;; esac; case \"$PSEUDOLIFE_AGENT_COORDINATION\" in ''|1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) ;; *) exit 0 ;; esac; bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\"",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event Stop",
             "async": true,
             "asyncRewake": true,

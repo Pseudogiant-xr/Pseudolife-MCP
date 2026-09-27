@@ -55,7 +55,58 @@ channel: it queues only a fixed, labelled notice with the pending count, never
 peer text, and the model reads the mail itself through `memory_message receive`.
 Putting peer text in the queued message would place it in a user-role turn; that
 variant is not implemented. Setup and limits are in the configuration guide's
-"Optional Codex doorbell" section.
+"Codex doorbell" section. Since 2026-09-28 the doorbell is on by default and
+policy-gated: the daemon rings a task only while it is parked with a declared
+need that the message plausibly clears.
+
+## Doorbell probe (procedure, 2026-09-28)
+
+The doorbell shipped on 2026-09-23 without a run against a real Codex home:
+every doorbell test drives a fake CLI, and the 2026-09-12 host evidence above
+predates it. Default-on relies on this path, so the probe is a release gate
+for it, and this record states whether it has run.
+
+**Status: not yet run.** The maintainer has to be present for the Codex side
+(a loaded, idle desktop or CLI task with `memory_message` approved), so the
+run is requested on the board and in chat first. Until a run is recorded
+here, the doorbell's live delivery is unprobed.
+
+Procedure, all synthetic content, no message bodies recorded:
+
+1. Prerequisites: a deployed daemon at or past this change; the Codex shim
+   runtime at or past 0.15.0 (the doorbell module); `codex` on PATH or the
+   desktop app installed; `memory_message` approved in the recipient's tool
+   configuration; `PSEUDOLIFE_CODEX_DOORBELL` unset or a yes in the Codex
+   server's `env` table.
+2. Start the recorder on the host, then a fresh Codex task (desktop app or
+   `codex` CLI) that makes one Pseudolife call, so the shim watches it:
+   `python -m evals.codex_doorbell_probe --recipient <its board agent id>
+   --out evals/results/codex-doorbell-probe-<date>.json`. The id comes from
+   `memory_agents list`. The recorder polls `/api/agents` and the digest
+   ledger; it stores timestamps and counts only.
+3. Park the task with a need (`memory_agents update` with a park record:
+   reason `waiting_peer`, the need, `park_clear_by` set to the sender's
+   agent id, an expiry) and end its turn. Until the park record lands
+   daemon-side, the pre-policy path is probed instead: any new addressed
+   mail rings.
+4. From another session, send the task one message that clears the need
+   (tagged `clears=<need>`, or from the named clearer).
+5. Observe, in order: a `bell` line in `ledger.log` (the shim ran
+   `codex queue`), the task's `last_activity` advancing on the board (the
+   app-server dispatched the notice and the task took a turn), and the
+   message acknowledged (`memory_message ack` from the task). The recorder
+   writes the deltas between them. Where `pseudolife-mcp board-audit export`
+   is available, pass `--export <file>` to count the `send`, first-read and
+   `ack` events too.
+6. Record the Codex CLI and app versions, the shim version, the three
+   timestamps, the counts, and any timeout (the CLI has 20 s; app-servers
+   poll for queued messages about every 10 s) in the JSON the recorder
+   writes, commit it under `evals/results/`, and replace the status line
+   above with the run's date and outcome.
+
+A run whose task never took a turn is a finding, not a failure of the
+recorder: it names the step that did not happen (no bell, bell but no turn,
+turn but no acknowledgment), which is what phase 3 needs to know.
 
 ## Host evidence (2026-09-12)
 

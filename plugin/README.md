@@ -183,9 +183,10 @@ listed for review and left alone. By hand:
   independently of the memory reminder, without a daemon call.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
-- **Stop hook** (opt-in, `PSEUDOLIFE_AGENT_WAKE_HOOK=1`) — waits in the
-  background after each turn and wakes the idle session when new addressed
-  board mail arrives; off by default. See
+- **Stop hook** (on by default since 2026-09-28; `PSEUDOLIFE_AGENT_WAKE_HOOK=0`
+  turns it off, `PSEUDOLIFE_AGENT_COORDINATION=0` turns off the board) — waits
+  in the background after each turn and wakes the idle session when board
+  mail that clears its declared need arrives; policy-gated and capped. See
   [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout

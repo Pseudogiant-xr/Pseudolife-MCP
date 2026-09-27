@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
+- Wake is on by default (maintainer decision 2026-09-28, superseding the
+  2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
+  stay opt-in" and the opt-in framing of the two 2026-09-23 entries "board
+  mail can wake an idle Codex task, opt-in" and "board mail can wake an idle
+  Claude Code session"). The plugin's `Stop` hook runs unless the hook
+  environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=0` (or `false`/`no`/`off`),
+  and the Codex shim arms its doorbell whenever it finds a `codex` CLI
+  unless `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes.
+  `PSEUDOLIFE_AGENT_COORDINATION=0` stays the master off switch for a
+  client. A ring is policy-gated: the daemon rings a session only while it
+  is parked with a declared need that the message plausibly clears, never
+  for chatter, and the park record and wake decision ship beside this
+  entry. The 27 Sep night showed a session parked on a blocker a message
+  had already cleared, with no wake path on; unattended runs are where wake
+  pays.
+- The Stop hook's command now refuses a script that does not parse
+  (`bash -n` first) instead of relying on the opt-in flag to keep a broken
+  copy from waking every session at every turn end, and it honours
+  `PSEUDOLIFE_AGENT_COORDINATION` before bash reads the script. Existing
+  `=1` settings keep working. Codex loads the same `hooks.json`; the `Stop`
+  entry stays a no-op there. The hook scripts changed, so Codex asks to
+  approve them again after the plugin update.
+- The Codex CLI lookup falls back, on Windows, to the desktop app's own
+  `%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe` (newest build, as
+  `ops/setup-codex-hooks.py` finds it), so a desktop-only install rings;
+  PATH stays absolute-directories-only and `PSEUDOLIFE_CODEX_BIN` still
+  overrides both. With no CLI found the default stays quiet and falls back
+  to pull delivery; an explicit `=1` still says why on stderr.
+- The wake caps are operator-configurable under `coordination.wake` in
+  `config.yaml`: `per_recipient_per_hour` (20, counting every wake),
+  `urgent_per_sender_per_hour` (6), `nightly_total` (200) and
+  `fan_out_stagger_seconds` (30); whole numbers of rings, `0` rings nobody.
+  `/health` reports `coordination: {enabled, wake: {...}}`, and
+  `pseudolife-mcp doctor` gains a `wake` section: each registered client's
+  wake path (`claude_code.stop_hook`, read from the settings.json `env`
+  block over the shell; `codex.doorbell`, read from the MCP server's `env`
+  table and forwarded `env_vars`, plus the CLI lookup) as `on`, `off (<the
+  setting>)` or `off (no codex CLI)`, and the caps in force, or why they
+  are unknown (daemon unreachable, or one that predates them).
+- Docs: the configuration guide's doorbell and Stop-hook sections describe
+  the default-on behaviour and the opt-outs, the coordination block gains
+  `wake`, the README's Codex setup states the `memory_message` approval a
+  woken task needs (without it the task stalls on a prompt) and its
+  Updating section says existing installs start ringing after the client
+  update and how to opt out. The live Codex doorbell probe the 2026-09-12
+  validation record still lacks is written up as a procedure there with a
+  recorder (`evals/codex_doorbell_probe.py`); whether it has run is stated
+  in that record, not here.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a

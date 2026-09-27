@@ -1306,6 +1306,47 @@ class MemoryPolicyConfig:
 
 
 @dataclass
+class WakeConfig:
+    """Caps on the rings that start a model turn in an idle session.
+
+    Wake is on by default and policy-gated (maintainer decision 2026-09-28,
+    superseding the 2026-09-25 opt-in): a message rings a parked session
+    only when it plausibly clears the need the park record declares. The
+    policy gate keeps the effective rate low; these caps are the guarantee
+    against a loop between two woken sessions, a chatty sender, or a
+    fan-out that would start a dozen unattended turns at once. The figures
+    are the 2026-09-28 design decision, grounded in the 2026-09-23/24
+    fifteen-session board trial: the Stop hook's 20 wakes an hour per
+    session was already in force there, no sender-recipient pair exceeded
+    10 wakes an hour and no request or handoff would have crossed 6, while
+    fan-out bursts were 2.8% of traffic. A cap of 0 rings nobody; the off
+    switch stays ``PSEUDOLIFE_AGENT_COORDINATION=0`` on the client.
+    """
+
+    # Rings one recipient may receive in any hour, counting every wake,
+    # including the ones no sender caused (a partial ack, an expiry).
+    per_recipient_per_hour: int = 20
+    # Rings one sender may cause with ``urgent`` in any hour.
+    urgent_per_sender_per_hour: int = 6
+    # Rings across the whole board in one night (a UTC day).
+    nightly_total: int = 200
+    # Seconds between two rings caused by one fan-out send.
+    fan_out_stagger_seconds: float = 30.0
+
+    def __post_init__(self) -> None:
+        for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"coordination.wake.{name} must be a whole number of "
+                                 "rings, 0 or more (0 rings nobody)")
+        stagger = self.fan_out_stagger_seconds
+        if type(stagger) not in (int, float) or stagger < 0:
+            raise ValueError("coordination.wake.fan_out_stagger_seconds must be a number "
+                             "of seconds, 0 or more")
+        self.fan_out_stagger_seconds = float(stagger)
+
+
+@dataclass
 class CoordinationConfig:
     """Peer awareness and addressed mail; limits bound injected session context.
 
@@ -1334,10 +1375,16 @@ class CoordinationConfig:
     # bounded. The log is cut on UTC day boundaries, so an event stays up to
     # a day longer than this.
     audit_retention_days: int = 90
+    # Caps on wake rings; see WakeConfig.
+    wake: WakeConfig = field(default_factory=WakeConfig)
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
+        if isinstance(self.wake, dict):
+            self.wake = WakeConfig(**self.wake)
+        if not isinstance(self.wake, WakeConfig):
+            raise ValueError("coordination.wake must be a mapping of caps")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
             raise ValueError("coordination.awareness_limit must be an integer in 1..20")
         if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:

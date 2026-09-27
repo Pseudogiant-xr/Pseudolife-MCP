@@ -194,9 +194,9 @@ function Get-PseudolifeConnection {
 }
 
 $rawInput = [Console]::In.ReadToEnd()
-# Stop carries Claude Code's opt-in wake hook (stop-wake.sh), which Claude
-# runs through the bash command. Codex loads the same hooks.json and runs
-# this one instead: for Codex it is a silent no-op.
+# Stop carries Claude Code's wake hook (stop-wake.sh, on by default since
+# 2026-09-28), which Claude runs through the bash command. Codex loads the
+# same hooks.json and runs this one instead: for Codex it is a silent no-op.
 if ($Event -eq 'Stop') { exit 0 }
 $sessionId = ''
 $startReason = ''

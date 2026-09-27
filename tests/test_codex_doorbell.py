@@ -1100,7 +1100,11 @@ def test_shim_reports_success_only_for_a_result_that_is_not_an_error(monkeypatch
     assert noted == [False, True, False, False]
 
 
-def test_shim_arms_the_doorbell_only_on_opt_in(monkeypatch, tmp_path, capsys):
+def test_shim_arms_the_doorbell_by_default_and_names_a_bad_configured_path(monkeypatch, tmp_path, capsys):
+    """On by default since 2026-09-28 (the default-on and opt-out cases are
+    in test_wake_defaults.py); a configured PSEUDOLIFE_CODEX_BIN that is not
+    an absolute existing file turns it off and, with an explicit yes, says so
+    rather than falling back to PATH."""
     from pseudolife_memory import codex_coordination, shim
 
     seen = []
@@ -1122,29 +1126,19 @@ def test_shim_arms_the_doorbell_only_on_opt_in(monkeypatch, tmp_path, capsys):
     for key in ("PSEUDOLIFE_AGENT_STATE", "PSEUDOLIFE_AGENT_WAKE",
                 "PSEUDOLIFE_CODEX_DOORBELL", "PSEUDOLIFE_CODEX_BIN"):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    binary = _fake_cli(tmp_path / "bin")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
 
     def run():
         asyncio.run(shim._run_session_proxy("http://fixture", "token", "process-session"))
         return capsys.readouterr().err
 
-    assert "doorbell" not in run()                  # default: off, and silent
-    binary = _fake_cli(tmp_path / "bin")
-    monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", str(binary))
-    monkeypatch.setenv("PSEUDOLIFE_CODEX_DOORBELL", "1")
-    run()
+    assert "doorbell" not in run()                  # default: on, and silent
+    assert isinstance(seen[0]["doorbell"], CodexDoorbell)
+    assert _same(seen[0]["doorbell"]._command, binary)
     monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", str(tmp_path / "missing"))
+    assert "doorbell" not in run()                  # default with a bad path: off, quiet
+    monkeypatch.setenv("PSEUDOLIFE_CODEX_DOORBELL", "1")
     missing = run()
-    monkeypatch.delenv("PSEUDOLIFE_CODEX_BIN")
-    unfound = run()
-    monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "0")
-    uncoordinated = run()
-
-    assert "doorbell" not in seen[0]
-    assert isinstance(seen[1]["doorbell"], CodexDoorbell)
-    assert seen[1]["doorbell"]._command == [str(binary)]
-    assert "doorbell" not in seen[2] and "doorbell" not in seen[3]
-    assert len(seen) == 4                           # coordination off: no registry at all
+    assert "doorbell" not in seen[1] and "doorbell" not in seen[2]
     assert "PSEUDOLIFE_CODEX_BIN is not an absolute path to an existing file" in missing
-    assert "no codex CLI found on PATH" in unfound
-    assert "PSEUDOLIFE_CODEX_DOORBELL needs PSEUDOLIFE_AGENT_COORDINATION=1" in uncoordinated

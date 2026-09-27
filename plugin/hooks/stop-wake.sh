@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Pseudolife-MCP Stop hook: wake an idle Claude Code session when addressed
-# board mail arrives. Opt-in: hooks.json runs it only when
-# PSEUDOLIFE_AGENT_WAKE_HOOK=1 (checked again here), and it is a no-op
-# anywhere but Claude Code (Codex loads the same hooks.json).
+# board mail arrives. On by default since 2026-09-28 (before that, opt-in
+# with PSEUDOLIFE_AGENT_WAKE_HOOK=1): hooks.json skips it when
+# PSEUDOLIFE_AGENT_WAKE_HOOK is 0/false/no/off or PSEUDOLIFE_AGENT_COORDINATION
+# is set to anything but a yes (both checked again here), refuses a copy that
+# does not parse, and it is a no-op anywhere but Claude Code (Codex loads the
+# same hooks.json).
 #
 # hooks.json registers it with "async": true and "asyncRewake": true, so it
 # waits in the background after each turn, and exit code 2 starts a new turn
@@ -45,7 +48,10 @@ POLL=5
 MAX_WAKES=20
 WAKE_WINDOW=3600
 
-if [ "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}" != "1" ] || [ "${CLAUDECODE:-}" != "1" ]; then
+OFF=""
+case "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}" in 0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) OFF=1 ;; esac
+case "${PSEUDOLIFE_AGENT_COORDINATION:-}" in ''|1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) ;; *) OFF=1 ;; esac
+if [ -n "$OFF" ] || [ "${CLAUDECODE:-}" != "1" ]; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done
     exit 0

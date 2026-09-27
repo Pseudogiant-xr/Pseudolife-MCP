@@ -111,6 +111,14 @@ not a promise that a first model download fits. The tool budget leaves time for
 the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
 `pseudolife-mcp serve` in a terminal if needed.
 
+Approve `memory_message` in that table's tool configuration
+(`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
+"approve"`, or allow it once and keep the approval). Board mail can wake an
+idle Codex task by default, and the woken task reads its mail with that tool:
+without the approval it stalls on a prompt until someone answers it. Set
+`PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
+from being woken (see [Codex doorbell](docs/guide/configuration.md#codex-doorbell)).
+
 The MCP handshake delivers compact recall/capture/reflection instructions.
 For the complete standing guidance, copy the
 [bundled memory block](examples/CLAUDE.memory.md) into your project
@@ -593,6 +601,17 @@ registrations are preserved and named; upgrade those in their own
 interpreter. A daemon-side credential change with an old shim leaves the
 two out of step: the Claude Desktop registrar refuses a shim that cannot
 read the selected token file (exit 4), and names the upgrade.
+
+- **Upgrading past 2026-09-28: board mail starts waking idle sessions.**
+  Once the plugin cache and the shim move (`-All`, then a client restart),
+  a Claude Code session and a Codex task with a `codex` CLI are woken when
+  mail arrives that clears the need they parked on; before this both wake
+  paths were opt-in. Nothing rings for chatter, and rings are capped. To
+  keep the old behaviour, set `PSEUDOLIFE_AGENT_WAKE_HOOK=0` in the `env`
+  block of `~/.claude/settings.json` and `PSEUDOLIFE_CODEX_DOORBELL = "0"`
+  in the Codex server's `env` table (`PSEUDOLIFE_AGENT_COORDINATION=0` in
+  either place turns off the board for that client). `pseudolife-mcp
+  doctor` shows each client's wake path under `wake`.
 
 The three tell on each other: `/health` reports the daemon's `version`
 and a digest of the hook scripts it shipped with; the session briefing
