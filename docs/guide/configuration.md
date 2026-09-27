@@ -467,7 +467,11 @@ default home's queue, which no app-server of the task's home reads.
   `memory_message receive`, where it stays framed as agent-origin.
 - **How it fails.** The CLI runs in the background with a 20-second timeout, no
   `PSEUDOLIFE_*` variables and, on Windows, no console window; a timeout or shim
-  shutdown kills its whole process tree, launcher wrappers included. A missing
+  shutdown kills its whole process tree, launcher wrappers included. On Windows
+  the CLI runs in a job object that every process it starts joins, so the kill
+  also reaches a worker whose parent has already exited; where the shim cannot
+  give it a job (a parent job that forbids nesting), `taskkill /T` does the
+  kill, as before. A missing
   CLI, a non-zero exit or a timeout turns the doorbell off for that shim process
   with one stderr line; pull delivery and hints continue unchanged. Each queued
   doorbell appends a `bell` line to `ledger.log` in the digest directory.
