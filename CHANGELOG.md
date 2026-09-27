@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as before. Where the job cannot be created or cannot take the CLI (a parent
   job that forbids nesting), the CLI runs as before, with taskkill as the kill.
   POSIX is unchanged: the CLI's process group is killed.
+
 ### Fixed (2026-09-27 — a rule is pinned when the query names its entity before punctuation)
 - Constraint pinning in `memory_search` missed a rule whenever the query
   named the rule's entity right before punctuation. With a rule stored
@@ -63,6 +64,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   explains the consequence beside the mechanism; `memory-model.md` points
   there.
   No retrieval behaviour changes.
+
 ### Fixed (2026-09-27 — `memory_recall` seeds an entity a sentence ends on)
 - `memory_recall` starts its graph walk from the entities the question
   names, and the name matcher behind that (`_mentions` in
