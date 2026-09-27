@@ -879,11 +879,14 @@ class CoordinationAdapter:
             try:
                 result = await self._post("attach", attach, retry=True)
             except AdapterError as error:
-                if not (resumed and self._provider is None and error.code == "instance_not_found"):
+                if not (resumed and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long
                 # idleness, or absent from a restored snapshot. The old file stays beside
-                # the new one for diagnosis; a fresh address is registered.
+                # the new one for diagnosis; a fresh address is registered. A bound
+                # identity reaches this only after _post re-verified the saved bank and
+                # principal, and the daemon says instance_not_found only for a missing
+                # row, which rebind cannot restore either.
                 self._retire_stale_state()
                 reservation = self._load_or_reserve()
                 await self._register(reservation)

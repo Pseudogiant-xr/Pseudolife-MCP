@@ -128,7 +128,8 @@ process's startup id instead of the resumed one, and the session then gets a
 new address. A state-backed address registers as resumable and is kept for
 seven days after its last activity or lease (longer while a retained message
 names it), so the board holds about a week of sessions; a session resumed
-after its address was removed gets none. Without a state file or directory,
+after its address was removed registers a new one and keeps the old state
+file with a `.stale` suffix. Without a state file or directory,
 each launch gets a new address, registered as not resumable and retired an
 hour after it goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
@@ -974,15 +975,16 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. A
-legacy adapter registers a fresh address on its next start only when the authenticated
-daemon explicitly confirms that the saved address no longer exists. It keeps
+write that carries no instance credential. An
+adapter with saved state registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists (pruned
+after seven idle days with no retained mail, or absent from a restored
+database, where `rebind` cannot restore it either). A bank-bound client first
+verifies that the daemon is still its saved bank and principal. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential preserves the saved address and requires corrected authentication
-or the deliberate restore/rebind procedure; an HTTP status alone never proves
-that an address should be replaced.
-Bank-bound clients preserve their address even when it is missing on the server;
-use deliberate recovery rather than silently registering a replacement.
+credential, or a different bank or principal, preserves the saved address and
+requires corrected authentication or the deliberate restore/rebind procedure;
+an HTTP status alone never proves that an address should be replaced.
 
 A subagent that a Claude Code session spawns with its Agent tool runs in the
 same shim process, so its board calls carry the parent's identity (probed
