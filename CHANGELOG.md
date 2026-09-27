@@ -52,6 +52,113 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with pid, worktree and ETA, and a holder is never assumed idle from
   process stats; a host-shaped symptom is broadcast before it is debugged.
 
+### Added (2026-09-28 — one `memory_message` send reaches a whole project or the whole board, and ids can be given by prefix, schema v48)
+- `memory_message(action="send")` takes `to: "project:<name>"` (every
+  attached, non-idle agent in that project but the sender) and `to: "all"`
+  (every attached, non-idle agent on the board but the sender): the peers
+  `memory_agents list` shows with `adapter_available`. On 2026-09-27 a
+  session that had fixed a host-wide fault sent the same text to six agents
+  one at a time, finding them by reading the peer list and pattern-matching
+  statuses, and had to repeat one send that failed transiently. One request
+  id covers the burst, so a retry returns the same per-recipient receipts,
+  each with its `message_id`, `recipient_agent_id` and a `wake` decision
+  (`live` for an attached peer that opted into wake, which the daemon rings;
+  `pull` otherwise). The burst is atomic and refused whole, writing nothing,
+  above 50 recipients (`fanout_too_large`), when nobody is reachable
+  (`no_recipients`) or when one mailbox is full (`queue_full`, naming that
+  mailbox's prefix); it counts once against the sender's rate; a reply
+  cannot ride it. Each recipient gets its own message row and its own `send`
+  audit event with its own body and salt, the payload carrying
+  `fanout: {to, recipients}`, so `board-audit verify`, `redact` and
+  `export --agent` need no new event kind and the coordination report keeps
+  counting bursts per message. Schema v48: the mailbox's
+  `UNIQUE (sender_agent_id, request_id)` becomes the unique index
+  `coordination_messages_request_idx` over `(sender_agent_id, request_id,
+  recipient_agent_id)`, created before the old constraint is dropped, and
+  the drop runs only where the constraint exists so an open export never
+  blocks the schema pass.
+- `to`, `reply_to` and `ack`'s `message_id` accept a unique prefix of 8 to
+  31 lowercase hex characters of the id; so do `board-audit export --agent`,
+  `board-audit redact --message-id` and `coordination-recovery rebind
+  --agent`. Every surface shows an 8-12 character prefix, and on 2026-09-26
+  seven sends bounced with `recipient_not_found` because a prefix was
+  pasted as the address (Coordination v2 design, Addressing E8). A prefix
+  that matches several ids is refused with `ambiguous_recipient`,
+  `ambiguous_message_id`, `ambiguous_reply` or, in the CLIs,
+  `ambiguous_agent`, and the error's detail lists the candidates cut to the
+  shortest prefixes that tell them apart; one that matches none fails as
+  the full id would. `reply_to` and `ack` resolve among the caller's own
+  mail, so another mailbox's ids neither resolve nor make a prefix
+  ambiguous; an address a restore revoked is not a candidate for `to`, and
+  is one for `rebind`. A direct send's receipt now names
+  `recipient_agent_id` and the `wake` decision, and its request key is
+  taken over the resolved recipient, so a retry that spells it by prefix is
+  the same request. A refusal that carries a detail surfaces it as
+  `code: detail` in the MCP tool's error and as a separate `detail` field
+  beside `error` on REST (`CoordinationRefused`, a `ValueError`, replaces
+  the bare code `dispatch` raised).
+- Nothing is resolved before the caller is authenticated, so a prefix
+  lookup cannot tell an unauthenticated caller whether an address or a
+  message exists. A retry is recognised from its stored rows before any
+  prefix is resolved, so it returns its receipts even after a new address
+  made its prefix ambiguous or its recipient was revoked. The per-minute
+  send rate counts requests, so a burst counts once and a sender reaches at
+  most 60 x 50 mailboxes a minute. An ambiguous prefix in an `ack` batch
+  refuses the whole call. `board-audit redact` of one copy of a burst lists
+  the others as `other_copies` (and says so on stderr), since each keeps its
+  own body until it is redacted too.
+
+### Fixed (2026-09-28 — the plugin's Windows hooks: Git Bash is the requirement, the /clear handoff fits its budget, an orphaned wake watcher stops)
+- Claude Code runs the plugin's hook commands through Git Bash on Windows,
+  found by its own rules (`CLAUDE_CODE_GIT_BASH_PATH`, then the default Git
+  for Windows directories, then the `git` on PATH), and falls back to
+  PowerShell only when it finds none; it ignores the `commandWindows`
+  field, which is Codex's. Measured on Claude Code 2.1.280 on 2026-09-27:
+  with every Git directory removed from PATH and `bash` on PATH resolving
+  to the WSL launcher, the hooks still ran under
+  `C:\Program Files\Git\bin\bash.exe`, and the `commandWindows` command
+  never ran. Without Git Bash every plugin hook fails silently in
+  PowerShell, so Git for Windows is now a stated requirement (README,
+  `plugin/README.md`, `docs/guide/providers.md`), and
+  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`,
+  honouring `CLAUDE_CODE_GIT_BASH_PATH` from the process environment or the
+  `env` block of `~/.claude/settings.json`, which wins as in Claude Code), fails
+  with `GitBashMissing` when there is none, and warns when `bash` on PATH
+  is the WSL launcher (`bash_on_path_is_wsl_launcher`), which does not
+  affect Claude Code but breaks tools that look bash up on PATH. The
+  2026-07-16 plugin design note, which said hooks ran in PowerShell by
+  default on Windows, carries a dated correction.
+- Claude Code gives a plugin's SessionEnd hooks 1.5 s in total, whatever
+  `timeout` hooks.json sets: a settings.json hook with `"timeout": 60` ran
+  the 8.7 s it asked for, the plugin hook asking for 10 s was cancelled at
+  1.5 s (2.1.280, 2026-09-27). The `/clear` and `/resume` digest handoff
+  measured the process creation identity inside that budget with `ps -W`,
+  which took seconds a call on the loaded 2026-09-23 test host (65 ms idle
+  on 2026-09-27). SessionStart now measures it, with seconds to spare, into
+  a third line of `claude-<pid>.host`, with a fourth line saying until when
+  that text holds: `ps -W` prints a start time as HH:MM:SS for a process's
+  first 24 hours and as "Mon DD" after, in local time, so the Windows
+  identity lasts until a little before the 24-hour mark and under the same
+  UTC offset (macOS's is local time too; Linux's never changes). SessionEnd
+  reads line 3 inside that window and measures otherwise, and for a record
+  the previous hooks wrote; SessionStart still checks a handoff against a
+  fresh measurement, never against the record. The handoff work took about
+  0.3 s on the maintainer's host; the episode-close request still follows
+  it and may be cut short, as before (the idle reaper is the backstop).
+  Two-line records stay valid. The coordination SessionStart hook's budget
+  in hooks.json goes from 5 s to 10 s, since it now runs `ps -W` at every
+  start beside its 2 s check-in request.
+- The opt-in Stop hook could not tell whether Claude Code was still running
+  on Windows (`kill -0` cannot see a Windows PID), so a watcher orphaned by
+  a crash ran its full hour. It now lists the process through `ps -W` at
+  arm time and once a minute, and ends within the minute of it going away;
+  a listing that fails leaves the watch alone. Linux and macOS are
+  unchanged.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks` (the coordination SessionStart
+  entry's timeout changed).
+
 ### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
 - A running shim whose saved board address the daemon had pruned (the host
   slept, or the daemon was unreachable, past the seven-day retention, then a

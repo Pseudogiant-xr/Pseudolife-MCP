@@ -277,7 +277,8 @@ def test_redact_removes_a_body_prints_json_and_the_chain_still_verifies(store, c
     head = f"4:{result['redact_hash']}"
     assert result == {"ok": True, "message_id": message_id, "seq": 3, "redact_seq": 4,
                       "redact_hash": result["redact_hash"], "expect_head": head,
-                      "live_body_cleared": True, "audit_copy": "removed", "vacuumed": True}
+                      "live_body_cleared": True, "audit_copy": "removed", "other_copies": [],
+                      "vacuumed": True}
     # The operator is told to keep the new head, which catches a later
     # removal of the redact row itself.
     assert f"--expect-head {head}" in output.err

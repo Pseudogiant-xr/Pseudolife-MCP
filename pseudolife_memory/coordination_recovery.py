@@ -16,7 +16,7 @@ import psycopg
 from pseudolife_memory.coordination_adapter import (
     CoordinationAdapter, _StateReservation, _open_state,
 )
-from pseudolife_memory.storage.coordination import CoordinationStore
+from pseudolife_memory.storage.coordination import CoordinationError, CoordinationStore
 from pseudolife_memory.utils.config import load_config
 
 
@@ -96,7 +96,13 @@ def _perform(args):
         # If the process/commit fails after the write, retain the file for explicit
         # operator diagnosis; never infer success or automatically register again.
         with storage._txn():
-            result = CoordinationStore(storage).rebind(args.agent, args.principal)
+            try:
+                result = CoordinationStore(storage).rebind(args.agent, args.principal)
+            except CoordinationError as exc:
+                if exc.code == "ambiguous_agent":
+                    raise RecoveryError(f"--agent {args.agent} matches several ids: "
+                                        f"{exc.detail}; give a longer prefix") from None
+                raise
             adapter._identity = {key: result[key] for key in ("agent_id", "credential")}
             adapter._save_new_identity(reservation)
     print("Mailbox rebound; private state written. Wake remains disabled until explicit adapter opt-in.")
@@ -119,7 +125,8 @@ def main(argv=None) -> int:
     parser.add_argument("--config", required=True, help="Restored daemon configuration file")
     parser.add_argument("--confirm-daemon-stopped", action="store_true")
     parser.add_argument("--confirm-restore", action="store_true")
-    parser.add_argument("--agent")
+    parser.add_argument("--agent", help="the mailbox to rebind: a full id, or a unique "
+                                        "prefix of 8 or more characters")
     parser.add_argument("--principal")
     parser.add_argument("--bank-url")
     parser.add_argument("--state", help="New private adapter state file outside the repository")

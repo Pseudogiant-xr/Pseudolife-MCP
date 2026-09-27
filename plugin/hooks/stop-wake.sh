@@ -44,6 +44,9 @@ POLL=5
 # a wake happens only while the session is idle.
 MAX_WAKES=20
 WAKE_WINDOW=3600
+# Under Git Bash the parent is a Windows PID that only `ps -W` lists; it is
+# checked at arm time and then this often (seconds), not at every poll.
+PARENT_CHECK=60
 
 if [ "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}" != "1" ] || [ "${CLAUDECODE:-}" != "1" ]; then
     # Drain the payload with a builtin: a cheap exit.
@@ -111,15 +114,42 @@ still_owner() {
     [ "$current" = "$TOKEN" ]
 }
 
-# Claude Code going away ends the wait, where kill -0 can see it. Under Git
-# Bash CLAUDE_PID is a Windows PID that only tasklist or ps -W can probe, at
-# 1.6-3.5 s a call on the 2026-09-23 test machine, so there the budget bounds
-# an orphaned watcher.
-PARENT=""
+# Claude Code going away ends the wait. kill -0 sees a POSIX parent at every
+# poll. Under Git Bash CLAUDE_PID is a Windows PID that only `ps -W` (Git's
+# own) lists, at 65 ms a call on the idle maintainer host (2026-09-27) and
+# 1.6-3.5 s on the loaded 2026-09-23 test machine, so there it runs at arm
+# time and then every PARENT_CHECK seconds. Returns 0 while the PID is
+# listed, 1 once a listing lacks it, 2 when there is no listing to judge by
+# (the watch then goes on as if unchecked).
+windows_pid_listed() {  # $1 = a Windows PID
+    local listing
+    listing=$(ps -W 2>/dev/null) || return 2
+    [ -n "$listing" ] || return 2
+    printf '%s\n' "$listing" |
+        awk -v p="$1" '$4 == p || ($1 ~ /^[A-Za-z]$/ && $5 == p) { found = 1; exit } END { exit found ? 0 : 1 }'
+}
+PARENT="" WINDOWS_PARENT="" PARENT_CHECKED=0
 case "${CLAUDE_PID:-}" in
     ''|*[!0123456789]*) ;;
-    *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
+    *)  case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                windows_pid_listed "$CLAUDE_PID"
+                [ $? -eq 0 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
+                ;;
+            *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
+        esac ;;
 esac
+# True while the parent is (as far as this host can tell) still running.
+parent_alive() {
+    if [ -z "$WINDOWS_PARENT" ]; then
+        kill -0 "$PARENT"
+        return
+    fi
+    [ $((SECONDS - PARENT_CHECKED)) -ge "$PARENT_CHECK" ] || return 0
+    PARENT_CHECKED=$SECONDS
+    windows_pid_listed "$PARENT"
+    [ $? -ne 1 ]
+}
 
 read_seen() {
     SEEN_AT=0
@@ -157,8 +187,9 @@ wake_budget_ok() {
 # mail this session has not seen and the wake cap allows it, 3 on timeout, a
 # lost lease or a gone parent, 2 when the digest turns into a symlink or
 # vanishes. A digest absent at arm time is waited for (the shim writes it on
-# its first heartbeat); one that vanishes mid-watch means the shim exited,
-# the only sign of that under Git Bash, so the watch ends rather than fire
+# its first heartbeat); one that vanishes mid-watch means the shim exited
+# (a crash that takes the shim down with Claude Code leaves it, which the
+# parent check above catches), so the watch ends rather than fire
 # into a later session. The wait-mail command being built beside this hook
 # has the same fire-and-mark contract; it can replace the loop once it
 # ships, keeping the lease, parent and cap checks beside it.
@@ -167,7 +198,7 @@ wait_for_mail() {
     local deadline=$WAIT snapshot present=0
     while :; do
         still_owner || return 3
-        if [ -n "$PARENT" ] && ! kill -0 "$PARENT"; then return 3; fi
+        if [ -n "$PARENT" ] && ! parent_alive; then return 3; fi
         [ -L "$FILE" ] && return 2
         if [ ! -f "$FILE" ] && [ "$present" = 1 ]; then return 2; fi
         if [ -f "$FILE" ]; then

@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v47). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v48). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -502,7 +502,33 @@ acknowledge; use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
-mailbox's, instead of failing whole.
+mailbox's, instead of failing whole. An ambiguous prefix in a batch refuses
+the whole call, since acknowledging the wrong message cannot be undone.
+
+A send names its recipient by agent id, or by a unique prefix of it of at
+least 8 hex characters, the length every surface shows: a prefix that matches
+several ids is refused with `ambiguous_recipient` and the candidates cut to
+the shortest prefixes that tell them apart, and one that matches none fails
+as the full id would (`recipient_not_found`). `reply_to` and `ack` take
+prefixes the same way, resolved among the caller's own mail
+(`ambiguous_reply`, `ambiguous_message_id`), so another mailbox's ids
+neither resolve nor make a prefix ambiguous. A direct send's receipt names
+the `recipient_agent_id` it resolved to. `to: "project:<name>"` sends to
+every attached, non-idle agent in that project except the sender, and
+`to: "all"` to every attached, non-idle agent on the board except the
+sender: the peers the list shows with `adapter_available`. One request id
+covers the burst, so a retry with it returns the same result: `recipients`
+and one receipt per recipient with its `message_id`, `recipient_agent_id`
+and a `wake` decision (`live` for an attached peer that opted into wake,
+which the daemon rings; `pull` for one that reads at its next receive or
+digest). The burst is atomic and refused whole, writing nothing, above 50
+recipients (`fanout_too_large`), when nobody is reachable
+(`no_recipients`) or when one mailbox is full (`queue_full`, naming that
+mailbox's prefix); it counts once against the sender's rate, and a reply
+cannot ride it. Each recipient gets its own message and its own audit event.
+A refusal that carries such a detail surfaces it after the code in the MCP
+tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
+separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
 Setup leaves Codex tool approvals unchanged. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval. To authorize
@@ -628,7 +654,9 @@ Every board mutation appends one row in the same database transaction as the
 mutation itself, so a refused or rolled-back call leaves no event and no event
 exists without its change. The events are `register`, `update` (the new values
 and the ones they replaced, which is the status history), `attach`, `detach`,
-`send` (with the full body), `read`, `ack`, `attempt`, the prune pass's
+`send` (with the full body; a burst to a project or the whole board writes one
+per recipient, each with its own body and salt and `fanout: {to, recipients}`
+in its payload), `read`, `ack`, `attempt`, the prune pass's
 `expire` (bodies blanked) and `prune` (messages and addresses removed),
 `bank_identity`, the lease events, the operator's restore `recover` and
 `rebind`, and the operator's `redact` ([below](#redacting-a-body)). A `read`
@@ -701,7 +729,10 @@ pseudolife-mcp board-audit verify
 the payload parsed, and `body` and `body_salt` (`null` except on a v46
 `send` that has not been redacted). Prefer `--out` for anything you keep: a
 PowerShell 5 `>` redirect writes UTF-16. The filters are `--project`, `--task`,
-`--agent` (the acting agent or a message's recipient), and `--since` / `--until`
+`--agent` (the acting agent or a message's recipient: a full id, or a unique
+prefix of 8 or more characters, resolved against registered addresses and
+the log's own ids, so an address the prune pass removed still resolves; an
+ambiguous prefix is refused naming the candidates), and `--since` / `--until`
 (epoch seconds or ISO 8601; a time without an offset is local). The daemon's
 `expire`, `prune` and `audit_prune` rows and the operator's `recover` carry no
 project or task and name agents only in their payload, so a filtered export
@@ -772,7 +803,11 @@ tool or REST route for it.
 pseudolife-mcp board-audit redact --message-id <id> --reason "pasted a credential"
 ```
 
-In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
+`--message-id` takes the full id or a unique prefix of 8 or more characters
+(an ambiguous one is refused naming the candidates). A message sent to a
+project or to `all` is one copy per recipient: redacting one leaves the
+others, so the result lists them as `other_copies` (and says so on stderr);
+redact each. In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
 the live copy in the mailbox if prune has not already and ends its delivery,
 and appends a
 chained `redact` row (actor `operator`, the message's agents, project and task,
@@ -952,7 +987,9 @@ cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
 decision explicitly as ordinary memory if it should become durable knowledge.
 
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
-60 new sends per sender per minute and 50 messages per receive page. Bodies stop
+60 new sends per sender per minute (a send to a project or to `all` counts as
+one, so a sender can reach at most 60 × 50 mailboxes a minute) and 50 messages
+per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
 The [audit log](#audit-log) keeps its own copy of every body for
 `audit_retention_days`, unless the operator [redacts](#redacting-a-body) it.
@@ -1145,9 +1182,11 @@ sessions can keep waking each other, so wakes are capped (below).
 - A watcher waits at most 3540 s after the turn that armed it; the hook's
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer is not woken; its mail still appears on its next prompt. On Linux and
-  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
-  Claude Code ends a waiting hook at teardown.
+  longer is not woken; its mail still appears on its next prompt. The watcher
+  also stops when Claude Code exits: at once on Linux and macOS, and within
+  a minute on Windows, where it lists the process through `ps -W` at arm
+  time and then once a minute (a Windows PID is invisible to `kill -0`). In
+  `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
   native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
   command stops at the flag check, and the script exits unless Claude Code
@@ -2078,7 +2117,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v47**; migrations are additive
+The current Postgres meta version is **v48**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -2131,6 +2170,7 @@ The milestones:
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
+| v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
