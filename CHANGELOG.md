@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key again)
+### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
 - The plugin's bash hooks check digest keys, PIDs, timestamps and session
   ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
   under bash 3.2, which matches a range like `a-f` by locale collation, so
@@ -22,7 +22,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checks guard. Every set is now spelled out (`[!0123456789abcdef]`), which
   bash compares character by character with no collation involved.
   `tests/test_hook_glob_ranges.py` reproduces the 3.2 matching on any bash
-  and fails on any range left in a hook's glob patterns.
+  and fails on any bracket range in a hook line that is not a sed, grep
+  or awk expression.
 - Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
   (or `ops/update.sh --all`) and restart clients. Codex may ask to
   re-approve the changed hooks in `/hooks`.
@@ -33,9 +34,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tests on a real macOS runner, under its bash 3.2 and BSD tools. The
   hooks' BSD fallbacks (`stat -f`, `base64 -D`, `shasum`,
   `ps -o lstart=`) had run nowhere before. It is a fixed file list like
-  the Windows lane, not the full suite: about 7 runner minutes, of which
-  the tests take about 6. The first run was green apart from the hook fix
-  above, and every skip it printed was Windows-only.
+  the Windows lane, not the full suite: about 8 runner minutes, of which
+  the tests take about 7. The first run failed only on the hook bug
+  above. The lane starts no Postgres, so the store tests in
+  `test_coordination_turn_digest.py` skip there (the Linux lanes run
+  them); every other skip is Windows-only. A step fails the job unless
+  the bash on PATH is 3.2.
 
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)

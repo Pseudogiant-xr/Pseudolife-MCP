@@ -298,12 +298,13 @@ jobs:
           python -m pip install -U pip
           pip install -e .[dev,lite]
 
-      - name: Record the shell under test
-        # The hooks run under the system bash; macOS ships 3.2, and a
-        # Homebrew bash earlier on PATH would hide what users get.
+      - name: Check the shell under test is macOS's bash 3.2
+        # The hooks run under the system bash, which macOS ships as 3.2. A
+        # newer bash earlier on PATH would keep this lane green while it
+        # stopped testing what users get, so it fails the job instead.
         run: |
           command -v bash
-          bash --version | sed -n 1p
+          bash -c 'echo "$BASH_VERSION"; case "$BASH_VERSION" in 3.2*) ;; *) exit 1 ;; esac'
 
       - name: Hook, installer and embedded-provider tests
         # The plugin hooks' BSD branches (stat -f, base64 -D, shasum,

@@ -42,10 +42,14 @@ def _collated(env, tmp_path):
 
 
 def test_hook_glob_brackets_spell_out_their_characters():
+    # sed, grep and awk read their own regex syntax, not bash globs; a glob
+    # bracket holds no whitespace, which leaves out `[ test ]` commands.
     offenders = []
     for script in sorted((ROOT / "plugin/hooks").glob("*.sh")):
         for number, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"\[![^]]*?[0-9A-Za-z]-[0-9A-Za-z]", line):
+            if re.search(r"\b(sed|grep|awk)\b", line):
+                continue
+            if re.search(r"\[[!^]?[^]\s]*[0-9A-Za-z]-[0-9A-Za-z][^]\s]*\]", line):
                 offenders.append(f"{script.name}:{number}: {line.strip()}")
     assert offenders == []
 
