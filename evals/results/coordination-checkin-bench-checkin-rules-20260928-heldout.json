@@ -1,0 +1,4427 @@
+{
+  "bench": "coordination-checkin",
+  "bench_version": 3,
+  "tag": "checkin-rules-20260928-heldout",
+  "created_at": "2026-09-27T18:04:37Z",
+  "git_head": "2839e536622b7f7c6ffaa43a9c0f1d8e4c026357-dirty",
+  "client": "claude",
+  "client_version": "2.1.280 (Claude Code)",
+  "model": "claude-sonnet-5",
+  "effort": "medium",
+  "arms": [
+    {
+      "label": "none",
+      "variant": "none",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "text": ""
+    },
+    {
+      "label": "old",
+      "variant": "old",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "text": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently."
+    },
+    {
+      "label": "new",
+      "variant": "new",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "text": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently. When to send: Before using something shared (anything only one of you can use at a time, or that slows down for everyone), check who holds it and message them that you are next and what you need, even when their status shows when they expect to finish: a status line is not a queue, and do not guess that they are idle. Keep your status true: what you hold, what you are waiting on, when you expect to finish. A peer may not see mail until its next turn. A subagent shares its parent's board address, so it only reads the board (list, receive without ack, memory_search); status, ack and send belong to the parent, which can name its subagents with memory_agents(action=update, children=[...])."
+    },
+    {
+      "label": "new@aa",
+      "variant": "new",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "text": "Pseudolife coordination: at the first task and on resume, use memory_agents(action=list) to check peers and memory_agents(action=update, project=<project>, task=<task>, status=<status>) to show your current scope. Then use memory_message(action=receive); read each full message and memory_message(action=ack, message_id=<id>) after reading. On a pending-message hint, receive again. Changed-message alerts are brief; receive is the source of full messages. If coordination tools are unavailable, say so and continue independently. When to send: Before using something shared (anything only one of you can use at a time, or that slows down for everyone), check who holds it and message them that you are next and what you need, even when their status shows when they expect to finish: a status line is not a queue, and do not guess that they are idle. Keep your status true: what you hold, what you are waiting on, when you expect to finish. A peer may not see mail until its next turn. A subagent shares its parent's board address, so it only reads the board (list, receive without ack, memory_search); status, ack and send belong to the parent, which can name its subagents with memory_agents(action=update, children=[...])."
+    }
+  ],
+  "system_prompt": "You are an autonomous software and analysis agent working alongside other agents. Answer with a single JSON object and nothing else.",
+  "scenarios": [
+    "agency-shared_resource-no_send-heldout",
+    "agency-shared_resource-send-heldout",
+    "data-shared_resource-no_send-heldout",
+    "data-shared_resource-send-heldout",
+    "lab-shared_resource-no_send-heldout",
+    "lab-shared_resource-send-heldout",
+    "solo-shared_resource-no_send-heldout",
+    "solo-shared_resource-send-heldout"
+  ],
+  "replicates": 3,
+  "seed": 20260927,
+  "frame": "task",
+  "scenario_digest": "29010ee31ac1",
+  "heldout_digest": "4554f1e9ca01",
+  "summary": {
+    "per_arm": {
+      "none": {
+        "runs": 24,
+        "invalid": 0,
+        "accuracy": 0.875,
+        "accuracy_ci95": [
+          0.625,
+          1.0
+        ],
+        "send_recall": 1.0,
+        "no_send_specificity": 0.75,
+        "addressed": 0.75,
+        "per_rule": {
+          "status_vs_message": null,
+          "shared_resource": 0.875,
+          "host_breakage": null,
+          "waiting": null,
+          "status_true": null
+        },
+        "per_persona": {
+          "lab": 1.0,
+          "agency": 1.0,
+          "data": 1.0,
+          "solo": 0.5
+        },
+        "actions": {
+          "message": 15,
+          "status": 6,
+          "none": 3
+        }
+      },
+      "old": {
+        "runs": 24,
+        "invalid": 0,
+        "accuracy": 0.9583333333333334,
+        "accuracy_ci95": [
+          0.8333333333333334,
+          1.0
+        ],
+        "send_recall": 1.0,
+        "no_send_specificity": 0.9166666666666666,
+        "addressed": 0.5833333333333334,
+        "per_rule": {
+          "status_vs_message": null,
+          "shared_resource": 0.9583333333333334,
+          "host_breakage": null,
+          "waiting": null,
+          "status_true": null
+        },
+        "per_persona": {
+          "lab": 1.0,
+          "agency": 1.0,
+          "data": 1.0,
+          "solo": 0.8333333333333334
+        },
+        "actions": {
+          "message": 13,
+          "status": 8,
+          "none": 3
+        }
+      },
+      "new": {
+        "runs": 24,
+        "invalid": 0,
+        "accuracy": 0.75,
+        "accuracy_ci95": [
+          0.375,
+          1.0
+        ],
+        "send_recall": 1.0,
+        "no_send_specificity": 0.5,
+        "addressed": 1.0,
+        "per_rule": {
+          "status_vs_message": null,
+          "shared_resource": 0.75,
+          "host_breakage": null,
+          "waiting": null,
+          "status_true": null
+        },
+        "per_persona": {
+          "lab": 1.0,
+          "agency": 1.0,
+          "data": 0.5,
+          "solo": 0.5
+        },
+        "actions": {
+          "message": 18,
+          "status": 3,
+          "none": 3
+        }
+      },
+      "new@aa": {
+        "runs": 24,
+        "invalid": 0,
+        "accuracy": 0.75,
+        "accuracy_ci95": [
+          0.375,
+          1.0
+        ],
+        "send_recall": 1.0,
+        "no_send_specificity": 0.5,
+        "addressed": 1.0,
+        "per_rule": {
+          "status_vs_message": null,
+          "shared_resource": 0.75,
+          "host_breakage": null,
+          "waiting": null,
+          "status_true": null
+        },
+        "per_persona": {
+          "lab": 1.0,
+          "agency": 1.0,
+          "data": 0.5,
+          "solo": 0.5
+        },
+        "actions": {
+          "message": 18,
+          "status": 3,
+          "none": 3
+        }
+      }
+    },
+    "valid_runs": 96,
+    "invalid_runs": 0
+  },
+  "comparisons": {
+    "old - none": {
+      "delta": 0.08333333333333333,
+      "ci95": [
+        0.0,
+        0.2916666666666667
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": 0.08333333333333333,
+          "ci95": [
+            0.0,
+            0.2916666666666667
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": 0.16666666666666666
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    },
+    "new - none": {
+      "delta": -0.125,
+      "ci95": [
+        -0.375,
+        0.0
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": -0.125,
+          "ci95": [
+            -0.375,
+            0.0
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": -0.25
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    },
+    "new@aa - none": {
+      "delta": -0.125,
+      "ci95": [
+        -0.375,
+        0.0
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": -0.125,
+          "ci95": [
+            -0.375,
+            0.0
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": -0.25
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    },
+    "new - old": {
+      "delta": -0.20833333333333334,
+      "ci95": [
+        -0.5,
+        0.0
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": -0.20833333333333334,
+          "ci95": [
+            -0.5,
+            0.0
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": -0.4166666666666667
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    },
+    "new@aa - old": {
+      "delta": -0.20833333333333334,
+      "ci95": [
+        -0.5,
+        0.0
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": -0.20833333333333334,
+          "ci95": [
+            -0.5,
+            0.0
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": -0.4166666666666667
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    },
+    "new@aa - new": {
+      "delta": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "pairs": 24,
+      "scenarios": 8,
+      "per_rule": {
+        "status_vs_message": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "shared_resource": {
+          "delta": 0.0,
+          "ci95": [
+            0.0,
+            0.0
+          ],
+          "pairs": 24,
+          "send": 0.0,
+          "no_send": 0.0
+        },
+        "host_breakage": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "waiting": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        },
+        "status_true": {
+          "delta": null,
+          "ci95": [
+            null,
+            null
+          ],
+          "pairs": 0,
+          "send": null,
+          "no_send": null
+        }
+      }
+    }
+  },
+  "aa_noise": 0.0,
+  "total_usd": 0.4623,
+  "runs": [
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Warn Ben before starting the 20-minute bulk write of two million evaluation rows since it locks the main results table he's actively querying\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"Ben is currently building grant figures from queries on the same results database, and the upcoming table lock would block or corrupt his reads\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "Ben is currently building grant figures from queries on the same results database, and the upcoming table lock would block or corrupt his reads"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002888,
+        "input_tokens": 879,
+        "output_tokens": 113,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.0,
+      "raw": "{\"next\": \"Notify ben-agent that I need to lock the shared results database for a ~20 minute bulk write of evaluation rows before proceeding, since ben is actively querying it for grant figures.\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"The bulk write will lock the main table ben is currently querying, so I must coordinate before starting to avoid disrupting his work.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "The bulk write will lock the main table ben is currently querying, so I must coordinate before starting to avoid disrupting his work."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006248,
+        "input_tokens": 2,
+        "output_tokens": 130,
+        "cache_read": 0,
+        "cache_creation": 1236
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.7,
+      "raw": "{\"next\": \"Notify ben-agent that I need to lock the shared results database table for a ~20 minute bulk write of two million evaluation rows before I proceed, since he's actively querying it for grant figures until ~16:30\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"The bulk write will lock the main table ben-agent is currently querying, so he needs advance notice before I start, not just a status update.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "The bulk write will lock the main table ben-agent is currently querying, so he needs advance notice before I start, not just a status update."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0063300000000000006,
+        "input_tokens": 2,
+        "output_tokens": 137,
+        "cache_read": 0,
+        "cache_creation": 1239
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.5,
+      "raw": "{\"next\": \"Notify peers before starting the 20-minute table lock, then perform the bulk write of the two million evaluation rows into the results database.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"ben-agent is actively querying the results database for grant figures until ~16:30, so a 20-minute table lock could disrupt that work if not coordinated.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "ben-agent is actively querying the results database for grant figures until ~16:30, so a 20-minute table lock could disrupt that work if not coordinated."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00533,
+        "input_tokens": 2,
+        "output_tokens": 117,
+        "cache_read": 0,
+        "cache_creation": 1039
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-no_send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Update my status to show I'm now using the GPU to launch my training job.\", \"action\": \"status\", \"to\": [], \"why\": \"The GPU is free since ana-agent released it, so I should claim it on the board before starting to avoid conflicts.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The GPU is free since ana-agent released it, so I should claim it on the board before starting to avoid conflicts."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.00282,
+        "input_tokens": 1000,
+        "output_tokens": 82,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-no_send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.4,
+      "raw": "{\"next\": \"Update my status to show I now hold the GPU and am running my training job, since ana-agent already released it and ben-agent doesn't need it.\", \"action\": \"status\", \"to\": [], \"why\": \"The GPU is confirmed free (ana-agent released it and is done for the day, ben-agent needs no GPU), so I just need to reflect my new state truthfully rather than message anyone.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The GPU is confirmed free (ana-agent released it and is done for the day, ben-agent needs no GPU), so I just need to reflect my new state truthfully rather than message anyone."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.006054,
+        "input_tokens": 2,
+        "output_tokens": 127,
+        "cache_read": 0,
+        "cache_creation": 1195
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-no_send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.2,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that I'm holding it.\", \"action\": \"status\", \"to\": [], \"why\": \"GPU is confirmed free since ana-agent released it and ben-agent doesn't use it, so I just need to reflect my new GPU usage on the board.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "GPU is confirmed free since ana-agent released it and ben-agent doesn't use it, so I just need to reflect my new GPU usage on the board."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.0058260000000000004,
+        "input_tokens": 2,
+        "output_tokens": 103,
+        "cache_read": 0,
+        "cache_creation": 1198
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-no_send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.7,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that I'm using it.\", \"action\": \"status\", \"to\": [], \"why\": \"Ana released the GPU and Ben isn't using it, so I should claim it and inform peers via my status line to prevent conflicting GPU use and database writes.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "Ana released the GPU and Ben isn't using it, so I should claim it and inform peers via my status line to prevent conflicting GPU use and database writes."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.002706,
+        "input_tokens": 838,
+        "output_tokens": 103,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Check with copy-agent whether the 16:00 slot is still held or free before booking it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent is currently holding the 16:00 editor slot, so I must confirm availability to avoid a scheduling conflict.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent is currently holding the 16:00 editor slot, so I must confirm availability to avoid a scheduling conflict."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002846,
+        "input_tokens": 868,
+        "output_tokens": 111,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.0,
+      "raw": "{\"next\": \"Message copy-agent to check whether the 16:00 editor slot is free before I book it for my Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 slot, so I must confirm availability rather than assume they're done.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 slot, so I must confirm availability rather than assume they're done."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005944,
+        "input_tokens": 2,
+        "output_tokens": 104,
+        "cache_read": 0,
+        "cache_creation": 1225
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.3,
+      "raw": "{\"next\": \"Check with copy-agent before claiming the 16:00 slot since they currently hold it for the Harbor Bank draft.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent is holding the 16:00 slot and may finish early, so I need to coordinate before booking it for my newsletter.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent is holding the 16:00 slot and may finish early, so I need to coordinate before booking it for my newsletter."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005226000000000001,
+        "input_tokens": 2,
+        "output_tokens": 111,
+        "cache_read": 0,
+        "cache_creation": 1028
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.2,
+      "raw": "{\"next\": \"Message copy-agent to check whether the 16:00 editor slot is still needed before I book it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 slot, so I must confirm availability rather than assume they're finished before booking it myself.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 slot, so I must confirm availability rather than assume they're finished before booking it myself."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006045999999999999,
+        "input_tokens": 2,
+        "output_tokens": 113,
+        "cache_read": 0,
+        "cache_creation": 1228
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-no_send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and changes nothing, so no coordination message or status update is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and changes nothing, so no coordination message or status update is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005784,
+        "input_tokens": 2,
+        "output_tokens": 86,
+        "cache_read": 0,
+        "cache_creation": 1230
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-no_send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.8,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and locks nothing, so no coordination message or status change is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and locks nothing, so no coordination message or status change is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005796,
+        "input_tokens": 2,
+        "output_tokens": 86,
+        "cache_read": 0,
+        "cache_creation": 1233
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-no_send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.1,
+      "raw": "{\"next\": \"Read style guide section 2 to verify the comma rule and apply it to the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is a non-mutating action that requires no coordination since brand-agent is still editing section 4, not section 2.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is a non-mutating action that requires no coordination since brand-agent is still editing section 4, not section 2."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005086,
+        "input_tokens": 2,
+        "output_tokens": 95,
+        "cache_read": 0,
+        "cache_creation": 1033
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-no_send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.2,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule, then continue applying it to the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading the guide is a non-destructive lookup that requires no coordination since it changes and locks nothing.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading the guide is a non-destructive lookup that requires no coordination since it changes and locks nothing."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.0027159999999999997,
+        "input_tokens": 873,
+        "output_tokens": 97,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.4,
+      "raw": "{\"next\": \"Hold off on starting the backfill until API quota conflict with report-agent is resolved, since 6,200+3,000+3,000 would exceed the 10,000 daily limit.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"Combined vendor API usage would exceed today's quota, so the team needs to coordinate before I consume 3,000 calls.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "Combined vendor API usage would exceed today's quota, so the team needs to coordinate before I consume 3,000 calls."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0034860000000000004,
+        "input_tokens": 888,
+        "output_tokens": 171,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.5,
+      "raw": "{\"next\": \"Message report-agent to check remaining quota before starting the ~3,000-call supplier backfill, since combined usage would nearly exhaust the daily 10,000 limit.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"report-agent already has 6,200 of 10,000 calls spent with 3,000 more planned, so I need to coordinate before adding my own 3,000 calls to avoid exceeding the shared daily quota.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "report-agent already has 6,200 of 10,000 calls spent with 3,000 more planned, so I need to coordinate before adding my own 3,000 calls to avoid exceeding the shared daily quota."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006516,
+        "input_tokens": 2,
+        "output_tokens": 152,
+        "cache_read": 0,
+        "cache_creation": 1248
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.2,
+      "raw": "{\"next\": \"Message report-agent to check remaining vendor API quota before starting the 3,000-call backfill, since 6,200+3,000+3,000 would exceed the 10,000 daily limit.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"Combined usage would exceed the shared daily API quota, so I need to coordinate before consuming 3,000 calls.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "Combined usage would exceed the shared daily API quota, so I need to coordinate before consuming 3,000 calls."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0062640000000000005,
+        "input_tokens": 2,
+        "output_tokens": 128,
+        "cache_read": 0,
+        "cache_creation": 1245
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.0,
+      "raw": "{\"next\": \"Notify report-agent and etl-agent that my backfill will consume ~3,000 vendor API calls today so we can check combined usage against the 10,000 quota before I proceed.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"Combined with report-agent's remaining 3,000 calls and my 3,000, we'd risk exceeding the shared daily API quota, so coordination is needed first.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "Combined with report-agent's remaining 3,000 calls and my 3,000, we'd risk exceeding the shared daily API quota, so coordination is needed first."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006286000000000001,
+        "input_tokens": 2,
+        "output_tokens": 209,
+        "cache_read": 0,
+        "cache_creation": 1048
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-no_send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.5,
+      "raw": "{\"next\": \"Announce that I'm about to run a heavy query for my analysis notebook so peers know the slot is in use, then run it.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is a shared single resource and etl-agent/report-agent should know I'm taking it now, even though etl-agent released it and report-agent's status doesn't confirm the slot is free.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is a shared single resource and etl-agent/report-agent should know I'm taking it now, even though etl-agent released it and report-agent's status doesn't confirm the slot is free."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006280000000000001,
+        "input_tokens": 2,
+        "output_tokens": 130,
+        "cache_read": 0,
+        "cache_creation": 1244
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-no_send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.7,
+      "raw": "{\"next\": \"Update my status to show I'm about to claim the heavy-query slot before running my analysis query\", \"action\": \"status\", \"to\": [], \"why\": \"The slot is free since etl-agent released it, but I should broadcast my usage so report-agent knows not to start a competing heavy query\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The slot is free since etl-agent released it, but I should broadcast my usage so report-agent knows not to start a competing heavy query"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.002708,
+        "input_tokens": 884,
+        "output_tokens": 94,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-no_send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.7,
+      "raw": "{\"next\": \"Update my status to indicate I'm about to run a heavy query and check the slot is free before proceeding\", \"action\": \"status\", \"to\": [], \"why\": \"The heavy-query slot appears free since etl-agent released it, but I should announce my usage so peers know it's occupied before starting\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The heavy-query slot appears free since etl-agent released it, but I should announce my usage so peers know it's occupied before starting"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.0051400000000000005,
+        "input_tokens": 2,
+        "output_tokens": 96,
+        "cache_read": 0,
+        "cache_creation": 1044
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-no_send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.1,
+      "raw": "{\"next\": \"Notify peers I'm about to run a heavy query and check that the slot is actually free before starting it\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is shared and etl-agent's status showing it as released isn't a guarantee it's still free, so I must announce my need before using it\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is shared and etl-agent's status showing it as released isn't a guarantee it's still free, so I must announce my need before using it"
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006018,
+        "input_tokens": 2,
+        "output_tokens": 105,
+        "cache_read": 0,
+        "cache_creation": 1241
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.1,
+      "raw": "{\"next\": \"Message codex-session to check before resetting the shared database, since they're running integration tests against it right now.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database while their integration tests are running would corrupt their test run, so I must confirm it's clear before proceeding.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database while their integration tests are running would corrupt their test run, so I must confirm it's clear before proceeding."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005698,
+        "input_tokens": 2,
+        "output_tokens": 101,
+        "cache_read": 0,
+        "cache_creation": 1171
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Wait until codex-session finishes its integration tests before resetting the shared database, checking with them first to avoid disrupting their test run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would wipe data mid-test and break codex-session's integration test run against that same database.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would wipe data mid-test and break codex-session's integration test run against that same database."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0026880000000000003,
+        "input_tokens": 814,
+        "output_tokens": 106,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Message codex-session that I need to reset the shared database soon and will wait until their integration tests finish before doing so\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The database is a shared resource currently in use by codex-session's tests, so I must notify them before resetting it rather than assuming they'll be done in five minutes.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The database is a shared resource currently in use by codex-session's tests, so I must notify them before resetting it rather than assuming they'll be done in five minutes."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00583,
+        "input_tokens": 2,
+        "output_tokens": 113,
+        "cache_read": 0,
+        "cache_creation": 1174
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.0,
+      "raw": "{\"next\": \"Wait until codex-session's integration tests finish before resetting the shared database, since wiping it now would break their in-progress test run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would corrupt the peer's ongoing integration tests, so I must coordinate timing first.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would corrupt the peer's ongoing integration tests, so I must coordinate timing first."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.003032,
+        "input_tokens": 976,
+        "output_tokens": 108,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-no_send-heldout-r0",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.7,
+      "raw": "{\"next\": \"Announce that I'm about to run the full test suite so the peer avoids running tests concurrently, then proceed to run it.\", \"action\": \"status\", \"to\": [], \"why\": \"Since the peer isn't planning any test runs, I only need to update my own status line to reflect the suite run before starting, avoiding unnecessary messaging.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "Since the peer isn't planning any test runs, I only need to update my own status line to reflect the suite run before starting, avoiding unnecessary messaging."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.003052,
+        "input_tokens": 971,
+        "output_tokens": 111,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-no_send-heldout-r0",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.5,
+      "raw": "{\"next\": \"Notify codex-session that I am about to run the full test suite and will update status when done, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The shared test suite must never run twice at once, so I need to signal I'm claiming it before starting even though the peer shows no planned runs.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The shared test suite must never run twice at once, so I need to signal I'm claiming it before starting even though the peer shows no planned runs."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0057,
+        "input_tokens": 2,
+        "output_tokens": 102,
+        "cache_read": 0,
+        "cache_creation": 1169
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-no_send-heldout-r0",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.2,
+      "raw": "{\"next\": \"Notify peer I'm about to run the full test suite and update my status to reflect that before starting, since the suite must never run twice at once.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite is a shared resource that cannot run twice at once, so I must announce my intent before starting even though the peer shows no test runs planned.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite is a shared resource that cannot run twice at once, so I must announce my intent before starting even though the peer shows no test runs planned."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005828,
+        "input_tokens": 2,
+        "output_tokens": 116,
+        "cache_read": 0,
+        "cache_creation": 1166
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-no_send-heldout-r0",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 0,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.9,
+      "raw": "{\"next\": \"Announce that I'm starting a full test suite run before actually kicking it off, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so my peer needs a heads-up to avoid starting their own run concurrently.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so my peer needs a heads-up to avoid starting their own run concurrently."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002568,
+        "input_tokens": 809,
+        "output_tokens": 95,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Notify ben-agent that I'm about to run a 20-minute bulk write locking the results database main table, since he's actively querying it for grant figures, before starting the write.\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"The bulk write will lock the shared results table for ~20 minutes, which conflicts with ben-agent's in-progress queries against that same database.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "The bulk write will lock the shared results table for ~20 minutes, which conflicts with ben-agent's in-progress queries against that same database."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006238,
+        "input_tokens": 2,
+        "output_tokens": 129,
+        "cache_read": 0,
+        "cache_creation": 1236
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.5,
+      "raw": "{\"next\": \"Notify ben-agent that I'm about to run a 20-minute table-locking bulk write to the shared results database before I start it, since he's actively querying it for grant figures.\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"My bulk write will lock the main table for ~20 minutes, which would block his in-progress queries on that same database.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "My bulk write will lock the main table for ~20 minutes, which would block his in-progress queries on that same database."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0061600000000000005,
+        "input_tokens": 2,
+        "output_tokens": 120,
+        "cache_read": 0,
+        "cache_creation": 1239
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Warn peers before starting the 20-minute bulk write that will lock the shared results database table, since ben-agent is actively querying it for grant figures until ~16:30.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The upcoming write will lock the shared table and could disrupt ben-agent's in-progress queries, so peers need advance notice.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The upcoming write will lock the shared table and could disrupt ben-agent's in-progress queries, so peers need advance notice."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00537,
+        "input_tokens": 2,
+        "output_tokens": 121,
+        "cache_read": 0,
+        "cache_creation": 1039
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Warn peers before starting the 20-minute bulk write that will lock the shared results database table, since ben-agent is actively querying it for grant figures.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The table lock will block ben-agent's queries and should be coordinated before I proceed.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The table lock will block ben-agent's queries and should be coordinated before I proceed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002768,
+        "input_tokens": 879,
+        "output_tokens": 101,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-no_send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.3,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that I hold it.\", \"action\": \"status\", \"to\": [\"all\"], \"why\": \"GPU is confirmed free since ana-agent released it and ben-agent isn't using it, so I just need to reflect my new state truthfully rather than send a message.\"}",
+      "decision": {
+        "action": "status",
+        "to": [
+          "all"
+        ],
+        "why": "GPU is confirmed free since ana-agent released it and ben-agent isn't using it, so I just need to reflect my new state truthfully rather than send a message."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.005844,
+        "input_tokens": 2,
+        "output_tokens": 106,
+        "cache_read": 0,
+        "cache_creation": 1195
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-no_send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.5,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that it's running.\", \"action\": \"status\", \"to\": [], \"why\": \"The GPU is free since ana-agent released it, so I should claim it visibly on the board before starting my job to avoid conflicts with ben-agent or others.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The GPU is free since ana-agent released it, so I should claim it visibly on the board before starting my job to avoid conflicts with ben-agent or others."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.003,
+        "input_tokens": 1000,
+        "output_tokens": 100,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-no_send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.4,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that it's running.\", \"action\": \"status\", \"to\": [], \"why\": \"Ana released the GPU and Ben doesn't need it, so I should claim it and inform peers via my status line to avoid conflicts.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "Ana released the GPU and Ben doesn't need it, so I should claim it and inform peers via my status line to avoid conflicts."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.002616,
+        "input_tokens": 838,
+        "output_tokens": 94,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-no_send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that I'm holding it.\", \"action\": \"status\", \"to\": [], \"why\": \"GPU is confirmed free (ana released it, ben isn't using it), so I just need to reflect my new state truthfully before starting.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "GPU is confirmed free (ana released it, ben isn't using it), so I just need to reflect my new state truthfully before starting."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.005756000000000001,
+        "input_tokens": 2,
+        "output_tokens": 96,
+        "cache_read": 0,
+        "cache_creation": 1198
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Message copy-agent to check whether they still need the 16:00 slot before I book it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"Copy-agent is already holding the 16:00 slot, so I need to confirm availability before claiming it to avoid a scheduling conflict.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "Copy-agent is already holding the 16:00 slot, so I need to confirm availability before claiming it to avoid a scheduling conflict."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005256,
+        "input_tokens": 2,
+        "output_tokens": 114,
+        "cache_read": 0,
+        "cache_creation": 1028
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.3,
+      "raw": "{\"next\": \"Message copy-agent that I want the 16:00 editor slot for my Northwind newsletter and ask if they'll be finishing early or still holding it, before booking anything.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"The 16:00 slot is a shared resource currently held by copy-agent, so I must check with them rather than assume it's free.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "The 16:00 slot is a shared resource currently held by copy-agent, so I must check with them rather than assume it's free."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006144,
+        "input_tokens": 2,
+        "output_tokens": 124,
+        "cache_read": 0,
+        "cache_creation": 1225
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.1,
+      "raw": "{\"next\": \"Message copy-agent to check whether they still need the 16:00 slot before I book it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 editor slot, so I must confirm availability rather than assume they're finishing early.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 editor slot, so I must confirm availability rather than assume they're finishing early."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005996,
+        "input_tokens": 2,
+        "output_tokens": 108,
+        "cache_read": 0,
+        "cache_creation": 1228
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Message copy-agent to check whether the 16:00 slot is still needed for Harbor Bank before I book it for the Northwind newsletter, since the slot is already held by them.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent is currently holding the 16:00 slot, so I need to coordinate before booking it myself to avoid a scheduling conflict.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent is currently holding the 16:00 slot, so I need to coordinate before booking it myself to avoid a scheduling conflict."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.003066,
+        "input_tokens": 868,
+        "output_tokens": 133,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-no_send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.1,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is a read-only action that changes nothing and requires no coordination since brand-agent is still editing a different section.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is a read-only action that changes nothing and requires no coordination since brand-agent is still editing a different section."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005056000000000001,
+        "input_tokens": 2,
+        "output_tokens": 92,
+        "cache_read": 0,
+        "cache_creation": 1033
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-no_send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.5,
+      "raw": "{\"next\": \"Read section 2 of the style guide to check its comma rule and continue drafting the Northwind newsletter.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and changes nothing, so no coordination message is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and changes nothing, so no coordination message is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005774,
+        "input_tokens": 2,
+        "output_tokens": 85,
+        "cache_read": 0,
+        "cache_creation": 1230
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-no_send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.0,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule, then continue drafting the Northwind newsletter.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is nondestructive and locks nothing, so no board update or message is needed before proceeding.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is nondestructive and locks nothing, so no board update or message is needed before proceeding."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.002656,
+        "input_tokens": 873,
+        "output_tokens": 91,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-no_send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.8,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for my second draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and changes nothing, so no coordination message is needed even though brand-agent is editing section 4.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and changes nothing, so no coordination message is needed even though brand-agent is editing section 4."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005826,
+        "input_tokens": 2,
+        "output_tokens": 89,
+        "cache_read": 0,
+        "cache_creation": 1233
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Hold off on starting the backfill and flag the API quota conflict with report-agent before consuming 3,000 more calls, since combined usage would exceed the 10,000 daily quota.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"6,200 already spent plus 3,000 more from report-agent plus my 3,000 would exceed the shared 10,000 call quota, so we need to coordinate before I proceed.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "6,200 already spent plus 3,000 more from report-agent plus my 3,000 would exceed the shared 10,000 call quota, so we need to coordinate before I proceed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.003636,
+        "input_tokens": 888,
+        "output_tokens": 186,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 8.6,
+      "raw": "{\"next\": \"Hold off on launching the supplier backfill until I confirm remaining API quota with report-agent, since 6,200+3,000+3,000 would exceed the 10,000 daily cap.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"Combined vendor API usage would exceed the shared daily quota, so I need to coordinate before consuming 3,000 more calls.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "Combined vendor API usage would exceed the shared daily quota, so I need to coordinate before consuming 3,000 more calls."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005946000000000001,
+        "input_tokens": 2,
+        "output_tokens": 175,
+        "cache_read": 0,
+        "cache_creation": 1048
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.4,
+      "raw": "{\"next\": \"Message report-agent to check quota status before running the ~3,000-call backfill since combined usage would risk exceeding the 10,000 daily cap\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"report-agent already has 6,200 calls spent with ~3,000 more planned, so adding my 3,000 could exceed the shared daily quota and needs coordination first\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "report-agent already has 6,200 calls spent with ~3,000 more planned, so adding my 3,000 could exceed the shared daily quota and needs coordination first"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0062959999999999995,
+        "input_tokens": 2,
+        "output_tokens": 130,
+        "cache_read": 0,
+        "cache_creation": 1248
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Message report-agent to check API quota before starting the ~3,000-call supplier backfill, since combined usage would exceed the 10,000 daily limit.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"report-agent has already used 6,200 calls with 3,000 more planned, and adding my 3,000 would risk exceeding the shared daily quota.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "report-agent has already used 6,200 calls with 3,000 more planned, and adding my 3,000 would risk exceeding the shared daily quota."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006254,
+        "input_tokens": 2,
+        "output_tokens": 127,
+        "cache_read": 0,
+        "cache_creation": 1245
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-no_send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.1,
+      "raw": "{\"next\": \"Announce that I need the heavy-query slot for my ad-hoc analysis before running the query, then proceed once no conflict is confirmed.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is a shared resource and etl-agent already released it, but I should confirm no one else is about to claim it before starting.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is a shared resource and etl-agent already released it, but I should confirm no one else is about to claim it before starting."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006118,
+        "input_tokens": 2,
+        "output_tokens": 115,
+        "cache_read": 0,
+        "cache_creation": 1241
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-no_send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Update my status to indicate I'm about to run a heavy query for the ad-hoc analysis, then proceed since the slot is free (etl-agent released it and report-agent's work is API-based, not warehouse-heavy)\", \"action\": \"status\", \"to\": [], \"why\": \"The heavy-query slot appears free since etl-agent released it at 02:10 and report-agent is only consuming API quota, but I should broadcast my usage so peers know the slot is occupied.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The heavy-query slot appears free since etl-agent released it at 02:10 and report-agent is only consuming API quota, but I should broadcast my usage so peers know the slot is occupied."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.00574,
+        "input_tokens": 2,
+        "output_tokens": 156,
+        "cache_read": 0,
+        "cache_creation": 1044
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-no_send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.1,
+      "raw": "{\"next\": \"Announce that I am about to run a heavy query on the warehouse and check that the slot is actually free before proceeding.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is a shared single resource, so I must notify peers I'm taking it rather than assume it's idle based on etl-agent's status line.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is a shared single resource, so I must notify peers I'm taking it rather than assume it's idle based on etl-agent's status line."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0061,
+        "input_tokens": 2,
+        "output_tokens": 112,
+        "cache_read": 0,
+        "cache_creation": 1244
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-no_send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Update my status to show I'm about to run a heavy query on the warehouse before starting it\", \"action\": \"status\", \"to\": [], \"why\": \"The heavy-query slot is currently free but shared, so I should signal my usage to avoid collision with peers before proceeding\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The heavy-query slot is currently free but shared, so I should signal my usage to avoid collision with peers before proceeding"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.0026680000000000002,
+        "input_tokens": 884,
+        "output_tokens": 90,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.3,
+      "raw": "{\"next\": \"Message codex-session that I need to reset the shared local database and will wait until their integration tests finish before doing so\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"codex-session is currently running tests against the same shared database, so resetting it now would corrupt their run\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "codex-session is currently running tests against the same shared database, so resetting it now would corrupt their run"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005639999999999999,
+        "input_tokens": 2,
+        "output_tokens": 94,
+        "cache_read": 0,
+        "cache_creation": 1174
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Wait until codex-session's integration tests finish before resetting the shared database, to avoid disrupting their run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would wipe the data their in-progress integration tests depend on.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would wipe the data their in-progress integration tests depend on."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002558,
+        "input_tokens": 814,
+        "output_tokens": 93,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Message codex-session to let them know I need to reset the shared database for migration testing and will wait until their integration tests finish before doing so\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The database is a shared resource currently in use by codex-session's integration tests, so I must check in before resetting it rather than assuming they'll be done in five minutes.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The database is a shared resource currently in use by codex-session's integration tests, so I must check in before resetting it rather than assuming they'll be done in five minutes."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005888,
+        "input_tokens": 2,
+        "output_tokens": 120,
+        "cache_read": 0,
+        "cache_creation": 1171
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.2,
+      "raw": "{\"next\": \"Wait to reset the shared database until codex-session's integration tests finish, since resetting now would break their running tests.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would corrupt the peer's in-progress integration test run, so I need to coordinate timing first.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would corrupt the peer's in-progress integration test run, so I need to coordinate timing first."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002992,
+        "input_tokens": 976,
+        "output_tokens": 104,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-no_send-heldout-r1",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Notify the peer that I'm about to run the full test suite so we don't collide, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite can't run twice at once, so I must announce my usage before starting even though the peer shows no test runs planned.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite can't run twice at once, so I must announce my usage before starting even though the peer shows no test runs planned."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005639999999999999,
+        "input_tokens": 2,
+        "output_tokens": 96,
+        "cache_read": 0,
+        "cache_creation": 1169
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-no_send-heldout-r1",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.3,
+      "raw": "{\"next\": \"Notify peer that I'm about to run the full test suite so it isn't run twice concurrently, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so I must announce my run before starting it even though the peer isn't currently testing.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so I must announce my run before starting it even though the peer isn't currently testing."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005667999999999999,
+        "input_tokens": 2,
+        "output_tokens": 100,
+        "cache_read": 0,
+        "cache_creation": 1166
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-no_send-heldout-r1",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.8,
+      "raw": "{\"next\": \"Announce that I'm about to run the full test suite so the peer avoids running it concurrently, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so the peer needs to know before I start.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so the peer needs to know before I start."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002488,
+        "input_tokens": 809,
+        "output_tokens": 87,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-no_send-heldout-r1",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 1,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Announce that I'm starting the full test suite run before executing it, to avoid conflicting with any concurrent test run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so I need to inform my peer before starting my run.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so I need to inform my peer before starting my run."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002882,
+        "input_tokens": 971,
+        "output_tokens": 94,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.0,
+      "raw": "{\"next\": \"Notify peers before starting the 20-minute bulk write that locks the shared results table, since ben-agent is actively querying it for grant figures until ~16:30\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The table lock will block ben-agent's queries, so peers need advance notice before I proceed with the write\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The table lock will block ben-agent's queries, so peers need advance notice before I proceed with the write"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00525,
+        "input_tokens": 2,
+        "output_tokens": 109,
+        "cache_read": 0,
+        "cache_creation": 1039
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.3,
+      "raw": "{\"next\": \"Notify ben-agent that I need to lock the shared results database table for a ~20 minute bulk write of two million evaluation rows before proceeding\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"ben-agent is currently querying the results database and needs to know the table will lock so we don't collide\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "ben-agent is currently querying the results database and needs to know the table will lock so we don't collide"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006018,
+        "input_tokens": 2,
+        "output_tokens": 107,
+        "cache_read": 0,
+        "cache_creation": 1236
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Notify ben-agent before starting the 20-minute bulk write that will lock the shared results database table, since he is currently querying it for grant figures until ~16:30.\", \"action\": \"message\", \"to\": [\"ben-agent\"], \"why\": \"The bulk write will lock the main table for ~20 minutes, conflicting with ben-agent's active queries on the same results database.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "ben-agent"
+        ],
+        "why": "The bulk write will lock the main table for ~20 minutes, conflicting with ben-agent's active queries on the same results database."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006190000000000001,
+        "input_tokens": 2,
+        "output_tokens": 123,
+        "cache_read": 0,
+        "cache_creation": 1239
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "ben-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Notify peers before locking the results database table for the 20-minute bulk write of evaluation rows, since ben-agent is actively querying it for grant figures.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The bulk write will lock the shared results table for ~20 minutes, which would disrupt ben-agent's query-based figure building around now.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The bulk write will lock the shared results table for ~20 minutes, which would disrupt ben-agent's query-based figure building around now."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002948,
+        "input_tokens": 879,
+        "output_tokens": 119,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-lab-shared_resource-no_send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.1,
+      "raw": "{\"next\": \"Launch my training job on the GPU now that it's free, and update my status to reflect that I'm holding it.\", \"action\": \"status\", \"to\": [\"all\"], \"why\": \"GPU is confirmed released by ana-agent and ben-agent isn't using it, so I can claim it, but my status must reflect current usage for peers.\"}",
+      "decision": {
+        "action": "status",
+        "to": [
+          "all"
+        ],
+        "why": "GPU is confirmed released by ana-agent and ben-agent isn't using it, so I can claim it, but my status must reflect current usage for peers."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.005864,
+        "input_tokens": 2,
+        "output_tokens": 108,
+        "cache_read": 0,
+        "cache_creation": 1195
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-lab-shared_resource-no_send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.7,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU.\", \"action\": \"status\", \"to\": [], \"why\": \"Update my status to reflect that I'm now running on the GPU so peers know it's occupied.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "Update my status to reflect that I'm now running on the GPU so peers know it's occupied."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.00268,
+        "input_tokens": 1000,
+        "output_tokens": 68,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-lab-shared_resource-no_send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that I'm running on it.\", \"action\": \"status\", \"to\": [], \"why\": \"GPU is confirmed free since ana-agent released it and ben-agent doesn't use it, so I just need to reflect my current usage on the board.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "GPU is confirmed free since ana-agent released it and ben-agent doesn't use it, so I just need to reflect my current usage on the board."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.005796000000000001,
+        "input_tokens": 2,
+        "output_tokens": 100,
+        "cache_read": 0,
+        "cache_creation": 1198
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-lab-shared_resource-no_send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "lab-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "lab",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Launch my training job on the now-free GPU and update my status to reflect that it's running.\", \"action\": \"status\", \"to\": [], \"why\": \"The GPU is free since ana-agent released it, so I claim it now and inform peers via my status line to avoid conflicts.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The GPU is free since ana-agent released it, so I claim it now and inform peers via my status line to avoid conflicts."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.002576,
+        "input_tokens": 838,
+        "output_tokens": 90,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.7,
+      "raw": "{\"next\": \"Message copy-agent to check the status of the 16:00 slot before attempting to book it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 editor slot, so I must confirm availability rather than assume it's free.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 editor slot, so I must confirm availability rather than assume it's free."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005964,
+        "input_tokens": 2,
+        "output_tokens": 106,
+        "cache_read": 0,
+        "cache_creation": 1225
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Message copy-agent to check the 16:00 editor slot status before booking it for the Northwind newsletter, since they currently hold it though they may finish early.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"The 16:00 slot is a shared resource currently held by copy-agent, so I must confirm availability rather than assume they're done.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "The 16:00 slot is a shared resource currently held by copy-agent, so I must confirm availability rather than assume they're done."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0061259999999999995,
+        "input_tokens": 2,
+        "output_tokens": 121,
+        "cache_read": 0,
+        "cache_creation": 1228
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Message copy-agent to check whether the 16:00 slot is still needed or free before I book it for the Northwind newsletter.\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 slot, so I must coordinate before claiming it to avoid a scheduling conflict.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 slot, so I must coordinate before claiming it to avoid a scheduling conflict."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005256,
+        "input_tokens": 2,
+        "output_tokens": 114,
+        "cache_read": 0,
+        "cache_creation": 1028
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "copy-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.5,
+      "raw": "{\"next\": \"Message copy-agent to check if the 16:00 slot is still held or free before booking it for the Northwind newsletter\", \"action\": \"message\", \"to\": [\"copy-agent\"], \"why\": \"copy-agent currently holds the 16:00 slot, so I must confirm availability before claiming it myself to avoid a scheduling conflict\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "copy-agent"
+        ],
+        "why": "copy-agent currently holds the 16:00 slot, so I must confirm availability before claiming it myself to avoid a scheduling conflict"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002876,
+        "input_tokens": 868,
+        "output_tokens": 114,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-agency-shared_resource-no_send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.6,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule and apply it to my Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is a non-destructive lookup that doesn't affect peers, so no board update is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is a non-destructive lookup that doesn't affect peers, so no board update is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005046,
+        "input_tokens": 2,
+        "output_tokens": 91,
+        "cache_read": 0,
+        "cache_creation": 1033
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-agency-shared_resource-no_send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.4,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for the newsletter's second draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and locks nothing, so no coordination message or status change is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and locks nothing, so no coordination message or status change is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.005776,
+        "input_tokens": 2,
+        "output_tokens": 84,
+        "cache_read": 0,
+        "cache_creation": 1233
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-agency-shared_resource-no_send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.8,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for the Northwind newsletter draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is a non-destructive, non-locking action so no board update or message is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is a non-destructive, non-locking action so no board update or message is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.0025659999999999997,
+        "input_tokens": 873,
+        "output_tokens": 82,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-agency-shared_resource-no_send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "agency-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "agency",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Read section 2 of the style guide to verify the comma rule for my Northwind draft.\", \"action\": \"none\", \"to\": [], \"why\": \"Reading is non-exclusive and changes nothing, so no coordination message is needed.\"}",
+      "decision": {
+        "action": "none",
+        "to": [],
+        "why": "Reading is non-exclusive and changes nothing, so no coordination message is needed."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "none"
+      },
+      "cost": {
+        "usd": 0.0057139999999999995,
+        "input_tokens": 2,
+        "output_tokens": 79,
+        "cache_read": 0,
+        "cache_creation": 1230
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.6,
+      "raw": "{\"next\": \"Check API quota against report-agent's remaining usage before starting the 3,000-call backfill to avoid exceeding the shared 10,000 daily limit.\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"6,200 already spent plus report-agent's 3,000 plus my 3,000 would exceed the 10,000 daily vendor API quota, so I need to coordinate timing before consuming calls.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "6,200 already spent plus report-agent's 3,000 plus my 3,000 would exceed the 10,000 daily vendor API quota, so I need to coordinate timing before consuming calls."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 0.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006026,
+        "input_tokens": 2,
+        "output_tokens": 183,
+        "cache_read": 0,
+        "cache_creation": 1048
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Hold off on starting the backfill until API quota conflict with report-agent is resolved, since 6,200+3,000+3,000 would exceed the 10,000 daily quota.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"Combined API usage would exceed the shared daily quota, so we need to coordinate before I consume 3,000 more calls.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "Combined API usage would exceed the shared daily quota, so we need to coordinate before I consume 3,000 more calls."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.003476,
+        "input_tokens": 888,
+        "output_tokens": 170,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.2,
+      "raw": "{\"next\": \"Message report-agent to check if 3,000 more API calls today would exceed the shared quota before starting the backfill\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"6,200 already spent plus report-agent's 3,000 and my 3,000 would exceed the 10,000 daily quota, so I need to coordinate first\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "6,200 already spent plus report-agent's 3,000 and my 3,000 would exceed the 10,000 daily quota, so I need to coordinate first"
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006144,
+        "input_tokens": 2,
+        "output_tokens": 116,
+        "cache_read": 0,
+        "cache_creation": 1245
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "report-agent",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.4,
+      "raw": "{\"next\": \"Message report-agent to check current API usage before starting the 3,000-call backfill, since combined with their remaining ~3,000 calls it would risk exceeding the 10,000 daily quota.\", \"action\": \"message\", \"to\": [\"report-agent\"], \"why\": \"6,200 spent plus 3,000 more from report-agent plus my 3,000 could hit or exceed the shared daily quota, so I need to coordinate before using it.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "report-agent"
+        ],
+        "why": "6,200 spent plus 3,000 more from report-agent plus my 3,000 could hit or exceed the shared daily quota, so I need to coordinate before using it."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006446,
+        "input_tokens": 2,
+        "output_tokens": 145,
+        "cache_read": 0,
+        "cache_creation": 1248
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-data-shared_resource-no_send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Update my status to show I'm about to run a heavy query so peers know the slot is in use, then proceed since etl-agent already released it and report-agent's work isn't warehouse-heavy.\", \"action\": \"status\", \"to\": [], \"why\": \"The heavy-query slot appears free (etl-agent released it, report-agent is only calling the vendor API), so I just need to broadcast my own usage via status rather than message anyone.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The heavy-query slot appears free (etl-agent released it, report-agent is only calling the vendor API), so I just need to broadcast my own usage via status rather than message anyone."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.00559,
+        "input_tokens": 2,
+        "output_tokens": 141,
+        "cache_read": 0,
+        "cache_creation": 1044
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-data-shared_resource-no_send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.9,
+      "raw": "{\"next\": \"Announce that I am about to run a heavy query on the warehouse and confirm the slot is free before starting\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is a shared single resource and etl-agent's status is not a live queue, so I must check/notify before using it.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is a shared single resource and etl-agent's status is not a live queue, so I must check/notify before using it."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005980000000000001,
+        "input_tokens": 2,
+        "output_tokens": 100,
+        "cache_read": 0,
+        "cache_creation": 1244
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-data-shared_resource-no_send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Announce intent to use the heavy-query slot before running my ad-hoc query\", \"action\": \"message\", \"to\": [\"all\"], \"why\": \"The heavy-query slot is a shared single resource and peers' status lines aren't a queue, so I must notify before taking it even though etl-agent released it and report-agent isn't listed as holding it.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "all"
+        ],
+        "why": "The heavy-query slot is a shared single resource and peers' status lines aren't a queue, so I must notify before taking it even though etl-agent released it and report-agent isn't listed as holding it."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.006108,
+        "input_tokens": 2,
+        "output_tokens": 114,
+        "cache_read": 0,
+        "cache_creation": 1241
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-data-shared_resource-no_send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "data-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "data",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.2,
+      "raw": "{\"next\": \"Update my status to indicate I'm about to run a heavy query so peers know the slot is in use, then proceed with it since etl-agent released it and report-agent's task doesn't need it\", \"action\": \"status\", \"to\": [], \"why\": \"The heavy-query slot appears free (etl-agent released it), so I just need to signal I'm using it to avoid collisions with tonight's load.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The heavy-query slot appears free (etl-agent released it), so I just need to signal I'm using it to avoid collisions with tonight's load."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.003038,
+        "input_tokens": 884,
+        "output_tokens": 127,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.2,
+      "raw": "{\"next\": \"Wait until codex-session's integration tests finish before resetting the shared database, to avoid disrupting their test run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would corrupt their in-progress integration tests against it.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would corrupt their in-progress integration tests against it."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002548,
+        "input_tokens": 814,
+        "output_tokens": 92,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.4,
+      "raw": "{\"next\": \"Message codex-session to check before resetting the shared database, since their integration tests are still using it, then wait until they confirm completion before proceeding.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The database is a shared resource currently in use by codex-session's integration tests, so I must not reset it without checking first.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The database is a shared resource currently in use by codex-session's integration tests, so I must not reset it without checking first."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005778,
+        "input_tokens": 2,
+        "output_tokens": 109,
+        "cache_read": 0,
+        "cache_creation": 1171
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.8,
+      "raw": "{\"next\": \"Message codex-session that I need to reset the shared database for migration testing and will wait until their integration tests finish before doing so.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The database is a shared resource currently in use by codex-session's running tests, so I must notify them before resetting it rather than assuming they're idle.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The database is a shared resource currently in use by codex-session's running tests, so I must notify them before resetting it rather than assuming they're idle."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00582,
+        "input_tokens": 2,
+        "output_tokens": 112,
+        "cache_read": 0,
+        "cache_creation": 1174
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "send",
+      "to": "codex-session",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.1,
+      "raw": "{\"next\": \"Wait until codex-session finishes its integration tests before resetting the shared database, since that would break their running test run.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"Resetting the shared database now would corrupt their in-progress integration tests against it, so I need to coordinate timing first.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "Resetting the shared database now would corrupt their in-progress integration tests against it, so I need to coordinate timing first."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": 1.0,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.002972,
+        "input_tokens": 976,
+        "output_tokens": 102,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-old-solo-shared_resource-no_send-heldout-r2",
+      "arm": "old",
+      "variant": "old",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "d949883495089d3d9ad620765151632d653b52a3a17c1a2a34fee614388fe233",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 5.6,
+      "raw": "{\"next\": \"Announce that I'm starting the full test suite run so the peer avoids running tests concurrently, then execute it.\", \"action\": \"status\", \"to\": [], \"why\": \"The test suite must never run twice at once, so I need to broadcast my intent via status before running it since the peer isn't planning tests but should still see current state.\"}",
+      "decision": {
+        "action": "status",
+        "to": [],
+        "why": "The test suite must never run twice at once, so I need to broadcast my intent via status before running it since the peer isn't planning tests but should still see current state."
+      },
+      "grade": {
+        "correct": 1.0,
+        "addressed": null,
+        "action": "status"
+      },
+      "cost": {
+        "usd": 0.002992,
+        "input_tokens": 971,
+        "output_tokens": 105,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-none-solo-shared_resource-no_send-heldout-r2",
+      "arm": "none",
+      "variant": "none",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.3,
+      "raw": "{\"next\": \"Announce that I'm about to run the full test suite so the peer avoids running tests concurrently, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so the peer needs a heads-up before I start it.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so the peer needs a heads-up before I start it."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.0025380000000000003,
+        "input_tokens": 809,
+        "output_tokens": 92,
+        "cache_read": 0,
+        "cache_creation": 0
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new_aa-solo-shared_resource-no_send-heldout-r2",
+      "arm": "new@aa",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 4.0,
+      "raw": "{\"next\": \"Announce that I'm about to run the full test suite so codex-session knows not to start one concurrently, then run it.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite must never run twice at once, so I need to claim it explicitly rather than assume codex-session is idle.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite must never run twice at once, so I need to claim it explicitly rather than assume codex-session is idle."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.00569,
+        "input_tokens": 2,
+        "output_tokens": 101,
+        "cache_read": 0,
+        "cache_creation": 1169
+      }
+    },
+    {
+      "run_id": "checkin-rules-20260928-heldout-new-solo-shared_resource-no_send-heldout-r2",
+      "arm": "new",
+      "variant": "new",
+      "scenario": "solo-shared_resource-no_send-heldout",
+      "replicate": 2,
+      "persona": "solo",
+      "rule": "shared_resource",
+      "expect": "no_send",
+      "to": null,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "frame": "task",
+      "text_sha256": "0db1509ea3405eb87292340953f9d00ba76cc98c72275820d747d96ee5817916",
+      "heldout": true,
+      "bench_version": 3,
+      "errors": [],
+      "timed_out": false,
+      "client_rc": 0,
+      "wall_s": 3.3,
+      "raw": "{\"next\": \"Notify peer that I'm about to run the full test suite so we don't collide, then run it once confirmed clear.\", \"action\": \"message\", \"to\": [\"codex-session\"], \"why\": \"The test suite can't run twice at once, so I must claim it on the board before starting even though the peer says no test runs planned.\"}",
+      "decision": {
+        "action": "message",
+        "to": [
+          "codex-session"
+        ],
+        "why": "The test suite can't run twice at once, so I must claim it on the board before starting even though the peer says no test runs planned."
+      },
+      "grade": {
+        "correct": 0.0,
+        "addressed": null,
+        "action": "message"
+      },
+      "cost": {
+        "usd": 0.005688,
+        "input_tokens": 2,
+        "output_tokens": 102,
+        "cache_read": 0,
+        "cache_creation": 1166
+      }
+    }
+  ]
+}
