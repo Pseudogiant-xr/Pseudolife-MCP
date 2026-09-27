@@ -9951,6 +9951,7 @@ _CCB = RESULTS + "coordination-checkin-bench-checkin-rules-20260928"
 CCB_BOARD, CCB_TASK = _CCB + ".json", _CCB + "-task.json"
 CCB_ABL, CCB_ABL2 = _CCB + "-ablation.json", _CCB + "-ablation2.json"
 CCB_V2, CCB_HELD, CCB_FINAL = _CCB + "-shipped.json", _CCB + "-heldout.json", _CCB + "-final.json"
+CCB_CODEX, CCB_CODEX4 = _CCB + "-codex.json", _CCB + "-codex4.json"
 
 
 def _ccb_delta(key, field="delta", i=None, part=None):
@@ -10066,6 +10067,30 @@ for _cid, _doc, _needle, _art, _value, _stated, _places in (
          CCB_FINAL, _ccb_runs("new", "shared_resource", "no_send", "heldout2"), 0.92, 2),
         ("ccb-final-held2-r2-hold-old", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
          CCB_FINAL, _ccb_runs("old", "shared_resource", "no_send", "heldout2"), 0.92, 2),
+        # 8-9. the Codex forms, and two re-scorings of the frozen set
+        ("ccb-codex-spend", EVALS, "(`-codex`, $2.54)", CCB_CODEX, _USD, 2.54, 2),
+        ("ccb-codex-main", EVALS, "+0.067 [-0.017,", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="main"), 0.067, 3),
+        ("ccb-codex-held", EVALS, "-0.167 [-0.417, +0.000], no-send", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="heldout"), -0.167, 3),
+        ("ccb-codex-held-hold", EVALS, "held 0.50.", CCB_CODEX,
+         _ccb_arm("codex3", "no_send_specificity", part="heldout"), 0.50, 2),
+        ("ccb-codex4-spend", EVALS, "(`-codex4`, $2.56)", CCB_CODEX4, _USD, 2.56, 2),
+        ("ccb-codex4-main", EVALS, "(+0.000 [-0.058, +0.058])", CCB_CODEX4,
+         _ccb_delta("codex4 - old", part="main"), 0.0, 3),
+        ("ccb-codex4-held", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout"), 0.083, 3),
+        ("ccb-codex4-held2", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout2"), 0.062, 3),
+        *((f"ccb-codex4-hold-{_part}", EVALS, "holding every no-send situation", CCB_CODEX4,
+           _ccb_arm("codex4", "no_send_specificity", part=_part), 1.0, 2)
+          for _part in ("main", "heldout", "heldout2")),
+        ("ccb-rescore-codex", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-rescore-codex4", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX4, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-changelog-rescore", CHANGELOG, "frozen set at +0.042 each", CCB_CODEX4,
+         _ccb_delta("new - old", part="heldout2"), 0.042, 3),
         # CHANGELOG
         ("ccb-changelog-held", CHANGELOG, "over-sent on held-out ones (-0.208 against the", CCB_HELD,
          _ccb_delta("new - old"), -0.208, 3),

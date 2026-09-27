@@ -120,7 +120,8 @@ their status says when they expect to finish, because a status line is not
 a queue (if the board shows it free, use it and say so in your status); and
 keep your status true (what you hold, what you wait on, when you expect to
 finish). The Codex form, inside its
-512-character MCP-instructions budget, carries the first. An install's own
+512-character MCP-instructions budget, carries the first, bounded the same
+way. An install's own
 words for its shared things (a suite lock, a GPU, a style guide, an API
 quota) belong in the daemon's `<data_dir>/hook-instructions.md`, which the
 memory hook serves after its core (3.5 KB cap, see

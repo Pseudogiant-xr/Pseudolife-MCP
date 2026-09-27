@@ -4142,7 +4142,7 @@ outright; `task` (the default since v2) asks for the agent's next step in its
 own work, with the board action as one field of it.
 
 **2026-09-28 (claude-sonnet-5, medium effort, 3 replicates, every run
-valid).** Seven artifacts, `coordination-checkin-bench-checkin-rules-20260928*.json`,
+valid).** Nine artifacts, `coordination-checkin-bench-checkin-rules-20260928*.json`,
 in the order run. The shared-resource rule went through three wordings:
 (1) "check who holds it and message them"; (2) "message them that you are
 next ... a status line is not a queue, and do not guess that they are
@@ -4189,6 +4189,23 @@ Shipped minus old, by set: main +0.075 [-0.008, +0.175] (120 pairs);
 first held-out +0.083 [+0.000, +0.292] (24); second held-out +0.062
 [-0.062, +0.208] (48), A/A -0.021. Shipped minus wording 2 on the second
 held-out set: +0.167 [+0.000, +0.375].
+
+8. *Codex form, unbounded* (`-codex`, $2.54): "message its holder you're
+   next; status isn't a queue" gained on the main set (+0.067 [-0.017,
+   +0.167] over the old check-in) but, like wording 2, messaged holders who
+   had let go on the first held-out set: -0.167 [-0.417, +0.000], no-send
+   held 0.50.
+9. *Codex form, bounded and shipped* (`-codex4`, $2.56): "Need what a peer
+   holds? Message them you're next. Free? Use it, update status." adds
+   nothing on the main set (+0.000 [-0.058, +0.058]) and gains on both
+   held-out sets: +0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188],
+   holding every no-send situation. It ships over the unbounded form
+   because over-sending is the costlier failure.
+
+Runs 8 and 9 also re-scored the full check-in on the second held-out set
+against the old one: +0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188],
+beside run 7's +0.062. Three runs, the same direction, every interval
+crossing zero.
 
 Read plainly: wording 3 keeps wording 2's gain on the main set and removes
 its over-sending on both held-out sets. On the only unbiased set the gain

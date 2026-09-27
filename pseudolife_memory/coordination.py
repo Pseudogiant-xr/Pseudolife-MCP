@@ -116,8 +116,10 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # only that it could not see them help. An install's own words for
 # its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
 # hook-instructions.md is one host's), served after the memory core. The
-# closing subagent sentence (#425) is about who may write, not when to send,
-# and was not part of the measured text.
+# closing subagent sentence (#425) is about who may write, not when to send;
+# the -final run scored this whole constant, that sentence included, and
+# tests pin it byte for byte to evals/results/coordination-checkin-arms/
+# rules-v3-20260928.txt.
 CHECKIN_TEXT = (
     "Pseudolife coordination: at the first task and on resume, use "
     "memory_agents(action=list) to check peers and memory_agents(action=update, "
@@ -141,14 +143,18 @@ CHECKIN_TEXT = (
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
-# Daemon text plus this is exactly Codex's 512-character budget. It carries
-# the shared-resource rule, the one that moved decisions most, in its bounded
-# wording ("someone holds"). An earlier Codex form carrying the two cut rules
-# scored the pre-rules text's accuracy (2026-09-28); the measured forms are
-# under evals/results/coordination-checkin-arms/.
+# Daemon text plus this stays within Codex's 512-character budget (508). It
+# carries the shared-resource rule with its boundary ("Free? Use it"), and
+# took three wordings of its own (2026-09-28, evals/coordination_checkin_
+# bench.py): a form carrying the two cut rules scored the pre-rules text's
+# accuracy (-ablation); "message its holder you're next; status isn't a
+# queue" gained on the main set but, like the full text's second wording,
+# messaged holders who had let go on the first held-out set (-codex); this
+# bounded form gains nothing on the main set and gains on both held-out
+# sets, never over-sending (-codex4). Over-sending is the costlier failure.
 CHECKIN_INSTRUCTION = (
-    "Board: memory_agents update, list; memory_message receive, ack. Need a "
-    "shared thing someone holds? Message them you're next; status isn't a queue. "
+    "Board: memory_agents update, list; memory_message receive, ack. Need what a "
+    "peer holds? Message them you're next. Free? Use it, update status. "
     "Subagents only read the board.")
 
 

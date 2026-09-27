@@ -490,13 +490,15 @@ def test_checkin_says_when_to_send_not_only_how():
     mechanical steps and adds the two field-neutral rules that moved
     decisions in evals/coordination_checkin_bench.py (2026-09-28); three
     others that moved nothing were cut. Both texts are served exactly as
-    measured: the arm files under evals/results/coordination-checkin-arms/
-    must stay inside them, so a reword means a new bench run."""
+    measured: the check-in equals its arm file byte for byte (the -final
+    run scored that text; test_coordination_checkin_bench ties the file to
+    the artifact's hash), and the Codex form's measured part must stay
+    inside it, so a reword means a new bench run."""
     from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
     arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
     measured = (arms / "rules-v3-20260928.txt").read_text(encoding="utf-8").strip()
-    assert measured in CHECKIN_TEXT
-    assert (arms / "codex3-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
+    assert CHECKIN_TEXT == measured
+    assert (arms / "codex4-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
     for phrase in ("look for whoever holds it or has it booked",
                    "message them that you are next", "a status line is not a queue",
                    "If the board shows it free, use it", "Keep your status true"):
@@ -508,7 +510,7 @@ def test_checkin_says_when_to_send_not_only_how():
         assert cut not in CHECKIN_TEXT, cut
     # The mechanical steps stay, in front of the rules.
     assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")
-    assert "someone holds? Message them you're next" in CHECKIN_INSTRUCTION
+    assert "Message them you're next. Free? Use it" in CHECKIN_INSTRUCTION
     for verb in ("update", "list", "receive", "ack"):
         assert verb in CHECKIN_INSTRUCTION
     for text in (CHECKIN_TEXT, CHECKIN_INSTRUCTION):

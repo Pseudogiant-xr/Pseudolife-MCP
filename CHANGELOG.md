@@ -17,9 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   next, even when their status says when they expect to finish, because a
   status line is not a queue; if the board shows it free, use it and say so
   in your status. And keep your status true. The Codex form
-  (`CHECKIN_INSTRUCTION`, appended to the MCP instructions) carries the
-  first, and with the subagent sentence (the 2026-09-27 subagent entry
-  below) fills Codex's 512-character budget exactly.
+  (`CHECKIN_INSTRUCTION`, appended to the MCP instructions, 508 of Codex's
+  512 characters with the subagent sentence from the 2026-09-27 subagent
+  entry below) carries the first rule with its boundary: "Need what a peer
+  holds? Message them you're next. Free? Use it, update status." An
+  unbounded Codex form over-sent on held-out situations; the bounded one
+  gained on both held-out sets and never over-sent (`-codex`, `-codex4`).
 - Measured with a new bench, `evals/coordination_checkin_bench.py`: four
   teams that share something (a lab, an agency, a data team, one developer
   with two CLIs) x five candidate rules x a situation where a message is due
@@ -35,7 +38,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   main set by +0.075 [-0.008, +0.175] over 120 pairs; and the second wording
   by +0.167 [+0.000, +0.375] on the frozen set (artifact:
   `evals/results/coordination-checkin-bench-checkin-rules-20260928-final.json`;
-  `evals/README.md` walks through all seven runs).
+  `evals/README.md` walks through all nine runs, two of which re-scored the
+  frozen set at +0.042 each).
 - Host-specific vocabulary belongs in the daemon's
   `<data_dir>/hook-instructions.md`, served after the memory core.
   `examples/hook-instructions.md` is the maintainer host's copy (suite and

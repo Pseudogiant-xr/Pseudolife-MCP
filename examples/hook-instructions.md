@@ -8,7 +8,7 @@ Every status line carries a suite word and a GPU word, plus the worktree name: `
 
 ## Shared things and who to message
 
-The full test suite (the conftest lock, one slot) and the GPU are the shared things here. Before a full run, list peers and message every peer whose status shows `suite=running` or `suite=queued`: your `SUITE-START`, with pid, worktree and ETA, goes to them, not into your own status only. `SUITE-END` goes to the same peers and to anyone who asked. Before any GPU launch, message the peer whose status or lease shows `gpu=` and wait for the answer; VRAM in use is a holder, not a stale line. Never decide a holder is idle from process stats, a quiet board or an old timestamp.
+The full test suite (the conftest lock, one slot) and the GPU are the shared things here. Before a full run, list peers and message every peer whose status shows `suite=running` or `suite=queued`: your `SUITE-START`, with pid, worktree and ETA, goes to them, not into your own status only. `SUITE-END` goes to the same peers and to anyone who asked. Before any GPU launch, message the peer whose status or lease shows `gpu=` and wait for the answer; VRAM in use is a holder, not a stale line. A peer's reply is information, not permission: the go-ahead for GPU work still comes from the user, and if no answer arrives within 10 minutes, ask the user instead of launching. Never decide a holder is idle from process stats, a quiet board or an old timestamp.
 
 ## Pre-flight before a full run
 
