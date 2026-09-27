@@ -240,6 +240,7 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
     installed_bin = shell.tmp / "installed-bin"
     installed_bin.mkdir()
     (installed_bin / "pseudolife-mcp").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (installed_bin / "pseudolife-mcp").chmod(0o755)
     call_log = shell.tmp / "calls.txt"
     for name, query in (("claude", "get"), ("gemini", "list")):
         (fake_bin / name).write_text(
@@ -252,10 +253,14 @@ def _wire(shell: _Shell, client: str, *, token_file: str, existing: str | None =
             "  exit 1\nfi\n"
             "if [ \"$1\" = mcp ] && [ \"$2\" = add ]; then exit 0; fi\n"
             "exit 91\n", encoding="utf-8")
+        (fake_bin / name).chmod(0o755)
     (fake_bin / "pipx").write_text(
         "#!/bin/sh\n"
         "if [ \"$1\" = environment ]; then printf '%s\\n' \"$FAKE_INSTALL_BIN\"; fi\n"
         "exit 0\n", encoding="utf-8")
+    # Executable on POSIX: Linux refuses a stub without the bit (CI run
+    # 36331871190); Windows Git Bash runs it regardless.
+    (fake_bin / "pipx").chmod(0o755)
     helper = _between("ops/install.sh", "resolve_installed_shim() {",
                       "\n}\n\n# Two env pairs") + "\n}"
     loop = _between("ops/install.sh",
