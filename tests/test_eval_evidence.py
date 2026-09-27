@@ -9979,3 +9979,20 @@ for _cid, _art, _variant, _metric, _needle, _stated in (
          "0.75 → 0.625", 0.625)):
     CLAIMS.append(Claim(id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
                         value=_seed_p(_variant, _metric), stated=_stated, places=3))
+
+
+SEED_MARKS = _SEED + "marks.json"
+
+
+def test_seed_bench_combining_mark_rerun_scores_the_same():
+    """The combining-mark fix to _mentions says the seed bench "scored the
+    same as before": every metric but latency must equal the after run."""
+    assert "scored the same as before" in _read_doc(CHANGELOG)
+    assert SEED_MARKS in _tracked()
+    after, marks = _load_artifact(SEED_AFTER), _load_artifact(SEED_MARKS)
+
+    def scores(d):
+        return {k: {m: x for m, x in v.items() if m != "mean_latency_ms"}
+                for k, v in d.items() if k != "embedder"}
+    assert scores(marks) == scores(after)
+    assert marks["embedder"] == after["embedder"]

@@ -1,0 +1,39 @@
+{
+  "v0": {
+    "seed_precision": 0.295,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 12.75,
+    "mean_graph_calls": 12.75,
+    "mean_latency_ms": 322.7
+  },
+  "A": {
+    "seed_precision": 1.0,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 2.75,
+    "mean_graph_calls": 2.75,
+    "mean_latency_ms": 92.2
+  },
+  "A+B": {
+    "seed_precision": 1.0,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 2.75,
+    "mean_graph_calls": 2.75,
+    "mean_latency_ms": 22.7
+  },
+  "C": {
+    "seed_precision": 0.625,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 5.0,
+    "mean_graph_calls": 5.0,
+    "mean_latency_ms": 58.3
+  },
+  "embedder": {
+    "backend": "torch",
+    "device": "cpu",
+    "dtype": "bf16"
+  }
+}
