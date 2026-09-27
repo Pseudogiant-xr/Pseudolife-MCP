@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-27 — the standing memory block says where hard rules belong)
+- Constraint pinning serves a `constraint` fact ahead of the ranking only
+  when the query names the fact's entity. A session asks about the task it
+  is doing, not the rule it is about to break, so a rule stored only in the
+  bank ("hold the GPU run when VRAM is in use") is found when the query
+  happens to name it and missed otherwise — probed on the live bank on
+  2026-09-27 while checking a client's local memory files against it. The
+  standing memory block (`examples/CLAUDE.memory.md`, byte-identical to the
+  served `MEMORY_LOOP_BLOCK`) now says so at the constraint label: name a
+  rule's entity the way a task would say it, and keep any rule that must
+  hold however the task is phrased in the standing instructions too, with
+  the bank holding its why and its history. `docs/guide/retrieval.md`
+  explains the consequence beside the mechanism; `memory-model.md` points
+  there. No retrieval behaviour changes.
+
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on
   every user prompt, took a median of about 270 ms a turn on the
