@@ -23,6 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds? Message them you're next. Free? Use it, update status." An
   unbounded Codex form over-sent on held-out situations; the bounded one
   gained on both held-out sets and never over-sent (`-codex`, `-codex4`).
+  Both were scored without the closing "Subagents only read the board.",
+  which is about who may write, not when to send.
 - Measured with a new bench, `evals/coordination_checkin_bench.py`: four
   teams that share something (a lab, an agency, a data team, one developer
   with two CLIs) x five candidate rules x a situation where a message is due
@@ -49,6 +51,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   announcement is a message to the peers whose status shows the resource,
   with pid, worktree and ETA, and a holder is never assumed idle from
   process stats; a host-shaped symptom is broadcast before it is debugged.
+
 ### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
 - A running shim whose saved board address the daemon had pruned (the host
   slept, or the daemon was unreachable, past the seven-day retention, then a

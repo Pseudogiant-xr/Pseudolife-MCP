@@ -144,14 +144,17 @@ CHECKIN_TEXT = (
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
 # Daemon text plus this stays within Codex's 512-character budget (508). It
-# carries the shared-resource rule with its boundary ("Free? Use it"), and
-# took three wordings of its own (2026-09-28, evals/coordination_checkin_
+# carries the shared-resource rule with its boundary ("Free? Use it"). Four
+# Codex wordings were scored (2026-09-28, evals/coordination_checkin_
 # bench.py): a form carrying the two cut rules scored the pre-rules text's
-# accuracy (-ablation); "message its holder you're next; status isn't a
-# queue" gained on the main set but, like the full text's second wording,
-# messaged holders who had let go on the first held-out set (-codex); this
-# bounded form gains nothing on the main set and gains on both held-out
-# sets, never over-sending (-codex4). Over-sending is the costlier failure.
+# accuracy (-ablation); two unbounded forms, "message its holder you're
+# next; status isn't a queue" (-ablation2) and "Need a shared thing someone
+# holds? Message them you're next; status isn't a queue" (-codex), gained on
+# the main set, and the second, like the full text's second wording,
+# messaged holders who had let go on the first held-out set; this bounded
+# form gains nothing on the main set and gains on both held-out sets, never
+# over-sending (-codex4). Over-sending is the costlier failure. Each was
+# scored without the closing "Subagents only read the board." (#425).
 CHECKIN_INSTRUCTION = (
     "Board: memory_agents update, list; memory_message receive, ack. Need what a "
     "peer holds? Message them you're next. Free? Use it, update status. "
