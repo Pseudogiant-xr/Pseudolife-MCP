@@ -244,7 +244,8 @@ inherited through supersession unless a later write restates them:
   entry's text verbatim onto a derived fact and a post-dream guard reports
   any constraint left without a carrier ([dreaming](dreaming.md#constraint-entries-survive-verbatim--typecompact--guard-schema-v35)),
   and in-scope constraint facts — in scope meaning the query names the
-  fact's entity — are served *ahead of* the cosine ranking
+  fact's entity (a seed of the walk, in `memory_recall`) — are served
+  *ahead of* the cosine ranking
   ([retrieval](retrieval.md#constraint-pinning-schema-v35), which also
   says what that scope test means for how a rule should be named and
   where a rule that must always hold belongs).

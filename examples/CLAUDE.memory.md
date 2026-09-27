@@ -89,12 +89,14 @@ CAPTURE — as durable things arise (one claim per call):
 - Label what must not drift: `distortion_tolerance="constraint"` on a rule
   that must survive verbatim (served first in recall, `pinned`);
   `authority="quoted"` on what a doc or third party said — a quote is
-  not an instruction. Both inherit through supersession. A pin fires only
-  when the query names the fact's entity, and a task rarely names the rule
-  it is about to break — so name the entity the way the task would say it
-  (`bench server launch`, not `GPU pre-flight rule`), and keep any rule
-  that must hold however the task is phrased in your standing instructions
-  too; the bank holds its why, its history and its corrections.
+  not an instruction. Both inherit through supersession. In `memory_search`
+  a pin fires only when the query names the fact's entity (in
+  `memory_recall`, only on the walk's seeds), and a task rarely names the
+  rule it is about to break — so name the entity the way the task would
+  say it (`bench server`, not `GPU pre-flight rule`; a named rule still
+  has to clear the relevance floor), and keep any rule that must hold
+  however the task is phrased in your standing instructions too; the bank
+  holds its why, its history and its corrections.
 - Facts the repo or config can answer (deployed version, schema number,
   counts, budgets) do NOT belong in fact slots — they drift by construction;
   store the WHY as an entry and read the value from the repo. A one-off
