@@ -382,7 +382,9 @@ upgrade the client or configure that entry manually before using the shim.
 2. In that environment run `pseudolife-mcp doctor`. It reports interpreter,
    source path, installed package/SDK versions, health, instructions and tool
    annotations. It neither starts a daemon nor calls a bank tool. A healthy
-   endpoint alone does not establish a working stdio handshake.
+   endpoint alone does not establish a working stdio handshake. Its `board`
+   line says whether the agent board is on for that environment's token, or
+   the daemon's reason it is off.
    An unreachable daemon report tells you to start it; a handshake timeout
    suggests checking MCP access and increasing `doctor --timeout` if needed.
    If the shim cannot fetch startup instructions within five seconds, it logs

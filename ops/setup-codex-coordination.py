@@ -20,8 +20,15 @@ hooks = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(hooks)
 SetupError = hooks.SetupError
 SERVER = "pseudolife-memory"
+# PSEUDOLIFE_AGENT_WAKE is deliberately absent: unset already means pull-only
+# in the shim, and writing "0" here reset live delivery for anyone who had
+# opted in and later re-ran --enable.
 ENABLED_ENV = {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_NO_SPAWN": "1",
-               "PSEUDOLIFE_AGENT_COORDINATION": "1", "PSEUDOLIFE_AGENT_WAKE": "0"}
+               "PSEUDOLIFE_AGENT_COORDINATION": "1"}
+TRUTHY = {"1", "true", "yes", "on"}
+# Token-map principals join the board only when listed (2026-09-25 decision).
+PRINCIPAL_REASON = ("principal not allowed on the board (add 'codex' to "
+                    "coordination.allowed_principals in config.yaml)")
 RUNTIME_DEFAULTS = {"startup_timeout_sec": 240.0, "tool_timeout_sec": 240.0,
                     "required": True}
 
@@ -35,23 +42,46 @@ urlopen = build_opener(_NoRedirect).open
 
 
 def probe(url, token):
-    """Pass the bearer/allowlist gate without creating an agent or renewing a lease."""
+    """Pass the bearer/allowlist gate without creating an agent or renewing a lease.
+
+    Returns ``ready``, ``principal_not_allowed``, ``disabled`` or ``unavailable``."""
     try:
         url = hooks._validated_daemon_url(url)
         if not token:
-            return False
+            return "unavailable"
         request = Request(url + "/api/coordination/agents", data=b"{}",
                           headers={"Authorization": "Bearer " + token,
                                    "Content-Type": "application/json"})
         try:
-            with urlopen(request, timeout=3):
-                return False  # Disabled coordination returns 200 without checking identity.
+            with urlopen(request, timeout=3) as response:
+                # Disabled coordination returns 200 without checking identity.
+                disabled = json.loads(response.read(4096)) == {"enabled": False}
+                return "disabled" if disabled else "unavailable"
         except HTTPError as error:
             with error:
-                return (error.code == 401 and json.loads(error.read(4096)).get("error")
-                        == "instance_authentication_required")
+                code = json.loads(error.read(4096)).get("error")
+            if (error.code, code) == (401, "instance_authentication_required"):
+                return "ready"
+            if (error.code, code) == (403, "principal_not_allowed"):
+                return "principal_not_allowed"
+            return "unavailable"
     except Exception:
-        return False  # Never expose a credential-bearing URL or transport exception.
+        return "unavailable"  # Never expose a credential-bearing URL or transport exception.
+
+
+def served(url, token):
+    """Whether the daemon serves the board check-in to this bearer: the question
+    the shim asks at startup when PSEUDOLIFE_AGENT_COORDINATION is unset."""
+    try:
+        url = hooks._validated_daemon_url(url)
+        if not token:
+            return False
+        request = Request(url + "/api/hook/coordination-start",
+                          headers={"Authorization": "Bearer " + token})
+        with urlopen(request, timeout=3) as response:
+            return bool(response.read(65536).strip())
+    except Exception:
+        return False
 
 
 def private_backup(path):
@@ -101,15 +131,26 @@ def configure(client, home, cwd, action):
     else:
         token = effective("PSEUDOLIFE_MCP_TOKEN")
     fixed_state = effective("PSEUDOLIFE_AGENT_STATE")
-    daemon_ready = False if action == "disable" else probe(
-        effective("PSEUDOLIFE_MCP_DAEMON_URL") or "http://127.0.0.1:8765", token)
-    enabled = str(effective("PSEUDOLIFE_AGENT_COORDINATION") or "").lower() in {"1", "true", "yes", "on"}
+    url = effective("PSEUDOLIFE_MCP_DAEMON_URL") or "http://127.0.0.1:8765"
+    access = "unavailable" if action == "disable" else probe(url, token)
+    daemon_ready = access == "ready"
+    # The board is on by default: an unset value is a working configuration
+    # when the daemon serves the board to this bearer, which the shim asks
+    # at startup. An explicit opt-in skips that question, as the shim does.
+    setting = str(effective("PSEUDOLIFE_AGENT_COORDINATION") or "").strip().lower()
+    mode = ("explicit" if setting in TRUTHY else "disabled" if setting
+            else "default-on")
+    board = daemon_ready and (mode == "explicit" or (
+        mode == "default-on" and action == "check" and served(url, token)))
     codex_writer = str(effective("PSEUDOLIFE_WRITER_ID") or "").strip().lower() == "codex"
-    ready = enabled and daemon_ready and not fixed_state and codex_writer and server.get("enabled", True)
-    report = {"status": "ready" if ready else "needs-configuration",
+    ready = board and not fixed_state and codex_writer and server.get("enabled", True)
+    report = {"status": f"ready ({mode})" if ready else "needs-configuration",
               "bearer_configured": bool(token), "daemon_ready": daemon_ready,
-              "coordination_enabled": enabled, "identity_source": "MCP _meta.threadId",
+              "coordination_enabled": mode != "disabled", "coordination_mode": mode,
+              "identity_source": "MCP _meta.threadId",
               "fixed_state_configured": bool(fixed_state), "backup": None}
+    if access == "principal_not_allowed":
+        report["reason"] = PRINCIPAL_REASON
     if action == "check":
         return report
     if action == "enable":
@@ -119,6 +160,8 @@ def configure(client, home, cwd, action):
             raise SetupError("Remove PSEUDOLIFE_AGENT_STATE from Codex; each task needs its own saved identity.")
         if not token:
             raise SetupError("Configure a bearer token in this MCP server's env or explicitly forwarded env_vars first.")
+        if access == "principal_not_allowed":
+            raise SetupError(f"The daemon reports: {PRINCIPAL_REASON}; setup never changes the bank.")
         if not daemon_ready:
             raise SetupError("Enable daemon coordination and allow this bearer principal, then retry; setup never changes the bank.")
     values = dict(ENABLED_ENV) if action == "enable" else {"PSEUDOLIFE_AGENT_COORDINATION": "0"}
@@ -143,8 +186,15 @@ def configure(client, home, cwd, action):
         actual = current.get("config", {}).get("mcp_servers", {}).get(SERVER, {}).get("env", {})
         if any(actual.get(key) != value for key, value in values.items()):
             raise SetupError("Codex saved settings but its effective configuration differs; check project or managed overrides before reconnecting.")
+    # Live delivery also needs the app-server bridge; the shim falls back to
+    # pull without it (docs/guide/configuration.md, "Optional Codex live delivery").
+    live = (str(effective("PSEUDOLIFE_AGENT_WAKE") or "").strip().lower() in TRUTHY
+            and effective("PSEUDOLIFE_CODEX_SERVER_URL")
+            and effective("PSEUDOLIFE_CODEX_SERVER_TOKEN"))
     report.update(status="enabled" if action == "enable" else "disabled",
-                  coordination_enabled=action == "enable", wake="pull-only")
+                  coordination_enabled=action == "enable",
+                  coordination_mode="explicit" if action == "enable" else "disabled",
+                  wake="live" if action == "enable" and live else "pull-only")
     return report
 
 

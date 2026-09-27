@@ -60,7 +60,10 @@ INPUT=$(cat)
 # Only a top-level "session_id" counts (see coordination-prompt.sh).
 SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' |
       head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
-case "$SID" in ''|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+# Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+# a range by locale collation, where a-f takes upper case and 0-9 takes
+# digits such as the superscript two (tests/test_hook_glob_ranges.py).
+case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) exit 0 ;; esac
 [ "${#SID}" -le 128 ] || exit 0
 # A Codex run nested inside a Claude Bash tool inherits CLAUDECODE; Claude
 # Code sets CLAUDE_CODE_SESSION_ID in a hook's environment to the payload's
@@ -77,14 +80,14 @@ KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null;
 # line 2 names this session, so a reused PID's record cannot wake it for a
 # dead process's mail. A symlinked, CRLF or upper-case record is refused.
 case "${CLAUDE_PID:-}" in
-    ''|*[!0-9]*) ;;
+    ''|*[!0123456789]*) ;;
     *)  HOST="$DIGEST_DIR/claude-$CLAUDE_PID.host"
         if [ -f "$HOST" ] && [ ! -L "$HOST" ]; then
             RECORDED=""
             CONFIRMED=""
             { IFS= read -r RECORDED; IFS= read -r CONFIRMED; } < "$HOST"
             case "$RECORDED$CONFIRMED" in
-                *[!0-9a-f]*) ;;
+                *[!0123456789abcdef]*) ;;
                 *) [ "${#RECORDED}" -eq 64 ] && [ "$CONFIRMED" = "$KEY" ] && KEY=$RECORDED ;;
             esac
         fi ;;
@@ -97,7 +100,7 @@ WAKES="$DIGEST_DIR/$KEY.wakes"
 [ -L "$FILE" ] && exit 0
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
-case "$WAIT" in ''|*[!0-9]*) WAIT=$MAX_WAIT ;; esac
+case "$WAIT" in ''|*[!0123456789]*) WAIT=$MAX_WAIT ;; esac
 [ "${#WAIT}" -le 5 ] || WAIT=$MAX_WAIT
 WAIT=$((10#$WAIT))
 [ "$WAIT" -le "$MAX_WAIT" ] || WAIT=$MAX_WAIT
@@ -127,7 +130,7 @@ windows_pid_listed() {  # $1 = a Windows PID
 }
 PARENT="" WINDOWS_PARENT="" PARENT_CHECKED=0
 case "${CLAUDE_PID:-}" in
-    ''|*[!0-9]*) ;;
+    ''|*[!0123456789]*) ;;
     *)  case "${OSTYPE:-}" in
             msys*|cygwin*)
                 windows_pid_listed "$CLAUDE_PID"
@@ -152,7 +155,7 @@ read_seen() {
     SEEN_AT=0
     [ -f "$SEEN" ] && IFS= read -r SEEN_AT < "$SEEN"
     SEEN_AT=${SEEN_AT//[$'\r\n ']/}
-    case "$SEEN_AT" in ''|*[!0-9]*) SEEN_AT=0 ;; esac
+    case "$SEEN_AT" in ''|*[!0123456789]*) SEEN_AT=0 ;; esac
 }
 
 # Sets NOW, and RECENT to the wake times still inside the window; true while
@@ -166,7 +169,7 @@ wake_budget_ok() {
     [ -f "$WAKES" ] || return 0
     while IFS= read -r t || [ -n "$t" ]; do
         t=${t%$'\r'}
-        case "$t" in ''|*[!0-9]*) continue ;; esac
+        case "$t" in ''|*[!0123456789]*) continue ;; esac
         [ "${#t}" -le 12 ] || continue
         # Decimal, whatever the padding: bash reads 089 as bad octal.
         t=$((10#$t))
@@ -210,7 +213,7 @@ wait_for_mail() {
             while [ "${BODY%$'\n'}" != "$BODY" ]; do BODY=${BODY%$'\n'}; done
             read_seen
             case "$WATERMARK" in
-                ''|*[!0-9]*) ;;
+                ''|*[!0123456789]*) ;;
                 *) if [ -n "$BODY" ] && [ "$WATERMARK" -gt "$SEEN_AT" ] && wake_budget_ok; then
                        return 0
                    fi ;;

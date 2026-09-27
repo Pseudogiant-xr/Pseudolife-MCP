@@ -120,6 +120,23 @@ async def _handshake() -> dict:
             }
 
 
+def _board_line(timeout: float) -> str:
+    """The agent board's status for the credential this shim would send."""
+    from pseudolife_memory.board_status import board_status
+    from pseudolife_memory.credentials import CredentialProvider
+    from pseudolife_memory.daemon_url import _daemon_url
+
+    try:
+        token = CredentialProvider.from_environment().snapshot().token
+    except Exception:  # noqa: BLE001 - never serialize credential errors
+        return "off - the configured token file is missing, unsafe or malformed"
+    try:
+        url = _daemon_url()
+    except (Exception, SystemExit):  # noqa: BLE001 - an invalid URL is reported elsewhere
+        return "off - PSEUDOLIFE_MCP_DAEMON_URL is not a usable daemon URL"
+    return board_status(url, token, timeout=timeout)[1]
+
+
 def run_doctor() -> None:
     from pseudolife_memory.shim import _daemon_url, _require_mcp_sdk_v2, probe_health
 
@@ -136,6 +153,7 @@ def run_doctor() -> None:
             report[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             report[package] = "not installed"
+    report["board"] = _board_line(min(args.timeout, 2))
     if _windows():
         report.update(git_bash_report(os.environ))
     try:

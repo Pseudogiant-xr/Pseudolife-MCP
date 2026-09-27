@@ -86,9 +86,9 @@ identity_fresh() {  # $1 = the record's line 4
     case "$1" in *' '*' '*|'') return 1 ;; *' '*) ;; *) return 1 ;; esac
     until=${1%% *}
     offset=${1#* }
-    case "$until" in *[!0-9]*) return 1 ;; esac
+    case "$until" in *[!0123456789]*) return 1 ;; esac
     [ "${#until}" -le 12 ] || return 1
-    case "$offset" in -|[+-][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+    case "$offset" in -|[+-][0123456789][0123456789][0123456789][0123456789]) ;; *) return 1 ;; esac
     [ "$until" = 0 ] && [ "$offset" = - ] && return 0
     now=$(date '+%s %z' 2>/dev/null) || return 1
     [ "$offset" = - ] || [ "${now#* }" = "$offset" ] || return 1
@@ -97,8 +97,11 @@ identity_fresh() {  # $1 = the record's line 4
 case "$REASON" in
     clear|resume)
         DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+        # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+        # a range by locale collation, where a-f takes upper case and 0-9 takes
+        # digits such as the superscript two (tests/test_hook_glob_ranges.py).
         case "${CLAUDE_PID:-}" in
-            ''|*[!0-9]*) ;;
+            ''|*[!0123456789]*) ;;
             *)
                 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
                     KEY=$(sha256_of "$SID")
@@ -108,8 +111,8 @@ case "$REASON" in
                     if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
                         { IFS= read -r LINE1; IFS= read -r LINE2; IFS= read -r LINE3; IFS= read -r LINE4; } 2>/dev/null < "$RECORD"
                     fi
-                    case "$LINE1" in ''|*[!0-9a-f]*) LINE1="" ;; esac
-                    case "$LINE3" in ''|*[!0-9a-f]*) LINE3="" ;; esac
+                    case "$LINE1" in ''|*[!0123456789abcdef]*) LINE1="" ;; esac
+                    case "$LINE3" in ''|*[!0123456789abcdef]*) LINE3="" ;; esac
                     [ "${#LINE3}" -eq 64 ] || LINE3=""
                     if [ -n "$KEY" ]; then
                         WHO=""
