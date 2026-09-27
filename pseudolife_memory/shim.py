@@ -23,7 +23,6 @@ import sys
 import tempfile
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -31,6 +30,8 @@ from typing import NoReturn
 
 from pseudolife_memory import __version__
 from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
+from pseudolife_memory.daemon_url import (  # noqa: F401 — re-exported
+    DEFAULT_URL, _daemon_url, _NoRedirectHandler, _validated_daemon_url)
 
 try:
     from builtins import BaseExceptionGroup as _BaseExceptionGroup
@@ -42,7 +43,6 @@ except ImportError:  # pragma: no cover - Python 3.10 uses anyio's backport
 _BASE_EXCEPTION_GROUP_TYPES = ((_BaseExceptionGroup,)
                                if _BaseExceptionGroup is not None else ())
 
-DEFAULT_URL = "http://127.0.0.1:8765"
 # Floor wait for a spawned daemon: torch import on a cold cache. The lite
 # tier's true first boot costs more BEFORE the port binds (pg0 runtime
 # extraction + initdb, then the torch import), so as long as the spawned
@@ -289,38 +289,6 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     code = (sdk_error.code if classification == "protocol" and sdk_error is not None
             else -32603)
     return MCPError(code, message, data)
-
-
-def _daemon_url() -> str:
-    return _validated_daemon_url(
-        os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL", DEFAULT_URL))
-
-
-def _validated_daemon_url(value: str) -> str:
-    try:
-        parsed = urllib.parse.urlsplit(value)
-        valid_port = parsed.port
-    except (TypeError, ValueError):
-        parsed = None
-        valid_port = None
-    valid = bool(
-        parsed is not None
-        and parsed.scheme in {"http", "https"}
-        and parsed.hostname
-        and parsed.username is None
-        and parsed.password is None
-        and parsed.query == ""
-        and parsed.fragment == ""
-        and parsed.path in {"", "/"}
-        and not any(character.isspace() or ord(character) < 0x20
-                    for character in value)
-    )
-    if not valid:
-        print("[shim] invalid PSEUDOLIFE_MCP_DAEMON_URL; use an http(s) origin "
-              "without credentials, a path, query, or fragment.", file=sys.stderr)
-        raise SystemExit(1)
-    return urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc.rstrip("/"), "", "", ""))
 
 
 def probe_health(url: str, timeout: float = 0.25) -> dict | None:
@@ -632,11 +600,6 @@ def _session_headers(token: str | None, session_uid: str) -> dict[str, str]:
         headers["X-PL-Writer"] = writer_id
     headers["X-PL-Session"] = session_uid
     return headers
-
-
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 def _post_episode(url: str, token: str | None, path: str, payload: dict, *,
