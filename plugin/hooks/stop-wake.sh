@@ -67,9 +67,15 @@ POLL=5
 MAX_WAKES=20
 WAKE_WINDOW=3600
 
+# Read the two settings the way the shim and doctor do: trimmed and
+# lower-cased, blank meaning unset. Only a non-empty value costs a spawn.
+setting() {
+    [ -n "$1" ] || return 0
+    printf %s "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'
+}
 OFF=""
-case "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}" in 0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) OFF=1 ;; esac
-case "${PSEUDOLIFE_AGENT_COORDINATION:-}" in ''|1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) ;; *) OFF=1 ;; esac
+case "$(setting "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}")" in 0|false|no|off) OFF=1 ;; esac
+case "$(setting "${PSEUDOLIFE_AGENT_COORDINATION:-}")" in ''|1|true|yes|on) ;; *) OFF=1 ;; esac
 if [ -n "$OFF" ] || [ "${CLAUDECODE:-}" != "1" ]; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done

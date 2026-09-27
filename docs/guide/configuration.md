@@ -82,9 +82,13 @@ Wake is on by default and policy-gated (maintainer decision, 2026-09-28), so
 the caps are the guarantee, not the usual rate. `/health` reports the caps in
 force, and `pseudolife-mcp doctor` prints them beside each registered
 client's wake path (`stop_hook` for Claude Code, `doorbell` for Codex: `on`,
-or `off` with the setting that turned it off, `off (no codex CLI)`, or, for
-Claude Code, `off (plugin not installed)` / `off (plugin disabled)`, since
-only the plugin carries the Stop hook). The client-side switches are
+or `off` with the setting that turned it off, `off (no codex CLI)`; for
+Codex also `off (PSEUDOLIFE_WRITER_ID is not codex)` and `off (no bearer
+token)`, since the shim arms the doorbell only as the codex writer with a
+bearer; for Claude Code `off (plugin not installed)` / `off (plugin
+disabled)`, since only the plugin carries the Stop hook). The hooks and the
+shim read these switches trimmed and case-insensitively, and a blank value
+is unset. The client-side switches are
 `PSEUDOLIFE_AGENT_COORDINATION=0` (the master off switch for that client),
 `PSEUDOLIFE_AGENT_WAKE_HOOK=0` (the
 [Stop hook](#waking-an-idle-claude-code-session-the-stop-hook)) and

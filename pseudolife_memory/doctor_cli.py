@@ -119,6 +119,13 @@ def _codex_wake(health_enabled: bool | None) -> dict:
         return str(os.environ.get(key, "") or "").strip() if key in forwarded else ""
 
     state = _wake_state(health_enabled, effective, "PSEUDOLIFE_CODEX_DOORBELL")
+    # The shim arms a Codex doorbell only as the codex writer, and its board
+    # registry needs a bearer (orchestrator review of #434, 2026-09-28).
+    if state == "on" and effective("PSEUDOLIFE_WRITER_ID").lower() != "codex":
+        state = "off (PSEUDOLIFE_WRITER_ID is not codex)"
+    if state == "on" and not (effective("PSEUDOLIFE_MCP_TOKEN")
+                              or effective("PSEUDOLIFE_MCP_TOKEN_FILE")):
+        state = "off (no bearer token)"
     if state == "on":
         lookup = {**os.environ, **{k: str(v) for k, v in env.items()}}
         if resolve_codex_command(lookup) is None:

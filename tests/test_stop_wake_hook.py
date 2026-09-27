@@ -177,9 +177,15 @@ def test_hooks_json_binds_stop_as_an_async_rewake_command():
     assert hook["type"] == "command" and hook["async"] is True and hook["asyncRewake"] is True
     # On by default (2026-09-28): the command checks the opt-outs and refuses
     # a script that does not parse before bash reads it.
+    # Both settings are trimmed and lower-cased as the shim and doctor read
+    # them, with a spawn only for a non-empty value.
     assert hook["command"] == (
-        'case "$PSEUDOLIFE_AGENT_WAKE_HOOK" in 0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff]) exit 0 ;; esac; '
-        "case \"$PSEUDOLIFE_AGENT_COORDINATION\" in ''|1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) ;; *) exit 0 ;; esac; "
+        'w=$PSEUDOLIFE_AGENT_WAKE_HOOK; [ -z "$w" ] || '
+        "w=$(printf %s \"$w\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); "
+        'case "$w" in 0|false|no|off) exit 0 ;; esac; '
+        'c=$PSEUDOLIFE_AGENT_COORDINATION; [ -z "$c" ] || '
+        "c=$(printf %s \"$c\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); "
+        "case \"$c\" in ''|1|true|yes|on) ;; *) exit 0 ;; esac; "
         'bash -n "${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh" 2>/dev/null || exit 0; '
         'exec bash "${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh"')
     # Codex runs commandWindows on Windows; for Stop that is a silent no-op.
@@ -203,6 +209,32 @@ def test_the_command_refuses_a_script_that_does_not_parse(tmp_path, flag):
     result = subprocess.run([bash_exe(), "-c", _stop_hook()["command"]], input=_payload(), env=env,
                             capture_output=True, text=True, timeout=DEADLINE)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "0 "}, 0),             # trimmed, as the shim and doctor read it
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "\tOff"}, 0),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "  "}, 2),              # blank is unset: on
+    ({"PSEUDOLIFE_AGENT_COORDINATION": " 1 "}, 2),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "NO"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": " "}, 2),
+])
+def test_the_command_and_script_trim_and_fold_case(tmp_path, change, expected):
+    """doctor and the shim strip and lower-case these settings; the hook
+    must read the same value the same way, in its command and again in the
+    script."""
+    # One digest directory each: a run that fires marks the mail seen.
+    for where, via_command in ((tmp_path / "command", True), (tmp_path / "script", False)):
+        where.mkdir()
+        env = _env(where, wait=3)
+        env.update(change)
+        _digest(where, 3, BODY)
+        if via_command:
+            result = subprocess.run([bash_exe(), "-c", _stop_hook()["command"]], input=_payload(),
+                                    env=env, capture_output=True, text=True, timeout=DEADLINE)
+        else:
+            result, _ = _run(env)
+        assert result.returncode == expected, (via_command, result.stderr)
 
 
 @pytest.mark.parametrize("change,expected", [

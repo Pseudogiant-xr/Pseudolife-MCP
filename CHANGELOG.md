@@ -26,7 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Stop hook's command now refuses a script that does not parse
   (`bash -n` first) instead of relying on the opt-in flag to keep a broken
   copy from waking every session at every turn end, and it honours
-  `PSEUDOLIFE_AGENT_COORDINATION` before bash reads the script. Existing
+  `PSEUDOLIFE_AGENT_COORDINATION` before bash reads the script, both
+  trimmed and case-insensitive as the shim reads them. Existing
   `=1` settings keep working. Codex loads the same `hooks.json`; there the
   bash command still exits unless Claude Code started it, and the native
   command runs only the park gate. The hook scripts changed, so Codex asks
@@ -43,8 +44,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wake path (`claude_code.stop_hook`, `off` unless the plugin is installed
   and enabled, since only the plugin carries the Stop hook, then read from the settings.json `env`
   block over the shell; `codex.doorbell`, read from the MCP server's `env`
-  table and forwarded `env_vars`, plus the CLI lookup) as `on`, `off (<the
-  setting>)` or `off (no codex CLI)`, and the caps in force, or why they
+  table and forwarded `env_vars`, plus the CLI lookup; `off` without the
+  codex writer id or a bearer) as `on`, `off (<the setting>)` or `off (no
+  codex CLI)`, and the caps in force, or why they
   are unknown (daemon unreachable, or one that predates them).
 - Docs: the configuration guide's doorbell and Stop-hook sections describe
   the default-on behaviour and the opt-outs, the coordination block gains

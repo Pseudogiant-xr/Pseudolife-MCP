@@ -259,13 +259,19 @@ def _register_claude(home: Path, env: dict | None = None, *, plugin: bool | None
         (config_dir / "settings.json").write_text(json.dumps(settings))
 
 
+CODEX_BASE_ENV = {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/token"}
+
+
 def _register_codex(home: Path, env: dict | None = None, forwarded: list | None = None,
-                    *, codex_home: Path | None = None) -> None:
+                    *, codex_home: Path | None = None, base: dict | None = CODEX_BASE_ENV) -> None:
+    """A Codex registration the doorbell can run in: the codex writer id
+    and a bearer (``base``), plus ``env`` on top."""
     codex_home = codex_home or home / ".codex"
     codex_home.mkdir(parents=True, exist_ok=True)
     lines = ['[mcp_servers.pseudolife-memory]', 'command = "pseudolife-mcp"']
     if forwarded:
         lines.append("env_vars = " + json.dumps(forwarded))
+    env = {**(base or {}), **(env or {})}
     if env:
         lines.append("[mcp_servers.pseudolife-memory.env]")
         lines += [f'{key} = "{value}"' for key, value in env.items()]
@@ -387,3 +393,24 @@ def test_doctor_follows_claude_config_dir_and_codex_home(monkeypatch, capsys, do
     report = _doctor(monkeypatch, capsys, HEALTH)
     assert report["wake"]["claude_code"]["stop_hook"] == "off (PSEUDOLIFE_AGENT_WAKE_HOOK=0)"
     assert report["wake"]["codex"]["doorbell"] == "off (PSEUDOLIFE_CODEX_DOORBELL=0)"
+
+
+def test_doctor_needs_the_codex_writer_and_a_bearer_for_the_doorbell(monkeypatch, capsys, doctor_home, tmp_path):
+    """The shim arms the doorbell only for PSEUDOLIFE_WRITER_ID=codex with a
+    bearer it can hand the board (orchestrator review of #434, 2026-09-28):
+    a hand-made registration without them must not read as ringing."""
+    _fake_cli(tmp_path / "bin")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    _register_codex(doctor_home, base={"PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/token"})
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["codex"]["doorbell"] == "off (PSEUDOLIFE_WRITER_ID is not codex)"
+    _register_codex(doctor_home, base={"PSEUDOLIFE_WRITER_ID": "codex"})
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["codex"]["doorbell"] == "off (no bearer token)"
+    # A bearer Codex forwards from the launching environment counts.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-token-value")
+    _register_codex(doctor_home, base={"PSEUDOLIFE_WRITER_ID": "codex"},
+                    forwarded=["PSEUDOLIFE_MCP_TOKEN"])
+    report = _doctor(monkeypatch, capsys, HEALTH)
+    assert report["wake"]["codex"]["doorbell"] == "on"
+    assert "fixture-token-value" not in json.dumps(report)
