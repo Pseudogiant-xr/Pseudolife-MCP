@@ -35,6 +35,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - README's `memory_agents` row now lists `lease`, `expect` and `children`,
   and the claim and release actions, which it had lagged since v45.
 
+### Fixed (2026-09-27 — Codex coordination setup keeps live delivery on and recognises the default-on board)
+- Re-running `ops/setup-codex-coordination.py --enable` no longer turns
+  off Codex live delivery. Enable wrote `PSEUDOLIFE_AGENT_WAKE=0` whenever
+  the value differed, so a registration set to `1` for the app-server bridge
+  went back to pull-only. The script no longer writes the variable. When
+  it is unset the shim already uses pull, so the only thing the `"0"` ever
+  did was reset an opt-in. Enable's report now says `wake: live` only when
+  the wake flag and both bridge settings are present.
+- `--check` recognises the board being on by default. Before, it reported
+  `needs-configuration` unless `PSEUDOLIFE_AGENT_COORDINATION` was
+  explicitly truthy, but since the board went on by default an unset value
+  is a working configuration. The check now asks the daemon what the shim
+  asks at startup (`GET /api/hook/coordination-start` with the
+  registration's bearer). It reports `ready (default-on)` when the daemon
+  serves the board and `ready (explicit)` for a pinned opt-in. A new
+  `coordination_mode` field carries the same mode. `--enable` is now only
+  for pinning explicit mode, and the Codex setup steps in
+  `docs/guide/configuration.md` say so.
+- When the daemon refuses the bearer's principal, `--check` says so:
+  `principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
+  `--enable`'s refusal names the same cause. A Codex principal from a
+  `PSEUDOLIFE_MCP_TOKENS` map is off the board until it is listed (the
+  2026-09-25 default, unchanged). In that state a shim on the default
+  setting leaves coordination off without an error, and one pinned with
+  `--enable` shows only an attach-unavailable hint. The coordination section of the
+  configuration guide and the README's Codex setup now say this for
+  upgraders.
+
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)
   bounded names with Python's `\w`, which leaves out combining marks: a
