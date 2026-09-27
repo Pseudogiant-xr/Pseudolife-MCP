@@ -893,8 +893,9 @@ class BoardMirror:
     and :meth:`hold` return at once, and :meth:`release` waits at most its
     budget. The OS lock is the truth throughout; every board failure ends in
     one line on stderr and the work going on. A board that grants the lease
-    before the OS lock does, or shows another holder while this process has
-    the OS lock, is reported once and left to catch up.
+    before the OS lock does is given it back (the board mirrors the lock; it
+    must not name a queued run as the holder); one that shows another holder
+    while this process has the OS lock is reported once and left to catch up.
     """
 
     def __init__(self, name: str, *, purpose: str = "", expect: int | None = None,
@@ -916,7 +917,7 @@ class BoardMirror:
         self._thread: threading.Thread | None = None
         self._deadline = 0.0  # the release side's, set by release()
         self._failing_since: float | None = None
-        self._granted_early = False
+        self._granted_early = False  # handed back; no more asking until held
         self._warned_lost = False
         self._held_since: float | None = None
 
@@ -979,6 +980,8 @@ class BoardMirror:
                         self._announce("acquired", time.monotonic() + ANNOUNCE_BUDGET)
                         announced = True
                     next_call = time.monotonic() + _renew_interval(self.ttl)
+                elif state == "waiting" and self._granted_early:
+                    next_call = float("inf")  # handed back: wait for hold()
                 elif now >= next_call:
                     reply = self._lease()
                     interval = BOARD_POLL if state == "waiting" else _renew_interval(self.ttl)
@@ -986,10 +989,12 @@ class BoardMirror:
                         interval = min(TRANSIENT_RETRY, interval)
                     elif state == "waiting" and reply["state"] == "held":
                         self._early_grant()
+                        continue
                     elif state == "holding" and reply["state"] != "held":
                         self._lost()
                     next_call = time.monotonic() + interval
-                self._wake.wait(max(0.0, next_call - time.monotonic()))
+                pause = next_call - time.monotonic()
+                self._wake.wait(None if pause == float("inf") else max(0.0, pause))
                 self._wake.clear()
             board = self._board
             if board is not None:
@@ -1046,11 +1051,17 @@ class BoardMirror:
         return reply
 
     def _early_grant(self) -> None:
-        if not self._granted_early:
-            self._granted_early = True
-            _say(f"lease: the board granted {self.name!r} before the local lock did (its "
-                 f"holder is a run the board does not show); the board lease is kept while "
-                 f"this process waits for the lock")
+        """The board granted the lease while the OS lock is still held by a
+        run the board does not show (older code, no bearer, lock off). Kept,
+        the board would name a queued run as the holder: give it back, and
+        ask no more until this process holds the lock (asking again would
+        only be granted again, churning the audit log every poll)."""
+        self._granted_early = True
+        if self._board is not None:
+            self._board.release_quietly(self.name)
+        _say(f"lease: the board had no holder for {self.name!r} while its local lock is "
+             f"held by a run the board does not show; not claiming it until this process "
+             f"holds the lock")
 
     def _not_held(self, reply: dict) -> None:
         holder = reply.get("holder")

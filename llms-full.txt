@@ -4082,8 +4082,11 @@ expected end from the median of the last five timed runs
 are on record). Only a run that ran its tests, passed or failed, is timed: an
 interrupted run or a collection error would drag the median down. The lock is
 freed first and the board told after, and a run that leaves the queue without
-the lock (refused, a changed tree, Ctrl-C) gives its board place back. The OS
-lock stays the truth: a board that is unreachable, refuses, or shows another
+the lock (refused, a changed tree, Ctrl-C) gives its board place back. When the
+lock's holder is a run the board does not show (older code, no bearer), the
+board grants the lease to the first waiter; that waiter hands it back and asks
+no more until it holds the lock, so the board never names a queued run as the
+holder. The OS lock stays the truth: a board that is unreachable, refuses, or shows another
 holder costs one line and never delays or stops the run, and
 `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
 are read when conftest is imported, before the suite's own client isolation

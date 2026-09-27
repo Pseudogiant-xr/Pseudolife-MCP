@@ -1338,3 +1338,30 @@ def test_the_board_environment_never_shows_its_token():
                                         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"})
     assert env["PSEUDOLIFE_MCP_TOKEN"] == "tok-SECRET-x"
     assert "tok-SECRET" not in repr(env) and "tok-SECRET" not in str(env)
+
+
+def test_a_waiter_hands_back_a_board_grant_it_has_no_lock_for(held, quick_board):
+    # The OS lock's holder is a run the board does not show (older code, or
+    # no bearer), so the board grants the lease to the first waiter. Kept,
+    # the board would name a run that is still queued as the holder: the
+    # waiter gives it back and asks no more until it has the lock.
+    daemon = FakeDaemon(lease=[HELD("full-suite")])
+    err = io.StringIO()
+    mirror = _mirror(held.dir, daemon)
+    result = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02,
+                                            notice_every=60, out=err, mirror=mirror)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert _wait_for(lambda: "release" in daemon.actions())
+        time.sleep(0.3)  # several polls: no second grant is asked for while queued
+        assert daemon.actions() == ["register", "lease", "release"]
+    finally:
+        held.holder.send_release()
+        thread.join(START_TIMEOUT)
+    assert _wait_for(lambda: daemon.actions().count("lease") == 2)  # taken with the lock
+    suite_lock.release(result["held"])
