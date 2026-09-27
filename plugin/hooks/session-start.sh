@@ -131,11 +131,14 @@ if [ "${1:-}" = memory-changes ]; then
     # "session_id": only a top-level key counts, as in coordination-prompt.sh.
     SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' 2>/dev/null |
           head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
-    case "$SID" in ''|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+    # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+    # a range by locale collation, where a-f takes upper case and 0-9 takes
+    # digits such as the superscript two (tests/test_hook_glob_ranges.py).
+    case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) exit 0 ;; esac
     [ "${#SID}" -le 128 ] || exit 0
     MARK_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
     KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
-    case "$KEY" in *[!0-9a-f]*) exit 0 ;; esac
+    case "$KEY" in *[!0123456789abcdef]*) exit 0 ;; esac
     [ "${#KEY}" -eq 64 ] || exit 0
     MARK="$MARK_DIR/$KEY.mark"
     SINCE=""
@@ -143,14 +146,14 @@ if [ "${1:-}" = memory-changes ]; then
         IFS= read -r SINCE 2>/dev/null < "$MARK"
     fi
     SINCE=${SINCE%$'\r'}
-    case "$SINCE" in ''|*[!0-9.]*) SINCE="" ;; esac
+    case "$SINCE" in ''|*[!0123456789.]*) SINCE="" ;; esac
     [ "${#SINCE}" -le 22 ] || SINCE=""
     # One attempt, no retry: at most about 2 s of the 5 s hook budget.
     BODY=$(curl -L --max-redirs 0 -sf --connect-timeout 1 --max-time 2 \
         "${AUTH[@]}" "${URL}/api/hook/memory-changes?session_id=${SID}${SINCE:+&since=${SINCE}}" \
         2>/dev/null) || exit 0
     TOKEN=${BODY%%$'\n'*}
-    case "$TOKEN" in ''|*[!0-9.]*) exit 0 ;; esac
+    case "$TOKEN" in ''|*[!0123456789.]*) exit 0 ;; esac
     [ "${#TOKEN}" -le 22 ] || exit 0
     NOTE=""
     case "$BODY" in *$'\n'*) NOTE=${BODY#*$'\n'} ;; esac
@@ -205,7 +208,7 @@ hooks_digest() {  # $1 = directory
 }
 PLUGIN_HOOKS_DIGEST=$(hooks_digest "$(dirname "$0")" 2>/dev/null) || PLUGIN_HOOKS_DIGEST=""
 case "$PLUGIN_HOOKS_DIGEST" in
-    *[!0-9a-f]*) PLUGIN_HOOKS_DIGEST="" ;;
+    *[!0123456789abcdef]*) PLUGIN_HOOKS_DIGEST="" ;;
 esac
 [ "${#PLUGIN_HOOKS_DIGEST}" -eq 64 ] || PLUGIN_HOOKS_DIGEST=""
 QS=""

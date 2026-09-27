@@ -16,6 +16,10 @@
 #                       containers at all, so embedded PG is the only
 #                       Postgres coverage possible there; the FULL suite on
 #                       Windows stays future work (embedder wall-time).
+#   * test-lite-macos — the plugin hooks and client installers on a real
+#                       macOS runner (bash 3.2, BSD stat/base64/ps, shasum),
+#                       plus the embedded provider on its macOS wheel. Their
+#                       BSD fallbacks run nowhere else (added 2026-09-27).
 # Kept lean: master-push + PR triggers only, cancel-in-progress,
 # pip + HuggingFace caches, diagnostic artifacts for the full Linux lanes.
 name: CI
@@ -273,3 +277,41 @@ jobs:
         # container (unsupported on Windows runners), no HF download.
         # test_suite_lock.py is the only CI coverage of the msvcrt backend.
         run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_ops_update_credentials.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py -q
+
+  test-lite-macos:
+    runs-on: macos-latest
+    # Curated like the Windows lane: the hook and installer surface needs no
+    # embedding model, so this is minutes, not the full suite.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (dev + lite)
+        run: |
+          python -m pip install -U pip
+          pip install -e .[dev,lite]
+
+      - name: Check the shell under test is macOS's bash 3.2
+        # The hooks run under the system bash, which macOS ships as 3.2. A
+        # newer bash earlier on PATH would keep this lane green while it
+        # stopped testing what users get, so it fails the job instead.
+        run: |
+          command -v bash
+          bash -c 'echo "$BASH_VERSION"; case "$BASH_VERSION" in 3.2*) ;; *) exit 1 ;; esac'
+
+      - name: Hook, installer and embedded-provider tests
+        # The plugin hooks' BSD branches (stat -f, base64 -D, shasum,
+        # ps -o lstart=) execute only here. No Postgres is started, so the
+        # store tests in test_coordination_turn_digest.py skip; the Linux
+        # lanes run them. -rs prints every skip reason, so a platform skip
+        # cannot pass for coverage.
+        env:
+          PSEUDOLIFE_SUITE_LOCK: "off"
+        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py -q -rs
