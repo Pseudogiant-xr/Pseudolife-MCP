@@ -31,16 +31,23 @@ SID=$(printf '%s' "$INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\
 REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 
 # Coordination digest key, first: Claude Code gives a plugin SessionEnd hook
-# 1.5s, whatever hooks.json says, and the connection checks and curl below
-# can use all of it. /clear or /resume inside a running process keeps its
-# shim, so the session ending here hands the process's record (see
+# 1.5s, whatever hooks.json says (the SessionEnd budget is shared, and only
+# a settings.json timeout raises it; on 2.1.280 a plugin hook asking for
+# 10 s was cancelled at 1.5 s, 2026-09-27), and the connection checks and
+# curl below can use all of it. /clear or /resume inside a running process
+# keeps its shim, so the session ending here hands the process's record (see
 # coordination-start.sh) to the next one: time, this process's creation identity
-# and the ending session's key. A record not confirmed for the ending
-# session (none yet under older hooks, or another process's) is first
-# replaced by that session's own key, which is right unless an earlier
-# /clear under older hooks already moved it. Without a creation identity no
-# handoff is written, and the next session starts from its own key.
-# Same helpers as coordination-start.sh.
+# and the ending session's key. The identity is read from the record's
+# third line, which SessionStart measured with seconds to spare, while its
+# fourth line says it still holds (identity_fresh); it is measured here only
+# otherwise (past that line's window, a record written before 2026-09-28,
+# or one not confirmed for the ending session), because the Windows probe,
+# `ps -W`, took seconds a call on a loaded host. A record not confirmed
+# for the ending session (none yet under older hooks, or another process's)
+# is first replaced by that session's own key, which is right unless an
+# earlier /clear under older hooks already moved it. Without a creation
+# identity no handoff is written, and the next session starts from its own
+# key. Same helpers as coordination-start.sh.
 sha256_of() {  # $1 = text
     printf '%s' "$1" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
 }
@@ -70,28 +77,57 @@ process_identity() {
     esac
     [ -n "$line" ] && printf '%s' "$line"
 }
+# True while the record's line 4 ("<until> <UTC offset>", written by
+# coordination-start.sh's identity_expiry) says line 3 still reads as it
+# would if measured now: before <until> (0: no end) and under the same
+# offset ("-": none applies). Anything malformed is false.
+identity_fresh() {  # $1 = the record's line 4
+    local until offset now
+    case "$1" in *' '*' '*|'') return 1 ;; *' '*) ;; *) return 1 ;; esac
+    until=${1%% *}
+    offset=${1#* }
+    case "$until" in *[!0123456789]*) return 1 ;; esac
+    [ "${#until}" -le 12 ] || return 1
+    case "$offset" in -|[+-][0123456789][0123456789][0123456789][0123456789]) ;; *) return 1 ;; esac
+    [ "$until" = 0 ] && [ "$offset" = - ] && return 0
+    now=$(date '+%s %z' 2>/dev/null) || return 1
+    [ "$offset" = - ] || [ "${now#* }" = "$offset" ] || return 1
+    [ "$until" = 0 ] || [ "${now%% *}" -lt "$until" ]
+}
 case "$REASON" in
     clear|resume)
         DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
+        # Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+        # a range by locale collation, where a-f takes upper case and 0-9 takes
+        # digits such as the superscript two (tests/test_hook_glob_ranges.py).
         case "${CLAUDE_PID:-}" in
-            ''|*[!0-9]*) ;;
+            ''|*[!0123456789]*) ;;
             *)
                 if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
                     KEY=$(sha256_of "$SID")
                     RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
                     SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
-                    LINE1="" LINE2=""
+                    LINE1="" LINE2="" LINE3="" LINE4=""
                     if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
-                        { IFS= read -r LINE1; IFS= read -r LINE2; } 2>/dev/null < "$RECORD"
+                        { IFS= read -r LINE1; IFS= read -r LINE2; IFS= read -r LINE3; IFS= read -r LINE4; } 2>/dev/null < "$RECORD"
                     fi
-                    case "$LINE1" in ''|*[!0-9a-f]*) LINE1="" ;; esac
+                    case "$LINE1" in ''|*[!0123456789abcdef]*) LINE1="" ;; esac
+                    case "$LINE3" in ''|*[!0123456789abcdef]*) LINE3="" ;; esac
+                    [ "${#LINE3}" -eq 64 ] || LINE3=""
                     if [ -n "$KEY" ]; then
-                        if [ "${#LINE1}" -ne 64 ] || [ "$LINE2" != "$KEY" ]; then
+                        WHO=""
+                        if [ "${#LINE1}" -eq 64 ] && [ "$LINE2" = "$KEY" ]; then
+                            [ -n "$LINE3" ] && identity_fresh "$LINE4" && WHO="$LINE3"
+                        else
                             write_lines "$RECORD" "$KEY" "$KEY"
                         fi
-                        IDENTITY=$(process_identity "$CLAUDE_PID")
-                        [ -n "$IDENTITY" ] &&
-                            write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$(sha256_of "$IDENTITY")" "$KEY"
+                        if [ -z "$WHO" ]; then
+                            # No identity on record that still holds: measure.
+                            IDENTITY=$(process_identity "$CLAUDE_PID")
+                            [ -n "$IDENTITY" ] && WHO=$(sha256_of "$IDENTITY")
+                        fi
+                        [ -n "$WHO" ] &&
+                            write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$WHO" "$KEY"
                     fi
                 fi
                 ;;

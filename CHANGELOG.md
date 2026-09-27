@@ -6,12 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added (2026-09-28 — sessions park with what they need, and board mail wakes a session only when it clears that need, schema v48)
+### Added (2026-09-28 — sessions park with what they need, and board mail wakes a session only when it clears that need, schema v49)
 - A session that ended its turn on a cleared blocker sat there all night on
   2026-09-27 because no message could reach it, while any message at all
   could wake a session that had nothing to wait for. The maintainer decided
   (2026-09-28) that wake is policy-gated on a **park record**: a session's
-  standing statement of why it stopped and what would clear it. Schema v48
+  standing statement of why it stopped and what would clear it. Schema v49
   adds it to the agent row: `memory_agents(action="update", park_reason=...,
   park_needs=..., park_clear_by=..., park_resume=..., park_expires=...)`.
   `park_reason` is one of `done`, `blocked`, `needs_approval`, `needs_info`,
@@ -52,7 +52,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   declares at register and every attach whether a ring reaches it without
   a live channel (`ring`: the Claude shim when it has a digest for the Stop
   hook, a Codex thread the doorbell watches), and the daemon counts that as
-  a wake path; a daemon older than v48 refuses the attach parameter once
+  a wake path; a daemon older than v49 refuses the attach parameter once
   and the adapter stops sending it. The Claude adapter writes
   `<key>.ring` beside the digest (the digest watermark, then the decision
   and reason) at `ring_at`, while the Codex doorbell asks the adapter for a
@@ -60,7 +60,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whose mail the session has already seen is dropped. The Stop
   hook fires only on a ring past `.seen`, a nudge adds one sentence asking
   for a park record, and every ring's ledger line (`wait`, `bell`, `ring`)
-  carries the decision and reason. Against a daemon older than v48 nothing
+  carries the decision and reason. Against a daemon older than v49 nothing
   rings; pull delivery, hints and the prompt-hook digest are unchanged.
 - **Caps**, in `config.yaml` under `coordination.wake`: `per_recipient_per_hour`
   (20, the figure the Stop hook already used, now counting every ring),
@@ -94,15 +94,190 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   docstring was tightened to pay for its own line; the core and full
   description budgets move deliberately (11,500 -> 11,750, 17,800 ->
   18,000) rather than cut the decision table.
-- **Upgrading:** a schema bump (v48, additive) plus a shim and plugin
+- **Upgrading:** a schema bump (v49, additive) plus a shim and plugin
   change: deploy with `ops/update.ps1 -All` and restart the clients. The
   Stop hook still runs only with `PSEUDOLIFE_AGENT_WAKE_HOOK=1` and the
   Codex doorbell with `PSEUDOLIFE_CODEX_DOORBELL=1`; once on, they ring
-  only on the daemon's decision, so a v48 shim beside a pre-v48 daemon
+  only on the daemon's decision, so a v49 shim beside a pre-v49 daemon
   never rings. Upgrade the plugin and the shim together (`-All`): the new
-  `stop-wake.sh` fires only on the `.ring` marker, which only a v48 shim
+  `stop-wake.sh` fires only on the `.ring` marker, which only a v49 shim
   writes, so an updated plugin beside an older shim never wakes. The `wait`
   and `bell` ledger lines gain a sixth column, the ring's reason.
+
+### Added (2026-09-28 — one `memory_message` send reaches a whole project or the whole board, and ids can be given by prefix, schema v48)
+- `memory_message(action="send")` takes `to: "project:<name>"` (every
+  attached, non-idle agent in that project but the sender) and `to: "all"`
+  (every attached, non-idle agent on the board but the sender): the peers
+  `memory_agents list` shows with `adapter_available`. On 2026-09-27 a
+  session that had fixed a host-wide fault sent the same text to six agents
+  one at a time, finding them by reading the peer list and pattern-matching
+  statuses, and had to repeat one send that failed transiently. One request
+  id covers the burst, so a retry returns the same per-recipient receipts,
+  each with its `message_id`, `recipient_agent_id` and a `wake` decision
+  (`live` for an attached peer that opted into wake, which the daemon rings;
+  `pull` otherwise). The burst is atomic and refused whole, writing nothing,
+  above 50 recipients (`fanout_too_large`), when nobody is reachable
+  (`no_recipients`) or when one mailbox is full (`queue_full`, naming that
+  mailbox's prefix); it counts once against the sender's rate; a reply
+  cannot ride it. Each recipient gets its own message row and its own `send`
+  audit event with its own body and salt, the payload carrying
+  `fanout: {to, recipients}`, so `board-audit verify`, `redact` and
+  `export --agent` need no new event kind and the coordination report keeps
+  counting bursts per message. Schema v48: the mailbox's
+  `UNIQUE (sender_agent_id, request_id)` becomes the unique index
+  `coordination_messages_request_idx` over `(sender_agent_id, request_id,
+  recipient_agent_id)`, created before the old constraint is dropped, and
+  the drop runs only where the constraint exists so an open export never
+  blocks the schema pass.
+- `to`, `reply_to` and `ack`'s `message_id` accept a unique prefix of 8 to
+  31 lowercase hex characters of the id; so do `board-audit export --agent`,
+  `board-audit redact --message-id` and `coordination-recovery rebind
+  --agent`. Every surface shows an 8-12 character prefix, and on 2026-09-26
+  seven sends bounced with `recipient_not_found` because a prefix was
+  pasted as the address (Coordination v2 design, Addressing E8). A prefix
+  that matches several ids is refused with `ambiguous_recipient`,
+  `ambiguous_message_id`, `ambiguous_reply` or, in the CLIs,
+  `ambiguous_agent`, and the error's detail lists the candidates cut to the
+  shortest prefixes that tell them apart; one that matches none fails as
+  the full id would. `reply_to` and `ack` resolve among the caller's own
+  mail, so another mailbox's ids neither resolve nor make a prefix
+  ambiguous; an address a restore revoked is not a candidate for `to`, and
+  is one for `rebind`. A direct send's receipt now names
+  `recipient_agent_id` and the `wake` decision, and its request key is
+  taken over the resolved recipient, so a retry that spells it by prefix is
+  the same request. A refusal that carries a detail surfaces it as
+  `code: detail` in the MCP tool's error and as a separate `detail` field
+  beside `error` on REST (`CoordinationRefused`, a `ValueError`, replaces
+  the bare code `dispatch` raised).
+- Nothing is resolved before the caller is authenticated, so a prefix
+  lookup cannot tell an unauthenticated caller whether an address or a
+  message exists. A retry is recognised from its stored rows before any
+  prefix is resolved, so it returns its receipts even after a new address
+  made its prefix ambiguous or its recipient was revoked. The per-minute
+  send rate counts requests, so a burst counts once and a sender reaches at
+  most 60 x 50 mailboxes a minute. An ambiguous prefix in an `ack` batch
+  refuses the whole call. `board-audit redact` of one copy of a burst lists
+  the others as `other_copies` (and says so on stderr), since each keeps its
+  own body until it is redacted too.
+
+### Fixed (2026-09-28 — the plugin's Windows hooks: Git Bash is the requirement, the /clear handoff fits its budget, an orphaned wake watcher stops)
+- Claude Code runs the plugin's hook commands through Git Bash on Windows,
+  found by its own rules (`CLAUDE_CODE_GIT_BASH_PATH`, then the default Git
+  for Windows directories, then the `git` on PATH), and falls back to
+  PowerShell only when it finds none; it ignores the `commandWindows`
+  field, which is Codex's. Measured on Claude Code 2.1.280 on 2026-09-27:
+  with every Git directory removed from PATH and `bash` on PATH resolving
+  to the WSL launcher, the hooks still ran under
+  `C:\Program Files\Git\bin\bash.exe`, and the `commandWindows` command
+  never ran. Without Git Bash every plugin hook fails silently in
+  PowerShell, so Git for Windows is now a stated requirement (README,
+  `plugin/README.md`, `docs/guide/providers.md`), and
+  `pseudolife-mcp doctor` reports the bash.exe Claude Code would use (`git_bash`,
+  honouring `CLAUDE_CODE_GIT_BASH_PATH` from the process environment or the
+  `env` block of `~/.claude/settings.json`, which wins as in Claude Code), fails
+  with `GitBashMissing` when there is none, and warns when `bash` on PATH
+  is the WSL launcher (`bash_on_path_is_wsl_launcher`), which does not
+  affect Claude Code but breaks tools that look bash up on PATH. The
+  2026-07-16 plugin design note, which said hooks ran in PowerShell by
+  default on Windows, carries a dated correction.
+- Claude Code gives a plugin's SessionEnd hooks 1.5 s in total, whatever
+  `timeout` hooks.json sets: a settings.json hook with `"timeout": 60` ran
+  the 8.7 s it asked for, the plugin hook asking for 10 s was cancelled at
+  1.5 s (2.1.280, 2026-09-27). The `/clear` and `/resume` digest handoff
+  measured the process creation identity inside that budget with `ps -W`,
+  which took seconds a call on the loaded 2026-09-23 test host (65 ms idle
+  on 2026-09-27). SessionStart now measures it, with seconds to spare, into
+  a third line of `claude-<pid>.host`, with a fourth line saying until when
+  that text holds: `ps -W` prints a start time as HH:MM:SS for a process's
+  first 24 hours and as "Mon DD" after, in local time, so the Windows
+  identity lasts until a little before the 24-hour mark and under the same
+  UTC offset (macOS's is local time too; Linux's never changes). SessionEnd
+  reads line 3 inside that window and measures otherwise, and for a record
+  the previous hooks wrote; SessionStart still checks a handoff against a
+  fresh measurement, never against the record. The handoff work took about
+  0.3 s on the maintainer's host; the episode-close request still follows
+  it and may be cut short, as before (the idle reaper is the backstop).
+  Two-line records stay valid. The coordination SessionStart hook's budget
+  in hooks.json goes from 5 s to 10 s, since it now runs `ps -W` at every
+  start beside its 2 s check-in request.
+- The opt-in Stop hook could not tell whether Claude Code was still running
+  on Windows (`kill -0` cannot see a Windows PID), so a watcher orphaned by
+  a crash ran its full hour. It now lists the process through `ps -W` at
+  arm time and once a minute, and ends within the minute of it going away;
+  a listing that fails leaves the watch alone. Linux and macOS are
+  unchanged.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks` (the coordination SessionStart
+  entry's timeout changed).
+
+### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
+- A running shim whose saved board address the daemon had pruned (the host
+  slept, or the daemon was unreachable, past the seven-day retention, then a
+  heartbeat) stopped background delivery with "check bearer access or
+  restore/rebind the saved identity". Neither helps: `rebind` refuses a
+  missing address row. The stderr notice and the per-call hint now say the
+  address no longer exists and that restarting the session registers a new
+  one, which startup does since the 2026-09-28 fix for resumed sessions.
+  Auth and bank-mismatch failures keep the old wording. The running adapter
+  still does not swap its address in place; that stays a restart.
+
+### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
+- The plugin's bash hooks check digest keys, PIDs, timestamps and session
+  ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
+  under bash 3.2, which matches a range like `a-f` by locale collation, so
+  under a UTF-8 locale it also takes upper-case letters. The first macOS CI
+  run found `stop-wake.sh` following a `claude-<pid>.host` record of 64
+  upper-case letters to a digest that does not exist; Linux and Windows run
+  bash 5, which matches ranges by code point and refuses it.
+  `coordination-prompt.sh`, `coordination-start.sh` and `session-end.sh`
+  read the same record with the same check. The hooks write that record in
+  lower case themselves, so this took a damaged or planted file. With the
+  same collation reproduced on Git Bash, `0-9` also takes digits such as
+  `²`, and such a value would reach the timestamp arithmetic that the
+  checks guard. Every set is now spelled out (`[!0123456789abcdef]`), which
+  bash compares character by character with no collation involved.
+  `tests/test_hook_glob_ranges.py` reproduces the 3.2 matching on any bash
+  and fails on any bracket range in a hook line that is not a sed, grep
+  or awk expression.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks`.
+
+### Added (2026-09-27 — CI runs the plugin hooks on macOS)
+- A fourth CI lane, `test-lite-macos` (macos-latest, Python 3.11), runs
+  the plugin hook, client installer, coordination and embedded-provider
+  tests on a real macOS runner, under its bash 3.2 and BSD tools. The
+  hooks' BSD fallbacks (`stat -f`, `base64 -D`, `shasum`,
+  `ps -o lstart=`) had run nowhere before. It is a fixed file list like
+  the Windows lane, not the full suite: about 8 runner minutes, of which
+  the tests take about 7. The first run failed only on the hook bug
+  above. The lane starts no Postgres, so the store tests in
+  `test_coordination_turn_digest.py` skip there (the Linux lanes run
+  them); every other skip is Windows-only. A step fails the job unless
+  the bash on PATH is 3.2.
+
+### Fixed (2026-09-28 — a Claude Code session resumed after its board address was pruned gets a new one)
+- A Claude Code session whose shim keeps agent state
+  (`PSEUDOLIFE_AGENT_STATE_DIR`) re-attaches to its saved board address on
+  `claude --resume`. The daemon removes a resumable address seven days after
+  its last activity or lease, once no retained message names it. Resuming
+  after that failed startup attach with `instance_not_found`, and the shim
+  kept the state file, so every later resume of that session failed the same
+  way and it never got a board address again (memory kept working). The
+  retire-and-re-register path ran only for adapters without a credential
+  provider, and the shim and the Codex registry always pass one.
+- A bank-bound adapter now takes the same path: the saved state moves aside
+  with a `.stale` suffix and a fresh address is registered. This reverses the
+  rule, added 2026-09-13, that bank-bound clients keep an address the server
+  no longer has. The daemon returns `instance_not_found` only when the
+  address row is missing, every request first re-verifies the saved bank and
+  principal, and `rebind` refuses a missing row, so the recovery that rule
+  pointed to could not restore the address. A rejected bearer or instance
+  credential, or a different bank or principal, still preserves the saved
+  address. Unchanged too: pre-2026-09-13 state not yet bound to a bank stops
+  earlier, at the ownership proof, when its address is gone, because that
+  answer does not tell a missing address from a different principal.
 
 ### Fixed (2026-09-27 — a default install turns the agent board on, and the installer says whether it did)
 - The agent board needs a bearer token, but neither installer created one,

@@ -157,7 +157,7 @@ class Mailbox:
         if ids:
             self.set(*ids, notify=False)
 
-    # The daemon's decision the adapter offers (v48): standing by default,
+    # The daemon's decision the adapter offers (v49): standing by default,
     # so the arrival tests keep their meaning; a test clears it to show the
     # gate holds.
     ring = ("rung", "anyone")
@@ -1160,7 +1160,7 @@ def test_shim_arms_the_doorbell_only_on_opt_in(monkeypatch, tmp_path, capsys):
     assert "PSEUDOLIFE_CODEX_DOORBELL needs PSEUDOLIFE_AGENT_COORDINATION=1" in uncoordinated
 
 
-# --- the daemon decides, the doorbell rings (v48) --------------------------
+# --- the daemon decides, the doorbell rings (v49) --------------------------
 
 def test_without_a_daemon_decision_the_doorbell_holds(tmp_path):
     """New mail alone no longer rings: the daemon's wake decision, offered

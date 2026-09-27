@@ -1307,7 +1307,7 @@ class MemoryPolicyConfig:
 
 @dataclass
 class WakeConfig:
-    """Caps on the rings the daemon decides at send (schema v48).
+    """Caps on the rings the daemon decides at send (schema v49).
 
     A ring is an unattended model turn in the recipient, so every one is
     bounded. The four caps come from the 2026-09-23/24 messageboard trial
@@ -1373,7 +1373,7 @@ class CoordinationConfig:
     # bounded. The log is cut on UTC day boundaries, so an event stays up to
     # a day longer than this.
     audit_retention_days: int = 90
-    # The wake caps (schema v48); see WakeConfig.
+    # The wake caps (schema v49); see WakeConfig.
     wake: WakeConfig = field(default_factory=WakeConfig)
 
     def __post_init__(self) -> None:

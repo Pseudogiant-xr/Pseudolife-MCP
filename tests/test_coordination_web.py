@@ -345,7 +345,7 @@ def test_authenticated_mcp_binding_still_checks_the_bank(monkeypatch):
 
 
 
-# --- the Stop-hook park gate route (v48) -----------------------------------
+# --- the Stop-hook park gate route (v49) -----------------------------------
 
 def test_park_gate_route_serves_the_daemons_answer(monkeypatch):
     """``GET /api/hook/park-gate?agent=<id>&since=<epoch>`` answers the

@@ -31,7 +31,7 @@ from pathlib import Path
 import sys
 
 from pseudolife_memory.storage.coordination import (
-    AUDIT_COLUMNS, CoordinationError, CoordinationStore, audit_events, audit_has_body_column,
+    AUDIT_COLUMNS, CoordinationError, CoordinationStore, audit_events, audit_has_body_column, resolve_agent_id,
     verify_audit_chain,
 )
 
@@ -166,8 +166,17 @@ def _export(args) -> int:
         except OSError as exc:
             raise AuditCliError(f"cannot create {target}: {exc.strerror}") from None
         with out as stream:
+            agent = args.agent
+            if agent is not None:
+                try:
+                    agent = resolve_agent_id(conn, agent)
+                except CoordinationError as exc:
+                    if exc.code == "ambiguous_agent":
+                        raise AuditCliError(f"--agent {agent} matches several ids: "
+                                            f"{exc.detail}; give a longer prefix") from None
+                    raise AuditCliError(f"no agent id starts with {agent}") from None
             rows = audit_events(conn, project=args.project, task=args.task,
-                                agent_id=args.agent, since=args.since, until=args.until)
+                                agent_id=agent, since=args.since, until=args.until)
             try:
                 for row in rows:
                     row = dict(row)
@@ -298,7 +307,8 @@ def _redact(args) -> int:
             result = CoordinationStore(_Storage(conn)).redact(args.message_id, args.reason)
         except CoordinationError as exc:
             print(json.dumps({"ok": False, "message_id": args.message_id, "reason": exc.code}))
-            print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}", file=sys.stderr)
+            print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}"
+                  + (f": {exc.detail}" if exc.detail else ""), file=sys.stderr)
             return EXIT_BROKEN
         except psycopg.errors.LockNotAvailable:
             raise AuditCliError("the board is busy: a row or the audit chain stayed locked for "
@@ -314,6 +324,11 @@ def _redact(args) -> int:
         print("board-audit: the live copy is blanked and out of delivery, but this message "
               "was sent before schema v46: the audit log keeps its body until audit "
               "retention removes the send event", file=sys.stderr)
+    if result.get("other_copies"):
+        print(f"board-audit: this message was one of {len(result['other_copies']) + 1} copies "
+              "of one send to a project or the whole board; each keeps its own copy of the "
+              "body until it is redacted too: " + " ".join(result["other_copies"]),
+              file=sys.stderr)
     if result["audit_copy"] == "gone":
         print("board-audit: audit retention had already removed this message's send event, "
               "so the audit log held no copy of it; its live request fingerprint (and any "
@@ -347,7 +362,8 @@ def main(argv=None) -> int:
     export = actions.add_parser("export", help="write events as JSON lines, oldest first")
     export.add_argument("--project", help="only events in this project")
     export.add_argument("--task", help="only events in this task")
-    export.add_argument("--agent", help="only events by this agent or to its mailbox")
+    export.add_argument("--agent", help="only events by this agent or to its mailbox "
+                                        "(a full id, or a unique prefix of 8 or more characters)")
     export.add_argument("--since", type=_time, help="epoch seconds or ISO 8601, inclusive")
     export.add_argument("--until", type=_time, help="epoch seconds or ISO 8601, exclusive")
     export.add_argument("--out", help="a NEW file to write instead of stdout")
@@ -357,7 +373,9 @@ def main(argv=None) -> int:
     verify.add_argument("--input", help="verify an unfiltered export file instead of the bank")
     redact = actions.add_parser(
         "redact", help="remove one message body (sent from schema v46 on) and log why")
-    redact.add_argument("--message-id", required=True, help="the message whose body to remove")
+    redact.add_argument("--message-id", required=True,
+                        help="the message whose body to remove (a full id, or a unique "
+                             "prefix of 8 or more characters)")
     redact.add_argument("--reason", required=True,
                         help="why, kept in the log for good (at most 240 characters; "
                              "never repeat the secret)")

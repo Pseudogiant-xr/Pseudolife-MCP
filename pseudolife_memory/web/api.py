@@ -110,8 +110,9 @@ async def _wait_while_connected(operation, receive):
 
 
 async def _send_coordination_error(send, exc):
-    from pseudolife_memory.coordination import public_error
+    from pseudolife_memory.coordination import public_detail, public_error
     code = public_error(exc)
+    detail = public_detail(exc)
     status = (401 if code in {"unauthorized", "authentication_required",
                              "instance_authentication_required"}
               else 403 if code in {"principal_not_allowed", "invalid_credential"}
@@ -125,7 +126,8 @@ async def _send_coordination_error(send, exc):
         # Database errors can include complete rows. Neither exception messages
         # nor tracebacks are appropriate diagnostics for private mail failures.
         logger.error("coordination handler failed (%s)", type(exc).__name__)
-    await _send_json(send, status, {"error": code})
+    await _send_json(send, status, {"error": code} if detail is None
+                     else {"error": code, "detail": detail})
 
 
 def _parse_query(scope) -> dict[str, str]:
@@ -432,7 +434,7 @@ def build_console_app(
                               [(b"x-pl-board", state.encode("ascii"))])
             return
 
-        # 4d) plugin Stop hook: the park gate (v48). "allow" or "block" plus
+        # 4d) plugin Stop hook: the park gate (v49). "allow" or "block" plus
         # the message, for the address the hook names; an empty body for a
         # bearer that cannot use the board, which the hook reads as allow.
         # 200 always; the daemon call is the hook's one request.

@@ -207,7 +207,7 @@ try {
 
 # Stop carries Claude Code's wake hook (stop-wake.sh), which Claude runs
 # through the bash command. Codex loads the same hooks.json and runs this
-# one instead, and gets only the park gate (schema v48): when the turn is
+# one instead, and gets only the park gate (schema v49): when the turn is
 # not itself a Stop continuation and the shim has named this thread's board
 # address in <key>.agent, one bounded request asks the daemon whether the
 # thread parked since the turn began (the <key>.turn stamp CoordinationPrompt

@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 48
+SCHEMA_META_VERSION = 49
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -517,7 +517,6 @@ CREATE TABLE IF NOT EXISTS coordination_messages (
     attempt_generation BIGINT,
     attempts INTEGER NOT NULL DEFAULT 0,
     acknowledged_at DOUBLE PRECISION,
-    UNIQUE (sender_agent_id, request_id),
     UNIQUE (recipient_agent_id, recipient_sequence)
 );
 CREATE INDEX IF NOT EXISTS coordination_messages_pending_idx
@@ -632,7 +631,31 @@ BEGIN
             ADD COLUMN IF NOT EXISTS children JSONB NOT NULL DEFAULT '[]';
     END IF;
 END $$;
--- v48: the park record, a session's standing statement of why it stopped
+-- v48: one send may reach several recipients (``to: "project:<name>"`` or
+-- ``"all"``) under one request id, one row each, so the sender's request key
+-- admits the recipient. The unique index is created first, so the table is
+-- never without a request key. The pre-v48 key is found by its columns
+-- (exactly sender_agent_id and request_id), not by the name Postgres gave
+-- it, and dropped only where it exists: a pass over a migrated bank then
+-- adds no ALTER TABLE of its own.
+CREATE UNIQUE INDEX IF NOT EXISTS coordination_messages_request_idx
+    ON coordination_messages (sender_agent_id, request_id, recipient_agent_id);
+DO $$
+DECLARE
+    stale_key name;
+BEGIN
+    FOR stale_key IN
+        SELECT c.conname FROM pg_constraint c
+        WHERE c.conrelid = 'coordination_messages'::regclass AND c.contype = 'u'
+          AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+               FROM pg_attribute a
+               WHERE a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey))
+              = ARRAY['request_id', 'sender_agent_id']
+    LOOP
+        EXECUTE format('ALTER TABLE coordination_messages DROP CONSTRAINT %I', stale_key);
+    END LOOP;
+END $$;
+-- v49: the park record, a session's standing statement of why it stopped
 -- and what would clear it (maintainer decision 2026-09-28). park_reason
 -- NULL means not parked; the other fields describe the park. Guarded like
 -- the v46 and v47 columns: one probe, then the ALTER only when missing.
@@ -650,14 +673,14 @@ BEGIN
             ADD COLUMN IF NOT EXISTS park_set_at DOUBLE PRECISION;
     END IF;
     -- The wake decision a send returned, kept on the message so a retry
-    -- repeats it; NULL on messages sent before v48.
+    -- repeats it; NULL on messages sent before v49.
     IF NOT EXISTS (SELECT 1 FROM pg_attribute
                    WHERE attrelid = 'coordination_messages'::regclass
                      AND attname = 'wake' AND attnum > 0 AND NOT attisdropped) THEN
         ALTER TABLE coordination_messages ADD COLUMN IF NOT EXISTS wake JSONB;
     END IF;
 END $$;
--- v48: every ring the daemon decided at send (rung or nudged), for the
+-- v49: every ring the daemon decided at send (rung or nudged), for the
 -- caps (per recipient per hour, urgent per sender per hour, the nightly
 -- total), the fan-out stagger (ring_at) and the hand-off to the shim
 -- (served_at: the recipient's next attach or heartbeat carried it). No

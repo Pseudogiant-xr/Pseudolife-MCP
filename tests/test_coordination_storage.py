@@ -423,7 +423,7 @@ def test_credential_shaped_child_label_is_refused(store):
         store.update(*creds(a), children=[shaped])
 
 
-# --- park records (schema v48) ---------------------------------------------
+# --- park records (schema v49) ---------------------------------------------
 
 def _park(row):
     return {key: row[key] for key in ("park_reason", "park_needs", "park_clear_by",
@@ -889,3 +889,20 @@ def test_clears_needs_a_distinctive_word(store):
     for filler in ("the", "of the", "diff"[:3]):
         assert _wake(store, a, b, clears=filler)["decision"] == "withheld", filler
     assert _wake(store, a, b, clears="the storage")["decision"] == "rung"
+
+
+def test_a_burst_to_parked_peers_decides_and_staggers_each_ring(store):
+    """A ``to: "all"`` burst (#430) gets one wake decision per recipient, and
+    the rings of that one send are spaced by the fan-out stagger; a retry of
+    the burst repeats every decision and writes no new ring."""
+    a = store.register("alice")
+    peers = [_wake_capable(store) for _ in range(3)]
+    for agent in peers:
+        store.update(*creds(agent), park_reason="blocked", park_needs="x", park_clear_by="anyone")
+        _idle(store, agent)
+    out = store.send(*creds(a), to="all", text="the GPU is free", request_id="burst")
+    assert {r["wake"]["decision"] for r in out["receipts"]} == {"rung"}
+    assert sorted(r["wake"]["ring_at"] for r in out["receipts"]) == [1000.0, 1030.0, 1060.0]
+    again = store.send(*creds(a), to="all", text="the GPU is free", request_id="burst")
+    assert [r["wake"] for r in again["receipts"]] == [r["wake"] for r in out["receipts"]]
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (3,)
