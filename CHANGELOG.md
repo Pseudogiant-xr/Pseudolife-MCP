@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
+- A running shim whose saved board address the daemon had pruned (the host
+  slept, or the daemon was unreachable, past the seven-day retention, then a
+  heartbeat) stopped background delivery with "check bearer access or
+  restore/rebind the saved identity". Neither helps: `rebind` refuses a
+  missing address row. The stderr notice and the per-call hint now say the
+  address no longer exists and that restarting the session registers a new
+  one, which startup does since the 2026-09-28 fix for resumed sessions.
+  Auth and bank-mismatch failures keep the old wording. The running adapter
+  still does not swap its address in place; that stays a restart.
+
 ### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
 - The plugin's bash hooks check digest keys, PIDs, timestamps and session
   ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
