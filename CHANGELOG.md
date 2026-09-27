@@ -31,12 +31,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   measured the process creation identity inside that budget with `ps -W`,
   which took seconds a call on the loaded 2026-09-23 test host (65 ms idle
   on 2026-09-27). SessionStart now measures it, with seconds to spare, into
-  a third line of `claude-<pid>.host`, and SessionEnd reads it, measuring
-  only for a record the previous hooks wrote; SessionStart still checks a
-  handoff against a fresh measurement, never against the record. The
-  handoff work took about 0.3 s on the maintainer's host; the episode-close
-  request still follows it and may be cut short, as before (the idle
-  reaper is the backstop). Two-line records stay valid.
+  a third line of `claude-<pid>.host`, with a fourth line saying until when
+  that text holds: `ps -W` prints a start time as HH:MM:SS for a process's
+  first 24 hours and as "Mon DD" after, in local time, so the Windows
+  identity lasts until a little before the 24-hour mark and under the same
+  UTC offset (macOS's is local time too; Linux's never changes). SessionEnd
+  reads line 3 inside that window and measures otherwise, and for a record
+  the previous hooks wrote; SessionStart still checks a handoff against a
+  fresh measurement, never against the record. The handoff work took about
+  0.3 s on the maintainer's host; the episode-close request still follows
+  it and may be cut short, as before (the idle reaper is the backstop).
+  Two-line records stay valid. The coordination SessionStart hook's budget
+  in hooks.json goes from 5 s to 10 s, since it now runs `ps -W` at every
+  start beside its 2 s check-in request.
 - The opt-in Stop hook could not tell whether Claude Code was still running
   on Windows (`kill -0` cannot see a Windows PID), so a watcher orphaned by
   a crash ran its full hour. It now lists the process through `ps -W` at
@@ -45,7 +52,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 - Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
   (or `ops/update.sh --all`) and restart clients. Codex may ask to
-  re-approve the changed hooks in `/hooks`.
+  re-approve the changed hooks in `/hooks` (the coordination SessionStart
+  entry's timeout changed).
 
 ### Fixed (2026-09-27 — `memory_recall` no longer seeds a name found inside an accented or Devanagari word)
 - `memory_recall`'s name matcher (`_mentions` in `memory/recall.py`)

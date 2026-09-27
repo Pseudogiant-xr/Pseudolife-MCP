@@ -82,7 +82,9 @@ under Claude Code on Windows: SessionEnd hooks from a plugin get 1.5 s in
 total, whatever `timeout` hooks.json sets (a settings.json hook can raise
 the budget, a plugin's cannot; measured 2026-09-27), so the `/clear` and
 `/resume` digest handoff is written before the episode-close request and
-reads the process identity SessionStart recorded instead of measuring it;
+reads the process identity SessionStart recorded instead of measuring it,
+while that record says it still holds (`ps -W` prints a process's start
+time differently after its first 24 hours, and a DST change shifts it);
 and the opt-in Stop hook checks that Claude Code is still running through
 `ps -W` at arm time and once a minute (a Windows PID is invisible to
 `kill -0`), so a watcher orphaned by a crash ends within the minute.

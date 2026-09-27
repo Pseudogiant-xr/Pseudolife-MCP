@@ -14,8 +14,9 @@ SRC=$(printf '%s' "$INPUT" | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"
 # shim's key, line 2 the key of the session the record is confirmed for,
 # line 3 the sha256 of this process's creation identity (below), measured
 # here, where SessionStart has seconds, so that session-end.sh only reads it
-# inside the 1.5 s Claude Code gives a plugin SessionEnd hook (records from
-# before 2026-09-28 have two lines; session-end.sh measures for those).
+# inside the 1.5 s Claude Code gives a plugin SessionEnd hook, and line 4
+# until when line 3 holds (identity_expiry). Past that, and for records from
+# before 2026-09-28 (two lines), session-end.sh measures.
 # The prompt hook follows line 1 only while line 2 names its own session.
 # A launch writes the session's own key. /clear and /resume carry the record
 # forward only through the handoff session-end.sh has just left
@@ -44,7 +45,8 @@ write_lines() {  # $1 = path, then its lines; atomic replace, best effort
 }
 # The creation identity of process $1, which a later process reusing the PID
 # does not share; empty where the host offers none, and callers then fail
-# closed. Only ever compared across one handoff, seconds apart.
+# closed. Its text can change while the process runs (identity_expiry says
+# until when it holds), so a cached one is compared only inside that window.
 process_identity() {
     local stat boot="" fields line=""
     case "${OSTYPE:-}" in
@@ -66,20 +68,59 @@ process_identity() {
     esac
     [ -n "$line" ] && printf '%s' "$line"
 }
+# The record's line 4 for identity line $1: until when (epoch seconds) that
+# text holds, then the UTC offset it was read under ("-" where it does not
+# depend on one); 0 for no end. Git Bash's `ps -W` prints the start as
+# HH:MM:SS for a process's first 24 hours and as "Mon DD" after
+# (msys2-runtime winsup/utils/ps.cc), both in local time, and macOS's
+# lstart is local time: a DST change or the 24-hour mark changes the text.
+# Linux's boot id and start ticks never change.
+identity_expiry() {  # $1 = an identity line from process_identity
+    local now zone start fields stime
+    case "${OSTYPE:-}" in linux*) printf '0 -'; return 0 ;; esac
+    now=$(date '+%s %z' 2>/dev/null) || return 1
+    zone=${now#* }
+    now=${now%% *}
+    case "$now" in ''|*[!0-9]*) return 1 ;; esac
+    case "$zone" in [+-][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            read -r -a fields <<< "$1"
+            case "${fields[0]:-}" in
+                [A-Za-z]) stime=${fields[7]:-} ;;  # a leading status flag
+                *) stime=${fields[6]:-} ;;
+            esac
+            case "$stime" in
+                [0-2][0-9]:[0-5][0-9]:[0-5][0-9])
+                    start=$(date -d "$stime" +%s 2>/dev/null) || return 1
+                    case "$start" in ''|*[!0-9]*) return 1 ;; esac
+                    [ "$start" -le "$now" ] || start=$((start - 86400))
+                    # The 24-hour mark, less an hour (a DST change since the
+                    # start misplaces it by that much) and two minutes (the
+                    # handoff's window after SessionEnd reads it).
+                    printf '%s %s' "$((start + 86400 - 3720))" "$zone"
+                    return 0 ;;
+            esac ;;
+    esac
+    printf '0 %s' "$zone"
+}
 # Sets IDENT to the sha256 of this process's creation identity ('' where
-# the host offers none), measuring at most once per run.
-IDENT="" IDENT_MEASURED=""
+# the host offers none) and IDENT_UNTIL to its expiry line, measuring at
+# most once per run.
+IDENT="" IDENT_UNTIL="" IDENT_MEASURED=""
 measure_identity() {
     local identity
     [ -z "$IDENT_MEASURED" ] || return 0
     IDENT_MEASURED=1
     identity=$(process_identity "$CLAUDE_PID")
-    [ -n "$identity" ] && IDENT=$(sha256_of "$identity")
+    [ -n "$identity" ] || return 0
+    IDENT=$(sha256_of "$identity")
+    IDENT_UNTIL=$(identity_expiry "$identity") || IDENT_UNTIL=""
 }
 write_record() {  # $1 = the shim's key, $2 = the key it is confirmed for
     measure_identity
-    if [ -n "$IDENT" ]; then
-        write_lines "$RECORD" "$1" "$2" "$IDENT"
+    if [ -n "$IDENT" ] && [ -n "$IDENT_UNTIL" ]; then
+        write_lines "$RECORD" "$1" "$2" "$IDENT" "$IDENT_UNTIL"
     else
         write_lines "$RECORD" "$1" "$2"
     fi
@@ -153,7 +194,9 @@ fi
 # bearer is missing or unknown, or its principal is not allowed; a client
 # that set PSEUDOLIFE_AGENT_COORDINATION to anything but a yes asks for
 # nothing. One request, no retry: at most about 2 s on top of the record
-# work above, inside the 5 s budget in hooks.json. A daemon that does not
+# work above, inside the 10 s budget in hooks.json; the record work runs
+# `ps -W` on Windows, 1.6-3.5 s a call on a loaded host (2026-09-23), and a
+# hook killed at its budget loses this output. A daemon that does not
 # answer adds nothing; the shim's initialization instructions still carry a
 # compact check-in when its adapter is up. Connection and credential
 # checks: the same as session-start.sh.

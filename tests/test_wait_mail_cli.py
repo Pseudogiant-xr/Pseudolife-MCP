@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -304,7 +305,12 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
     hook("session-end.sh", spawn, reason=reason)
     hook("coordination-start.sh", current, source=reason)
     record = digests / f"claude-{os.getpid()}.host"
-    assert record.read_bytes() == f"{_key(spawn)}\n{_key(current)}\n".encode()
+    # Lines 3-4: the process identity SessionStart caches for the next
+    # SessionEnd, and until when it holds (tests/test_coordination_turn_digest.py).
+    lines = record.read_bytes().split(b"\n")
+    assert lines[:2] == [_key(spawn).encode(), _key(current).encode()]
+    assert re.fullmatch(rb"[0-9a-f]{64}", lines[2]) and re.fullmatch(rb"[0-9]{1,12} (-|[+-][0-9]{4})", lines[3])
+    assert lines[4:] == [b""]
     assert not (digests / f"claude-{os.getpid()}.switch").exists()
     assert not _seen(digest).exists()
 

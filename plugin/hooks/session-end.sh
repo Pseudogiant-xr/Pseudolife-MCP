@@ -38,9 +38,10 @@ REASON=$(printf '%s' "$INPUT" | sed -n 's/.*"reason"[[:space:]]*:[[:space:]]*"\(
 # keeps its shim, so the session ending here hands the process's record (see
 # coordination-start.sh) to the next one: time, this process's creation identity
 # and the ending session's key. The identity is read from the record's
-# third line, which SessionStart measured with seconds to spare; it is
-# measured here only for a record without one (written before 2026-09-28,
-# or not confirmed for the ending session), because the Windows probe,
+# third line, which SessionStart measured with seconds to spare, while its
+# fourth line says it still holds (identity_fresh); it is measured here only
+# otherwise (past that line's window, a record written before 2026-09-28,
+# or one not confirmed for the ending session), because the Windows probe,
 # `ps -W`, took seconds a call on a loaded host. A record not confirmed
 # for the ending session (none yet under older hooks, or another process's)
 # is first replaced by that session's own key, which is right unless an
@@ -76,6 +77,23 @@ process_identity() {
     esac
     [ -n "$line" ] && printf '%s' "$line"
 }
+# True while the record's line 4 ("<until> <UTC offset>", written by
+# coordination-start.sh's identity_expiry) says line 3 still reads as it
+# would if measured now: before <until> (0: no end) and under the same
+# offset ("-": none applies). Anything malformed is false.
+identity_fresh() {  # $1 = the record's line 4
+    local until offset now
+    case "$1" in *' '*' '*|'') return 1 ;; *' '*) ;; *) return 1 ;; esac
+    until=${1%% *}
+    offset=${1#* }
+    case "$until" in *[!0-9]*) return 1 ;; esac
+    [ "${#until}" -le 12 ] || return 1
+    case "$offset" in -|[+-][0-9][0-9][0-9][0-9]) ;; *) return 1 ;; esac
+    [ "$until" = 0 ] && [ "$offset" = - ] && return 0
+    now=$(date '+%s %z' 2>/dev/null) || return 1
+    [ "$offset" = - ] || [ "${now#* }" = "$offset" ] || return 1
+    [ "$until" = 0 ] || [ "${now%% *}" -lt "$until" ]
+}
 case "$REASON" in
     clear|resume)
         DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
@@ -86,31 +104,24 @@ case "$REASON" in
                     KEY=$(sha256_of "$SID")
                     RECORD="$DIGEST_DIR/claude-$CLAUDE_PID.host"
                     SWITCH="$DIGEST_DIR/claude-$CLAUDE_PID.switch"
-                    LINE1="" LINE2="" LINE3=""
+                    LINE1="" LINE2="" LINE3="" LINE4=""
                     if [ -f "$RECORD" ] && [ ! -L "$RECORD" ]; then
-                        { IFS= read -r LINE1; IFS= read -r LINE2; IFS= read -r LINE3; } 2>/dev/null < "$RECORD"
+                        { IFS= read -r LINE1; IFS= read -r LINE2; IFS= read -r LINE3; IFS= read -r LINE4; } 2>/dev/null < "$RECORD"
                     fi
                     case "$LINE1" in ''|*[!0-9a-f]*) LINE1="" ;; esac
                     case "$LINE3" in ''|*[!0-9a-f]*) LINE3="" ;; esac
                     [ "${#LINE3}" -eq 64 ] || LINE3=""
                     if [ -n "$KEY" ]; then
-                        WHO="" CONFIRMED=""
+                        WHO=""
                         if [ "${#LINE1}" -eq 64 ] && [ "$LINE2" = "$KEY" ]; then
-                            CONFIRMED=1
-                            WHO="$LINE3"
+                            [ -n "$LINE3" ] && identity_fresh "$LINE4" && WHO="$LINE3"
+                        else
+                            write_lines "$RECORD" "$KEY" "$KEY"
                         fi
                         if [ -z "$WHO" ]; then
-                            # No identity on record (the previous hooks wrote
-                            # it, or it is another session's): measure here.
+                            # No identity on record that still holds: measure.
                             IDENTITY=$(process_identity "$CLAUDE_PID")
                             [ -n "$IDENTITY" ] && WHO=$(sha256_of "$IDENTITY")
-                        fi
-                        if [ -z "$CONFIRMED" ]; then
-                            if [ -n "$WHO" ]; then
-                                write_lines "$RECORD" "$KEY" "$KEY" "$WHO"
-                            else
-                                write_lines "$RECORD" "$KEY" "$KEY"
-                            fi
                         fi
                         [ -n "$WHO" ] &&
                             write_lines "$SWITCH" "$(date +%s 2>/dev/null)" "$WHO" "$KEY"
