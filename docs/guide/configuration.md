@@ -68,7 +68,12 @@ The allowed names are principals from the bearer-token configuration above.
 Without the key only `default`, the singular `PSEUDOLIFE_MCP_TOKEN` principal,
 is admitted: principals of a `PSEUDOLIFE_MCP_TOKENS` map are separately
 trusted identities and join the board only when listed (an explicit list
-replaces the default; include `default` to keep it). Mailbox operations
+replaces the default; include `default` to keep it). An upgrade that already
+authenticates clients through a map therefore finds them off the board until
+they are listed. A shim whose bearer is unlisted leaves coordination off at
+startup without an error, and memory keeps working. For Codex,
+`ops/setup-codex-coordination.py --check` names this cause
+([Codex CLI and desktop](#codex-cli-and-desktop)). Mailbox operations
 require PostgreSQL, configured
 bearer authentication and a registered adapter's private instance credential.
 Two sessions sharing a principal still need distinct adapter identities. A
@@ -325,15 +330,39 @@ the Python environment where Pseudolife is installed:
 ```sh
 python ops/setup-codex-coordination.py --credentials
 python ops/setup-codex-coordination.py --check
-python ops/setup-codex-coordination.py --enable
 ```
 
-The check is read-only. Enable requires a configured bearer and an enabled daemon
-that allows its principal; it does not change the daemon's authentication or
-allowlist. The token must be in the MCP registration's `env`, or explicitly
-forwarded through `env_vars`. Setup preserves the command and unrelated settings,
-backs up the configuration privately, and uses Codex's versioned configuration
-writer. Reconnect the MCP server after changing its environment.
+The check is read-only. Coordination is on by default, so a registration
+without `PSEUDOLIFE_AGENT_COORDINATION` reports `ready (default-on)` when the
+daemon serves the board to its bearer, the same question the shim asks at
+startup. Nothing more is needed then. When it reports `needs-configuration`,
+its `reason` names what to fix where it can tell.
+
+`python ops/setup-codex-coordination.py --enable` is only for pinning explicit
+mode (`PSEUDOLIFE_AGENT_COORDINATION=1`), after which the check reports
+`ready (explicit)`. In explicit mode the shim skips the startup question and
+keeps the adapter's own diagnostics. Enable also sets `PSEUDOLIFE_WRITER_ID=codex`
+and `PSEUDOLIFE_MCP_NO_SPAWN=1`. It leaves `PSEUDOLIFE_AGENT_WAKE` as it is:
+unset means pull-only, and a live-delivery opt-in survives a re-run. Enable
+requires a configured bearer and an enabled daemon that allows its principal;
+it does not change the daemon's authentication or allowlist. The token must be
+in the MCP registration's `env`, or explicitly forwarded through `env_vars`.
+Setup preserves the command and unrelated settings, backs up the configuration
+privately, and uses Codex's versioned configuration writer. Reconnect the MCP
+server after changing its environment.
+
+A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map (principal `codex`, say) is
+off the board until an operator lists it: without `allowed_principals` only
+`default` is admitted. The shim's startup question then leaves coordination
+off with no error, and memory keeps working. The check reports
+`principal not allowed on the board (add 'codex' to coordination.allowed_principals in config.yaml)`.
+Add the principal the map gives that bearer, keeping `default` if the
+singular token should stay on the board, and restart the daemon:
+
+```yaml
+coordination:
+  allowed_principals: [default, codex]
+```
 
 For authenticated connections, the normal installer prepares a private
 credential file and connects both the stdio shim and lifecycle hooks to it.

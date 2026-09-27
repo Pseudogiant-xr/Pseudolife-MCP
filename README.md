@@ -111,6 +111,16 @@ not a promise that a first model download fits. The tool budget leaves time for
 the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
 `pseudolife-mcp serve` in a terminal if needed.
 
+The agent board (peer awareness and addressed mail between sessions) is on by
+default, behind bearer authentication. Without `coordination.allowed_principals`
+in the daemon's `config.yaml`, only the singular `PSEUDOLIFE_MCP_TOKEN`
+principal is admitted. A Codex bearer from a `PSEUDOLIFE_MCP_TOKENS` map stays
+off the board until an operator lists it (`allowed_principals: [default, codex]`).
+Until then the shim leaves coordination off without an error.
+`python ops/setup-codex-coordination.py --check` reports `ready (default-on)`
+or names the cause. See
+[Codex CLI and desktop](docs/guide/configuration.md#codex-cli-and-desktop).
+
 The MCP handshake delivers compact recall/capture/reflection instructions.
 For the complete standing guidance, copy the
 [bundled memory block](examples/CLAUDE.memory.md) into your project
