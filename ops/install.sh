@@ -34,6 +34,8 @@
 #   --claude-md append|skip          compatibility alias for --instructions
 #   --agents-file <path>             standing-file target for generic agents
 #   --no-art                         plain output (no banner, no color)
+#   --no-token                       open-loopback install: mint no bearer
+#                                    token, so the agent board stays off
 #   --model / --shim-port / --transport   as before
 #
 # Extractor modes (spec: docs/superpowers/specs/
@@ -64,6 +66,7 @@ AGENTS_FILE=""
 SHIM_PORT=0
 TRANSPORT=shim
 NO_ART=""
+NO_TOKEN=""
 
 usage() {
     sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
@@ -86,6 +89,7 @@ while [ $# -gt 0 ]; do
         --shim-port) SHIM_PORT="$2"; shift 2 ;;
         --transport) TRANSPORT="$2"; shift 2 ;;
         --no-art) NO_ART=1; shift ;;
+        --no-token) NO_TOKEN=1; shift ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -423,6 +427,17 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
     step "Dreamer model: $MODEL"
 fi
 
+installer_python() {  # echoes an interpreter >= 3.10, or nothing
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 || true; }
 bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
@@ -470,6 +485,51 @@ awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
     echo "$ENV_END"
 } >> "$env_file"
 step "Wrote managed block in ops/.env"
+
+# ── 5b. bearer token (the agent board needs one) ──────────────────────────
+# A default install mints one, so the board is on; every client wired below
+# then carries it in an owner-only token file. The value is never printed.
+# Open loopback (docs/guide/configuration.md) stays available: --no-token,
+# and --transport http, whose registrations cannot carry a token file. A
+# host that cannot install the shim falls back to HTTP, so it mints none.
+# >>> mint token >>>
+# Whether stage 11 can be expected to install the shim: pipx, or a Python
+# >= 3.10 with pip outside a PEP 668 externally managed environment (where
+# `pip install --user` refuses). The helper needs that Python either way.
+shim_tooling_ready() {
+    [ -n "$(installer_python)" ] || return 1
+    command -v pipx >/dev/null 2>&1 && return 0
+    "$(installer_python)" -c 'import os, sys, sysconfig
+import pip
+marker = os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")
+sys.exit(1 if sys.prefix == sys.base_prefix and os.path.exists(marker) else 0)' >/dev/null 2>&1
+}
+TOKEN_STATE=""
+token_py="$(installer_python)"
+# A token already set gates the daemon whatever this run may mint, and the
+# HTTP-registration warning and the board hint depend on knowing that.
+if [ -n "${PSEUDOLIFE_MCP_TOKEN:-}${PSEUDOLIFE_MCP_TOKENS:-}" ] ||
+        [ -n "$(get_env PSEUDOLIFE_MCP_TOKEN)$(get_env PSEUDOLIFE_MCP_TOKENS)" ]; then
+    TOKEN_STATE=present
+elif [ -n "$NO_TOKEN" ]; then
+    TOKEN_STATE=opted-out
+elif [ "$TRANSPORT" != shim ]; then
+    TOKEN_STATE=http
+elif ! shim_tooling_ready; then
+    TOKEN_STATE=no-shim
+else
+    mint_output=$("$token_py" "$repo/ops/client_credentials.py" mint --env-file "$env_file") || true
+    case "$mint_output" in
+        *'"minted"'*)
+            TOKEN_STATE=minted
+            step "Minted a bearer token in ops/.env (owner-only, never printed) - the agent board needs one." ;;
+        *'"present"'*) TOKEN_STATE=present ;;
+        *)
+            TOKEN_STATE=failed
+            echo "WARNING: could not mint a bearer token in ops/.env, so the agent board stays off. Set PSEUDOLIFE_MCP_TOKEN there by hand and re-run." >&2 ;;
+    esac
+fi
+# <<< mint token <<<
 
 # ── 6. sidecar enable/disable via the compose override ────────────────────
 installer_owns_override() {
@@ -1185,16 +1245,6 @@ MCP_CLAUDE_DESKTOP=""
 MCP_CODEX=""
 MCP_GEMINI=""
 
-installer_python() {  # echoes an interpreter >= 3.10, or nothing
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 0
-}
 # Claude Desktop launches MCP servers with a sanitized environment, so a
 # token-gated daemon needs a token FILE path on the entry — never the value,
 # and never an OS env var, which Desktop cannot see (2026-09-19 incident).
@@ -1257,6 +1307,49 @@ print(r["runtime_defaults"])
     fi
     return 0
 }
+# Board credentials for the Claude Code and Gemini shims: an owner-only token
+# file per client holding its principal's own PSEUDOLIFE_MCP_TOKENS entry,
+# else the singular token; the shim re-reads it per call. Claude Code also
+# gets a private directory for its board address, keyed by session id so
+# `claude --resume <id>` keeps it. The plugin's hooks read the Claude Code
+# process environment, not the registration, so they get the file through
+# settings.json unless the user's own environment supplies a credential.
+# >>> client token files >>>
+CLIENT_DAEMON_URL="$(get_env PSEUDOLIFE_MCP_DAEMON_URL)"
+CLIENT_DAEMON_URL="${CLIENT_DAEMON_URL:-http://127.0.0.1:8765}"
+CLAUDE_AGENT_STATE_DIR="$HOME/.pseudolife-mcp/claude-code-agents"
+CLAUDE_JSON="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+client_token_file() {  # $1 = principal; echoes the token file it wrote or kept, or nothing
+    [ "$TRANSPORT" = shim ] || return 0
+    client_py="$(installer_python)"
+    [ -n "$client_py" ] || return 0
+    client_target="$HOME/.pseudolife-mcp/$1.token"
+    # The value rides process-scoped env vars, never an argument.
+    client_output=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
+        PSEUDOLIFE_INSTALLER_TOKENS="$(desktop_tokens_source)" \
+        "$client_py" "$repo/ops/client_credentials.py" token-file \
+        --principal "$1" --path "$client_target") || true
+    case "$client_output" in
+        *'"ready"'*) printf '%s\n' "$client_target" ;;
+        *'"tokenless"'*) ;;
+        *) echo "WARNING: could not write the $1 token file ($client_output); its registration gets no board credential." >&2 ;;
+    esac
+}
+CLAUDE_TOKEN_FILE=""
+GEMINI_TOKEN_FILE=""
+case " $CLIENTS " in *" claude "*) CLAUDE_TOKEN_FILE="$(client_token_file claude-code)" ;; esac
+case " $CLIENTS " in *" gemini "*) GEMINI_TOKEN_FILE="$(client_token_file gemini)" ;; esac
+if [ "${HOOK_CLAUDE:-}" = plugin ] && [ -n "$CLAUDE_TOKEN_FILE" ]; then
+    settings_output=$("$(installer_python)" "$repo/ops/client_credentials.py" claude-settings-env \
+        --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+        --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL") || true
+    case "$settings_output" in
+        *'"updated"'*) step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)." ;;
+        *'"kept"'*) ;;
+        *) echo "WARNING: could not give the plugin's hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the env block of ~/.claude/settings.json." >&2 ;;
+    esac
+fi
+# <<< client token files <<<
 for selected_client in $CLIENTS; do
     if [ "$selected_client" = claude-desktop ]; then
         # No `mcp add` CLI: the entry is merged into claude_desktop_config.json
@@ -1501,6 +1594,11 @@ for selected_client in $CLIENTS; do
                 step "MCP server already wired into Gemini CLI — registration preserved."
                 MCP_GEMINI=present
             fi
+            # `gemini mcp list` shows no env, so the installer cannot tell
+            # whether this registration carries a token; say how to add one.
+            if [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
+                echo "WARNING: the daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
+            fi
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
@@ -1517,7 +1615,11 @@ for selected_client in $CLIENTS; do
                     # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries
                     # the same Docker-tier no-spawn guard as the claude and
                     # codex registrations (2026-08-29 incident).
-                    gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory "$SHIM_PATH"
+                    if [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
+                        gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 -e "PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE" -e "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" pseudolife-memory "$SHIM_PATH"
+                    else
+                        gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory "$SHIM_PATH"
+                    fi
                     MCP_GEMINI=shim-env
                 else
                     echo "WARNING: this Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
@@ -1598,6 +1700,28 @@ for selected_client in $CLIENTS; do
             step "MCP server already wired into Claude Code — registration preserved."
             MCP_CLAUDE=present
         fi
+        # An install from before the board token: the upgraded shim reads a
+        # token file, so add it, the daemon URL and the state directory to
+        # the registration in place (never a remove and re-add), keeping any
+        # credential it already has. Anything else gets the manual fix.
+        claude_credential_ok=""
+        if [ "$MCP_CLAUDE" = present-upgraded ] && [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+            claude_env_output=$("$(installer_python)" "$repo/ops/client_credentials.py" registration-env \
+                --config "$CLAUDE_JSON" \
+                --set "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" \
+                --set "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" \
+                --set "PSEUDOLIFE_AGENT_STATE_DIR=$CLAUDE_AGENT_STATE_DIR") || true
+            case "$claude_env_output" in
+                *'"updated"'*)
+                    claude_credential_ok=1
+                    step "Claude Code registration: added the board token file, daemon URL and state directory in place. Restart Claude Code sessions to load them." ;;
+                *'"unchanged"'*) claude_credential_ok=1 ;;
+            esac
+        fi
+        if [ -z "$claude_credential_ok" ] && [ -n "${CLAUDE_TOKEN_FILE:-}" ] &&
+                ! printf '%s\n' "$existing_claude" | grep -q 'PSEUDOLIFE_MCP_TOKEN'; then
+            echo "WARNING: the daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
+        fi
     elif [ "$TRANSPORT" = "shim" ]; then
         ensure_shim
         if [ -n "$SHIM_OK" ]; then
@@ -1610,7 +1734,14 @@ for selected_client in $CLIENTS; do
                 # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier shims wait for the
                 # compose daemon instead of spawning a fallback that can
                 # shadow the real bank (see the Codex registration above).
-                claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
+                # With a token, the board credential rides along: the token
+                # file (re-read per call), the daemon URL, and the state
+                # directory that keeps a resumed session's board address.
+                if [ -n "${CLAUDE_TOKEN_FILE:-}" ]; then
+                    claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE" "PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL" "PSEUDOLIFE_AGENT_STATE_DIR=$CLAUDE_AGENT_STATE_DIR" -- "$SHIM_PATH"
+                else
+                    claude mcp add --scope user pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- "$SHIM_PATH"
+                fi
                 MCP_CLAUDE=shim-env
             else
                 echo "WARNING: this Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed." >&2
@@ -1744,6 +1875,41 @@ for selected_client in $CLIENTS; do
     esac
 done
 echo ""
+# One line for the agent board, as the daemon answers it for the first client
+# token file (else the daemon's singular token): on, or off and why.
+# >>> board line >>>
+board_hint=""
+case "$TOKEN_STATE" in
+    opted-out) board_hint=" (installed with --no-token; re-run without it to turn the board on)" ;;
+    http)      board_hint=" (--transport http registrations cannot carry a token file)" ;;
+    no-shim)   board_hint=" (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" ;;
+esac
+board_file="${CLAUDE_TOKEN_FILE:-${GEMINI_TOKEN_FILE:-${CODEX_CREDENTIAL_FILE:-}}}"
+board_py="$(installer_python)"
+if [ -z "$board_py" ]; then
+    board_line="unknown - no Python >= 3.10 to ask the daemon"
+elif [ -n "$board_file" ]; then
+    board_line=$("$board_py" "$repo/ops/client_credentials.py" board \
+        --daemon-url "$CLIENT_DAEMON_URL" --token-file "$board_file") || board_line="unknown"
+else
+    board_line=$(PSEUDOLIFE_INSTALLER_TOKEN="$(desktop_token_source)" \
+        "$board_py" "$repo/ops/client_credentials.py" board \
+        --daemon-url "$CLIENT_DAEMON_URL") || board_line="unknown"
+fi
+case "$board_line" in
+    on*) echo "  [x] Agent board          $board_line" ;;
+    *)   echo "  [!] Agent board          $board_line$board_hint" ;;
+esac
+case "$TOKEN_STATE" in minted|present)
+    for http_state in "${MCP_CLAUDE:-}" "${MCP_GEMINI:-}" "${MCP_CODEX:-}"; do
+        if [ "$http_state" = http ]; then
+            echo "WARNING: an HTTP registration sends no bearer token, and this daemon requires one, so its memory calls will be refused. Register the stdio shim (fix its install and re-run without --transport http), or remove the token from ops/.env for an open-loopback install." >&2
+            break
+        fi
+    done ;;
+esac
+echo ""
+# <<< board line <<<
 case "$EXTRACTOR" in
     sidecar)
         echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;

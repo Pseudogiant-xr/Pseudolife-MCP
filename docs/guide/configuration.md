@@ -85,7 +85,8 @@ but cannot send, receive or acknowledge another instance's mail. Awareness is
 gated on the same allowed-principal list: a bearer whose principal is not listed
 sees no peers and no awareness section in its briefing, and with no bearer token
 configured there is no principal to list, so the board stays dormant on an open
-loopback install: no awareness, no mail and no startup check-in.
+loopback install: no awareness, no mail and no startup check-in. The
+installers mint a token by default; see [Turning the board on](#turning-the-board-on).
 
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
@@ -161,6 +162,58 @@ host that cannot report a creation time falls back to the per-session key.
 After `/clear`, compaction or a resume, the current digest prints once more. A `--continue` launch whose shim got the
 startup id cannot be mapped, since no hook ever sees that id; such a session
 gets hints only.
+
+### Turning the board on
+
+A default `ops/install.sh` / `ops\install.ps1` run turns the board on:
+
+1. When neither `PSEUDOLIFE_MCP_TOKEN` nor `PSEUDOLIFE_MCP_TOKENS` is set in
+   `ops/.env` or the installer's environment, it writes a random
+   `PSEUDOLIFE_MCP_TOKEN` to `ops/.env`, makes that file owner-only, and never
+   prints the value. The daemon's `default` principal is on the default
+   `allowed_principals` list.
+2. It writes an owner-only token file per shim client it wires,
+   `~/.pseudolife-mcp/claude-code.token` and `~/.pseudolife-mcp/gemini.token`.
+   A `PSEUDOLIFE_MCP_TOKENS` map entry for that client's principal
+   (`claude-code`, `gemini`) wins over the singular token. List a map's
+   principals in `allowed_principals`.
+3. It registers Claude Code with `PSEUDOLIFE_MCP_TOKEN_FILE` (re-read on every
+   call, so a rotation needs no restart), `PSEUDOLIFE_MCP_DAEMON_URL` and
+   `PSEUDOLIFE_AGENT_STATE_DIR` (`~/.pseudolife-mcp/claude-code-agents`, which
+   keeps a resumed session's board address), and Gemini CLI with the first two.
+   Codex and Claude Desktop get their own credential files, as before.
+4. With the Claude Code plugin, it sets `PSEUDOLIFE_MCP_TOKEN_FILE` and
+   `PSEUDOLIFE_MCP_DAEMON_URL` in the `env` block of `~/.claude/settings.json`.
+   The plugin's hooks read the Claude Code process environment, not the MCP
+   registration, so without it they are refused; beside a Codex connection
+   file they also refuse a token file without the matching URL. It leaves that
+   block alone when it, or the installer's own environment, already sets
+   `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`, and never replaces a
+   URL already there.
+
+An existing install gets the same by re-running the installer. After it
+upgrades the shim behind an existing Claude Code registration, it adds the
+three settings to that registration in place (a backup of `~/.claude.json`
+is taken first) and keeps any credential the registration already has; restart
+Claude Code sessions to load them. A custom or HTTP registration is left alone
+with a warning: a token-gated daemon refuses an HTTP registration, which cannot
+carry a token file, so register the stdio shim instead. An existing Gemini CLI
+registration is always left alone with a warning naming the fix, since
+`gemini mcp list` shows no environment and the installer cannot tell whether it
+already carries a token.
+
+The installer's final ladder and `pseudolife-mcp doctor` (its `board` field,
+run from the registered command's environment) print one line: `on - token
+present, principal allowed`, or `off - ` and the daemon's reason. The reason
+comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
+(`disabled`, `authentication_required`, `unauthorized`,
+`principal_not_allowed` or `coordination_requires_postgres`).
+
+To keep an open-loopback install with the board dormant, pass `--no-token`
+(`-NoToken`). `--transport http` mints no token either, nor does a host that
+cannot install the shim (no pipx, and no Python >= 3.10 whose pip may install
+packages), since its registrations fall back to HTTP. None of these removes a
+token that is already configured.
 
 ### Waking an idle session: `pseudolife-mcp wait-mail`
 
