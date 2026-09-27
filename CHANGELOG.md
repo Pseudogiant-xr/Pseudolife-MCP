@@ -101,7 +101,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no park record: rung at most once an hour, with a request to park);
   `capped`. Chatter never rings. A retry repeats its decision, and the
   audit log's `send` event names it. The rings the daemon decides are
-  `coordination_wakes` rows; the recipient's next attach or heartbeat
+  `coordination_wakes` rows (left out of portable `export`, like the other
+  board tables); the recipient's next attach or heartbeat
   carries the newest as `wake` for one heartbeat interval (so a retried
   heartbeat still gets it; the adapter takes each ring once). An adapter
   declares at register and every attach whether a ring reaches it without

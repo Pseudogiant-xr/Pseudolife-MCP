@@ -1189,7 +1189,7 @@ The lock file remains on disk; lock ownership is released when the process exits
 including a crash. Do not delete it while an adapter might be using it.
 
 Full database backups contain coordination mail and the audit log. Portable `export`/`import`
-archives omit the coordination tables (agents, mail and the audit log) and their clock metadata so moving
+archives omit the coordination tables (agents, mail, leases, rings and the audit log) and their clock metadata so moving
 knowledge cannot clone live mailboxes or instance credentials. Follow the
 [offline mailbox recovery procedure](coordination-recovery.md) after a database
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
