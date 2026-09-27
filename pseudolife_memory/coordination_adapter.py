@@ -263,8 +263,7 @@ class CoordinationAdapter:
     def unread_hint(self) -> str | None:
         """The digest from the last adapter check; reading it does no I/O or ACK."""
         if self._permanent_failure:
-            return ("Coordination: background delivery stopped; check bearer access or "
-                    "restore/rebind the saved identity.")
+            return f"Coordination: background delivery stopped; {self._stop_advice()}."
         if self._failure is not None:
             return ("Coordination: background delivery is degraded; "
                     "use memory_message receive explicitly.")
@@ -487,8 +486,7 @@ class CoordinationAdapter:
             self._degraded.set()
             if not already_reported:
                 print("pseudolife-mcp: live coordination background delivery stopped; "
-                      "check bearer access or restore/rebind the saved identity.",
-                      file=sys.stderr)
+                      f"{self._stop_advice()}.", file=sys.stderr)
             return
         if self._failure is not None:
             return
@@ -497,6 +495,15 @@ class CoordinationAdapter:
         self._degraded.set()
         print("pseudolife-mcp: live coordination delivery unavailable; retrying in the "
               "background, use explicit receive meanwhile.", file=sys.stderr)
+
+    def _stop_advice(self) -> str:
+        """What the operator can do once background delivery has stopped. A
+        missing address cannot be rebound (rebind refuses a missing row), but
+        the next start retires the saved state and registers a new address."""
+        if self._failure is not None and self._failure.code == "instance_not_found":
+            return ("the board address no longer exists on this bank; restart the session "
+                    "to register a new one")
+        return "check bearer access or restore/rebind the saved identity"
 
     @staticmethod
     def _is_permanent_identity_error(error: AdapterError) -> bool:

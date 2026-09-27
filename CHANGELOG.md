@@ -45,6 +45,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   announcement is a message to the peers whose status shows the resource,
   with pid, worktree and ETA, and a holder is never assumed idle from
   process stats; a host-shaped symptom is broadcast before it is debugged.
+### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
+- A running shim whose saved board address the daemon had pruned (the host
+  slept, or the daemon was unreachable, past the seven-day retention, then a
+  heartbeat) stopped background delivery with "check bearer access or
+  restore/rebind the saved identity". Neither helps: `rebind` refuses a
+  missing address row. The stderr notice and the per-call hint now say the
+  address no longer exists and that restarting the session registers a new
+  one, which startup does since the 2026-09-28 fix for resumed sessions.
+  Auth and bank-mismatch failures keep the old wording. The running adapter
+  still does not swap its address in place; that stays a restart.
+
+### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
+- The plugin's bash hooks check digest keys, PIDs, timestamps and session
+  ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
+  under bash 3.2, which matches a range like `a-f` by locale collation, so
+  under a UTF-8 locale it also takes upper-case letters. The first macOS CI
+  run found `stop-wake.sh` following a `claude-<pid>.host` record of 64
+  upper-case letters to a digest that does not exist; Linux and Windows run
+  bash 5, which matches ranges by code point and refuses it.
+  `coordination-prompt.sh`, `coordination-start.sh` and `session-end.sh`
+  read the same record with the same check. The hooks write that record in
+  lower case themselves, so this took a damaged or planted file. With the
+  same collation reproduced on Git Bash, `0-9` also takes digits such as
+  `²`, and such a value would reach the timestamp arithmetic that the
+  checks guard. Every set is now spelled out (`[!0123456789abcdef]`), which
+  bash compares character by character with no collation involved.
+  `tests/test_hook_glob_ranges.py` reproduces the 3.2 matching on any bash
+  and fails on any bracket range in a hook line that is not a sed, grep
+  or awk expression.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks`.
+
+### Added (2026-09-27 — CI runs the plugin hooks on macOS)
+- A fourth CI lane, `test-lite-macos` (macos-latest, Python 3.11), runs
+  the plugin hook, client installer, coordination and embedded-provider
+  tests on a real macOS runner, under its bash 3.2 and BSD tools. The
+  hooks' BSD fallbacks (`stat -f`, `base64 -D`, `shasum`,
+  `ps -o lstart=`) had run nowhere before. It is a fixed file list like
+  the Windows lane, not the full suite: about 8 runner minutes, of which
+  the tests take about 7. The first run failed only on the hook bug
+  above. The lane starts no Postgres, so the store tests in
+  `test_coordination_turn_digest.py` skip there (the Linux lanes run
+  them); every other skip is Windows-only. A step fails the job unless
+  the bash on PATH is 3.2.
+
 ### Fixed (2026-09-28 — a Claude Code session resumed after its board address was pruned gets a new one)
 - A Claude Code session whose shim keeps agent state
   (`PSEUDOLIFE_AGENT_STATE_DIR`) re-attaches to its saved board address on

@@ -403,7 +403,12 @@ def test_a_state_less_adapter_replaces_an_address_the_daemon_retired(monkeypatch
     asyncio.run(asyncio.wait_for(drive(), 5))
 
 
-def test_a_state_backed_adapter_keeps_its_retired_address_for_deliberate_recovery(monkeypatch, tmp_path):
+def test_a_state_backed_adapter_stops_on_a_retired_address_and_points_to_a_restart(
+        monkeypatch, tmp_path):
+    """A running adapter with saved state does not swap its address in the
+    background: it stops, and the next start retires the state and registers
+    a new address. Rebind cannot help (it refuses a missing row), so the
+    advice names the restart instead."""
     async def drive():
         from pseudolife_memory.coordination_adapter import CoordinationAdapter
         monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
@@ -415,6 +420,8 @@ def test_a_state_backed_adapter_keeps_its_retired_address_for_deliberate_recover
             await _wait_for(lambda: instance._permanent_failure)
             assert state["registers"] == 1
             assert instance.instance_headers["X-PL-Agent"] == "agent-1"
+            assert "restart the session" in instance.unread_hint
+            assert "rebind" not in instance.unread_hint
 
     asyncio.run(asyncio.wait_for(drive(), 5))
 
