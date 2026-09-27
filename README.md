@@ -256,6 +256,13 @@ setups. Non-interactive example:
 Without explicit hook approval, unattended setup does not grant trust; use
 `--codex-hooks skip --instructions append` for instructions only. Explicit
 `--instructions skip` prevents fallback edits.
+The installer also turns the agent board on: it mints a bearer token in
+`ops/.env` (owner-only, never printed) and gives each shim client it wires an
+owner-only token file. Re-running it on an existing install adds that file to
+the Claude Code registration in place. The ladder's last line, and
+`pseudolife-mcp doctor`, say whether the board is on or why it is off.
+`--no-token` / `-NoToken` keeps an open-loopback install with the board
+dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
