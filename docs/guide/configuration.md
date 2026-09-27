@@ -85,7 +85,8 @@ but cannot send, receive or acknowledge another instance's mail. Awareness is
 gated on the same allowed-principal list: a bearer whose principal is not listed
 sees no peers and no awareness section in its briefing, and with no bearer token
 configured there is no principal to list, so the board stays dormant on an open
-loopback install: no awareness, no mail and no startup check-in.
+loopback install: no awareness, no mail and no startup check-in. The
+installers mint a token by default; see [Turning the board on](#turning-the-board-on).
 
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
@@ -112,16 +113,25 @@ provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
 private file outside the repository for deliberate mailbox resume. Each concurrent
 adapter needs its own state file; sharing one does not create a second identity.
-Claude Code sessions can instead set `PSEUDOLIFE_AGENT_STATE_DIR` to a private
-directory: the shim keys one state file under it by the
+Claude Code sessions use `PSEUDOLIFE_AGENT_STATE_DIR` instead, a private
+directory. When the installers register Claude Code with a token file, they
+set it beside the token to `~/.pseudolife-mcp/claude-code-agents`, keeping a
+value the registration already has (see
+[Turning the board on](#turning-the-board-on)); a registration made by hand
+sets it itself. The shim keys one state file under it by the
 `CLAUDE_CODE_SESSION_ID` Claude Code launches it with, so concurrent sessions
 never share one and `claude --resume <id>` returns to the session's address.
-That id is fixed for the shim's lifetime: `/clear` or an in-session `/resume`
-keeps the running shim and its address. `claude --continue`, or `--resume`
-without an id, may launch the shim with the process's startup id instead of
-the resumed one, and the session then gets a new address. Without either, each launch
-gets a new address, registered as not resumable and retired an hour after it
-goes quiet. Never infer recovery from a
+That id is fixed for the shim's lifetime: `/clear`, compaction or an
+in-session `/resume` keeps the running shim and its address. `claude
+--continue`, or `--resume` without an id, may launch the shim with the
+process's startup id instead of the resumed one, and the session then gets a
+new address. A state-backed address registers as resumable and is kept for
+seven days after its last activity or lease (longer while a retained message
+names it), so the board holds about a week of sessions; a session resumed
+after its address was removed registers a new one and keeps the old state
+file with a `.stale` suffix. Without a state file or directory,
+each launch gets a new address, registered as not resumable and retired an
+hour after it goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
 private file and adapter headers, not model arguments or memory entries.
 
@@ -161,6 +171,58 @@ host that cannot report a creation time falls back to the per-session key.
 After `/clear`, compaction or a resume, the current digest prints once more. A `--continue` launch whose shim got the
 startup id cannot be mapped, since no hook ever sees that id; such a session
 gets hints only.
+
+### Turning the board on
+
+A default `ops/install.sh` / `ops\install.ps1` run turns the board on:
+
+1. When neither `PSEUDOLIFE_MCP_TOKEN` nor `PSEUDOLIFE_MCP_TOKENS` is set in
+   `ops/.env` or the installer's environment, it writes a random
+   `PSEUDOLIFE_MCP_TOKEN` to `ops/.env`, makes that file owner-only, and never
+   prints the value. The daemon's `default` principal is on the default
+   `allowed_principals` list.
+2. It writes an owner-only token file per shim client it wires,
+   `~/.pseudolife-mcp/claude-code.token` and `~/.pseudolife-mcp/gemini.token`.
+   A `PSEUDOLIFE_MCP_TOKENS` map entry for that client's principal
+   (`claude-code`, `gemini`) wins over the singular token. List a map's
+   principals in `allowed_principals`.
+3. It registers Claude Code with `PSEUDOLIFE_MCP_TOKEN_FILE` (re-read on every
+   call, so a rotation needs no restart), `PSEUDOLIFE_MCP_DAEMON_URL` and
+   `PSEUDOLIFE_AGENT_STATE_DIR` (`~/.pseudolife-mcp/claude-code-agents`, which
+   keeps a resumed session's board address), and Gemini CLI with the first two.
+   Codex and Claude Desktop get their own credential files, as before.
+4. With the Claude Code plugin, it sets `PSEUDOLIFE_MCP_TOKEN_FILE` and
+   `PSEUDOLIFE_MCP_DAEMON_URL` in the `env` block of `~/.claude/settings.json`.
+   The plugin's hooks read the Claude Code process environment, not the MCP
+   registration, so without it they are refused; beside a Codex connection
+   file they also refuse a token file without the matching URL. It leaves that
+   block alone when it, or the installer's own environment, already sets
+   `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`, and never replaces a
+   URL already there.
+
+An existing install gets the same by re-running the installer. After it
+upgrades the shim behind an existing Claude Code registration, it adds the
+three settings to that registration in place (a backup of `~/.claude.json`
+is taken first) and keeps any credential the registration already has; restart
+Claude Code sessions to load them. A custom or HTTP registration is left alone
+with a warning: a token-gated daemon refuses an HTTP registration, which cannot
+carry a token file, so register the stdio shim instead. An existing Gemini CLI
+registration is always left alone with a warning naming the fix, since
+`gemini mcp list` shows no environment and the installer cannot tell whether it
+already carries a token.
+
+The installer's final ladder and `pseudolife-mcp doctor` (its `board` field,
+run from the registered command's environment) print one line: `on - token
+present, principal allowed`, or `off - ` and the daemon's reason. The reason
+comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
+(`disabled`, `authentication_required`, `unauthorized`,
+`principal_not_allowed` or `coordination_requires_postgres`).
+
+To keep an open-loopback install with the board dormant, pass `--no-token`
+(`-NoToken`). `--transport http` mints no token either, nor does a host that
+cannot install the shim (no pipx, and no Python >= 3.10 whose pip may install
+packages), since its registrations fall back to HTTP. None of these removes a
+token that is already configured.
 
 ### Waking an idle session: `pseudolife-mcp wait-mail`
 
@@ -913,15 +975,16 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. A
-legacy adapter registers a fresh address on its next start only when the authenticated
-daemon explicitly confirms that the saved address no longer exists. It keeps
+write that carries no instance credential. An
+adapter with saved state registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists (pruned
+after seven idle days with no retained mail, or absent from a restored
+database, where `rebind` cannot restore it either). A bank-bound client first
+verifies that the daemon is still its saved bank and principal. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential preserves the saved address and requires corrected authentication
-or the deliberate restore/rebind procedure; an HTTP status alone never proves
-that an address should be replaced.
-Bank-bound clients preserve their address even when it is missing on the server;
-use deliberate recovery rather than silently registering a replacement.
+credential, or a different bank or principal, preserves the saved address and
+requires corrected authentication or the deliberate restore/rebind procedure;
+an HTTP status alone never proves that an address should be replaced.
 
 A subagent that a Claude Code session spawns with its Agent tool runs in the
 same shim process, so its board calls carry the parent's identity (probed
@@ -975,7 +1038,12 @@ generation's replay cursor. An explicit authentication or identity rejection
 preserves state and stops retries with the rejected credential. File-backed
 clients observe the credential source and resume after a replacement authenticates
 to the saved bank and principal. An authority mismatch remains closed until the
-credential again matches the saved authority; it never creates a replacement address. Do not
+credential again matches the saved authority; it never creates a replacement address. A
+saved address the daemon reports missing while the shim runs (the host slept or
+the daemon was unreachable past the seven-day retention) also stops background
+delivery and keeps the state file, but the notice says to restart the session:
+`rebind` cannot restore a missing address, and the next start retires the state
+and registers a new one. Do not
 infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before

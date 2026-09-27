@@ -38,6 +38,126 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tests/suite_lock.py`, `session_kind` and `take_for_session`'s
   `preflight` hook).
 
+### Fixed (2026-09-28 — a running session whose board address was pruned is told to restart, not to rebind)
+- A running shim whose saved board address the daemon had pruned (the host
+  slept, or the daemon was unreachable, past the seven-day retention, then a
+  heartbeat) stopped background delivery with "check bearer access or
+  restore/rebind the saved identity". Neither helps: `rebind` refuses a
+  missing address row. The stderr notice and the per-call hint now say the
+  address no longer exists and that restarting the session registers a new
+  one, which startup does since the 2026-09-28 fix for resumed sessions.
+  Auth and bank-mismatch failures keep the old wording. The running adapter
+  still does not swap its address in place; that stays a restart.
+
+### Fixed (2026-09-27 — on macOS the plugin hooks refuse an upper-case digest key)
+- The plugin's bash hooks check digest keys, PIDs, timestamps and session
+  ids with glob character sets such as `*[!0-9a-f]*`. macOS runs the hooks
+  under bash 3.2, which matches a range like `a-f` by locale collation, so
+  under a UTF-8 locale it also takes upper-case letters. The first macOS CI
+  run found `stop-wake.sh` following a `claude-<pid>.host` record of 64
+  upper-case letters to a digest that does not exist; Linux and Windows run
+  bash 5, which matches ranges by code point and refuses it.
+  `coordination-prompt.sh`, `coordination-start.sh` and `session-end.sh`
+  read the same record with the same check. The hooks write that record in
+  lower case themselves, so this took a damaged or planted file. With the
+  same collation reproduced on Git Bash, `0-9` also takes digits such as
+  `²`, and such a value would reach the timestamp arithmetic that the
+  checks guard. Every set is now spelled out (`[!0123456789abcdef]`), which
+  bash compares character by character with no collation involved.
+  `tests/test_hook_glob_ranges.py` reproduces the 3.2 matching on any bash
+  and fails on any bracket range in a hook line that is not a sed, grep
+  or awk expression.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. Codex may ask to
+  re-approve the changed hooks in `/hooks`.
+
+### Added (2026-09-27 — CI runs the plugin hooks on macOS)
+- A fourth CI lane, `test-lite-macos` (macos-latest, Python 3.11), runs
+  the plugin hook, client installer, coordination and embedded-provider
+  tests on a real macOS runner, under its bash 3.2 and BSD tools. The
+  hooks' BSD fallbacks (`stat -f`, `base64 -D`, `shasum`,
+  `ps -o lstart=`) had run nowhere before. It is a fixed file list like
+  the Windows lane, not the full suite: about 8 runner minutes, of which
+  the tests take about 7. The first run failed only on the hook bug
+  above. The lane starts no Postgres, so the store tests in
+  `test_coordination_turn_digest.py` skip there (the Linux lanes run
+  them); every other skip is Windows-only. A step fails the job unless
+  the bash on PATH is 3.2.
+
+### Fixed (2026-09-28 — a Claude Code session resumed after its board address was pruned gets a new one)
+- A Claude Code session whose shim keeps agent state
+  (`PSEUDOLIFE_AGENT_STATE_DIR`) re-attaches to its saved board address on
+  `claude --resume`. The daemon removes a resumable address seven days after
+  its last activity or lease, once no retained message names it. Resuming
+  after that failed startup attach with `instance_not_found`, and the shim
+  kept the state file, so every later resume of that session failed the same
+  way and it never got a board address again (memory kept working). The
+  retire-and-re-register path ran only for adapters without a credential
+  provider, and the shim and the Codex registry always pass one.
+- A bank-bound adapter now takes the same path: the saved state moves aside
+  with a `.stale` suffix and a fresh address is registered. This reverses the
+  rule, added 2026-09-13, that bank-bound clients keep an address the server
+  no longer has. The daemon returns `instance_not_found` only when the
+  address row is missing, every request first re-verifies the saved bank and
+  principal, and `rebind` refuses a missing row, so the recovery that rule
+  pointed to could not restore the address. A rejected bearer or instance
+  credential, or a different bank or principal, still preserves the saved
+  address. Unchanged too: pre-2026-09-13 state not yet bound to a bank stops
+  earlier, at the ownership proof, when its address is gone, because that
+  answer does not tell a missing address from a different principal.
+
+### Fixed (2026-09-27 — a default install turns the agent board on, and the installer says whether it did)
+- The agent board needs a bearer token, but neither installer created one,
+  so a default install left the board dormant with nothing on screen saying
+  so. Once a user added a token, the Claude Code registration still carried
+  none (unlike Codex's), and a tokenless shim exits at startup against a
+  token-gated daemon, so memory broke too.
+- `ops/install.sh` and `ops/install.ps1` now write a random
+  `PSEUDOLIFE_MCP_TOKEN` to `ops/.env` when neither it nor
+  `PSEUDOLIFE_MCP_TOKENS` is set there or in the installer's environment.
+  The file becomes owner-only and the value is never printed.
+  `--no-token` / `-NoToken` keeps the documented open-loopback mode.
+  `--transport http` (whose registrations cannot carry a token file) mints
+  none either, nor does a host that cannot install the shim (no pipx, and no
+  pip-capable Python outside a PEP 668 externally managed environment),
+  since its registrations would fall back to HTTP.
+- Each shim client the installer wires gets an owner-only token file,
+  `~/.pseudolife-mcp/claude-code.token` and `gemini.token`, holding its
+  principal's own `PSEUDOLIFE_MCP_TOKENS` entry or else the singular token.
+  The Claude Code registration now carries `PSEUDOLIFE_MCP_TOKEN_FILE`,
+  `PSEUDOLIFE_MCP_DAEMON_URL` and `PSEUDOLIFE_AGENT_STATE_DIR`
+  (`~/.pseudolife-mcp/claude-code-agents`, so `claude --resume <id>` keeps
+  its board address); Gemini CLI's carries the first two. With the Claude
+  Code plugin, `PSEUDOLIFE_MCP_TOKEN_FILE` and `PSEUDOLIFE_MCP_DAEMON_URL`
+  also go into the `env` block of `~/.claude/settings.json`: the plugin's
+  hooks read the Claude Code process environment, not the registration, and
+  beside a Codex connection file they refuse a token file without the
+  matching URL. A symlinked config is written through. A credential the user's own
+  environment or settings already supply is left alone. The shared work
+  lives in the new `ops/client_credentials.py`, which writes token files
+  through the same owner-only writer as the Codex and Claude Desktop paths.
+- With the state directory now set by default, a Claude Code session keeps
+  one board address across `claude --resume <id>` instead of taking a new
+  one per launch. That address registers as resumable, so the daemon keeps it
+  for seven days after its last activity rather than one hour: the board
+  now holds about a week of Claude Code sessions, as it already did for
+  Codex threads. A session resumed after its address was removed runs
+  without one. A new test drives two launches of one session, and one of
+  another, through the shim and the adapter to pin this.
+- The installers' final ladder and `pseudolife-mcp doctor` (a new `board`
+  field) print one line: `on - token present, principal allowed`, or `off -`
+  and the reason. The reason is the daemon's own, from a new `X-PL-Board`
+  header on `GET /api/hook/coordination-start`.
+- Upgrading: re-run the installer. It mints the token if `ops/.env` has
+  none, and after upgrading the shim behind an existing Claude Code
+  registration it adds the token file, daemon URL and state directory to
+  that registration in place (a backup of `~/.claude.json` first), keeping
+  any credential already there. Restart Claude Code sessions afterwards. A
+  custom or HTTP Claude Code registration, and any existing Gemini CLI
+  registration (`gemini mcp list` shows no environment, so the installer
+  cannot tell whether it carries a token), is left alone with a warning
+  naming the fix.
+
 ### Added (2026-09-27 — a session names its subagents on the board, and subagents stop writing as their parent, schema v47)
 - A subagent that a Claude Code session spawns with its Agent tool shares the
   parent's shim, so its board calls carry the parent's identity (probed
