@@ -598,14 +598,28 @@ def _origin_from_source(source: str | None) -> str | None:
     return _SOURCE_ORIGIN.get((source or "").strip().lower())
 
 
+# An apostrophe glued to letters on both sides ("don't", "o'brien") is part
+# of a word, not a boundary. The one exception is the possessive "'s": a
+# task says "the bench server's config", and that names "bench server".
+_APOS = "'’"
+_SCOPE_BEFORE = rf"(?<!\w)(?<!\w[{_APOS}])"
+_SCOPE_AFTER = rf"(?!\w)(?![{_APOS}](?!s(?!\w))\w)"
+
+
 def _entity_in_query(entity: str | None, query: str | None) -> bool:
     """The recall-scope test for constraint pinning (TypeRetrieve, arXiv
     2608.22752): a fact is in scope when the query NAMES its entity. Both
     sides go through the cortex's own slot normalisation (casefold,
     separators folded to one hyphen) and the entity must occur as a
-    hyphen-bounded run — so ``payments db`` matches ``payments-db`` but
-    ``db`` does not match ``payments-database``. No embedding pass; the
-    cost is one string scan per constraint-labelled fact.
+    word-bounded run: no letter or digit on either side, so ``payments
+    db`` matches ``payments-db`` but ``db`` does not match
+    ``payments-database``. Punctuation the slot key keeps (``?``, ``,``,
+    ``:``, quotes, brackets) is a boundary too, so "start the bench
+    server?" and "the bench server's config" name ``bench server``;
+    ``_norm_key`` itself is untouched, because it keys the slots. An
+    apostrophe inside a word is not a boundary except before a
+    possessive ``s``, so ``don't`` does not name ``Don``. No embedding
+    pass; the cost is one regex scan per constraint-labelled fact.
 
     Known limit: a RAW-STRING test — it does not resolve graph aliases,
     so a constraint written under an alias that was later folded into
@@ -618,7 +632,8 @@ def _entity_in_query(entity: str | None, query: str | None) -> bool:
     e = _norm_key(entity or "")
     if not e:
         return False
-    return f"-{e}-" in f"-{_norm_key(query or '')}-"
+    pattern = _SCOPE_BEFORE + re.escape(e) + _SCOPE_AFTER
+    return re.search(pattern, _norm_key(query or "")) is not None
 
 
 def _inherited_labels(parents, new_text: str) -> tuple[str | None, str | None]:

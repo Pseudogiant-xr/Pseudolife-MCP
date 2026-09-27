@@ -155,6 +155,36 @@ def test_scope_test_is_separator_insensitive_and_word_bounded():
     assert not _entity_in_query("", "anything")
 
 
+def test_scope_test_treats_punctuation_as_a_boundary():
+    """A task names an entity mid-sentence, so the bounded match must end
+    at ``?``, ``,`` or a possessive ``'s`` as well as at whitespace and
+    ``._-/``. Found 2026-09-27: each of the first three queries named
+    "bench server" and none pinned its rule."""
+    from pseudolife_memory.service import _entity_in_query
+    assert _entity_in_query("bench server", "should I start the bench server?")
+    assert _entity_in_query("bench server", "start the bench server, then run")
+    assert _entity_in_query("bench server", "the bench server's config")
+    assert _entity_in_query("bench server", "the bench server’s config")
+    assert _entity_in_query("bench server", "(bench server): up?")
+    assert _entity_in_query("bench server", "is 'bench server' up")
+    assert _entity_in_query("host:port", "what is the host:port?")
+    # The separator folding and the word bound are unchanged.
+    assert _entity_in_query("payments db", "payments-db")
+    assert not _entity_in_query("db", "what is the payments-database host")
+    assert not _entity_in_query("bench", "the benchmark server?")
+
+
+def test_scope_test_does_not_split_contractions():
+    """An apostrophe inside a word is not a boundary, except before a
+    possessive s: "Don" is not named by "don't", only by "Don's"."""
+    from pseudolife_memory.service import _entity_in_query
+    assert not _entity_in_query("Don", "don't start the bench server")
+    assert not _entity_in_query("Don", "don’t start it")
+    assert not _entity_in_query("brien", "ask o'brien first")
+    assert _entity_in_query("Don", "ask Don's team first")
+    assert _entity_in_query("bench servers", "the bench servers' configs")
+
+
 def test_mcp_search_cortex_block_carries_labels_and_pins(tmp_path, monkeypatch):
     """The cortex block is a whitelist re-selection (chip 4.1's re_verify
     lesson): pinned / authority / distortion_tolerance must be re-selected

@@ -303,8 +303,11 @@ the cosine ranking, marked `pinned: true`, when it is **in scope** — and
 scope is defined cheaply and precisely, with no second embedding pass:
 in `memory_search`'s cortex block, the query *names the fact's entity*
 (both sides go through the cortex's slot normalisation, so `payments db`
-matches `payments-db`, and the entity must occur as a separator-bounded
-run, so `db` does not match `payments-database`; a raw-string test — it
+matches `payments-db`, and the entity must occur as a word-bounded run
+with no letter or digit touching it, so `db` does not match
+`payments-database` while `bench server?`, `bench server,` and
+`bench server's` all name `bench server`; an apostrophe inside a word
+binds it, so `don't` does not name `Don`; a raw-string test — it
 does not resolve graph aliases, so a constraint written under an alias
 later folded into another name is pinned by `memory_recall` but not by
 the cortex block, a known open follow-up now that

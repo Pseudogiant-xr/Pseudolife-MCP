@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-27 — a rule is pinned when the query names its entity before punctuation)
+- Constraint pinning in `memory_search` missed a rule whenever the query
+  named the rule's entity right before punctuation. With a rule stored
+  under `bench server`, "about to start the bench server on the 4090"
+  pinned it, but "should I start the bench server?", "start the bench
+  server, then run" and "the bench server's config" did not (probed
+  2026-09-27). The scope test (`_entity_in_query`) required a hyphen on
+  each side of the entity after slot normalisation, and `?`, `,` and `'`
+  are not slot separators. It now requires only that no letter or digit
+  touches the entity, so any punctuation ends it. An apostrophe inside a
+  word still binds it, except before a possessive `s`: "Don's team"
+  names `Don`, "don't" does not. The slot key (`_norm_key`) is unchanged,
+  so no slot is re-keyed, and every query that pinned a rule before
+  still pins it. `memory_recall` seeds through its own raw-text matcher
+  (`recall._mentions`), which already treats `?`, `,` and `'s` as
+  boundaries and is left as it is.
+
 ### Changed (2026-09-27 — the per-turn memory-change hook takes half the time)
 - `pseudolife-mcp prompt-hook`, which installs without the plugin run on
   every user prompt, took a median of about 270 ms a turn on the
