@@ -7,6 +7,7 @@ docs/specs/2026-06-23-memcot-live-wiring-design.md.
 """
 from __future__ import annotations
 
+import functools
 import json  # noqa: E402
 import os  # noqa: E402
 import re
@@ -18,14 +19,48 @@ from typing import Any, Callable, Protocol
 from pseudolife_memory.utils import no_redirect
 
 
+# Boundaries for _mentions. A dot is a boundary unless a word character sits
+# on its far side, so "the bench server." names "bench server" but "node"
+# does not match inside "node.js" (nor "v1" inside "v1.2"). An apostrophe
+# glued to a word on both sides is part of that word ("don't" does not name
+# "Don"), except before a possessive "s" ("the bench server's config" names
+# "bench server") — the same apostrophe rule as the pin-scope test.
+_APOS = "'’"
+_MENTION_BEFORE = rf"(?<!\w)(?<!\w\.)(?<!\w[{_APOS}])"
+_MENTION_AFTER = rf"(?!\w)(?!\.\w)(?![{_APOS}](?!s(?!\w))\w)"
+# Separators inside a NAME match any run of each other, so "payments db"
+# and "payments-db" name the same entity (the run cortex._norm_key folds,
+# less the dot: "node.js" stays literal). The text is not folded, so "_"
+# in the text is still part of a word.
+_NAME_SEP = r"[\s_\-/]+"
+
+
+@functools.lru_cache(maxsize=8192)
+def _mention_re(name: str) -> re.Pattern[str]:
+    pieces = re.split(f"({_NAME_SEP})", name)
+    # re.split with a group alternates text, separator, text, ...; only a
+    # separator between two non-empty runs is internal to the name.
+    body = "".join(
+        _NAME_SEP if i % 2 and pieces[i - 1] and pieces[i + 1]
+        else re.escape(p)
+        for i, p in enumerate(pieces))
+    return re.compile(_MENTION_BEFORE + body + _MENTION_AFTER, re.IGNORECASE)
+
+
 def _mentions(text: str, name: str) -> bool:
-    """Word-boundary, case-insensitive membership (hyphens are boundaries, so
-    'k8s' does not match 'k8s-prod'). Canonical package copy of the bench's
-    value_present."""
+    """Word-bounded, case-insensitive: does ``text`` name ``name``?
+
+    Hyphens are boundaries, so 'k8s' matches 'k8s-prod cluster' (as the
+    pin-scope test ``service._entity_in_query`` also treats them). A dot
+    bounds only when no word character follows it, apostrophes bound only
+    a possessive 's', and the name's own separators fold (see the
+    constants above). Began as a copy of ``ladder_sweep.value_present``,
+    whose any-adjacent-dot exclusion missed a name a sentence ends on;
+    that scorer is left as it is, since changing it would move the
+    scores it has already produced."""
     if not text or not name:
         return False
-    return re.search(r"(?<![\w.])" + re.escape(name) + r"(?![\w.])",
-                     text, re.IGNORECASE) is not None
+    return _mention_re(name).search(text) is not None
 
 
 @dataclass
