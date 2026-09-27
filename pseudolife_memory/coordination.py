@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import parse_token_map, resolve_principal
-from pseudolife_memory.storage.coordination import CoordinationClockChanged
+from pseudolife_memory.storage.coordination import CoordinationClockChanged, CoordinationError
 
 
 _PARAMETERS = {
@@ -73,7 +73,25 @@ PUBLIC_ERROR_CODES = frozenset({
     "lease_not_held", "lease_queue_full",
     # v46: a body, status or lease purpose shaped like a credential (a 400).
     "secret_like_body",
+    # v47: an id prefix that matches several ids (the detail names them),
+    # and a burst (``to: "project:<name>"`` or ``"all"``) that would reach
+    # nobody or more than FANOUT_MAX peers.
+    "ambiguous_recipient", "ambiguous_message_id", "ambiguous_reply",
+    "fanout_too_large", "no_recipients",
 })
+
+
+class CoordinationRefused(ValueError):
+    """What ``dispatch`` raises: a stable public code and, for some
+    refusals, a short public ``detail`` the caller can act on (the
+    candidates an ambiguous prefix matched, the size of a refused burst).
+    Its text is ``code`` or ``code: detail``, which is what the MCP tool
+    surfaces; the REST route sends the two as separate fields."""
+
+    def __init__(self, code: str, detail: str | None = None):
+        self.code = code
+        self.detail = detail
+        super().__init__(code if detail is None else f"{code}: {detail}")
 
 
 # Travels with every receive result so the caution is beside the text, not
@@ -126,10 +144,19 @@ def unavailable_reason(service, headers: Mapping[str, str], *,
 
 
 def public_error(exc: Exception) -> str:
-    code = str(exc)
+    code = exc.code if isinstance(exc, CoordinationRefused) else str(exc)
     if code in PUBLIC_ERROR_CODES:
         return code
     return "invalid_request" if isinstance(exc, (ValueError, TypeError)) else "coordination_unavailable"
+
+
+def public_detail(exc: Exception) -> str | None:
+    """The refusal's detail, only beside its own public code: never the
+    text of an unexpected exception."""
+    if not isinstance(exc, (CoordinationError, CoordinationRefused)):
+        return None
+    detail = exc.detail
+    return detail if isinstance(detail, str) and exc.code in PUBLIC_ERROR_CODES else None
 
 
 def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token=None) -> str:
@@ -333,8 +360,18 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
     if action in {"send", "attach", "detach"}:
         notify = getattr(service, "_coordination_notifier", None)
         if notify is not None:
-            notify(parameters["to"] if action == "send" else agent_id)
+            # The receipts name the recipients: the address may have been a
+            # prefix, or a project or the whole board.
+            for recipient in (send_recipients(result) if action == "send" else [agent_id]):
+                notify(recipient)
     return result
+
+
+def send_recipients(result) -> list[str]:
+    """The agent ids a send result says were reached: one, or a burst's."""
+    if "receipts" in result:
+        return [receipt["recipient_agent_id"] for receipt in result["receipts"]]
+    return [result["recipient_agent_id"]]
 
 
 def dispatch(service, action: str, parameters: dict, *, headers=None,
@@ -355,7 +392,7 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
                 service._ensure_init()
             return _dispatch(service, action, parameters, headers=headers, principal=principal)
     except Exception as exc:
-        raise ValueError(public_error(exc)) from None
+        raise CoordinationRefused(public_error(exc), public_detail(exc)) from None
 
 
 # How long a model's claim holds between renewals. A model renews by claiming

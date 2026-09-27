@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 46
+SCHEMA_META_VERSION = 47
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -517,7 +517,6 @@ CREATE TABLE IF NOT EXISTS coordination_messages (
     attempt_generation BIGINT,
     attempts INTEGER NOT NULL DEFAULT 0,
     acknowledged_at DOUBLE PRECISION,
-    UNIQUE (sender_agent_id, request_id),
     UNIQUE (recipient_agent_id, recipient_sequence)
 );
 CREATE INDEX IF NOT EXISTS coordination_messages_pending_idx
@@ -616,6 +615,23 @@ BEGIN
                    WHERE attrelid = 'coordination_events'::regclass
                      AND attname = 'body_salt' AND attnum > 0 AND NOT attisdropped) THEN
         ALTER TABLE coordination_events ADD COLUMN IF NOT EXISTS body_salt TEXT;
+    END IF;
+END $$;
+-- v47: one send may reach several recipients (``to: "project:<name>"`` or
+-- ``"all"``) under one request id, one row each, so the sender's request key
+-- admits the recipient. The unique index is created first, so the table is
+-- never without a request key; the pre-v47 constraint is dropped only where
+-- it exists, since ALTER TABLE takes an ACCESS EXCLUSIVE lock even for a
+-- DROP CONSTRAINT IF EXISTS that finds nothing (same reason as v46 above).
+CREATE UNIQUE INDEX IF NOT EXISTS coordination_messages_request_idx
+    ON coordination_messages (sender_agent_id, request_id, recipient_agent_id);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint
+               WHERE conrelid = 'coordination_messages'::regclass
+                 AND conname = 'coordination_messages_sender_agent_id_request_id_key') THEN
+        ALTER TABLE coordination_messages
+            DROP CONSTRAINT IF EXISTS coordination_messages_sender_agent_id_request_id_key;
     END IF;
 END $$;
 """
