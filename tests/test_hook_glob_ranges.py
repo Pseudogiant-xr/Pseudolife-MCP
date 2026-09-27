@@ -76,7 +76,14 @@ def test_compaction_does_not_carry_an_upper_case_process_record(tmp_path):
     record = _write_digest(tmp_path, own, 3, BODY) / f"claude-{env['CLAUDE_PID']}.host"
     _plant(record, f"{UPPER}\n{own}\n")
     _claude_hook("coordination-start.sh", env, "launch-session", source="compact")
-    assert record.read_text(encoding="utf-8") == f"{own}\n{own}\n"
+    # Lines 3-4, where the host offers them, are the cached process identity
+    # and its expiry (tests/test_coordination_turn_digest.py).
+    lines = record.read_text(encoding="utf-8").split("\n")
+    assert lines[:2] == [own, own] and lines[-1] == ""
+    assert len(lines) in (3, 5)
+    if len(lines) == 5:
+        assert re.fullmatch(r"[0-9a-f]{64}", lines[2])
+        assert re.fullmatch(r"[0-9]{1,12} (-|[+-][0-9]{4})", lines[3])
 
 
 def test_session_end_replaces_an_upper_case_process_record(tmp_path):
