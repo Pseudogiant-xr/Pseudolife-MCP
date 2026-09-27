@@ -307,7 +307,8 @@ def _redact(args) -> int:
             result = CoordinationStore(_Storage(conn)).redact(args.message_id, args.reason)
         except CoordinationError as exc:
             print(json.dumps({"ok": False, "message_id": args.message_id, "reason": exc.code}))
-            print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}", file=sys.stderr)
+            print(f"board-audit: {_REDACT_REFUSALS.get(exc.code, exc.code)}"
+                  + (f": {exc.detail}" if exc.detail else ""), file=sys.stderr)
             return EXIT_BROKEN
         except psycopg.errors.LockNotAvailable:
             raise AuditCliError("the board is busy: a row or the audit chain stayed locked for "
@@ -323,6 +324,11 @@ def _redact(args) -> int:
         print("board-audit: the live copy is blanked and out of delivery, but this message "
               "was sent before schema v46: the audit log keeps its body until audit "
               "retention removes the send event", file=sys.stderr)
+    if result.get("other_copies"):
+        print(f"board-audit: this message was one of {len(result['other_copies']) + 1} copies "
+              "of one send to a project or the whole board; each keeps its own copy of the "
+              "body until it is redacted too: " + " ".join(result["other_copies"]),
+              file=sys.stderr)
     if result["audit_copy"] == "gone":
         print("board-audit: audit retention had already removed this message's send event, "
               "so the audit log held no copy of it; its live request fingerprint (and any "

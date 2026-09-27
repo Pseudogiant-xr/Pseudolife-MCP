@@ -51,6 +51,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `code: detail` in the MCP tool's error and as a separate `detail` field
   beside `error` on REST (`CoordinationRefused`, a `ValueError`, replaces
   the bare code `dispatch` raised).
+- Nothing is resolved before the caller is authenticated, so a prefix
+  lookup cannot tell an unauthenticated caller whether an address or a
+  message exists. A retry is recognised from its stored rows before any
+  prefix is resolved, so it returns its receipts even after a new address
+  made its prefix ambiguous or its recipient was revoked. The per-minute
+  send rate counts requests, so a burst counts once and a sender reaches at
+  most 60 x 50 mailboxes a minute. An ambiguous prefix in an `ack` batch
+  refuses the whole call. `board-audit redact` of one copy of a burst lists
+  the others as `other_copies` (and says so on stderr), since each keeps its
+  own body until it is redacted too.
 ### Fixed (2026-09-27 — Codex coordination setup keeps live delivery on and recognises the default-on board)
 - Re-running `ops/setup-codex-coordination.py --enable` no longer turns
   off Codex live delivery. Enable wrote `PSEUDOLIFE_AGENT_WAKE=0` whenever

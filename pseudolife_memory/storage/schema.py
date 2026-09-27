@@ -620,19 +620,26 @@ END $$;
 -- v47: one send may reach several recipients (``to: "project:<name>"`` or
 -- ``"all"``) under one request id, one row each, so the sender's request key
 -- admits the recipient. The unique index is created first, so the table is
--- never without a request key; the pre-v47 constraint is dropped only where
--- it exists, since ALTER TABLE takes an ACCESS EXCLUSIVE lock even for a
--- DROP CONSTRAINT IF EXISTS that finds nothing (same reason as v46 above).
+-- never without a request key. The pre-v47 key is found by its columns
+-- (exactly sender_agent_id and request_id), not by the name Postgres gave
+-- it, and dropped only where it exists: a pass over a migrated bank then
+-- adds no ALTER TABLE of its own.
 CREATE UNIQUE INDEX IF NOT EXISTS coordination_messages_request_idx
     ON coordination_messages (sender_agent_id, request_id, recipient_agent_id);
 DO $$
+DECLARE
+    stale_key name;
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_constraint
-               WHERE conrelid = 'coordination_messages'::regclass
-                 AND conname = 'coordination_messages_sender_agent_id_request_id_key') THEN
-        ALTER TABLE coordination_messages
-            DROP CONSTRAINT IF EXISTS coordination_messages_sender_agent_id_request_id_key;
-    END IF;
+    FOR stale_key IN
+        SELECT c.conname FROM pg_constraint c
+        WHERE c.conrelid = 'coordination_messages'::regclass AND c.contype = 'u'
+          AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+               FROM pg_attribute a
+               WHERE a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey))
+              = ARRAY['request_id', 'sender_agent_id']
+    LOOP
+        EXECUTE format('ALTER TABLE coordination_messages DROP CONSTRAINT %I', stale_key);
+    END LOOP;
 END $$;
 """
 

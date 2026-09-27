@@ -107,10 +107,11 @@ def test_one_request_id_covers_the_burst_so_a_retry_returns_the_same_receipts(st
 def test_a_burst_over_the_cap_or_with_nobody_to_reach_is_refused_whole(store, monkeypatch):
     sender = attached(store, "p")
     peers = [attached(store, "p") for _ in range(3)]
-    monkeypatch.setattr(store_module, "FANOUT_MAX", 2)
+    monkeypatch.setattr(store_module, "FANOUT_MAX", 1)
     with pytest.raises(CoordinationError, match="fanout_too_large") as refused:
         store.send(*creds(sender), to="project:p", text="fix", request_id="r")
-    assert refused.value.detail == "3 recipients, limit 2"
+    # The real count, not the one-over-the-cap the set is read with.
+    assert refused.value.detail == "3 recipients, limit 1"
     with pytest.raises(CoordinationError, match="no_recipients"):
         store.send(*creds(sender), to="project:empty", text="fix", request_id="r")
     for bad in ("project:", "project:" + "x" * 121, "PROJECT:p", "all ", "project"):
@@ -152,6 +153,12 @@ def test_the_audit_log_keeps_one_send_event_per_recipient_and_still_verifies(sto
     store.redact(out["receipts"][1]["message_id"], "pasted a token")
     bodies = [e["body"] for e in events(store, "send")]
     assert bodies == ["HOST FIX", None, "HOST FIX", "just you"]
+    # The operator is told which other copies still hold the body.
+    ids = [r["message_id"] for r in out["receipts"]]
+    assert store.redact(ids[0], "pasted a token")["other_copies"] == [ids[1], ids[2]]
+    assert store.redact(ids[2], "pasted a token")["other_copies"] == [ids[0], ids[1]]
+    direct = events(store, "send")[-1]["message_id"]
+    assert store.redact(direct, "pasted a token")["other_copies"] == []
     assert verify(store)["ok"]
     store.test_time[0] += DAY + 1
     store.prune()
@@ -255,3 +262,14 @@ def test_v47_replaces_the_sender_request_key_with_one_that_admits_a_recipient(pg
         "AND indexname='coordination_messages_request_idx'").fetchone()
     assert index and index[0].startswith("CREATE UNIQUE INDEX")
     assert "(sender_agent_id, request_id, recipient_agent_id)" in index[0]
+    # Found by its columns, whatever name it was given; a unique key over
+    # other columns is left alone.
+    pg_conn.execute("ALTER TABLE coordination_messages ADD CONSTRAINT some_other_name "
+                    "UNIQUE (request_id, sender_agent_id)")
+    pg_conn.execute("ALTER TABLE coordination_messages ADD CONSTRAINT keep_this_one "
+                    "UNIQUE (sender_agent_id, request_id, recipient_sequence)")
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    constraints = {r[0] for r in pg_conn.execute(
+        "SELECT conname FROM pg_constraint WHERE conrelid='coordination_messages'::regclass")}
+    assert "some_other_name" not in constraints and "keep_this_one" in constraints
+    pg_conn.execute("ALTER TABLE coordination_messages DROP CONSTRAINT keep_this_one")

@@ -339,6 +339,14 @@ def _resolved(ids, *, missing, ambiguous):
     return ids[0]
 
 
+def _fingerprint(to, text, reply_to, expires_at):
+    """A send's request fingerprint over its resolved recipient (a burst:
+    its address as given) and resolved parent. The same digest a full-id
+    send has always stored, so pre-v47 request keys still match."""
+    return _hash(json.dumps([to, text, reply_to, expires_at], ensure_ascii=False,
+                            separators=(",", ":")))
+
+
 def _fanout_target(to):
     """``("all", None)`` or ``("project", name)`` when ``to`` addresses a
     set of peers; None when it names one agent."""
@@ -1550,12 +1558,8 @@ class CoordinationStore:
                          (*params, value + "%", AMBIGUITY_LISTED + 1))
         return _resolved([r["message_id"] for r in rows], missing=missing, ambiguous=ambiguous)
 
-    def _fanout_rows(self, sender, target, now, *, only=None):
-        """The agents ``to: "all"`` or ``to: "project:<name>"`` reaches:
-        every registered address but the sender's whose adapter holds a live
-        lease and whose own last action is within ATTACHED_IDLE_WINDOW, the
-        peers the list shows with ``adapter_available``. ``only`` re-reads
-        a set under its row locks. One over FANOUT_MAX is enough to refuse."""
+    @staticmethod
+    def _fanout_scope(sender, target, now, only=None):
         clauses = ["credential_hash IS NOT NULL", "agent_id<>%s", "attachment_id IS NOT NULL",
                    "coalesce(lease_until,0)>%s", "last_activity>%s"]
         params = [sender, now, now - ATTACHED_IDLE_WINDOW]
@@ -1565,8 +1569,47 @@ class CoordinationStore:
         if only is not None:
             clauses.append("agent_id=ANY(%s)")
             params.append(only)
-        return self._all("SELECT * FROM coordination_agents WHERE " + " AND ".join(clauses)
+        return " AND ".join(clauses), params
+
+    def _fanout_rows(self, sender, target, now, *, only=None):
+        """The agents ``to: "all"`` or ``to: "project:<name>"`` reaches:
+        every registered address but the sender's whose adapter holds a live
+        lease and whose own last action is within ATTACHED_IDLE_WINDOW, the
+        peers the list shows with ``adapter_available``. ``only`` re-reads
+        a set under its row locks. One over FANOUT_MAX is enough to refuse."""
+        where, params = self._fanout_scope(sender, target, now, only)
+        return self._all("SELECT * FROM coordination_agents WHERE " + where
                          + " ORDER BY agent_id LIMIT %s", (*params, FANOUT_MAX + 1))
+
+    def _fanout_count(self, sender, target, now):
+        """How many a refused burst would have reached, for its detail."""
+        where, params = self._fanout_scope(sender, target, now)
+        return self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + where,
+                         params)["n"]
+
+    def _replayed(self, existing, *, to, fanout, text, reply_to, expires_at, now):
+        """The result of a send whose request id already has rows: the same
+        receipts when ``to``, ``reply_to`` (each in full or as a prefix of
+        what the first attempt resolved), the text and the expiry match it,
+        else ``request_conflict``."""
+        first = existing[0]
+        if fanout is None:
+            target, parent = first["recipient_agent_id"], first["reply_to"]
+            if to != target and not (is_id_prefix(to) and target.startswith(to)):
+                raise CoordinationError("request_conflict")
+            if reply_to is not None and reply_to != parent and not (
+                    parent and is_id_prefix(reply_to) and parent.startswith(reply_to)):
+                raise CoordinationError("request_conflict")
+            fingerprint = _fingerprint(target, text, None if reply_to is None else parent,
+                                       expires_at)
+        else:
+            fingerprint = _fingerprint(to, text, reply_to, expires_at)
+        if any(row["fingerprint"] != fingerprint for row in existing):
+            raise CoordinationError("request_conflict")
+        agents = {r["agent_id"]: r for r in self._all(
+            "SELECT * FROM coordination_agents WHERE agent_id=ANY(%s)",
+            ([row["recipient_agent_id"] for row in existing],))}
+        return self._send_result(to, fanout, existing, agents, now)
 
     def _wake(self, agent, now):
         """What the daemon will do for this recipient: ``live`` when its
@@ -1640,6 +1683,19 @@ class CoordinationStore:
             raise CoordinationError("invalid_reply")
         with self.storage._txn():
             now = self.clock()
+            # Authenticated before anything is resolved: a prefix lookup
+            # answers differently for mail that exists, so an unauthenticated
+            # call must never reach one (review of 67d54ac7). Re-read under
+            # the row locks below.
+            self._auth(principal, agent_id, credential)
+            # A retry is recognised from its stored rows before any prefix is
+            # resolved, so it returns its receipts even after a new address
+            # made its prefix ambiguous or its recipient was revoked.
+            existing = self._all("SELECT * FROM coordination_messages WHERE sender_agent_id=%s "
+                                 "AND request_id=%s", (agent_id, request_id))
+            if existing:
+                return self._replayed(existing, to=to, fanout=fanout, text=text,
+                                      reply_to=reply_to, expires_at=expires_at, now=now)
             # The recipients are read before any lock so that every row can
             # be locked in one global order, including the sender's own
             # rate/idempotency state; a burst re-reads its set under the
@@ -1656,24 +1712,25 @@ class CoordinationStore:
                         missing="invalid_reply", ambiguous="ambiguous_reply")
             else:
                 targets = [r["agent_id"] for r in self._fanout_rows(agent_id, fanout, now)]
+                if len(targets) > FANOUT_MAX:
+                    raise CoordinationError(
+                        "fanout_too_large",
+                        f"{self._fanout_count(agent_id, fanout, now)} recipients, "
+                        f"limit {FANOUT_MAX}")
             # The request key covers what was resolved, so a retry that
             # spells the recipient or the parent by prefix is the same
             # request as one that spells it in full.
-            fingerprint = _hash(json.dumps(
-                [to if fanout is not None else targets[0], text, reply_to, expires_at],
-                ensure_ascii=False, separators=(",", ":")))
+            fingerprint = _fingerprint(to if fanout is not None else targets[0], text,
+                                       reply_to, expires_at)
             self._all("SELECT agent_id FROM coordination_agents WHERE agent_id=ANY(%s) "
                       "ORDER BY agent_id FOR UPDATE", (sorted({agent_id, *targets}),))
             sender = self._auth(principal, agent_id, credential)
             existing = self._all("SELECT * FROM coordination_messages WHERE sender_agent_id=%s "
                                  "AND request_id=%s", (agent_id, request_id))
             if existing:
-                if any(row["fingerprint"] != fingerprint for row in existing):
-                    raise CoordinationError("request_conflict")
-                agents = {r["agent_id"]: r for r in self._all(
-                    "SELECT * FROM coordination_agents WHERE agent_id=ANY(%s)",
-                    ([row["recipient_agent_id"] for row in existing],))}
-                return self._send_result(to, fanout, existing, agents, now)
+                # A concurrent first attempt committed while this one resolved.
+                return self._replayed(existing, to=to, fanout=fanout, text=text,
+                                      reply_to=reply_to, expires_at=expires_at, now=now)
             if enforce_writer_epoch:
                 if (type(expected_writer_epoch) is not int
                         or expected_writer_epoch < 1):
@@ -1697,9 +1754,6 @@ class CoordinationStore:
                     raise CoordinationError("recipient_not_found")
                 recipients = [recipient]
             else:
-                if len(targets) > FANOUT_MAX:
-                    raise CoordinationError("fanout_too_large",
-                                            f"{len(targets)} recipients, limit {FANOUT_MAX}")
                 # A peer that detached or went idle since the unlocked read
                 # is dropped here, so the receipts name who was reached.
                 recipients = self._fanout_rows(agent_id, fanout, now, only=targets)
@@ -1839,17 +1893,29 @@ class CoordinationStore:
             # A prefix resolves among this mailbox's own messages; in a
             # batch one that matches nothing stays as given and lands in
             # ``missing``, and two spellings of one message count once.
+            # An ambiguous prefix refuses the whole call, batch or not:
+            # acknowledging the wrong message cannot be undone.
+            prefixes = [one for one in given if is_id_prefix(one)]
+            matches = {one: [] for one in prefixes}
+            if prefixes:
+                # One statement for every prefix in the batch: the calls run
+                # under the coordination lock, which heartbeats wait on.
+                for row in self._all(
+                        "SELECT message_id FROM coordination_messages WHERE recipient_agent_id=%s "
+                        "AND message_id LIKE ANY(%s) ORDER BY message_id",
+                        (agent_id, [one + "%" for one in prefixes])):
+                    for one in prefixes:
+                        if row["message_id"].startswith(one):
+                            matches[one].append(row["message_id"])
             ids, resolved = [], {}
             for one in given:
-                full = self._resolve_message(
-                    one, scope="recipient_agent_id=%s", params=(agent_id,),
-                    missing=None if batch else "message_not_found",
+                full = one if one not in matches else _resolved(
+                    matches[one], missing=None if batch else "message_not_found",
                     ambiguous="ambiguous_message_id")
                 resolved[one] = one if full is None else full
                 if resolved[one] not in ids:
                     ids.append(resolved[one])
-            # Two statements for the whole batch: the calls run under the
-            # coordination lock, which heartbeats wait on.
+            # Two more statements for the whole batch.
             found = {row["message_id"]: row for row in self._all(
                 "SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                 "AND message_id = ANY(%s) FOR UPDATE", (agent_id, ids))}
@@ -2038,7 +2104,12 @@ class CoordinationStore:
         with self.storage._txn():
             # A prefix resolves among every registered address, revoked ones
             # included: those are what a rebind is for.
-            agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+            try:
+                agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+            except CoordinationError as exc:
+                if exc.code == "instance_not_found":
+                    raise CoordinationError("invalid_rebind") from None
+                raise
             row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s FOR UPDATE", (agent_id,))
             if row is None or row["principal"] != principal or row["credential_hash"] is not None:
                 raise CoordinationError("invalid_rebind")
@@ -2171,6 +2242,19 @@ class CoordinationStore:
                 actor="operator", agent_id=sent["agent_id"],
                 recipient=sent["recipient_agent_id"], project=sent["project"],
                 task=sent["task"], message_id=message_id)], now, head=head)
+            siblings = self._burst_siblings(message_id, sent["agent_id"], payload)
         return {"message_id": message_id, "seq": sent["seq"], "redact_seq": seq,
                 "redact_hash": digest, "expect_head": f"{seq}:{digest}",
-                "live_body_cleared": cleared, "audit_copy": audit_copy}
+                "live_body_cleared": cleared, "audit_copy": audit_copy,
+                "other_copies": siblings}
+
+    def _burst_siblings(self, message_id, sender, payload):
+        """The other messages of the burst ``message_id`` was sent in (v47:
+        the same sender and request id), which each keep their own copy of
+        the body until they are redacted too. Empty for a direct send."""
+        if payload is None or "fanout" not in payload:
+            return []
+        return [r["message_id"] for r in self._all(
+            "SELECT message_id FROM coordination_events WHERE event='send' AND agent_id=%s "
+            "AND message_id<>%s AND payload::jsonb->>'request_id'=%s ORDER BY seq",
+            (sender, message_id, payload.get("request_id")))]

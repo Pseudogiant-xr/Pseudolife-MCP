@@ -410,7 +410,8 @@ acknowledge; use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
-mailbox's, instead of failing whole.
+mailbox's, instead of failing whole. An ambiguous prefix in a batch refuses
+the whole call, since acknowledging the wrong message cannot be undone.
 
 A send names its recipient by agent id, or by a unique prefix of it of at
 least 8 hex characters, the length every surface shows: a prefix that matches
@@ -711,7 +712,10 @@ pseudolife-mcp board-audit redact --message-id <id> --reason "pasted a credentia
 ```
 
 `--message-id` takes the full id or a unique prefix of 8 or more characters
-(an ambiguous one is refused naming the candidates). In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
+(an ambiguous one is refused naming the candidates). A message sent to a
+project or to `all` is one copy per recipient: redacting one leaves the
+others, so the result lists them as `other_copies` (and says so on stderr);
+redact each. In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
 the live copy in the mailbox if prune has not already and ends its delivery,
 and appends a
 chained `redact` row (actor `operator`, the message's agents, project and task,
@@ -891,7 +895,9 @@ cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
 decision explicitly as ordinary memory if it should become durable knowledge.
 
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
-60 new sends per sender per minute and 50 messages per receive page. Bodies stop
+60 new sends per sender per minute (a send to a project or to `all` counts as
+one, so a sender can reach at most 60 × 50 mailboxes a minute) and 50 messages
+per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
 The [audit log](#audit-log) keeps its own copy of every body for
 `audit_retention_days`, unless the operator [redacts](#redacting-a-body) it.

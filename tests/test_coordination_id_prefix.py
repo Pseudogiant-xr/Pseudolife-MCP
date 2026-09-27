@@ -68,6 +68,62 @@ def test_a_unique_prefix_addresses_the_agent_and_the_receipt_names_it(store):
             store.send(*creds(a), to=short, text="x", request_id="r3")
 
 
+def test_nothing_is_resolved_for_a_caller_that_is_not_authenticated(store):
+    """A prefix lookup answers differently for mail that exists; before the
+    caller's credential is checked it would be an oracle on other mailboxes
+    (review of 67d54ac7)."""
+    a, b, bob = store.register("alice"), store.register("alice"), store.register("bob")
+    ids = [store.send(*creds(a), to=b["agent_id"], text=f"m{i}", request_id=f"m{i}")["message_id"]
+           for i in range(2)]
+    rename_message(store.storage.conn, ids[0], "feedface01" + "0" * 22)
+    rename_message(store.storage.conn, ids[1], "feedface02" + "0" * 22)
+    forged = ("bob", b["agent_id"], bob["credential"])
+    for to, reply_to in ((a["agent_id"], "feedface"), (a["agent_id"], "feedface01"),
+                         (a["agent_id"], "0123456789ab"), (a["agent_id"][:8], None),
+                         ("0123456789ab", None), ("project:p", None)):
+        with pytest.raises(CoordinationError) as refused:
+            store.send(*forged, to=to, text="probe", request_id="p", reply_to=reply_to)
+        assert (refused.value.code, refused.value.detail) == ("invalid_credential", None)
+
+
+def test_a_retry_returns_its_receipt_after_its_prefix_became_ambiguous(store):
+    sender, peer = pair(store)
+    peer = rename_agent(store.storage.conn, peer, A_ID)
+    first = store.send(*creds(sender), to="deadbeef", text="x", request_id="r")
+    later = rename_agent(store.storage.conn, store.register("alice"), B_ID)
+    with pytest.raises(CoordinationError, match="ambiguous_recipient"):
+        store.send(*creds(sender), to="deadbeef", text="x", request_id="r2")
+    assert store.send(*creds(sender), to="deadbeef", text="x", request_id="r") == first
+    assert store.send(*creds(sender), to=A_ID, text="x", request_id="r") == first
+    for other in ("deadbeefab", B_ID):
+        with pytest.raises(CoordinationError, match="request_conflict"):
+            store.send(*creds(sender), to=other, text="x", request_id="r")
+    # And after its recipient's credentials were revoked.
+    store.storage.conn.execute("UPDATE coordination_agents SET credential_hash=NULL "
+                               "WHERE agent_id=%s", (A_ID,))
+    assert store.send(*creds(sender), to="deadbeefaa", text="x", request_id="r")["message_id"] == (
+        first["message_id"])
+    assert later["agent_id"] == B_ID
+
+
+def test_a_reply_retried_with_a_prefix_is_the_same_request(store):
+    a, b = pair(store)
+    asked = store.send(*creds(a), to=b["agent_id"], text="q", request_id="q")
+    reply = store.send(*creds(b), to=a["agent_id"], text="a", request_id="a",
+                       reply_to=asked["message_id"])
+    assert store.send(*creds(b), to=a["agent_id"][:8], text="a", request_id="a",
+                      reply_to=asked["message_id"][:9]) == reply
+    with pytest.raises(CoordinationError, match="request_conflict"):
+        store.send(*creds(b), to=a["agent_id"], text="a", request_id="a")
+
+
+def test_rebinding_a_prefix_that_matches_nothing_fails_as_the_full_id_does(store):
+    with pytest.raises(CoordinationError, match="invalid_rebind"):
+        store.rebind("0123456789ab", "alice")
+    with pytest.raises(CoordinationError, match="invalid_rebind"):
+        store.rebind("0123456789ab" + "0" * 20, "alice")
+
+
 def test_an_ambiguous_prefix_is_refused_naming_the_candidates(store):
     sender, first, second = store.register("alice"), store.register("alice"), store.register("alice")
     first = rename_agent(store.storage.conn, first, A_ID)
