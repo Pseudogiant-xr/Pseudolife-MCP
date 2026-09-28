@@ -234,7 +234,7 @@ class FixtureService:
         return {"count": len(_LESSONS), "entries": [_lesson_dict(t) for t in _LESSONS][:limit]}
 
     def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3, *,
-                         include_coordination=True):
+                         include_coordination=True, include_dream_stall=True):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
 
     def memory_changes_since(self, since, *, session_key=None, limit=1):
@@ -740,6 +740,7 @@ class FixtureService:
                 "reasoning_effort":
                     self.config.memory.dream.extractor_reasoning_effort or None,
                 "primary_healthy": True,
+                "stall": None, "last_stall": None,
                 "last_dream_extractor": {"which": "primary",
                                          "base_url": "http://host.docker.internal:8082/v1",
                                          "at": _NOW - 2 * _H}}

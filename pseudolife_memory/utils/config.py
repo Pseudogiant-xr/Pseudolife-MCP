@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,16 @@ class DreamConfig:
     idle_seconds: float = 600.0
     max_batch: int = 40
     sweep_interval_seconds: float = 600.0   # used by the Phase 3 daemon sweep
+    # Dream-stall board notices (2026-09-28). On 2026-08-11 the primary
+    # extractor's CLI login had been expired for over a day and ten dream
+    # runs served from the fallback with nothing on the board or at session
+    # start. When dreams stall (or the fallback serves for the primary), the
+    # daemon posts one notice to every attached, non-idle session and one
+    # when it clears; stall_repeat_hours bounds the repeats while it lasts.
+    # 6 h is a starting value, not a measurement: a stall that outlives a
+    # working day is re-announced about twice, not once per 600 s sweep.
+    stall_notice: bool = True
+    stall_repeat_hours: float = 6.0
     # Consolidation quarantine — the two-man rule for low-trust claims
     # (spec 2026-08-09-consolidation-quarantine-design.md; MAFIA-informed:
     # the defense keys on WHO wrote, never on what the text says). When on,
@@ -481,6 +492,14 @@ class DreamConfig:
     # reviewed clean (188 events, 0 incorrect dates, negligible volume).
     # Requires PG; an events-pass failure is non-fatal to claims.
     chronicle: bool = True
+
+    def __post_init__(self) -> None:
+        # Zero or a negative window would post a stall notice on every dream.
+        hours = self.stall_repeat_hours
+        if (isinstance(hours, bool) or not isinstance(hours, (int, float))
+                or not math.isfinite(hours) or hours <= 0):
+            raise ValueError("memory.dream.stall_repeat_hours must be a number of "
+                             "hours greater than 0")
 
 
 @dataclass
