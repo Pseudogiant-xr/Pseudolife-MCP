@@ -326,8 +326,22 @@ def test_two_sessions_starting_together_spawn_one_run(home, monkeypatch):
         return real_open(path, flags, *args)
 
     monkeypatch.setattr(shim.os, "open", racing_open)
-    assert shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0")) == ""
+    note = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    assert "just started by another session" in note and "--clients-only" not in note
     assert calls == []
+
+
+def test_the_result_file_is_written_even_when_the_update_crashes(tmp_path, monkeypatch):
+    from pseudolife_memory import update_cli
+
+    def boom(self):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(update_cli.Update, "_run", boom)
+    result = tmp_path / "r.result"
+    with pytest.raises(OSError):
+        update_cli.Update(update_cli.Options(result_file=result)).run()
+    assert result.read_text(encoding="utf-8").strip() == "1"
 
 
 def test_shim_runs_it_at_most_once_an_hour_per_release(home, monkeypatch):

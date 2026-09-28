@@ -617,7 +617,13 @@ def _unattended_clients(url: str, health: dict) -> str:
             pass
         pid = _spawn_detached(argv, log)
     except FileExistsError:
-        return ""          # another session just started it; its note is served next time
+        # Another session won the exclusive create a moment ago: say that a
+        # run is in flight, never the manual command beside it.
+        note = (f"Pseudolife-MCP: an unattended client update to {daemon_version} was just started by "
+                f"another session (log {log}); this shim is {__version__}. Start a new session when it "
+                f"finishes.")
+        _UNATTENDED_NOTES[(url, daemon_version)] = note
+        return note
     except Exception as exc:  # noqa: BLE001 - the shim must start whatever the spawn does
         print(f"[shim] could not start the unattended client update: {exc}", file=sys.stderr)
         return ""

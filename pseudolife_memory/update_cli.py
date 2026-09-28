@@ -265,19 +265,27 @@ class Update:
     # -- entry -------------------------------------------------------------
     def run(self) -> int:
         try:
-            self._run()
-        except UpdateError as exc:
-            self.warn(str(exc))
-            self.report.ok = False
-            self.report.exit_code = exc.exit_code
+            try:
+                self._run()
+            except UpdateError as exc:
+                self.warn(str(exc))
+                self.report.ok = False
+                self.report.exit_code = exc.exit_code
+            except Exception:
+                # An unexpected error still leaves a result the unattended
+                # caller can read (else its sessions hear "still running").
+                self.report.ok = False
+                self.report.exit_code = 1
+                raise
+        finally:
+            if self.o.result_file is not None:
+                try:
+                    self.o.result_file.parent.mkdir(parents=True, exist_ok=True)
+                    self.o.result_file.write_text(f"{self.report.exit_code}\n", encoding="utf-8")
+                except OSError as exc:
+                    self.warn(f"could not write the result file {self.o.result_file}: {exc}")
         if self.o.as_json:
             print(json.dumps(self.report.__dict__, indent=2, default=str))
-        if self.o.result_file is not None:
-            try:
-                self.o.result_file.parent.mkdir(parents=True, exist_ok=True)
-                self.o.result_file.write_text(f"{self.report.exit_code}\n", encoding="utf-8")
-            except OSError as exc:
-                self.warn(f"could not write the result file {self.o.result_file}: {exc}")
         return self.report.exit_code
 
     def _run(self) -> None:
