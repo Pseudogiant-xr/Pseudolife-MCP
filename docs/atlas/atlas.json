@@ -914,7 +914,7 @@
     "OpenAI-compatible :8081 — compose-internal only, no host port",
     "~5.3 GB Q4_K_M GGUF baked at build; --jinja --parallel 1",
     "Swap weights via gitignored compose override — no rebuild",
-    "Disabled entirely in sonnet-only installs (profiles: disabled)"
+    "Disabled entirely in claude-only / openai-only / endpoint installs (profiles: disabled)"
    ]
   },
   {
@@ -922,13 +922,13 @@
    "g": "sidecar",
    "x": 600,
    "y": 1400,
-   "t": "Sonnet shim",
+   "t": "Claude shim",
    "s": "host · 127.0.0.1:8082",
    "p": "evals/claude_shim.py",
    "d": [
     "Wraps the Max-plan claude CLI as an OpenAI-compatible endpoint",
     "Task Scheduler AtLogOn autostart (install-shim-autostart)",
-    "Primary extractor in sonnet / sonnet-fallback modes"
+    "Primary extractor in claude-only / claude-fallback modes"
    ]
   },
   {
@@ -941,7 +941,7 @@
    "p": "evals/codex_shim.py",
    "d": [
     "Wraps the ChatGPT-plan codex CLI as an OpenAI-compatible endpoint",
-    "Autostart via install-codex-shim-autostart (codex-* installer modes)",
+    "Autostart via install-codex-shim-autostart (openai-* installer modes)",
     "Serves gpt-5.6-terra by default; gpt-*/codex-* honoured per request"
    ]
   },
@@ -1104,7 +1104,7 @@
     "providers (multi-select + capability matrix) → preflight → extractor mode",
     "volumes → managed .env → compose up --build → hooks → MCP registration",
     "Providers: claude / codex / gemini / generic; per-provider writer ids",
-    "Modes: sidecar / sonnet-fallback / sonnet-only / codex-fallback / codex-only (-only = ~11.8 GB lighter)",
+    "Modes: sidecar / claude-* / openai-* / endpoint[-fallback] (-only and endpoint = ~11.8 GB lighter)",
     "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll"
    ]
   },

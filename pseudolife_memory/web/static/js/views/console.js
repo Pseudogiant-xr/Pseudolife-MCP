@@ -21,8 +21,10 @@ const EFFORT_PATH = "memory.dream.extractor_reasoning_effort";
 // the provider-specific extras (codex "minimal", claude "max") as free text.
 const DREAMER_EFFORTS = ["low", "medium", "high", "xhigh"];
 const DREAMER_MODELS = [
+  { id: "claude-opus-5-5", label: "Opus 5.5",
+    note: "recommended — clears the extraction-ladder gate with no regression against Opus 5" },
   { id: "claude-opus-5", label: "Opus 5",
-    note: "recommended — best measured extraction quality" },
+    note: "the earlier default — measured best extractor on 2026-08-02" },
   { id: "claude-sonnet-5", label: "Sonnet 5", note: "balanced" },
   { id: "claude-haiku-4-5", label: "Haiku 4.5",
     note: "fastest / lightest on plan usage" },
@@ -34,6 +36,8 @@ const DREAMER_MODELS = [
   { id: "gpt-5.6-sol", label: "Sol", note: "OpenAI flagship — unmeasured here" },
   { id: "gpt-5.6-terra", label: "Terra", note: "OpenAI balanced — unmeasured here" },
   { id: "gpt-5.6-luna", label: "Luna", note: "OpenAI fastest — unmeasured here" },
+  { id: "gpt-6-sol", label: "GPT-6 Sol", note: "OpenAI GPT-6 flagship — unmeasured here" },
+  { id: "gpt-6-luna", label: "GPT-6 Luna", note: "OpenAI GPT-6 fastest — unmeasured here" },
 ];
 
 export async function renderConsole(root, ctx) {

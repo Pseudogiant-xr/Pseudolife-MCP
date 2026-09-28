@@ -2368,7 +2368,7 @@ default, which is far more than the stack needs. Adding up the parts
 measured 2026-09-23 — daemon ~2.5 GB with the bf16 embedder or ~4 GB with
 fp32, the extractor sidecar's ~5.3 GB mmapped model plus its context, and
 Postgres — the whole stack wants ~9 GB under dream load with the default
-sidecar (~10 GB with fp32), or ~3 GB in `sonnet-only` mode (~4.5 GB), where
+sidecar (~10 GB with fp32), or ~3 GB in `claude-only` mode (~4.5 GB), where
 the Qwen3 embedding backbone is the bulk of it. Encode bursts add up to
 ~1 GB on top.
 Cap the VM by copying `ops/wslconfig.example` to

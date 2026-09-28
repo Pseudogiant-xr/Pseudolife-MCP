@@ -19,13 +19,21 @@
 #
 #   ops\install-shim-autostart.ps1              # default port 8082, v5 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
+#   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
+#   claude-haiku-4-5, claude-fable-5 (the list ops\install.ps1 offers; any other
+#   claude-* id passes to the shim unchanged)
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
 # 127.0.0.1 for the daemon's dream pass (primary extractor; the in-stack E4B
 # container is the fallback — see docs/superpowers/specs/
 # 2026-07-11-sonnet-sidecar-cutover-design.md). Requires a logged-in CLI.
-# -Model default is claude-opus-5 per the 2026-08-02 same-harness comparison
-# (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0).
+# -Model default is claude-opus-5-5 since 2026-09-29: it clears the
+# paired extraction-ladder gate with no regression against claude-opus-5
+# (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28).
+# claude-opus-5 was the default from the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0), the
+# judged comparison that established Opus as the best extractor; it ran on
+# claude-opus-5.
 # -PromptFile default is sonnet_extractor_v5.md since 2026-09-07: the
 # v2 body with its two pre-rule worked examples re-cut on invented names (the
 # same re-cut the daemon's v12 base took on 2026-09-07), plus the
@@ -43,7 +51,7 @@
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,
-    [string]$Model = "claude-opus-5",
+    [string]$Model = "claude-opus-5-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v5.md",
     [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log",
     # How long to wait for the started shim to bind the port. The shim warms

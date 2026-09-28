@@ -4,6 +4,9 @@
 #
 #   ops/install-codex-shim-autostart.sh                       # port 8086, terra
 #   ops/install-codex-shim-autostart.sh --model gpt-5.6-sol   # pick the served model
+#   OpenAI models: gpt-5.6-terra (default), gpt-5.6-sol, gpt-5.6-luna, gpt-6-sol,
+#   gpt-6-luna (the list ops/install.sh offers; the GPT-6 ids were accepted by
+#   the Codex CLI on 2026-09-29; any other id passes to the shim unchanged)
 #
 # The shim wraps the ChatGPT-plan `codex` CLI as an OpenAI-compatible endpoint
 # for the daemon's dream pass. Requires a signed-in CLI (`codex login`).

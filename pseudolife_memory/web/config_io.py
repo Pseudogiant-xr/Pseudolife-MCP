@@ -436,9 +436,10 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.dream.extractor_model_override", "group": "Extractor",
      "label": "Dreamer model override", "type": "string", "default": None,
      "restart": False,
-     "suggestions": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-                     "claude-fable-5", "gpt-5.6-sol", "gpt-5.6-terra",
-                     "gpt-5.6-luna"],
+     "suggestions": ["claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
+                     "claude-haiku-4-5", "claude-fable-5", "gpt-5.6-sol",
+                     "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol",
+                     "gpt-6-luna"],
      "help": "Model-only override for the primary extractor — wins over BOTH "
              "env and config ownership, so the dreamer model can be switched "
              "without re-owning the endpoint wiring. Any model id the wired "
@@ -484,8 +485,8 @@ KNOBS: list[dict[str, Any]] = [
              "settings source = config."},
     {"path": "memory.dream.extractor_model", "group": "Extractor",
      "label": "Model name", "type": "string", "default": None, "restart": False,
-     "suggestions": ["extractor", "claude-opus-5", "claude-sonnet-5",
-                     "claude-haiku-4-5", "gpt-5.6-terra"],
+     "suggestions": ["extractor", "claude-opus-5-5", "claude-opus-5",
+                     "claude-sonnet-5", "claude-haiku-4-5", "gpt-5.6-terra"],
      "help": "Model id the endpoint expects — any name the endpoint serves "
              "works (the bundled sidecar serves \"extractor\"; LM "
              "Studio/Ollama use their loaded-model names). Against the "
