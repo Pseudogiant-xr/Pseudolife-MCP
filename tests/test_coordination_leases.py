@@ -37,7 +37,7 @@ def store(pg_conn):
     from pseudolife_memory.storage.schema import assert_disposable_database
     assert_disposable_database(pg_conn)
     pg_conn.execute("TRUNCATE coordination_messages, coordination_agents, coordination_events, "
-                    "coordination_leases, coordination_lease_waiters")
+                    "coordination_leases, coordination_lease_waiters, coordination_wakes")
     # A fresh bank's fences start at 1; the sequence outlives TRUNCATE.
     pg_conn.execute("ALTER SEQUENCE coordination_lease_fence RESTART WITH 1")
     now = [1000.0]
@@ -530,3 +530,68 @@ def test_prune_locks_a_lease_before_its_queue(store, pg_url):
     finally:
         other.close()
         store.storage.conn.execute("SET lock_timeout = '5s'")
+
+
+# --- a park cleared by a lease (v49 wake decision) ---------------------------------
+
+def _parked_on(store, lease):
+    """A ring-capable session parked until ``lease`` clears, idle since."""
+    agent = store.register("alice", wake_enabled=True)
+    store.attach(*creds(agent), attachment_id=agent["agent_id"][:8], wake_enabled=True)
+    store.update(*creds(agent), park_reason="needs_resource",
+                 park_needs="the suite lock, then my suite result", park_clear_by=lease)
+    store.storage.conn.execute("UPDATE coordination_agents SET last_activity=0 WHERE agent_id=%s",
+                               (agent["agent_id"],))
+    return agent
+
+
+def _notice(store, sender, recipient, tag):
+    return store.send(*creds(sender), to=recipient["agent_id"], text="LEASE notice",
+                      request_id=f"notice-{tag}")["wake"]
+
+
+def test_the_lease_holder_clears_a_park_on_its_lease(store):
+    """``park_clear_by`` may name a lease (full-suite, gpu): the lease CLI's
+    acquire notice comes from the mirror's own address, which the daemon's
+    lease table names as the holder, so it rings; a peer that does not hold
+    that lease, or holds another one, is chatter."""
+    holder, bystander, other = (store.register("alice") for _ in range(3))
+    parked = _parked_on(store, "full-suite")
+    store.acquire_lease(*creds(holder), name="full-suite", ttl=600)
+    store.acquire_lease(*creds(other), name="gpu", ttl=600)
+    assert _notice(store, holder, parked, "acquired") == {
+        "decision": "rung", "reason": "clearer", "ring_at": 1000.0}
+    assert _notice(store, bystander, parked, "chatter")["decision"] == "withheld"
+    assert _notice(store, other, parked, "other-lease")["decision"] == "withheld"
+
+
+def test_a_release_notice_rings_though_the_lease_is_already_free(store):
+    """The mirror frees the board lease before telling the peers (a
+    successor told "released" must find it free), so its release notice
+    comes from an address that no longer holds it. The daemon's own record
+    of that release, moments earlier, makes it the clearer; an hour later it
+    is just a former holder."""
+    holder, successor = store.register("alice"), store.register("alice")
+    parked = _parked_on(store, "full-suite")
+    store.acquire_lease(*creds(holder), name="full-suite", ttl=600)
+    store.acquire_lease(*creds(successor), name="full-suite", ttl=600)   # queued
+    store.release_lease(*creds(holder), name="full-suite")               # granted on
+    store.test_time[0] = 1010.0
+    assert _notice(store, holder, parked, "released") == {
+        "decision": "rung", "reason": "clearer", "ring_at": 1010.0}
+    store.test_time[0] = 1010.0 + 3600
+    assert _notice(store, holder, parked, "late")["decision"] == "withheld"
+
+
+def test_a_hold_that_lapsed_moments_ago_still_clears(store):
+    """A mirror whose renewals stopped loses the board lease to expiry, then
+    announces its release: the expiry the daemon logged against it counts
+    like a release."""
+    holder, lister = store.register("alice"), store.register("alice")
+    parked = _parked_on(store, "full-suite")
+    store.acquire_lease(*creds(holder), name="full-suite", ttl=60)
+    store.test_time[0] = 1100.0
+    store.list_leases()                     # settles the lapsed hold
+    store.test_time[0] = 1105.0
+    assert _notice(store, holder, parked, "expired")["reason"] == "clearer"
+    assert _notice(store, lister, parked, "lister")["decision"] == "withheld"

@@ -232,6 +232,12 @@ LEASE_QUEUE_MAX = 64
 LEASE_GRANT_WINDOW = 300
 # Waiters named per lease in a listing; the count beside them is exact.
 LEASE_LIST_QUEUE = 10
+# A park whose ``park_clear_by`` names a lease is cleared by that lease's
+# holder, and by its last holder for this long after the hold ended: the
+# lease CLI frees the board lease before it mails its release notice, and
+# spends at most its RELEASE_BUDGET (20 s) doing both. Three times that, so a
+# slow daemon still counts the notice; not a measurement.
+LEASE_CLEAR_GRACE = 60
 HLC_META_KEY = "coordination_hlc_highwater"
 WRITER_EPOCH_META_KEY = "writer_lease_epoch"
 BANK_ID_META_KEY = "coordination_bank_id"
@@ -1713,6 +1719,21 @@ class CoordinationStore:
             return None
         return {key: row.get(key, default) for key, default in _PARK_CLEARED.items()}
 
+    def _lease_clearer(self, agent_id, name, now):
+        """Whether ``agent_id`` holds the lease ``name``, or held it until at
+        most LEASE_CLEAR_GRACE ago (a release or an expiry the daemon logged
+        against it). Read from the lease table and the audit log, never
+        from anything the sender says."""
+        since = now - LEASE_CLEAR_GRACE
+        if self._one("SELECT 1 AS hit FROM coordination_leases WHERE name=%s "
+                     "AND holder_agent_id=%s AND expires_at>%s",
+                     (name, agent_id, since)) is not None:
+            return True
+        return self._one(
+            "SELECT 1 AS hit FROM coordination_events WHERE created_at>%s AND agent_id=%s "
+            "AND event IN ('lease_release','lease_expire') AND payload::jsonb->>'name'=%s "
+            "LIMIT 1", (since, agent_id, name)) is not None
+
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id):
         """Decide at send whether the recipient's shim should ring (v49).
 
@@ -1720,8 +1741,10 @@ class CoordinationStore:
         ``hinted`` for a recipient active within ``active_seconds`` (its
         next tool result carries the mail); ``not_needed`` for one parked
         done; ``no_path`` for one without a wake path (its need rides
-        along); parked with a need, ``rung`` when the sender is the clearer,
-        ``park_clear_by`` is ``anyone``, ``clears`` names the need, or the
+        along); parked with a need, ``rung`` when the sender is the clearer
+        (``park_clear_by`` names it, or names a lease it holds or has just
+        let go, ``_lease_clearer``), ``park_clear_by`` is ``anyone``,
+        ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need so the sender knows what would wake it; idle with no park,
         ``nudged`` at most once per ``nudge_interval_seconds``, else
@@ -1751,6 +1774,11 @@ class CoordinationStore:
                 how = "clearer"
             elif park["park_clear_by"] == "anyone":
                 how = "anyone"
+            elif park["park_clear_by"] and self._lease_clearer(
+                    sender["agent_id"], park["park_clear_by"], now):
+                # The lease CLI's acquire and release notices (full-suite,
+                # gpu) come from the mirror's own address, never the name.
+                how = "clearer"
             elif clears is not None and _need_matches(clears, park["park_needs"]):
                 how = "clears"
             elif urgent:
