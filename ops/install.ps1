@@ -1499,7 +1499,11 @@ function Resolve-InstalledShimPath($Manager = $null) {
         # runtime stands behind it (pseudolife_memory/runtimes.py).
         if (-not $script:shimPython) { $script:shimPython = Get-ShimRuntimePython }
         if ($script:shimPython) {
-            $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") launcher --if-installed 2>$null | Select-Object -Last 1
+            # An interpreter that cannot be run (a stale PSEUDOLIFE_SHIM_PYTHON,
+            # a removed venv) is "no launcher", never a terminating error.
+            try {
+                $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") launcher --if-installed 2>$null | Select-Object -Last 1
+            } catch { $launcher = $null; $LASTEXITCODE = 127 }
             if (($LASTEXITCODE -eq 0) -and $launcher) { return "$launcher".Trim() }
         }
         if ($Manager) { return $null }
@@ -1634,7 +1638,12 @@ function Install-ShimOnce {
     # cannot make a virtualenv.
     if (-not $script:shimPython) { $script:shimPython = Get-ShimRuntimePython }
     if ($script:shimPython) {
-        $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") install --source $repo --python $script:shimPython | Select-Object -Last 1
+        try {
+            $launcher = & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") install --source $repo --python $script:shimPython | Select-Object -Last 1
+        } catch {
+            Write-Host "  shim runtime: the interpreter $script:shimPython could not be run ($($_.Exception.Message)); falling back to pipx / pip"
+            $launcher = $null; $LASTEXITCODE = 127
+        }
         if (($LASTEXITCODE -eq 0) -and $launcher) {
             $script:shimInstallPath = "$launcher".Trim()
             $script:shimManagerKind = "runtime"
@@ -1745,7 +1754,9 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
     $migrateArgs = @("migrate", "--client", $Client, "--bare")
     if ($script:shimPipxVenv) { $migrateArgs += @("--from", $script:shimPipxVenv) }
     if ($RegisteredPath) { $migrateArgs += @("--from", $RegisteredPath) }
-    & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") @migrateArgs 2>&1 | Out-Host
+    try {
+        & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") @migrateArgs 2>&1 | Out-Host
+    } catch { return $false }
     return ($LASTEXITCODE -eq 0)
 }
 
