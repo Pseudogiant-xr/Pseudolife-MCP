@@ -1152,6 +1152,103 @@ def test_an_answer_cut_off_at_the_time_limit_is_open(tmp_path, codex):
         server.server_close()
 
 
+@pytest.mark.parametrize("client", ["claude", "codex", "codex-windows"])
+def test_the_gate_ledger_counts_the_message_in_utf8_bytes(tmp_path, client):
+    """Every client's gate line records the same unit: the message's UTF-8
+    length plus one (the newline), not characters or UTF-16 code units."""
+    message = "Park now: café ☃ \U0001f600 please"
+    server, _ = _gate_daemon("block\n" + message + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        # A UTF-8 locale, as on macOS and most Linux desktops: there bash's
+        # ${#var} counts characters, not bytes.
+        utf8 = {"LC_ALL": "C.UTF-8"}
+        if client == "claude":
+            result, _ = _run(_gate_env(tmp_path, server, **utf8))
+            assert result.returncode == 2
+        elif client == "codex":
+            result, _ = _run(_codex_env(tmp_path, **extra, **utf8))
+            assert json.loads(result.stdout) == {"decision": "block", "reason": message}
+        else:
+            result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                              input=_payload(), env=_env(tmp_path, **extra))
+            assert json.loads(result.stdout) == {"decision": "block", "reason": message}
+        [line] = (tmp_path / "digests" / "ledger.log").read_text(encoding="utf-8").splitlines()
+        fields = line.split("\t")
+        assert (fields[1], fields[5]) == ("gate", "block")
+        assert int(fields[4]) == len(message.encode("utf-8")) + 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _managed_connection(tmp_path, url, token_file):
+    from tests.test_codex_hooks import connection_payload
+    connection = tmp_path / "home" / "pseudolife" / "connection.json"
+    connection.parent.mkdir(parents=True, exist_ok=True)
+    connection.write_text(json.dumps(connection_payload(url, token_file), indent=2) + "\n")
+    connection.chmod(0o600)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the managed files are refused there")
+def test_a_tokenless_managed_connection_sends_no_bearer(tmp_path):
+    """Setup records an empty token file for a daemon without auth; the gate
+    then sends no bearer and ignores the explicit settings, as the sibling
+    hooks do."""
+    server, requests = _gate_daemon("allow\n")
+    try:
+        _managed_connection(tmp_path, f"http://127.0.0.1:{server.server_port}", "")
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_TOKEN="ambient-token",
+                         PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:1")
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, None)]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the managed files are refused there")
+def test_an_explicit_token_file_needs_the_matching_managed_url(tmp_path):
+    """Beside a managed connection, an explicit PSEUDOLIFE_MCP_TOKEN_FILE is
+    honoured only with the managed URL named explicitly too; otherwise the
+    gate asks nothing (a credential must not go to a daemon it was not
+    recorded for)."""
+    server, requests = _gate_daemon("allow\n")
+    try:
+        url = f"http://127.0.0.1:{server.server_port}"
+        managed_token = tmp_path / "home" / "pseudolife" / "token"
+        managed_token.parent.mkdir(parents=True, exist_ok=True)
+        managed_token.write_text("managed-token\n")
+        managed_token.chmod(0o600)
+        _managed_connection(tmp_path, url, managed_token.as_posix())
+        explicit = tmp_path / "explicit-token"
+        explicit.write_text("explicit-token\n")
+        explicit.chmod(0o600)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_TOKEN_FILE=str(explicit))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+        env["PSEUDOLIFE_MCP_DAEMON_URL"] = url
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, "Bearer explicit-token")]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
                     "Git Bash cannot show an NTFS file is owner-only, so, as in "
                     "coordination-start.sh, the managed files are refused there")

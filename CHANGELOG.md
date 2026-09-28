@@ -28,8 +28,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   continuation's Stop (`stop_hook_active`) or no answer prints nothing. The
   explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
   `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
-  Both Codex paths now append the `gate` ledger line Claude's gate writes,
-  so a block is auditable in `ledger.log` on every client. A hook Claude
+  This is the plugin install: a manual Codex install
+  (`ops/setup-codex-hooks.py` without the plugin) carries no `Stop` hook,
+  so it gets no gate on any platform, as before. Both Codex paths now
+  append the `gate` ledger line Claude's gate writes, so a block is
+  auditable in `ledger.log` on every client, and every client records its
+  length column in the same unit, UTF-8 bytes plus one (bash counted
+  characters under a UTF-8 locale, PowerShell UTF-16 units). A hook Claude
   Code started for its own session (`CLAUDECODE=1` and
   `CLAUDE_CODE_SESSION_ID` equal to the payload's id) stays Claude's
   whatever Codex marker its environment carries, so a leaked marker cannot

@@ -216,6 +216,7 @@ claude_connection() {
 }
 
 decode_connection_value() {
+    local value
     if value=$(printf '%s' "$1" | base64 --decode 2>/dev/null); then
         printf '%s' "$value"
     else
@@ -334,8 +335,10 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
                 else
                     printf '%s\n' "$MESSAGE" >&3
                 fi
+                # UTF-8 bytes plus the newline, on every client: ${#MESSAGE}
+                # counts characters under a UTF-8 locale.
                 printf '%s\tgate\t%s\t0\t%s\tblock\n' "$(date +%s)" "${KEY:0:8}" \
-                    "$(( ${#MESSAGE} + 1 ))" >> "$DIGEST_DIR/ledger.log"
+                    "$(( $(printf '%s' "$MESSAGE" | wc -c) + 1 ))" >> "$DIGEST_DIR/ledger.log"
                 [ -n "$CODEX_HOOK_CONTEXT" ] && exit 0
                 exit 2
                 ;;

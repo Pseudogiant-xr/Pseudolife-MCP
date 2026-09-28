@@ -336,11 +336,13 @@ try {
             [ordered]@{ decision = 'block'; reason = $reason } |
                 ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii
             # The same "gate" ledger line stop-wake.sh appends for a block,
-            # on every client; best effort, like Read-TurnDigest's.
+            # on every client (the length in UTF-8 bytes plus the newline,
+            # not UTF-16 units); best effort, like Read-TurnDigest's.
             try {
                 $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                $bytes = [Text.Encoding]::UTF8.GetByteCount($reason) + 1
                 [IO.File]::AppendAllText((Join-Path $digestDir 'ledger.log'),
-                    "$stamp`tgate`t$($key.Substring(0, 8))`t0`t$($reason.Length + 1)`tblock`n")
+                    "$stamp`tgate`t$($key.Substring(0, 8))`t0`t$bytes`tblock`n")
             } catch {}
         }
         exit 0
