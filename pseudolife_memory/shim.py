@@ -485,10 +485,10 @@ def _accept_health(url: str, health: dict) -> dict:
         print(
             f"[shim] this shim is pseudolife-mcp {__version__} but the daemon "
             f"at {url} is {health['version']} — run pseudolife-mcp update --clients-only "
-            f"(installs the daemon's release as a new shim runtime beside this one and "
-            f"refreshes the plugin cache; from a checkout: python ops/update_clients.py "
-            f"--only shim), or update the daemon (pseudolife-mcp update); then start a "
-            f"new session.",
+            f"--tag {health['version']} (installs the daemon's release as a new shim runtime "
+            f"beside this one and refreshes the plugin cache; from a checkout: python "
+            f"ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp "
+            f"update); then start a new session.",
             file=sys.stderr,
         )
     return _notice_if_cortex_is_inert(health)
@@ -513,8 +513,8 @@ def _version_note(url: str, health: dict) -> str:
         return started
     return (f"Pseudolife-MCP: this shim is pseudolife-mcp {__version__} but the "
             f"daemon at {url} is {daemon_version}; run pseudolife-mcp update --clients-only "
-            f"(from a checkout: python ops/update_clients.py --only shim) or update the "
-            f"daemon with pseudolife-mcp update, then start a new session.")
+            f"--tag {daemon_version} (from a checkout: python ops/update_clients.py --only shim) "
+            f"or update the daemon with pseudolife-mcp update, then start a new session.")
 
 
 # The unattended client half: what this process started, keyed by daemon URL
@@ -556,8 +556,15 @@ def _unattended_clients(url: str, health: dict) -> str:
     this one, the plugin cache refreshed; this session keeps its runtime)
     and return the one line the served instructions carry; '' otherwise.
     The daemon recreate is never taken here: that stays the operator's
-    ``pseudolife-mcp update``. At most one attempt per release per hour, so
-    a failing run does not repeat on every session start."""
+    ``pseudolife-mcp update``.
+
+    Only where that command can work: a Docker-tier registration on this
+    host (``PSEUDOLIFE_MCP_NO_SPAWN``, which the Docker-tier installers set,
+    and a loopback daemon URL); a lite daemon or a remote one would only
+    fail every time. One attempt per release per hour (the marker is
+    created exclusively, so two sessions starting together spawn one run),
+    and a run's exit code is read back from its result file, so the next
+    session says when the last attempt failed instead of trying again."""
     updates = health.get("updates")
     daemon_version = health.get("version")
     if not isinstance(updates, dict) or updates.get("unattended_clients") is not True:
@@ -569,21 +576,49 @@ def _unattended_clients(url: str, health: dict) -> str:
         return ""
     if (url, daemon_version) in _UNATTENDED_NOTES:
         return _UNATTENDED_NOTES[(url, daemon_version)]
+    if not (_is_loopback_url(url) and _spawn_disabled()):
+        return ""
     state = _state_dir()
     marker = state / f"update-clients.{daemon_version}.attempt"
+    result = state / f"update-clients.{daemon_version}.result"
     log = state / "update-clients.log"
     try:
-        recent = marker.is_file() and (time.time() - marker.stat().st_mtime) < _UNATTENDED_RETRY_SECONDS
+        stamp = marker.stat().st_mtime if marker.is_file() else None
     except OSError:
-        recent = False
-    if recent:
-        return ""
-    argv = [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", daemon_version]
+        stamp = None
+    if stamp is not None and (time.time() - stamp) < _UNATTENDED_RETRY_SECONDS:
+        try:
+            outcome = result.read_text(encoding="utf-8").strip() if result.is_file() else ""
+        except OSError:
+            outcome = ""
+        when = time.strftime("%H:%M", time.localtime(stamp))
+        if outcome and outcome != "0":
+            note = (f"Pseudolife-MCP: the unattended client update to {daemon_version} started at {when} "
+                    f"failed (exit {outcome}; log {log}); this shim is still {__version__}. Run "
+                    f"pseudolife-mcp update --clients-only --tag {daemon_version} yourself.")
+        else:
+            note = (f"Pseudolife-MCP: an unattended client update to {daemon_version} started at {when} "
+                    f"({'finished' if outcome == '0' else 'still running'}; log {log}); this shim is "
+                    f"{__version__}. Start a new session to run on the new runtime.")
+        _UNATTENDED_NOTES[(url, daemon_version)] = note
+        return note
+    argv = [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", daemon_version,
+            "--result-file", str(result)]
     try:
         state.mkdir(parents=True, exist_ok=True)
-        marker.write_text(f"{time.time():.0f}\n", encoding="utf-8")
+        if stamp is not None:
+            marker.unlink()
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{time.time():.0f}\n")
+        try:
+            result.unlink()
+        except FileNotFoundError:
+            pass
         pid = _spawn_detached(argv, log)
-    except OSError as exc:
+    except FileExistsError:
+        return ""          # another session just started it; its note is served next time
+    except Exception as exc:  # noqa: BLE001 - the shim must start whatever the spawn does
         print(f"[shim] could not start the unattended client update: {exc}", file=sys.stderr)
         return ""
     note = (f"Pseudolife-MCP: the daemon at {url} runs {daemon_version} and this shim "

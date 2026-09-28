@@ -47,13 +47,16 @@ HOOK_CONTEXT_MAX_CHARS = 9_500
 # A plugin version arrives on the hook's query string. Only a version-shaped
 # value may be echoed into the model's context; anything else is dropped.
 _VERSION_SHAPE = re.compile(r"[0-9A-Za-z.+-]{1,32}")  # used with fullmatch: `$` would admit a trailing newline
-PLUGIN_UPDATE_COMMANDS = ("pseudolife-mcp update --clients-only, or in Claude Code "
+# The client half pinned to the daemon's own release: without --tag it
+# would install the newest release on PyPI, which may be newer than the
+# daemon, and the mismatch would only change direction.
+PLUGIN_UPDATE_COMMANDS = (f"pseudolife-mcp update --clients-only --tag {DAEMON_VERSION}, or in Claude Code "
                           "/plugin marketplace update pseudolife-mcp, then "
                           "/plugin update pseudolife-memory@pseudolife-mcp")
-DAEMON_UPDATE_COMMANDS = ("pseudolife-mcp update (from a checkout: git pull, then "
-                          "ops/update.ps1 or ops/update.sh)")
-ALL_UPDATE_COMMANDS = ("pseudolife-mcp update --clients-only (from a checkout: ops/update.ps1 -All "
-                       "on Windows or ops/update.sh --all)")
+DAEMON_UPDATE_COMMANDS = ("pseudolife-mcp update, or from a checkout git pull, then "
+                          "ops/update.ps1 or ops/update.sh")
+ALL_UPDATE_COMMANDS = (f"pseudolife-mcp update --clients-only --tag {DAEMON_VERSION}, or from a checkout "
+                       "ops/update.ps1 -All on Windows or ops/update.sh --all")
 # The offer, when the daemon knows of a newer release (pseudolife_memory.
 # release_check): the one command that moves the whole install.
 RELEASE_UPDATE_COMMAND = "pseudolife-mcp update"
@@ -123,8 +126,7 @@ def update_notice(daemon_version: str | None, latest_release: str | None,
     if plugin_version and _VERSION_SHAPE.fullmatch(plugin_version) and plugin_version != daemon_version:
         where += f", plugin {plugin_version}"
     return (f"Pseudolife-MCP: release {latest_release} is available ({where}) — run "
-            f"{RELEASE_UPDATE_COMMAND} (it backs the bank up, tags a rollback, recreates the "
-            f"daemon, then updates the shim and the plugin cache), then start a new session.")
+            f"{RELEASE_UPDATE_COMMAND}, then start a new session.")
 
 
 def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERSION) -> str:
@@ -148,9 +150,8 @@ def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERS
         return (f"{head} — update the plugin ({PLUGIN_UPDATE_COMMANDS}) and start "
                 f"a new session; until then its hooks may lack what the daemon serves.")
     if plugin_key is not None and daemon_key is not None and plugin_key > daemon_key:
-        return (f"{head} — redeploy the daemon from the matching checkout "
-                f"({DAEMON_UPDATE_COMMANDS}); until then the plugin may call what "
-                f"the daemon does not serve.")
+        return (f"{head} — update the daemon ({DAEMON_UPDATE_COMMANDS}); until then the "
+                f"plugin may call what the daemon does not serve.")
     return (f"{head} — update the older one: plugin via {PLUGIN_UPDATE_COMMANDS}; "
             f"daemon via {DAEMON_UPDATE_COMMANDS}.")
 

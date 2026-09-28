@@ -138,6 +138,7 @@ class Options:
     allow_downgrade: bool = False      # release mode: a target older than the daemon
     env_file: Path | None = None       # release mode: the compose env file when the labelled one is gone
     check: bool = False
+    result_file: Path | None = None    # the exit code is written here at the end (an unattended caller reads it)
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
 
@@ -271,6 +272,12 @@ class Update:
             self.report.exit_code = exc.exit_code
         if self.o.as_json:
             print(json.dumps(self.report.__dict__, indent=2, default=str))
+        if self.o.result_file is not None:
+            try:
+                self.o.result_file.parent.mkdir(parents=True, exist_ok=True)
+                self.o.result_file.write_text(f"{self.report.exit_code}\n", encoding="utf-8")
+            except OSError as exc:
+                self.warn(f"could not write the result file {self.o.result_file}: {exc}")
         return self.report.exit_code
 
     def _run(self) -> None:
@@ -939,6 +946,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pseudolife-mcp update",
                                      description="update the daemon and the client side (shim, plugin cache, Codex hooks)")
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
+    parser.add_argument("--result-file", default=None,
+                        help="write the exit code to this file at the end (the shim's unattended client update reads it)")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
     parser.add_argument("--checkout", default=None,
@@ -975,7 +984,8 @@ def options_from_args(args) -> Options:
                    all_clients=args.all, clients_only=args.clients_only, daemon_only=args.daemon_only,
                    reinstall=args.reinstall, allow_downgrade=args.allow_downgrade,
                    env_file=Path(args.env_file) if args.env_file else None,
-                   check=args.check, as_json=args.json, daemon_url=args.daemon_url)
+                   check=args.check, as_json=args.json, daemon_url=args.daemon_url,
+                   result_file=Path(args.result_file) if args.result_file else None)
 
 
 def main(argv: list[str] | None = None) -> int:

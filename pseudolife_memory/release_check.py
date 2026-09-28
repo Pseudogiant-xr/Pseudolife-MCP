@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -29,8 +30,15 @@ logger = logging.getLogger("pseudolife-mcp")
 PYPI_JSON = "https://pypi.org/pypi/pseudolife-mcp/json"
 _VERSION_SHAPE = re.compile(r"[0-9A-Za-z.+-]{1,32}")
 _lock = threading.Lock()
-_state: dict = {"latest_release": None, "checked_at": 0.0, "failed_at": 0.0}
+_state: dict = {"enabled": False, "latest_release": None, "checked_at": 0.0, "failed_at": 0.0}
 _started = False
+# Until the first answer, a failed check (the network not up yet at boot)
+# is retried after this many seconds rather than the full interval.
+RETRY_AFTER_FAILURE_SECONDS = 900.0
+# PSEUDOLIFE_RELEASE_CHECK=0 in the daemon's environment makes no request
+# whatever config.yaml says: the test daemons set it, and so can any host
+# that must not reach PyPI.
+OFF_SWITCH = "PSEUDOLIFE_RELEASE_CHECK"
 
 
 def fetch_json(url: str, timeout: float = 5.0) -> dict | None:
@@ -91,23 +99,28 @@ def reset() -> None:
     """Tests: forget the last answer and allow ``start`` again."""
     global _started
     with _lock:
-        _state.update(latest_release=None, checked_at=0.0, failed_at=0.0)
+        _state.update(enabled=False, latest_release=None, checked_at=0.0, failed_at=0.0)
     _started = False
 
 
 def _loop(interval: float) -> None:
     while True:
         check_once()
-        time.sleep(interval)
+        known = snapshot()
+        time.sleep(min(interval, RETRY_AFTER_FAILURE_SECONDS) if known["latest_release"] is None else interval)
 
 
-def start(config) -> bool:
+def start(config, environ=None) -> bool:
     """Idempotent: start the background check when ``config.check_releases``
-    is on. Returns whether a thread was started by this call. Daemon-only."""
+    is on and the environment does not switch it off. Returns whether a
+    thread was started by this call. Daemon-only."""
     global _started
-    if _started or not getattr(config, "check_releases", False):
+    environ = os.environ if environ is None else environ
+    if _started or not getattr(config, "check_releases", False) or environ.get(OFF_SWITCH, "").strip() == "0":
         return False
     _started = True
+    with _lock:
+        _state["enabled"] = True
     interval = float(getattr(config, "check_interval_seconds", 6 * 3600))
     threading.Thread(target=_loop, args=(interval,), daemon=True, name="pl-release-check").start()
     return True

@@ -229,7 +229,8 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if updates is not None:
         from pseudolife_memory import release_check
         known = release_check.snapshot()
-        payload["updates"] = {"latest_release": known["latest_release"],
+        payload["updates"] = {"check_releases": bool(known["enabled"]),
+                              "latest_release": known["latest_release"],
                               "checked_at": known["checked_at"],
                               "unattended_clients": bool(updates.unattended_clients)}
     # Deliberately does NOT touch `status`: a bank with no extractor is

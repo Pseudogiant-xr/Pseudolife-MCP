@@ -174,15 +174,21 @@ no memory content.)
 This one is checkable rather than assertable, which is the point. Pull the
 network, run a dream, and watch it produce facts. Or read
 `ops/docker-compose.yml`: the extractor container is never published to
-the host, and the only endpoint the daemon calls is the one you configure.
+the host, and the only endpoint the daemon calls with memory content is
+the one you configure. (Since 2026-09-29 the daemon also asks PyPI for
+the newest release every six hours, a version number and nothing else,
+so the session briefing can say when an update is out; `updates:
+check_releases: false` in `config.yaml` turns that off, see
+[Configuration](configuration.md#being-told-and-the-unattended-client-half-updates).)
 Point `PSEUDOLIFE_DREAM_BASE_URL` at a hosted model and you have traded the
 property away deliberately — that is a supported configuration, and
 [Dreaming](dreaming.md) says so where you make the choice.
 
 Two honest caveats. First, the **lite** tier ships *no* extractor at all
-(`pip install "pseudolife-mcp[lite]"`) — zero egress by default there,
-because nothing extracts anything until you point it at an endpoint; see
-the README's quickstart for exactly what that costs you. Second, the agent
+(`pip install "pseudolife-mcp[lite]"`) — no memory content leaves it by
+default, because nothing extracts anything until you point it at an
+endpoint (the same release check applies, and the same switch turns it
+off); see the README's quickstart for exactly what that costs you. Second, the agent
 calling these tools is usually a hosted model, so "no egress" describes
 this server's behaviour, not your whole stack.
 

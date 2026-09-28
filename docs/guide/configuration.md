@@ -2640,19 +2640,30 @@ alternative.
 
 `unattended_clients` (default off) lets the safe half run by itself:
 when a session's shim finds the daemon running a newer release than the
-shim is (the state right after a daemon update, or after a deploy from a
-checkout), it starts `pseudolife-mcp update --clients-only --tag <the
-daemon's version>` in the background and says so in its served
-instructions. That installs the daemon's release as a new shim runtime
-beside the running one and refreshes the plugin cache; the running
-session keeps its runtime, the next session starts on the new one, and
-the Codex step is still printed for the operator (the log is
-`~/.pseudolife-mcp/update-clients.log`). At most one attempt per release
-per hour, so a failing run does not repeat on every session start. The
-daemon recreate, with its backup and rollback tag, is never taken by this
-knob: that stays `pseudolife-mcp update`, run on purpose. (The knob lives
-in the daemon's `config.yaml` and reaches the shim through `/health`, so
-one setting governs every client of that daemon.)
+shim is (the state right after `pseudolife-mcp update --daemon-only`, or
+after a release update that moved the daemon but not this client), it
+starts `pseudolife-mcp update --clients-only --tag <the daemon's
+version>` in the background and says so in its served instructions. That
+installs the daemon's release as a new shim runtime beside the running
+one and refreshes the plugin cache; the running session keeps its
+runtime, the next session starts on the new one, and the Codex step is
+still printed for the operator (the log is
+`~/.pseudolife-mcp/update-clients.log`). One attempt per release per
+hour: the run writes its exit code to a result file beside the log, and
+the next session's shim says when the last attempt failed, and which
+command to run, instead of trying again. Only a Docker-tier registration
+on this host takes it (the daemon URL is loopback and the registration
+carries `PSEUDOLIFE_MCP_NO_SPAWN`, as the Docker-tier installers set it):
+on a lite daemon or against a remote one the command could not succeed,
+so nothing is started. A plugin cache that is stale while the daemon and
+the shim are at the same version is not refreshed unattended; the
+briefing's hooks-differ line names the command for that. The daemon
+recreate, with its backup and rollback tag, is never taken by this knob:
+that stays `pseudolife-mcp update`, run on purpose. (The knob lives in
+the daemon's `config.yaml` and reaches the shim through `/health`, so one
+setting governs every client of that daemon.) `PSEUDOLIFE_RELEASE_CHECK=0`
+in the daemon's environment makes no release request whatever the file
+says; the test daemons run with it.
 
 ## Schema version history
 

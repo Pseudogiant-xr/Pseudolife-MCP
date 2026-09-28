@@ -17,17 +17,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of the plugin-version notice. Every notice that names an update now
   names `pseudolife-mcp update` or `--clients-only` first (the briefing's
   plugin-behind, daemon-behind and hooks-differ lines, the shim's version
-  line, `doctor`), with the checkout scripts as the alternative. Nothing
-  compared the daemon with the release page until now.
+  line, `doctor`), with the checkout scripts as the alternative, and the
+  client half pinned to the daemon's release (`--clients-only --tag
+  <version>`: without the tag the newest PyPI release would be installed
+  and the mismatch would only change direction). Until now only
+  `pseudolife-mcp update --check`, run by hand, compared the daemon with
+  the release page. `PSEUDOLIFE_RELEASE_CHECK=0` in the daemon's
+  environment makes no request whatever the file says (the test daemons
+  run with it); a failed check is retried after fifteen minutes until the
+  first answer. The comparison guide's egress note names the check and
+  the switch.
 - `updates.unattended_clients: true` (default off): when a session's shim
   finds the daemon on a newer release than itself, it starts
   `pseudolife-mcp update --clients-only --tag <daemon version>` in the
   background (a new shim runtime beside the running one, the plugin cache
   refreshed; log `~/.pseudolife-mcp/update-clients.log`), at most once per
   release per hour, and its served instructions say so instead of asking
-  for the command. The running session keeps its runtime; the next starts
-  on the new one. The daemon recreate, with its backup and rollback tag,
-  is never taken unattended by this knob. [Configuration](docs/guide/configuration.md#being-told-and-the-unattended-client-half-updates)
+  for the command; the run writes its exit code to a result file, and the
+  next session says when the last attempt failed rather than trying
+  again. Only a Docker-tier registration on this host (loopback daemon
+  URL, `PSEUDOLIFE_MCP_NO_SPAWN` set) takes it: elsewhere the command
+  could not succeed. The running session keeps its runtime; the next
+  starts on the new one. The daemon recreate, with its backup and rollback
+  tag, is never taken unattended by this knob. [Configuration](docs/guide/configuration.md#being-told-and-the-unattended-client-half-updates)
 
 ### Changed (2026-09-29 — the extractor shims start from ops/.env; changing a model is an edit plus a restart, not an elevated re-registration)
 - The Claude and Codex shim autostart task (Windows) and units (Linux)

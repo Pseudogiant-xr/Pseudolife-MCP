@@ -29,8 +29,12 @@ from tests.asgi_helpers import call, stub_mcp
 
 @pytest.fixture(autouse=True)
 def _no_live_check(monkeypatch):
-    """No test asks PyPI; the checker's snapshot is set explicitly."""
+    """No test asks PyPI; the checker's snapshot is set explicitly, and
+    forgotten again afterwards so no other file inherits an offer."""
     monkeypatch.setattr(release_check, "fetch_latest_release", lambda timeout=5.0: None)
+    monkeypatch.delenv(release_check.OFF_SWITCH, raising=False)
+    release_check.reset()
+    yield
     release_check.reset()
 
 
@@ -113,8 +117,11 @@ def test_start_is_a_no_op_when_the_check_is_off(monkeypatch):
                         lambda **kw: started.append(kw) or type("T", (), {"start": lambda self: None})())
     assert release_check.start(UpdatesConfig(check_releases=False)) is False
     assert started == []
+    assert release_check.start(UpdatesConfig(), {"PSEUDOLIFE_RELEASE_CHECK": "0"}) is False   # the test daemons' switch
+    assert started == []
     assert release_check.start(UpdatesConfig()) is True
     assert started and started[0]["daemon"] is True
+    assert release_check.snapshot()["enabled"] is True
     assert release_check.start(UpdatesConfig()) is False  # idempotent
 
 
@@ -145,6 +152,7 @@ def test_health_carries_the_newest_release_and_the_unattended_knob(monkeypatch):
     payload = _health(cfg)
     assert payload["updates"]["latest_release"] == "0.16.0"
     assert payload["updates"]["unattended_clients"] is True
+    assert payload["updates"]["check_releases"] is False       # no thread was started in this process
     assert payload["updates"]["checked_at"] > 0
     assert payload["status"] == "ok"
 
@@ -159,7 +167,8 @@ def test_update_notice_names_the_command_when_a_newer_release_exists():
     text = session_hook.update_notice("0.15.0", "0.16.0", None)
     assert text.startswith("Pseudolife-MCP: release 0.16.0 is available")
     assert "daemon 0.15.0" in text
-    assert "pseudolife-mcp update" in text
+    assert "run pseudolife-mcp update, then start a new session" in text
+    assert "backs the bank up" not in text                     # the pip tier does none of that
     assert "\n" not in text
 
 
@@ -210,21 +219,25 @@ def test_hook_session_start_serves_the_offer_to_unauthorized_callers(svc, monkey
 
 def test_the_version_notices_name_the_installed_command():
     behind = session_hook.version_notice("0.14.0", "0.15.0")
-    assert "pseudolife-mcp update --clients-only" in behind
+    # pinned to the daemon's release: without --tag the newest PyPI release would be installed
+    assert f"pseudolife-mcp update --clients-only --tag {__version__}" in behind
     assert "/plugin update pseudolife-memory@pseudolife-mcp" in behind
     ahead = session_hook.version_notice("0.16.0", "0.15.0")
-    assert "pseudolife-mcp update" in ahead and "ops/update.ps1" in ahead
+    assert "pseudolife-mcp update" in ahead and "ops/update.ps1" in ahead and "((" not in ahead
     hooks = session_hook.hooks_notice("0.15.0", "a" * 64, "0.15.0", "b" * 64)
-    assert "pseudolife-mcp update --clients-only" in hooks
+    assert f"pseudolife-mcp update --clients-only --tag {__version__}" in hooks
 
 
 # ── the shim: the unattended half ───────────────────────────────────────────
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    """A Docker-tier registration on this host: the installers set
+    PSEUDOLIFE_MCP_NO_SPAWN there, and the daemon URL is loopback."""
     from pseudolife_memory import shim
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "1")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(shim, "_UNATTENDED_NOTES", {})
     return tmp_path
@@ -247,7 +260,8 @@ def test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer(home, mon
     note = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
     assert len(calls) == 1
     argv, log = calls[0]
-    assert argv == [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "99.0.0"]
+    assert argv == [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", "99.0.0",
+                    "--result-file", str(home / ".pseudolife-mcp" / "update-clients.99.0.0.result")]
     assert log == home / ".pseudolife-mcp" / "update-clients.log"
     assert "99.0.0" in note and "unattended" in note
     assert "[shim]" in capsys.readouterr().err
@@ -264,25 +278,78 @@ def test_shim_does_not_run_it_when_the_knob_is_off_or_the_daemon_is_not_newer(ho
     assert calls == []
 
 
+def test_shim_runs_it_only_for_a_docker_tier_registration_on_this_host(home, monkeypatch):
+    """`update --clients-only` needs a daemon container on this machine: a
+    lite daemon (no NO_SPAWN on its registration) or a remote one would
+    only fail every hour and tell each session the runtime is coming."""
+    from pseudolife_memory import shim
+    calls = _spawns(monkeypatch)
+    assert shim._unattended_clients("http://10.0.0.7:8765", _health_for("99.0.0")) == ""
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN")
+    assert shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0")) == ""
+    assert calls == []
+    monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "1")
+    assert "unattended" in shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    assert len(calls) == 1
+
+
+def test_the_next_session_reads_the_last_attempts_result(home, monkeypatch):
+    """A failed run must be said, not repeated: the child writes its exit
+    code to the result file and the next shim serves it."""
+    from pseudolife_memory import shim
+    calls = _spawns(monkeypatch)
+    shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    state = home / ".pseudolife-mcp"
+    (state / "update-clients.99.0.0.result").write_text("2\n", encoding="utf-8")
+    shim._UNATTENDED_NOTES.clear()
+    note = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    assert "failed (exit 2" in note and "--clients-only --tag 99.0.0" in note
+    assert len(calls) == 1                                       # not retried within the hour
+    (state / "update-clients.99.0.0.result").write_text("0\n", encoding="utf-8")
+    shim._UNATTENDED_NOTES.clear()
+    note = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    assert "finished" in note and "Start a new session" in note
+    (state / "update-clients.99.0.0.result").unlink()
+    shim._UNATTENDED_NOTES.clear()
+    assert "still running" in shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+
+
+def test_two_sessions_starting_together_spawn_one_run(home, monkeypatch):
+    from pseudolife_memory import shim
+    calls = _spawns(monkeypatch)
+    real_open = shim.os.open
+
+    def racing_open(path, flags, *args):
+        # the other session's shim wins the exclusive create first
+        if str(path).endswith(".attempt") and flags & shim.os.O_EXCL:
+            Path(path).write_text("other\n", encoding="utf-8")
+        return real_open(path, flags, *args)
+
+    monkeypatch.setattr(shim.os, "open", racing_open)
+    assert shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0")) == ""
+    assert calls == []
+
+
 def test_shim_runs_it_at_most_once_an_hour_per_release(home, monkeypatch):
     from pseudolife_memory import shim
     calls = _spawns(monkeypatch)
-    first = shim._unattended_clients("http://x", _health_for("99.0.0"))
-    assert shim._unattended_clients("http://x", _health_for("99.0.0")) == first    # same process: remembered
+    first = shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
+    assert shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0")) == first    # same process: remembered
     assert len(calls) == 1
     marker = home / ".pseudolife-mcp" / "update-clients.99.0.0.attempt"
     assert marker.is_file()
     shim._UNATTENDED_NOTES.clear()                                                  # a new shim process
-    assert shim._unattended_clients("http://x", _health_for("99.0.0")) == ""        # within the hour: nothing
+    # within the hour: no new run, and the note says one is in flight rather than asking for the command
+    assert "still running" in shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
     assert len(calls) == 1
     import os, time
     stale = time.time() - 2 * 3600
     os.utime(marker, (stale, stale))
     shim._UNATTENDED_NOTES.clear()
-    shim._unattended_clients("http://x", _health_for("99.0.0"))
+    shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.0"))
     assert len(calls) == 2
     # a different release is a new attempt
-    shim._unattended_clients("http://x", _health_for("99.0.1"))
+    shim._unattended_clients("http://127.0.0.1:8765", _health_for("99.0.1"))
     assert len(calls) == 3
 
 
@@ -299,8 +366,18 @@ def test_shim_version_note_names_the_installed_command_when_attended(home, monke
     from pseudolife_memory import shim
     _spawns(monkeypatch)
     note = shim._version_note("http://127.0.0.1:8765", {"status": "ok", "version": "99.0.0"})
-    assert "pseudolife-mcp update --clients-only" in note       # the installed command first
+    assert "pseudolife-mcp update --clients-only --tag 99.0.0" in note       # pinned to the daemon's release
     assert "pseudolife-mcp update" in note and "unattended" not in note
+
+
+def test_the_result_file_carries_the_exit_code(tmp_path, monkeypatch):
+    from pseudolife_memory import update_cli
+    monkeypatch.setattr(update_cli, "run_cli", lambda argv, **kw: (1, "docker: not answering"))
+    monkeypatch.setattr(update_cli, "fetch_json", lambda url, timeout=5.0: None)
+    monkeypatch.setenv("PSEUDOLIFE_DOCKER", "fake-docker")
+    result = tmp_path / "state" / "r.result"
+    code = update_cli.main(["--clients-only", "--tag", "99.0.0", "--result-file", str(result)])
+    assert code == 2 and result.read_text(encoding="utf-8").strip() == "2"
 
 
 def test_the_update_check_names_the_command(tmp_path):
