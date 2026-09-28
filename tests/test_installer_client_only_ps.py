@@ -21,7 +21,7 @@ import threading
 
 import pytest
 
-from pseudolife_memory.credentials import _write_token_file
+from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_installer_existing_upgrade import _between, _fixture_env
 
 
@@ -70,20 +70,23 @@ class _PowerShell:
                 f"    {body}\n}}\n")
 
     def run(self, body: str, *, extra_env: dict[str, str] | None = None,
-            ) -> subprocess.CompletedProcess[str]:
+            stdin_text: str | None = None) -> subprocess.CompletedProcess[str]:
         prelude = (
             "$ErrorActionPreference = 'Stop'\n"
             f"$repo = '{_q(ROOT)}'\n"
             "function Step($message) { Write-Output \"STEP: $message\" }\n"
+            f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
+            + _between(INSTALL, "function Get-HelperStatus($output)", "\n}\n") + "\n}\n"
         )
         script = self.tmp / "run.ps1"
         script.write_text(prelude + body, encoding="utf-8")
         env = dict(self.env)
         env.update(extra_env or {})
+        stdin = {"input": stdin_text} if stdin_text is not None else {
+            "stdin": subprocess.DEVNULL}
         return subprocess.run(
             [self.pwsh, "-NoProfile", "-NonInteractive", "-File", str(script)],
-            capture_output=True, text=True, timeout=120, env=env, check=False,
-            stdin=subprocess.DEVNULL)
+            capture_output=True, text=True, timeout=120, env=env, check=False, **stdin)
 
 
 # -- flags and what they imply --------------------------------------------------
@@ -91,9 +94,11 @@ class _PowerShell:
 def _mode(ps: _PowerShell, *, daemon_url: str = "", client_only: bool = False,
           token_file: str = "", extractor: str = "", model: str = "",
           shim_port: int = 0, no_token: bool = False, transport: str = "shim",
+          read_token: bool = False,
           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return ps.run(
         f"$DaemonUrl = '{_q(daemon_url)}'\n"
+        f"$ReadToken = [switch]${'true' if read_token else 'false'}\n"
         f"$ClientOnly = [switch]${'true' if client_only else 'false'}\n"
         f"$TokenFile = '{_q(token_file)}'\n$Extractor = '{extractor}'\n$Model = '{model}'\n"
         f"$ShimPort = {shim_port}\n$NoToken = [switch]${'true' if no_token else 'false'}\n"
@@ -115,7 +120,7 @@ def test_a_daemon_url_off_this_machine_implies_client_only(tmp_path, url):
 
 @pytest.mark.parametrize("url", [
     "http://127.0.0.1:8765", "http://localhost:8765/", "http://LOCALHOST:8765",
-    "http://[::1]:8765"])
+    "http://[::1]:8765", "http://127.8.9.10:8765"])
 def test_a_loopback_daemon_url_keeps_the_local_install(tmp_path, url):
     proc = _mode(_PowerShell(tmp_path), daemon_url=url)
     assert proc.returncode == 0, _output(proc)
@@ -157,6 +162,30 @@ def test_a_malformed_daemon_url_is_refused(tmp_path):
     assert "invalid daemon URL" in _output(proc)
 
 
+@pytest.mark.parametrize("url", [
+    "http://user:secret@pl.example.invalid:8765", "http://pl.example.invalid:8765/pl",
+    "http://pl.example.invalid:8765/?x=1", "http://pl.example.invalid:8765#frag",
+    "http://pl.example.invalid:port", "http://:8765"])
+def test_a_daemon_url_that_is_not_an_origin_is_refused(tmp_path, url):
+    proc = _mode(_PowerShell(tmp_path), daemon_url=url)
+    assert proc.returncode == 2
+    assert "origin" in _output(proc)
+    assert "secret" not in _output(proc)
+
+
+def test_refusals_say_when_the_environment_implied_client_only(tmp_path):
+    proc = _mode(_PowerShell(tmp_path), extractor="sidecar",
+                 extra_env={"PSEUDOLIFE_MCP_DAEMON_URL": REMOTE})
+    assert proc.returncode == 2
+    assert "PSEUDOLIFE_MCP_DAEMON_URL in the environment" in _output(proc)
+
+
+def test_read_token_needs_client_only(tmp_path):
+    proc = _mode(_PowerShell(tmp_path), read_token=True)
+    assert proc.returncode == 2
+    assert "-ReadToken" in _output(proc)
+
+
 @pytest.mark.parametrize("flag,kwargs", [
     ("-Extractor", {"extractor": "sidecar"}),
     ("-Model", {"model": "claude-opus-5"}),
@@ -193,9 +222,19 @@ def test_the_new_parameters_are_declared_and_documented():
     assert "[string]$DaemonUrl" in params
     assert "[string]$TokenFile" in params
     assert "[switch]$ClientOnly" in params
+    assert "[switch]$ReadToken" in params
     header = text.split("param(", 1)[0]
-    for flag in ("-DaemonUrl", "-TokenFile", "-ClientOnly"):
+    for flag in ("-DaemonUrl", "-TokenFile", "-ClientOnly", "-ReadToken"):
         assert re.search(rf"(?m)^#\s+.*{flag}\b", header), flag
+    # One token file is one principal: the examples wire one client per run.
+    assert "one principal" in header
+    lines = header.splitlines()
+    examples = [lines[i] + lines[i + 1] for i, line in enumerate(lines[:-1])
+                if "-DaemonUrl http" in line]
+    assert examples
+    for example in examples:
+        assert re.search(r"-Client [a-z-]+(\s|$)", example), example
+        assert not re.search(r"-Client \S*,", example), example
 
 
 # -- preflight: the token file and the remote daemon ----------------------------
@@ -203,8 +242,11 @@ def test_the_new_parameters_are_declared_and_documented():
 def _preflight(ps: _PowerShell, *, daemon_url: str = REMOTE, token_file: str = "",
                health: str = HEALTH_ON, unreachable: bool = False,
                clients: tuple[str, ...] = ("claude",), missing: tuple[str, ...] = (),
-               extra_env: dict[str, str] | None = None,
+               extra_env: dict[str, str] | None = None, client_only: bool = True,
+               read_token: bool = False, feed: str | None = None, before: str = "",
                cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """``feed``: text on the preflight's stdin (-ReadToken input); ``before``:
+    PowerShell run first, in the same session."""
     env = {"FAKE_HEALTH": health, "FAKE_UNREACHABLE": "1" if unreachable else ""}
     env.update(extra_env or {})
     stubs = "".join(ps.stub_function(name) for name in ("claude", "codex", "gemini")
@@ -217,13 +259,16 @@ def _preflight(ps: _PowerShell, *, daemon_url: str = REMOTE, token_file: str = "
         + ps.stub_function("Invoke-RestMethod",
                            "if ($env:FAKE_UNREACHABLE) { throw 'unreachable' }\n"
                            "    return ($env:FAKE_HEALTH | ConvertFrom-Json)")
-        + f"$DaemonUrl = '{_q(daemon_url)}'\n$ClientOnly = [switch]$true\n"
+        + before
+        + f"$DaemonUrl = '{_q(daemon_url)}'\n"
+        f"$ClientOnly = [switch]${'true' if client_only else 'false'}\n"
+        f"$ReadToken = [switch]${'true' if read_token else 'false'}\n"
         f"$TokenFile = '{_q(token_file)}'\n$clients = @({client_list})\n"
         "$Extractor = ''; $Model = ''; $ShimPort = 0; $NoToken = [switch]$false\n"
         "$Transport = 'shim'\n"
         + _block("client-only mode") + _block("client-only preflight")
         + "\nInvoke-ClientOnlyPreflight\nWrite-Output \"TOKEN_FILE=$TokenFile\"\n")
-    return ps.run(body, extra_env=env)
+    return ps.run(body, extra_env=env, stdin_text=feed)
 
 
 def _token(ps: _PowerShell) -> Path:
@@ -259,14 +304,71 @@ def test_the_token_file_may_come_from_the_environment(tmp_path):
     assert FIXTURE_TOKEN not in _output(proc)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
-def test_a_token_file_other_users_can_read_is_refused(tmp_path):
+def test_a_token_file_written_with_set_content_is_refused(tmp_path):
+    """The shim's own check, on every OS: Set-Content leaves the inherited
+    ACL on Windows and the umask's mode on POSIX, neither owner-only."""
+    ps = _PowerShell(tmp_path)
+    plain = tmp_path / "plain.token"
+    proc = _preflight(ps, token_file=str(plain),
+                      before=f"Set-Content -LiteralPath '{_q(plain)}' -Value '{FIXTURE_TOKEN}'\n")
+    assert plain.exists()
+    assert proc.returncode == 1
+    assert "owner-only" in _output(proc)
+    assert "-ReadToken" in _output(proc)
+    assert FIXTURE_TOKEN not in _output(proc)
+    assert not any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
+
+
+def test_a_symlinked_token_file_is_refused(tmp_path):
     ps = _PowerShell(tmp_path)
     token = _token(ps)
-    token.chmod(0o644)
-    proc = _preflight(ps, token_file=str(token))
+    link = tmp_path / "link.token"
+    try:
+        os.symlink(token, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("this host cannot create symlinks")
+    proc = _preflight(ps, token_file=str(link))
     assert proc.returncode == 1
-    assert "chmod 600" in _output(proc)
+    assert "regular file" in _output(proc)
+
+
+def test_the_banner_says_when_the_environment_implied_client_only(tmp_path):
+    ps = _PowerShell(tmp_path)
+    token = _token(ps)
+    proc = _preflight(ps, daemon_url="", client_only=False, token_file=str(token),
+                      extra_env={"PSEUDOLIFE_MCP_DAEMON_URL": REMOTE})
+    assert proc.returncode == 0, _output(proc)
+    [banner] = [line for line in proc.stdout.splitlines() if "Client-only install" in line]
+    assert "PSEUDOLIFE_MCP_DAEMON_URL in the environment" in banner
+
+
+# -- -ReadToken: the installer creates the token file ---------------------------
+
+def test_read_token_creates_an_owner_only_token_file_from_stdin(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=FIXTURE_TOKEN + "\n")
+    assert proc.returncode == 0, _output(proc)
+    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
+    assert FIXTURE_TOKEN not in _output(proc)
+
+
+def test_read_token_never_replaces_an_existing_file(tmp_path):
+    ps = _PowerShell(tmp_path)
+    token = _token(ps)
+    before = token.read_bytes()
+    proc = _preflight(ps, token_file=str(token), read_token=True, feed="fixture-other\n")
+    assert proc.returncode == 1
+    assert "already exists" in _output(proc)
+    assert token.read_bytes() == before
+
+
+def test_read_token_refuses_an_empty_answer(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed="\n")
+    assert proc.returncode == 1
+    assert not target.exists()
 
 
 def test_an_unreachable_daemon_is_refused_with_how_to_check(tmp_path):
@@ -279,6 +381,8 @@ def test_an_unreachable_daemon_is_refused_with_how_to_check(tmp_path):
     [call] = [call for call in ps.logged() if call.startswith("Invoke-RestMethod|")]
     assert f"{REMOTE}/health" in call
     assert "-TimeoutSec" in call
+    # A redirect is refused, as curl -f and the shim refuse one.
+    assert "-MaximumRedirection 0" in call
 
 
 def test_an_open_daemon_is_never_reached_over_a_network(tmp_path):
@@ -382,17 +486,110 @@ Write-Output "URL=$codexCredentialUrl"
     assert f"URL={REMOTE}" in proc.stdout.splitlines()
 
 
-def test_client_only_briefing_hook_runs_the_host_shim_not_docker(tmp_path):
-    text = (ROOT / INSTALL).read_text(encoding="utf-8")
-    lines = [line for line in text.splitlines()
-             if line.startswith("$briefingCommand = ")
-             or line.startswith("if ($ClientOnly) { $briefingCommand = ")]
-    assert len(lines) == 2, lines
-    ps = _PowerShell(tmp_path)
-    proc = ps.run("$ClientOnly = [switch]$true\n" + "\n".join(lines)
-                  + "\nWrite-Output \"CMD=$briefingCommand\"\n")
+# -- Codex never lands on another daemon in client-only mode --------------------
+
+CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_configured":true,'
+              '"credential_file_path":"/fixture/codex/token","daemon_url":"%s"}')
+CODEX_STUB = """$global:LASTEXITCODE = 0
+    $callArgs = @($args)
+    if (($callArgs[0] -eq 'mcp') -and ($callArgs[1] -eq 'get')) {
+        if ($env:FAKE_EXISTING) { return $env:FAKE_EXISTING }
+        $global:LASTEXITCODE = 1
+        return
+    }
+    if ($callArgs -contains '--help') { return '  --env <KEY=VALUE>' }"""
+
+
+def _codex_wiring(ps: _PowerShell, *, python_ok: bool = True, cred: str | None = None,
+                  cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
+    """Sections 9 to 11 for a Codex-only client-only install, with stub
+    python, pipx and codex commands. Returns the run and the codex adds."""
+    token = _token(ps)
+    installed = ps.tmp / "installed-bin"
+    installed.mkdir()
+    (installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")).write_text(
+        "placeholder\n", encoding="utf-8")
+    stages = re.search(r"(?ms)^# -- 9\. session lifecycle hooks[^\n]*\n(.*?)^# -- 12\. health",
+                       (ROOT / INSTALL).read_text(encoding="utf-8"))[1]
+    body = f"""$env:PATH = '{_q(ps.tmp)}'
+$clients = @('codex'); $CodexHooks = 'auto'; $CodexHookTrust = 'yes'
+$Instructions = 'auto'; $ClaudeMd = ''; $AgentsFile = ''; $interactive = $false
+$Transport = 'shim'
+$ClientOnly = [switch]$true; $DaemonUrl = '{REMOTE}'; $TokenFile = '{_q(token)}'
+function Get-EnvValue($name) {{ return $null }}
+function global:python {{
+    $global:LASTEXITCODE = 1
+    if (($env:FAKE_PY_OK -eq '1') -and ("$args" -match 'sys\.executable')) {{
+        $global:LASTEXITCODE = 0
+        return 'fake-codex-python'
+    }}
+}}
+function global:fake-codex-python {{
+    $null = @($input)
+    $callArgs = @($args)
+    $global:LASTEXITCODE = 0
+    if ("$($callArgs[0])" -like '*setup-codex-coordination.py') {{
+        if ($callArgs -contains '--runtime-defaults') {{
+            return '{{"status":"ready","runtime_defaults":"configured"}}'
+        }}
+        $global:LASTEXITCODE = [int]$env:FAKE_CRED_EXIT
+        return $env:FAKE_CRED
+    }}
+    if ("$($callArgs[0])" -like '*setup-codex-hooks.py') {{
+        return '{{"status":"ready","source":"manual","instructions":"covered-by-hooks","recovery":null}}'
+    }}
+}}
+function global:pipx {{
+    $callArgs = @($args)
+    $global:LASTEXITCODE = 0
+    if ($callArgs[0] -eq 'environment') {{
+        if ($callArgs[2] -eq 'PIPX_BIN_DIR') {{ return '{_q(installed)}' }}
+        return
+    }}
+    $global:LASTEXITCODE = [int]$env:FAKE_PIPX_EXIT
+}}
+{ps.stub_function("codex", CODEX_STUB)}
+{stages}
+Write-Output ("MCP_CODEX=" + $mcpState['codex'])
+"""
+    proc = ps.run(body, extra_env={
+        "FAKE_PY_OK": "1" if python_ok else "0",
+        "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
+        "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
+        "FAKE_EXISTING": existing})
+    adds = [call for call in ps.logged()
+            if call.startswith("codex|mcp add") and "--help" not in call]
+    return proc, adds
+
+
+def test_codex_registers_with_the_remote_url_and_its_credential_file(tmp_path):
+    proc, adds = _codex_wiring(_PowerShell(tmp_path))
     assert proc.returncode == 0, _output(proc)
-    assert "CMD=pseudolife-mcp briefing --hook-json" in proc.stdout.splitlines()
+    [add] = adds
+    assert f"PSEUDOLIFE_MCP_DAEMON_URL={REMOTE}" in add
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE=/fixture/codex/token" in add
+    assert "PSEUDOLIFE_MCP_NO_SPAWN=1" in add
+    assert "MCP_CODEX=shim-env" in proc.stdout.splitlines()
+
+
+@pytest.mark.parametrize("scenario,kwargs,says", [
+    ("no python", {"python_ok": False}, "Python 3.10"),
+    ("credential setup failed",
+     {"cred": '{"status":"needs-configuration","recovery":"fixture"}', "cred_exit": 1},
+     "credential setup failed"),
+    ("shim install failed", {"pipx_exit": 1}, "stdio shim"),
+    ("existing registration elsewhere",
+     {"cred": CRED_READY % "http://127.0.0.1:8765",
+      "existing": "pseudolife-memory\n  command: pseudolife-mcp\n"
+                  "  env: PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:8765"},
+     f"not the daemon at {REMOTE}"),
+])
+def test_codex_is_never_left_on_another_daemon(tmp_path, scenario, kwargs, says):
+    proc, adds = _codex_wiring(_PowerShell(tmp_path), **kwargs)
+    assert proc.returncode == 0, _output(proc)
+    assert adds == [], scenario
+    assert "MCP_CODEX=failed" in proc.stdout.splitlines(), scenario
+    assert says in _output(proc), scenario
 
 
 # -- the whole script, client-only, against a local stand-in daemon ------------
@@ -473,11 +670,19 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     _script_stub(fake_bin, calls, "gemini",
                  "if (($args[0] -eq 'mcp') -and ($args[1] -eq 'add') -and ($args -contains '--help')) "
                  "{ Write-Output '  -e, --env <env...>' }\nexit 0")
+    # An earlier local install left its own file and loopback URL for the hooks.
+    settings_path = ps.home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps({"env": {
+        "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
     env = dict(ps.env)
     system_dirs = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] \
         if os.name == "nt" else ["/usr/bin", "/bin"]
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),
-                "PYTHONPATH": str(ROOT)})
+                "PYTHONPATH": str(ROOT),
+                # The installer's own environment carries an older credential.
+                "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     proc = subprocess.run(
         [ps.pwsh, "-NoProfile", "-NonInteractive", "-File", str(repo / "ops" / "install.ps1"),
          "-ClientOnly", "-DaemonUrl", daemon_server, "-TokenFile", str(token),
@@ -505,10 +710,17 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     settings = json.loads((ps.home / ".claude" / "settings.json").read_text(
         encoding="utf-8-sig"))
     commands = json.dumps(settings.get("hooks", {}))
-    assert "pseudolife-mcp briefing --hook-json" in commands
+    # The installed shim by its path: a hook's PATH need not include pipx's.
+    briefings = [hook["command"] for group in settings["hooks"]["SessionStart"]
+                 for hook in group["hooks"]
+                 if hook["command"].endswith(" briefing --hook-json")]
+    assert [Path(command.rsplit(" briefing", 1)[0]) for command in briefings] == [
+        installed / "pseudolife-mcp"]
     assert "docker exec" not in commands
     assert settings["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == daemon_server
     assert Path(settings["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"]) == token
+    assert "fixture-local-literal" not in output
+    assert list((ps.home / ".claude").glob("settings.json.bak-pseudolife-*"))
     assert f"remote at {daemon_server}" in proc.stdout
     assert re.search(r"\[x\] Agent board\s+on", proc.stdout)
     assert any(seen.endswith(f"Bearer {FIXTURE_TOKEN}") for seen in _Daemon.seen)

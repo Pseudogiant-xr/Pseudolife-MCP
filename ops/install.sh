@@ -12,7 +12,7 @@
 #   ops/install.sh --extractor sonnet-fallback --instructions append
 #   ops/install.sh --extractor codex-fallback --client codex
 #   ops/install.sh --daemon-url http://100.64.0.2:8765 \
-#       --token-file ~/.pseudolife-mcp/remote.token --client claude,codex
+#       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -54,6 +54,12 @@
 #                                    the installer never mints one here
 #   --client-only                    wire clients to --daemon-url only; with
 #                                    a loopback URL, for an SSH tunnel
+#   --read-token                     client-only: create the --token-file (it
+#                                    must not exist yet) from the token typed,
+#                                    unechoed, or piped on stdin
+# One token file is one principal: every client a run wires shares it. For
+# per-client attribution on the board, run the installer once per client,
+# each run with that client's own token file.
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
@@ -87,6 +93,7 @@ NO_TOKEN=""
 DAEMON_URL=""
 TOKEN_FILE=""
 CLIENT_ONLY=""
+READ_TOKEN=""
 
 usage() {
     sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
@@ -113,6 +120,7 @@ while [ $# -gt 0 ]; do
         --daemon-url) DAEMON_URL="$2"; shift 2 ;;
         --token-file) TOKEN_FILE="$2"; shift 2 ;;
         --client-only) CLIENT_ONLY=1; shift ;;
+        --read-token) READ_TOKEN=1; shift ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -160,17 +168,42 @@ daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
     esac
     printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
 }
-is_loopback_host() {
-    case "$1" in 127.0.0.1|localhost|::1) return 0 ;; *) return 1 ;; esac
+is_loopback_host() {  # the shim's rule (daemon_url._is_loopback_url)
+    case "$1" in localhost|::1) return 0 ;; esac
+    printf '%s' "$1" | grep -Eq '^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'
 }
-[ -n "$DAEMON_URL" ] || DAEMON_URL="${PSEUDOLIFE_MCP_DAEMON_URL:-}"
+CLIENT_ONLY_VIA=""
+daemon_url_from_env=""
+if [ -z "$DAEMON_URL" ] && [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
+    DAEMON_URL="$PSEUDOLIFE_MCP_DAEMON_URL"
+    daemon_url_from_env=1
+fi
 DAEMON_URL="${DAEMON_URL%/}"
 if [ -n "$DAEMON_URL" ]; then
-    case "$DAEMON_URL" in http://?*|https://?*) ;; *)
-        echo "invalid daemon URL '$DAEMON_URL' (expected http://<host>:<port> or https://<host>)" >&2
-        exit 2 ;;
+    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
+    # http(s), a host and an optional numeric port; no credentials, path,
+    # query, fragment or whitespace. The URL is not echoed: it may hold a
+    # password.
+    url_authority="${DAEMON_URL#*://}"
+    url_port=""
+    case "$url_authority" in
+        \[*\]:*) url_port="${url_authority##*]:}" ;;
+        \[*) ;;
+        *:*) url_port="${url_authority#*:}" ;;
     esac
-    is_loopback_host "$(daemon_url_host "$DAEMON_URL")" || CLIENT_ONLY=1
+    url_ok=1
+    case "$DAEMON_URL" in http://?*|https://?*) ;; *) url_ok="" ;; esac
+    case "$url_authority" in *[/?#@[:space:]]*) url_ok="" ;; esac
+    case "$url_port" in *[!0-9]*) url_ok="" ;; esac
+    [ -n "$(daemon_url_host "$DAEMON_URL")" ] || url_ok=""
+    if [ -z "$url_ok" ]; then
+        echo "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)" >&2
+        exit 2
+    fi
+    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_host "$(daemon_url_host "$DAEMON_URL")"; then
+        CLIENT_ONLY=1
+        [ -z "$daemon_url_from_env" ] || CLIENT_ONLY_VIA=" (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
+    fi
 fi
 if [ -n "$CLIENT_ONLY" ]; then
     if [ -z "$DAEMON_URL" ]; then
@@ -184,11 +217,11 @@ if [ -n "$CLIENT_ONLY" ]; then
     [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
     [ "$TRANSPORT" = shim ] || local_flags="$local_flags --transport http"
     if [ -n "$local_flags" ]; then
-        echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)" >&2
+        echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
         exit 2
     fi
-elif [ -n "$TOKEN_FILE" ]; then
-    echo "client-only install: --token-file names a remote daemon's token, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop --token-file" >&2
+elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ]; then
+    echo "client-only install: --token-file and --read-token name a remote daemon's token, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
     exit 2
 fi
 # <<< client-only mode <<<
@@ -399,30 +432,65 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
+installer_python() {  # echoes an interpreter >= 3.10, or nothing
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
 # token file and on the remote daemon answering. The token is never read
 # into output.
 client_only_preflight() {
-    step "Client-only install: this machine's clients will use the daemon at $DAEMON_URL (no Docker, volumes or local daemon here)."
+    step "Client-only install${CLIENT_ONLY_VIA:-}: this machine's clients will use the daemon at $DAEMON_URL (no Docker, volumes or local daemon here)."
     [ -n "$TOKEN_FILE" ] || TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
     if [ -z "$TOKEN_FILE" ]; then
-        echo "client-only install: pass --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token. The installer never mints one for a remote daemon" >&2
+        echo "client-only install: pass --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and --read-token to create it. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
         exit 2
     fi
-    if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
-        echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Write the daemon's token into it (owner-only: chmod 600), then re-run" >&2
+    token_py="$(installer_python)"
+    if [ -z "$token_py" ]; then
+        echo "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run" >&2
         exit 1
     fi
-    case "$(uname -s 2>/dev/null || true)" in
-        MINGW*|MSYS*|CYGWIN*) ;;  # NTFS ACLs, not mode bits; the shim checks those
-        *)
-            token_mode="$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null ||
-                stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || true)"
-            case "$token_mode" in *00) ;; *)
-                echo "client-only install: other users can read the token file (mode ${token_mode:-unknown}): $TOKEN_FILE. Run chmod 600 on it, then re-run" >&2
+    if [ -n "${READ_TOKEN:-}" ]; then
+        if [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; then
+            echo "client-only install: --read-token creates the token file, and it already exists: $TOKEN_FILE. Drop --read-token to use it, or remove it first" >&2
+            exit 1
+        fi
+        # Read unechoed, and handed to the helper on stdin through a shell
+        # builtin: the token never reaches an argument list or the output.
+        [ ! -t 0 ] || printf "Paste the daemon's bearer token (not shown), then Enter: " >&2
+        token_value=""
+        IFS= read -rs token_value || true
+        [ ! -t 0 ] || echo "" >&2
+        token_report=$(printf '%s\n' "$token_value" |
+            "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
+        token_value=""
+        case "$token_report" in
+            *'"written"'*) step "Wrote the token file $TOKEN_FILE (owner-only; the token is not shown)." ;;
+            *)
+                token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+                echo "client-only install: could not write the token file (${token_problem:-no result}): $TOKEN_FILE" >&2
                 exit 1 ;;
-            esac ;;
+        esac
+    fi
+    if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
+        echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Create it with --read-token, or write the daemon's token into it owner-only, then re-run" >&2
+        exit 1
+    fi
+    # The shim's own check, on every OS: an owner-only regular file (mode
+    # bits on POSIX, the ACL on Windows), no link, one well-formed token.
+    token_report=$("$token_py" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
+    case "$token_report" in *'"ready"'*) ;; *)
+        token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or create it with --read-token, then re-run" >&2
+        exit 1 ;;
     esac
     TOKEN_FILE="$(cd "$(dirname "$TOKEN_FILE")" && pwd)/$(basename "$TOKEN_FILE")"
     for selected_client in $CLIENTS; do
@@ -439,7 +507,7 @@ client_only_preflight() {
     daemon_health=""
     if ! daemon_health="$(curl -fsS --max-time 5 "$DAEMON_URL/health" 2>/dev/null)" ||
             ! printf '%s' "$daemon_health" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-        echo "client-only install: no healthy daemon answered at $DAEMON_URL/health." >&2
+        echo "client-only install: no healthy daemon answered at $DAEMON_URL/health.${CLIENT_ONLY_VIA:-}" >&2
         echo "  The daemon must be exposed to this machine, for example through the tailnet: check the host and port, that the daemon listens beyond loopback on its host, and that this machine reaches it (curl $DAEMON_URL/health)." >&2
         exit 1
     fi
@@ -573,17 +641,6 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
     fi
     step "Dreamer model: $MODEL"
 fi
-
-installer_python() {  # echoes an interpreter >= 3.10, or nothing
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 0
-}
 
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 || true; }
@@ -952,9 +1009,6 @@ CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
 CODEX_RUNTIME_DEFAULTS=""
 CODEX_RUNTIME_RECOVERY=""
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
-# No daemon container here: the host shim asks the remote daemon, reading its
-# address and token file from the settings.json env block (section 11).
-[ -z "${CLIENT_ONLY:-}" ] || briefing_command="pseudolife-mcp briefing --hook-json"
 for selected_client in $CLIENTS; do
     case "$selected_client" in claude|codex) ;; *) continue ;; esac
     if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
@@ -1017,6 +1071,11 @@ print(r.get("daemon_url") or "")
                 if [ "$credential_configured" = 1 ]; then
                     step "Codex credential file ready; future rotations are picked up by new requests."
                 fi
+                # An existing Codex registration keeps its own daemon URL.
+                if [ -n "${CLIENT_ONLY:-}" ] && [ "${CODEX_CREDENTIAL_URL%/}" != "$DAEMON_URL" ]; then
+                    CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                    CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL in [mcp_servers.pseudolife-memory.env], then re-run."
+                fi
             else
                 CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
                 CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
@@ -1063,6 +1122,12 @@ for key in ("status", "source", "instructions", "recovery"):
         fi
         step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
         if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
+        continue
+    fi
+    if [ -n "${CLIENT_ONLY:-}" ]; then
+        # No daemon container here: the hook runs the installed shim by its
+        # path, known once section 11 installed it (after section 12's check).
+        HOOK_CLAUDE=deferred
         continue
     fi
     step "Installing $selected_client session hook..."
@@ -1516,13 +1581,24 @@ fi
 # A client-only install's settings.json hooks run the host shim, which needs
 # the file and the URL there as much as the plugin's hooks do.
 if { [ "${HOOK_CLAUDE:-}" = plugin ] || [ -n "${CLIENT_ONLY:-}" ]; } && [ -n "$CLAUDE_TOKEN_FILE" ]; then
-    settings_output=$("$(installer_python)" "$repo/ops/client_credentials.py" claude-settings-env \
-        --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
-        --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL") || true
+    settings_args=("$repo/ops/client_credentials.py" claude-settings-env
+        --settings "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+        --token-file "$CLAUDE_TOKEN_FILE" --daemon-url "$CLIENT_DAEMON_URL")
+    # A client-only install's hooks must reach the remote daemon with the
+    # operator's file, whatever an earlier local install left there.
+    [ -z "${CLIENT_ONLY:-}" ] || settings_args+=(--replace)
+    settings_output=$("$(installer_python)" "${settings_args[@]}") || true
     case "$settings_output" in
-        *'"updated"'*) step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)." ;;
-        *'"kept"'*) ;;
-        *) echo "WARNING: could not give the plugin's hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the env block of ~/.claude/settings.json." >&2 ;;
+        *'"updated"'*)
+            if [ -n "${CLIENT_ONLY:-}" ]; then
+                settings_changed=$(printf '%s' "$settings_output" | sed -n 's/.*"changed": \[\([^]]*\)\].*/\1/p' | tr -d '"')
+                settings_backup=$(printf '%s' "$settings_output" | sed -n 's/.*"backup": "\([^"]*\)".*/\1/p')
+                step "Claude Code hooks: set ${settings_changed:-the daemon URL and token file} in ~/.claude/settings.json (env) for the daemon at $CLIENT_DAEMON_URL${settings_backup:+ (backup: $settings_backup)}."
+            else
+                step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)."
+            fi ;;
+        *'"kept"'*|*'"unchanged"'*) ;;
+        *) echo "WARNING: could not give the Claude Code hooks the token file ($settings_output). Set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE and PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL in the env block of ~/.claude/settings.json." >&2 ;;
     esac
 fi
 # <<< client token files <<<
@@ -1606,6 +1682,11 @@ for selected_client in $CLIENTS; do
         if [ -n "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
             MCP_CODEX=failed
             echo "WARNING: Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem." >&2
+            continue
+        elif [ -n "${CLIENT_ONLY:-}" ] && [ -z "$CODEX_CREDENTIAL_FILE" ]; then
+            # Without it Codex would reach whatever daemon its defaults name.
+            MCP_CODEX=failed
+            echo "WARNING: Codex was not registered: a client-only install points it at $CLIENT_DAEMON_URL through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run." >&2
             continue
         elif existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
             existing_codex_guard=$(codex mcp get pseudolife-memory --json 2>/dev/null || printf '%s' "$existing_codex")
@@ -1703,7 +1784,7 @@ for selected_client in $CLIENTS; do
             else
                 echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
                 echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
-                if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
                     echo "WARNING: Codex authentication requires the stdio shim; HTTP fallback was not registered." >&2
                     MCP_CODEX=failed
                 else
@@ -1715,7 +1796,7 @@ for selected_client in $CLIENTS; do
                 fi
             fi
         else
-            if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+            if [ -n "$CODEX_CREDENTIAL_FILE" ] || [ -n "${CLIENT_ONLY:-}" ]; then
                 echo "WARNING: Codex authentication requires the stdio shim; HTTP transport was not registered." >&2
                 MCP_CODEX=failed
             else
@@ -1913,9 +1994,13 @@ for selected_client in $CLIENTS; do
         fi
         # The in-place edit above only adds what is missing, so a registration
         # from an earlier local install may still name that daemon.
-        if [ -n "${CLIENT_ONLY:-}" ] &&
-                ! claude mcp get pseudolife-memory 2>/dev/null | grep -qF "$CLIENT_DAEMON_URL"; then
-            echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE." >&2
+        # Captured, then matched: a `grep -q` that exits early under
+        # pipefail would read the CLI's SIGPIPE as a mismatch.
+        if [ -n "${CLIENT_ONLY:-}" ]; then
+            claude_registration_now=$(claude mcp get pseudolife-memory 2>/dev/null || true)
+            case "$claude_registration_now" in *"$CLIENT_DAEMON_URL"*) ;; *)
+                echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE." >&2 ;;
+            esac
         fi
     elif [ "$TRANSPORT" = "shim" ]; then
         ensure_shim
@@ -1983,6 +2068,29 @@ if [ -z "$CLIENT_ONLY" ]; then
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
 fi
 
+# >>> client-only claude hook >>>
+# A client-only install's Claude Code session hook (deferred from section
+# 9): the installed shim by its path, since a hook's PATH need not include
+# pipx's directory. It reads the daemon's address and the token file from
+# the settings.json env block section 11 wrote.
+if [ "${HOOK_CLAUDE:-}" = deferred ]; then
+    ensure_shim
+    if [ -n "$SHIM_OK" ] && [ -n "$SHIM_PATH" ]; then
+        shim_command="${SHIM_PATH%.exe}"
+        case "$shim_command" in *[[:space:]]*)
+            echo "WARNING: the shim's path holds a space, so the session hook runs pseudolife-mcp from PATH instead: $shim_command" >&2
+            shim_command=pseudolife-mcp ;;
+        esac
+        step "Installing claude session hook..."
+        "$repo/ops/install-hook.sh" --client claude "" "$shim_command briefing --hook-json"
+        HOOK_CLAUDE=hook
+    else
+        echo "WARNING: the Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)." >&2
+        HOOK_CLAUDE=failed
+    fi
+fi
+# <<< client-only claude hook <<<
+
 # ── 13. per-provider wiring ladder + per-mode verify hints ─────────────────
 # [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
 mcp_marker() {  # $1 = state
@@ -2027,6 +2135,9 @@ for selected_client in $CLIENTS; do
             if [ "$HOOK_CLAUDE" = plugin ]; then
                 echo "    [x] Session briefing     Claude Code plugin"
                 echo "    [x] Per-turn discipline  Claude Code plugin"
+            elif [ "$HOOK_CLAUDE" = failed ]; then
+                echo "    [!] Session briefing     not installed - the shim is unavailable"
+                echo "    [!] Per-turn discipline  not installed"
             else
                 echo "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
                 echo "    [x] Per-turn discipline  UserPromptSubmit hook"

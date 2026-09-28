@@ -1231,9 +1231,31 @@ def test_shim_mcp_dependency_stays_on_the_daemon_line():
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
-    mcp_spec = next(d for d in deps if re.match(r"mcp\b", d))
+    mcp_spec = next(d for d in deps if re.match(r"mcp\s*(?:[<>=~!]|$)", d))
     assert "<2.2" in mcp_spec, mcp_spec
     lock = (Path(__file__).resolve().parents[1] / "ops" / "requirements.lock.txt"
             ).read_text(encoding="utf-8")
     locked = re.search(r"^mcp==(\d+)\.(\d+)\.", lock, re.M)
     assert locked and (locked.group(1), locked.group(2)) == ("2", "1"), lock
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://127.0.0.1:8765", True),
+    ("http://127.0.0.2:8765", True),
+    ("http://localhost:8765", True),
+    ("http://LOCALHOST:8765", True),
+    ("http://[::1]:8765", True),
+    ("http://[::ffff:127.0.0.1]:8765", True),
+    ("http://0.0.0.0:8765", False),
+    ("http://100.64.0.2:8765", False),
+    ("https://daemon.example.invalid", False),
+    ("http://myhost.local:8765", False),
+])
+def test_is_loopback_url_is_keyed_on_the_host_only(url, expected):
+    """Loopback is the address family's loopback range or the literal name
+    ``localhost``; any other name is treated as another machine WITHOUT
+    resolving it (a name that happens to resolve to loopback is remote to
+    the shim, which then never spawns for it: that is the safe direction)."""
+    from pseudolife_memory.daemon_url import _is_loopback_url
+
+    assert _is_loopback_url(url) is expected

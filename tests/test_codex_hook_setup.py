@@ -656,3 +656,33 @@ def test_real_codex_test_does_not_launch_codex_on_a_busy_machine(tmp_path, monke
     with pytest.raises(pytest.skip.Exception, match="too busy"):
         test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, True)
     assert launches == []
+
+
+def test_private_json_needs_no_third_party_modules(tmp_path):
+    """The installers run ops/setup-codex-hooks.py with whatever ``python3``
+    is on PATH, and a client-only machine has a bare interpreter: no anyio,
+    no httpx. Writing Codex's private connection file must not import the
+    coordination adapter (which imports both). The 2026-09-28 client-only
+    dogfood failed its Codex step with a swallowed ModuleNotFoundError
+    exactly here; the Windows host never saw it because its system Python
+    happens to carry anyio."""
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[1]
+    target = tmp_path / "connection.json"
+    script = (
+        "import sys, importlib.util, json\n"
+        "sys.modules['anyio'] = None\n"
+        "sys.modules['httpx'] = None\n"
+        f"spec = importlib.util.spec_from_file_location('hooks', {str(repo / 'ops' / 'setup-codex-hooks.py')!r})\n"
+        "hooks = importlib.util.module_from_spec(spec); spec.loader.exec_module(hooks)\n"
+        f"hooks._private_json(__import__('pathlib').Path({str(target)!r}), {{'daemon_url': 'http://100.64.0.2:8765'}})\n"
+        "print(json.load(open(sys.argv[1]))['daemon_url'])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(target)],
+        capture_output=True, text=True, cwd=str(repo), timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "http://100.64.0.2:8765"

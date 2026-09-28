@@ -23,7 +23,7 @@ import threading
 
 import pytest
 
-from pseudolife_memory.credentials import _write_token_file
+from pseudolife_memory.credentials import CredentialProvider, _write_token_file
 from tests.test_client_install_ux import _heredoc_payload, _marker_block
 from tests.test_installer_existing_upgrade import (
     _bash_fixture_path, _bash_variants, _between, _fixture_env,
@@ -33,6 +33,7 @@ from tests.test_installer_existing_upgrade import (
 ROOT = Path(__file__).resolve().parents[1]
 BASH = pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
 REMOTE = "http://100.64.0.2:8765"
+HELPER = ROOT / "ops" / "client_credentials.py"
 FIXTURE_TOKEN = "fixture-remote-token-0123456789"
 HEALTH_ON = '{"status": "ok", "version": "0.0.0", "auth": true}'
 HEALTH_OPEN = '{"status": "ok", "version": "0.0.0", "auth": false}'
@@ -87,6 +88,8 @@ class _Shell:
             f"HOME='{self.path(self.home)}'\n"
             f"PATH='{self.path(self.bin)}:/usr/bin:/bin'\n"
             f"export PATH CALL_LOG='{self.path(self.calls)}'\n"
+            f"repo='{self.path(ROOT)}'\n"
+            f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
             "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         env = dict(self.env)
@@ -100,9 +103,10 @@ class _Shell:
 def _mode(shell: _Shell, *, daemon_url: str = "", client_only: str = "",
           token_file: str = "", extractor: str = "", model: str = "",
           shim_port: str = "0", no_token: str = "", transport: str = "shim",
+          read_token: str = "",
           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return shell.run(
-        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
+        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\nREAD_TOKEN='{read_token}'\n"
         f"TOKEN_FILE='{_q(token_file)}'\nEXTRACTOR='{extractor}'\nMODEL='{model}'\n"
         f"SHIM_PORT='{shim_port}'\nNO_TOKEN='{no_token}'\nTRANSPORT='{transport}'\n"
         + _block("client-only mode")
@@ -122,7 +126,7 @@ def test_a_daemon_url_off_this_machine_implies_client_only(bash, tmp_path, url):
 
 @pytest.mark.parametrize("url", [
     "http://127.0.0.1:8765", "http://localhost:8765/", "http://LOCALHOST:8765",
-    "http://[::1]:8765"])
+    "http://[::1]:8765", "http://127.8.9.10:8765"])
 @BASH
 def test_a_loopback_daemon_url_keeps_the_local_install(bash, tmp_path, url):
     proc = _mode(_Shell(bash, tmp_path), daemon_url=url)
@@ -170,6 +174,20 @@ def test_a_malformed_daemon_url_is_refused(bash, tmp_path):
     assert "invalid daemon URL" in proc.stderr
 
 
+@pytest.mark.parametrize("url", [
+    "http://user:secret@pl.example.invalid:8765", "http://pl.example.invalid:8765/pl",
+    "http://pl.example.invalid:8765/?x=1", "http://pl.example.invalid:8765#frag",
+    "http://pl.example.invalid:port", "http://:8765"])
+@BASH
+def test_a_daemon_url_that_is_not_an_origin_is_refused(bash, tmp_path, url):
+    """The shim's own rule (daemon_url._validated_daemon_url): an http(s)
+    origin with no credentials, path, query or fragment."""
+    proc = _mode(_Shell(bash, tmp_path), daemon_url=url)
+    assert proc.returncode == 2
+    assert "origin" in proc.stderr
+    assert "secret" not in proc.stderr
+
+
 @pytest.mark.parametrize("flag,kwargs", [
     ("--extractor", {"extractor": "sidecar"}),
     ("--model", {"model": "claude-opus-5"}),
@@ -182,6 +200,21 @@ def test_client_only_refuses_the_flags_of_a_local_daemon(bash, tmp_path, flag, k
     proc = _mode(_Shell(bash, tmp_path), daemon_url=REMOTE, **kwargs)
     assert proc.returncode == 2
     assert flag in proc.stderr
+
+
+@BASH
+def test_refusals_say_when_the_environment_implied_client_only(bash, tmp_path):
+    proc = _mode(_Shell(bash, tmp_path), extractor="sidecar",
+                 extra_env={"PSEUDOLIFE_MCP_DAEMON_URL": REMOTE})
+    assert proc.returncode == 2
+    assert "PSEUDOLIFE_MCP_DAEMON_URL in the environment" in proc.stderr
+
+
+@BASH
+def test_read_token_needs_client_only(bash, tmp_path):
+    proc = _mode(_Shell(bash, tmp_path), read_token="1")
+    assert proc.returncode == 2
+    assert "--read-token" in proc.stderr
 
 
 @BASH
@@ -207,22 +240,37 @@ def test_the_new_flags_are_parsed_and_documented():
     assert '--token-file) TOKEN_FILE="$2"; shift 2 ;;' in sh
     assert "--client-only) CLIENT_ONLY=1; shift ;;" in sh
     usage = sh.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0]
-    for flag in ("--daemon-url", "--token-file", "--client-only"):
+    assert "--read-token) READ_TOKEN=1; shift ;;" in sh
+    for flag in ("--daemon-url", "--token-file", "--client-only", "--read-token"):
         assert re.search(rf"(?m)^#\s+.*{flag}\b", usage), flag
+    # One token file is one principal: the examples wire one client per run.
+    assert "one principal" in usage
+    lines = usage.splitlines()
+    examples = [lines[i] + lines[i + 1] for i, line in enumerate(lines[:-1])
+                if "--daemon-url http" in line]
+    assert examples
+    for example in examples:
+        assert re.search(r"--client [a-z-]+(\s|$)", example), example
+        assert not re.search(r"--client \S*,", example), example
 
 
 # -- preflight: the token file and the remote daemon ----------------------------
 
 def _preflight(shell: _Shell, *, daemon_url: str = REMOTE, token_file: str = "",
                health: str = HEALTH_ON, curl_exit: int = 0, clients: str = "claude",
+               client_only: str = "1", read_token: str = "", feed: str | None = None,
                extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    env = {"FAKE_HEALTH": health, "FAKE_CURL_EXIT": str(curl_exit)}
+    """``feed``: a line piped to the preflight's stdin (--read-token input)."""
+    env = {"FAKE_HEALTH": health, "FAKE_CURL_EXIT": str(curl_exit),
+           "FIXTURE_FEED": feed or ""}
     env.update(extra_env or {})
+    call = ("printf '%s\\n' \"$FIXTURE_FEED\" | client_only_preflight\n" if feed is not None
+            else "client_only_preflight\nprintf 'TOKEN_FILE=%s\\n' \"$TOKEN_FILE\"\n")
     return shell.run(
-        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY=1\nTOKEN_FILE='{_q(token_file)}'\n"
+        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
+        f"TOKEN_FILE='{_q(token_file)}'\nREAD_TOKEN='{read_token}'\n"
         f"CLIENTS='{clients}'\nEXTRACTOR='' MODEL='' SHIM_PORT=0 NO_TOKEN='' TRANSPORT=shim\n"
-        + _block("client-only mode") + _block("client-only preflight")
-        + "\nclient_only_preflight\nprintf 'TOKEN_FILE=%s\\n' \"$TOKEN_FILE\"\n",
+        + _block("client-only mode") + _block("client-only preflight") + "\n" + call,
         extra_env=env)
 
 
@@ -262,16 +310,81 @@ def test_the_token_file_may_come_from_the_environment(bash, tmp_path):
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 @BASH
-def test_a_token_file_other_users_can_read_is_refused(bash, tmp_path):
+def test_a_token_file_without_owner_only_protection_is_refused(bash, tmp_path):
+    """The shim's own check, on every OS: POSIX mode bits, or on Windows the
+    inherited ACL a file written the ordinary way gets."""
+    shell = _Shell(bash, tmp_path)
+    token = tmp_path / "plain.token"
+    token.write_text(FIXTURE_TOKEN + "\n", encoding="utf-8")
+    if os.name != "nt":
+        token.chmod(0o644)
+    proc = _preflight(shell, token_file=shell.path(token))
+    assert proc.returncode == 1
+    assert "owner-only" in proc.stderr
+    assert "--read-token" in proc.stderr
+    assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+    assert not any(call.startswith("curl|") for call in shell.logged())
+
+
+@BASH
+def test_a_symlinked_token_file_is_refused(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
     token = _token(shell)
-    token.chmod(0o644)
-    proc = _preflight(shell, token_file=str(token))
+    link = tmp_path / "link.token"
+    try:
+        os.symlink(token, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("this host cannot create symlinks")
+    proc = _preflight(shell, token_file=shell.path(link))
     assert proc.returncode == 1
-    assert "chmod 600" in proc.stderr
+    assert "regular file" in proc.stderr
+
+
+@BASH
+def test_the_banner_says_when_the_environment_implied_client_only(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    proc = _preflight(shell, daemon_url="", client_only="", token_file=shell.path(token),
+                      extra_env={"PSEUDOLIFE_MCP_DAEMON_URL": REMOTE})
+    assert proc.returncode == 0, proc.stderr
+    [banner] = [line for line in proc.stdout.splitlines() if "Client-only install" in line]
+    assert "PSEUDOLIFE_MCP_DAEMON_URL in the environment" in banner
+
+
+# -- --read-token: the installer creates the token file -------------------------
+
+@BASH
+def test_read_token_creates_an_owner_only_token_file_from_stdin(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=FIXTURE_TOKEN)
+    assert proc.returncode == 0, proc.stderr
+    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
+    assert any(call.startswith("curl|") for call in shell.logged())
+
+
+@BASH
+def test_read_token_never_replaces_an_existing_file(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    before = token.read_bytes()
+    proc = _preflight(shell, token_file=shell.path(token), read_token="1",
+                      feed="fixture-other-token")
+    assert proc.returncode == 1
+    assert "already exists" in proc.stderr
+    assert token.read_bytes() == before
+
+
+@BASH
+def test_read_token_refuses_an_empty_answer(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1", feed="")
+    assert proc.returncode == 1
+    assert not target.exists()
 
 
 @BASH
@@ -402,18 +515,193 @@ def test_codex_credentials_come_from_the_token_file_and_the_remote_url(bash, tmp
     assert "docker exec" not in proc.stdout
 
 
-@BASH
-def test_client_only_briefing_hook_runs_the_host_shim_not_docker(bash, tmp_path):
-    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
-    shell = _Shell(bash, tmp_path)
+# -- Codex never lands on another daemon in client-only mode --------------------
+
+CRED_READY = ('{"status":"ready","credential_file_configured":true,"connection_configured":true,'
+              '"credential_file_path":"/fixture/codex/token","daemon_url":"%s"}')
+
+
+def _codex_wiring(shell: _Shell, *, python_ok: bool = True, cred: str | None = None,
+                  cred_exit: int = 0, pipx_exit: int = 0, existing: str = ""):
+    """Sections 9 to 11 for a Codex-only client-only install, with stub
+    python, pipx and codex. Returns the run and the codex calls."""
+    token = _token(shell)
+    installed = shell.tmp / "installed-bin"
+    installed.mkdir()
+    _stub(installed / "pseudolife-mcp", "exit 0\n")
+    for name in ("python3", "python"):
+        _stub(shell.bin / name,
+              "case \"$1\" in\n"
+              "  -c) [ \"$FAKE_PY_OK\" = 1 ] || exit 1; exec \"$FIXTURE_PYTHON\" \"$@\" ;;\n"
+              "  *setup-codex-coordination.py)\n"
+              "    if [ \"$2\" = --runtime-defaults ]; then\n"
+              "      printf '{\"status\":\"ready\",\"runtime_defaults\":\"configured\"}\\n'; exit 0; fi\n"
+              "    cat >/dev/null; printf '%s\\n' \"$FAKE_CRED\"; exit \"$FAKE_CRED_EXIT\" ;;\n"
+              "  *setup-codex-hooks.py)\n"
+              "    printf '{\"status\":\"ready\",\"source\":\"manual\","
+              "\"instructions\":\"covered-by-hooks\",\"recovery\":null}\\n' ;;\n"
+              "esac\n")
+    _stub(shell.bin / "pipx",
+          "if [ \"$1\" = environment ]; then\n"
+          "  [ \"$3\" = PIPX_BIN_DIR ] && printf '%s\\n' \"$FAKE_INSTALL_BIN\"; exit 0; fi\n"
+          "exit \"$FAKE_PIPX_EXIT\"\n")
+    _stub(shell.bin / "codex",
+          "printf 'codex|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "if [ \"$1 $2\" = 'mcp get' ]; then\n"
+          "  [ -n \"$FAKE_EXISTING\" ] || exit 1; printf '%s\\n' \"$FAKE_EXISTING\"; exit 0; fi\n"
+          "if [ \"$1 $2 $3\" = 'mcp add --help' ]; then echo '  --env <KEY=VALUE>'; exit 0; fi\n"
+          "exit 0\n")
+    source = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    stages = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)"
+                       r"^# [^\n]*12\. health", source)[1]
     proc = shell.run(
-        "CLIENT_ONLY=1\n"
-        + "\n".join(line for line in text.splitlines()
-                    if line.startswith("briefing_command=")
-                    or re.match(r"^\[ -z \"\$\{CLIENT_ONLY:-\}\" \] \|\| briefing_command=", line))
-        + "\nprintf 'CMD=%s\\n' \"$briefing_command\"\n")
+        f"env_file='{shell.path(shell.tmp / 'absent.env')}'\n"
+        f"CLIENT_ONLY=1\nDAEMON_URL='{REMOTE}'\nTOKEN_FILE='{shell.path(token)}'\n"
+        "CLIENTS=codex CODEX_HOOKS=auto CODEX_HOOK_TRUST=yes INSTRUCTIONS=auto CLAUDE_MD=''\n"
+        "AGENTS_FILE='' TRANSPORT=shim\n"
+        + _between("ops/install.sh", "get_env() {", "\n") + "\n" + stages
+        + "\nprintf 'MCP_CODEX=%s\\n' \"$MCP_CODEX\"\n",
+        strict="set -euo pipefail",
+        extra_env={"FAKE_PY_OK": "1" if python_ok else "0",
+                   "FIXTURE_PYTHON": _bash_fixture_path(shell.bash, Path(sys.executable),
+                                                        shell.env),
+                   "FAKE_CRED": cred if cred is not None else CRED_READY % REMOTE,
+                   "FAKE_CRED_EXIT": str(cred_exit), "FAKE_PIPX_EXIT": str(pipx_exit),
+                   "FAKE_EXISTING": existing,
+                   "FAKE_INSTALL_BIN": _bash_fixture_path(shell.bash, installed, shell.env)})
+    adds = [call for call in shell.logged()
+            if call.startswith("codex|mcp add") and "--help" not in call]
+    return proc, adds
+
+
+@BASH
+def test_codex_registers_with_the_remote_url_and_its_credential_file(bash, tmp_path):
+    proc, adds = _codex_wiring(_Shell(bash, tmp_path))
     assert proc.returncode == 0, proc.stderr
-    assert "CMD=pseudolife-mcp briefing --hook-json\n" in proc.stdout
+    [add] = adds
+    assert f"PSEUDOLIFE_MCP_DAEMON_URL={REMOTE}" in add
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE=/fixture/codex/token" in add
+    assert "PSEUDOLIFE_MCP_NO_SPAWN=1" in add
+    assert "MCP_CODEX=shim-env" in proc.stdout
+
+
+@pytest.mark.parametrize("scenario,kwargs,says", [
+    ("no python", {"python_ok": False}, "Python 3.10"),
+    ("credential setup failed",
+     {"cred": '{"status":"needs-configuration","recovery":"fixture"}', "cred_exit": 1},
+     "credential setup failed"),
+    ("shim install failed", {"pipx_exit": 1}, "stdio shim"),
+    ("existing registration elsewhere",
+     {"cred": CRED_READY % "http://127.0.0.1:8765",
+      "existing": "pseudolife-memory\n  command: pseudolife-mcp\n"
+                  "  env: PSEUDOLIFE_MCP_DAEMON_URL=http://127.0.0.1:8765"},
+     f"not the daemon at {REMOTE}"),
+])
+@BASH
+def test_codex_is_never_left_on_another_daemon(bash, tmp_path, scenario, kwargs, says):
+    proc, adds = _codex_wiring(_Shell(bash, tmp_path), **kwargs)
+    assert proc.returncode == 0, proc.stderr
+    assert adds == [], scenario
+    assert "MCP_CODEX=failed" in proc.stdout, scenario
+    assert says in proc.stdout + proc.stderr, scenario
+
+
+# -- the helper subcommands the installers share -------------------------------
+
+def _helper(*args: str, stdin: bytes = b"", env: dict[str, str] | None = None):
+    full_env = dict(os.environ)
+    full_env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    full_env.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+    full_env.update(env or {})
+    return subprocess.run([sys.executable, str(HELPER), *args], input=stdin,
+                          capture_output=True, timeout=60, env=full_env, check=False)
+
+
+def test_check_token_file_accepts_what_the_shim_reads(tmp_path):
+    token = tmp_path / "good.token"
+    _write_token_file(token, FIXTURE_TOKEN)
+    proc = _helper("check-token-file", "--path", str(token))
+    assert proc.returncode == 0, proc.stdout
+    assert json.loads(proc.stdout)["status"] == "ready"
+    assert FIXTURE_TOKEN.encode() not in proc.stdout + proc.stderr
+
+
+def test_check_token_file_refuses_an_unprotected_file(tmp_path):
+    token = tmp_path / "plain.token"
+    token.write_text(FIXTURE_TOKEN + "\n", encoding="utf-8")
+    if os.name != "nt":
+        token.chmod(0o644)
+    proc = _helper("check-token-file", "--path", str(token))
+    assert proc.returncode == 1
+    assert "owner-only" in json.loads(proc.stdout)["recovery"]
+    assert FIXTURE_TOKEN.encode() not in proc.stdout + proc.stderr
+
+
+def test_check_token_file_refuses_a_symlink(tmp_path):
+    token = tmp_path / "good.token"
+    _write_token_file(token, FIXTURE_TOKEN)
+    link = tmp_path / "link.token"
+    try:
+        os.symlink(token, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("this host cannot create symlinks")
+    proc = _helper("check-token-file", "--path", str(link))
+    assert proc.returncode == 1
+    assert "regular file" in json.loads(proc.stdout)["recovery"]
+
+
+def test_write_token_file_creates_an_owner_only_file_from_stdin(tmp_path):
+    target = tmp_path / "keys" / "new.token"
+    proc = _helper("write-token-file", "--path", str(target),
+                   stdin=FIXTURE_TOKEN.encode() + b"\r\n")
+    assert proc.returncode == 0, proc.stdout
+    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
+    assert FIXTURE_TOKEN.encode() not in proc.stdout + proc.stderr
+    assert _helper("check-token-file", "--path", str(target)).returncode == 0
+
+
+@pytest.mark.parametrize("stdin", [b"", b"\n", b"two words\n"])
+def test_write_token_file_refuses_a_malformed_token(tmp_path, stdin):
+    target = tmp_path / "new.token"
+    proc = _helper("write-token-file", "--path", str(target), stdin=stdin)
+    assert proc.returncode == 1
+    assert not target.exists()
+
+
+def test_write_token_file_never_replaces_an_existing_file(tmp_path):
+    target = tmp_path / "old.token"
+    _write_token_file(target, FIXTURE_TOKEN)
+    before = target.read_bytes()
+    proc = _helper("write-token-file", "--path", str(target), stdin=b"fixture-other\n")
+    assert proc.returncode == 1
+    assert "already exists" in json.loads(proc.stdout)["recovery"]
+    assert target.read_bytes() == before
+
+
+def test_settings_env_replace_moves_an_earlier_local_install_to_the_remote_daemon(tmp_path):
+    """A client-only install sets both keys whatever an earlier local install
+    left in settings.json or the installer's environment holds."""
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": {
+        "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/home/.pseudolife-mcp/claude-code.token",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765", "OTHER": "kept"},
+        "enabledPlugins": {"x": True}}), encoding="utf-8")
+    proc = _helper("claude-settings-env", "--settings", str(settings),
+                   "--token-file", "/fixture/remote.token", "--daemon-url", REMOTE,
+                   "--replace", env={"PSEUDOLIFE_MCP_TOKEN": "fixture-process-token"})
+    assert proc.returncode == 0, proc.stdout
+    report = json.loads(proc.stdout)
+    assert report["status"] == "updated"
+    assert report["changed"] == ["PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_MCP_TOKEN_FILE"]
+    assert Path(report["backup"]).exists()
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["env"] == {"PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/remote.token",
+                           "PSEUDOLIFE_MCP_DAEMON_URL": REMOTE, "OTHER": "kept"}
+    assert data["enabledPlugins"] == {"x": True}
+    again = _helper("claude-settings-env", "--settings", str(settings),
+                    "--token-file", "/fixture/remote.token", "--daemon-url", REMOTE,
+                    "--replace")
+    assert json.loads(again.stdout)["status"] == "unchanged"
 
 
 # -- the whole script, client-only, against a local stand-in daemon ------------
@@ -483,13 +771,21 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
           "printf 'gemini|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
           "if [ \"$1 $2 $3\" = 'mcp add --help' ]; then echo '  -e, --env <env...>'; fi\n"
           "exit 0\n")
+    # An earlier local install left its own file and loopback URL for the hooks.
+    settings_path = shell.home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(json.dumps({"env": {
+        "PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/local/claude-code.token",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}}), encoding="utf-8")
     proc = shell.run(
         f"exec '{shell.path(repo / 'ops' / 'install.sh')}' --client-only "
         f"--daemon-url '{board_server}' --token-file '{shell.path(token)}' "
         "--client claude,gemini --claude-plugin skip --instructions skip --no-art\n",
         extra_env={"FAKE_HEALTH": HEALTH_ON,
                    "FAKE_INSTALL_BIN": _bash_fixture_path(bash, installed, shell.env),
-                   "PYTHONPATH": str(ROOT)})
+                   "PYTHONPATH": str(ROOT),
+                   # The installer's own environment carries an older credential.
+                   "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     calls = shell.logged()
     assert not any(call.startswith("docker|") for call in calls)
@@ -513,10 +809,18 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     settings = json.loads((shell.home / ".claude" / "settings.json").read_text(
         encoding="utf-8"))
     commands = json.dumps(settings.get("hooks", {}))
-    assert "pseudolife-mcp briefing --hook-json" in commands
+    # The installed shim by its path: a hook's PATH need not include pipx's.
+    # (Git Bash hands the path to Python in its Windows spelling.)
+    briefings = [hook["command"] for group in settings["hooks"]["SessionStart"]
+                 for hook in group["hooks"]
+                 if hook["command"].endswith(" briefing --hook-json")]
+    assert [Path(command.rsplit(" briefing", 1)[0]) for command in briefings] == [
+        installed / "pseudolife-mcp"]
     assert "docker exec" not in commands
     assert settings["env"]["PSEUDOLIFE_MCP_DAEMON_URL"] == board_server
     assert Path(settings["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"]) == token
+    assert "fixture-local-literal" not in output
+    assert list((shell.home / ".claude").glob("settings.json.bak-pseudolife-*"))
     # The summary says where the daemon is, and the board was asked with
     # the operator's token.
     assert f"remote at {board_server}" in proc.stdout
@@ -550,7 +854,8 @@ def _messages(text: str) -> set[str]:
     found |= set(re.findall(r"the link itself is unencrypted[^\"$]*", text))
     found |= set(re.findall(r"An unauthenticated bank must never[^\"$]*", text))
     spellings = {"--daemon-url": "-DaemonUrl", "--token-file": "-TokenFile",
-                 "--client-only": "-ClientOnly"}
+                 "--client-only": "-ClientOnly", "--read-token": "-ReadToken",
+                 "--client,": "-Client,"}
     normalized = set()
     for message in found:
         for sh_flag, ps_flag in spellings.items():

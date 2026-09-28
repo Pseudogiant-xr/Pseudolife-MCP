@@ -8140,6 +8140,9 @@ ops\update.ps1        # or: ops/update.sh
 
 Never put a token in a URL or in shell history. Move it to the client out of
 band.
+The installer takes one token file per run; see
+[With the installer](#with-the-installer-client-only-path) for wiring two
+clients on one machine.
 
 ## Admitting the new principals to the board
 
@@ -8166,54 +8169,77 @@ token file and the agent's registration.
 ### The token file
 
 One file per client, `~/.pseudolife-mcp/<client>.token`, owner-only (mode
-`600`). The shim refuses to start when the daemon requires auth and the file
-is missing or readable by anyone else. On Linux or macOS, without the token
-touching shell history:
+`600` on Linux and macOS, an owner-only ACL on Windows). The shim refuses to
+start when the daemon requires auth and the file is missing or readable by
+anyone else.
+
+The simplest way to write it is the installer's `--read-token`
+(`-ReadToken`): it reads the token without echo and writes the
+`--token-file` path owner-only on Linux, macOS and Windows, and only when
+that file does not exist yet. The installer then validates the file with the
+shim's own owner-only check on every OS, and refuses a file that would fail
+at session start.
+
+By hand on Linux or macOS, without the token touching shell history:
 
 ```bash
 mkdir -p ~/.pseudolife-mcp && chmod 700 ~/.pseudolife-mcp
-( umask 077; read -rs -p "token: " t; printf '%s\n' "$t" > ~/.pseudolife-mcp/claude-code.token )
+( umask 077; read -rs -p "token: " t; printf '%s
+' "$t" > ~/.pseudolife-mcp/claude-code.token )
 ```
 
-On Windows, let the installer write it: an owner-only ACL is harder to get
-right by hand.
+By hand on Windows, write the token alone to the file with no byte-order
+mark (a BOM becomes part of the token and every call is rejected), then
+remove inherited access:
+
+```bat
+icacls <file> /inheritance:r /grant:r "%USERNAME%:F"
+```
 
 ### With the installer (client-only path)
 
-The installers take a client-only mode that skips the Docker stack and wires
-the selected clients against a remote daemon:
+The installers take a client-only mode that skips the Docker stack, mints no
+token, and wires the selected clients against a remote daemon. A
+non-loopback `--daemon-url` implies it; pass it explicitly for a loopback URL
+that is really an SSH tunnel.
+
+The installer takes one token file per run, so run it once per client, each
+with that client's own token file:
 
 ```bash
-ops/install.sh --client-only --daemon-url <url> --token-file <path>
+ops/install.sh --client-only --daemon-url <url> --client claude --token-file ~/.pseudolife-mcp/claude-code.token --read-token
+ops/install.sh --client-only --daemon-url <url> --client codex --token-file ~/.pseudolife-mcp/codex.token --read-token
 ```
 
 ```powershell
-ops\install.ps1 -ClientOnly -DaemonUrl <url> -TokenFile <path>
+ops\install.ps1 -ClientOnly -DaemonUrl <url> -Client claude -TokenFile <path> -ReadToken
 ```
+
+If per-client attribution on the board does not matter, one shared principal
+and one token file for every client on the machine is fine too.
+
+Codex does not use the operator's token file directly: its credential helper
+keeps its own copy under `~/.codex/pseudolife/`, which Codex's hooks read. A
+token rotation therefore has to be written to both places.
 
 ### By hand
 
 ```bash
 pipx install pseudolife-mcp
 
-claude mcp add --scope user pseudolife-memory \
-  -e PSEUDOLIFE_WRITER_ID=claude-code \
-  -e PSEUDOLIFE_MCP_NO_SPAWN=1 \
-  -e PSEUDOLIFE_MCP_TOKEN_FILE=<path> \
-  -e PSEUDOLIFE_MCP_DAEMON_URL=<url> \
-  -- <shim path>
+claude mcp add --scope user pseudolife-memory   -e PSEUDOLIFE_WRITER_ID=claude-code   -e PSEUDOLIFE_MCP_NO_SPAWN=1   -e PSEUDOLIFE_MCP_TOKEN_FILE=<path>   -e PSEUDOLIFE_MCP_DAEMON_URL=<url>   -- <shim path>
 
-codex mcp add pseudolife-memory \
-  --env PSEUDOLIFE_WRITER_ID=codex \
-  --env PSEUDOLIFE_MCP_NO_SPAWN=1 \
-  --env PSEUDOLIFE_MCP_TOKEN_FILE=<path> \
-  --env PSEUDOLIFE_MCP_DAEMON_URL=<url> \
-  -- <shim path>
+codex mcp add pseudolife-memory   --env PSEUDOLIFE_WRITER_ID=codex   --env PSEUDOLIFE_MCP_NO_SPAWN=1   --env PSEUDOLIFE_MCP_TOKEN_FILE=<path>   --env PSEUDOLIFE_MCP_DAEMON_URL=<url>   -- <shim path>
 ```
 
 `<shim path>` is the absolute path of the `pseudolife-mcp` executable pipx
 installed, `<url>` an origin such as `http://100.64.0.2:8765` (no `/mcp`, no
-path). The Codex timeouts in the [README](../../README.md) apply here too.
+path).
+
+The shim waits up to 15 seconds for a remote daemon that does not answer,
+which is longer than Codex's default MCP startup timeout. Set the Codex
+startup timeout as the [README's Codex setup](../../README.md#quickstart)
+describes.
 
 The Claude Code plugin adds the session hooks:
 
@@ -8229,12 +8255,13 @@ registration, so also set `PSEUDOLIFE_MCP_TOKEN_FILE` and
 On a headless box, the provider CLIs (`claude`, `codex`) must be on the
 `PATH` of a non-interactive shell, not only a login shell.
 
-### Why `PSEUDOLIFE_MCP_NO_SPAWN=1`
+### `PSEUDOLIFE_MCP_NO_SPAWN=1` is required
 
-The shim never spawns a local daemon for a non-loopback URL. The variable is
-still recommended: it states the intent in the registration, and without it
-an older shim that cannot reach the daemon starts a useless local daemon and
-gives up after about three minutes.
+Set it on every client registration. The shim never spawns a local daemon
+for a non-loopback URL, but a client-only install over an SSH tunnel uses a
+loopback URL: if the tunnel drops, a shim without this setting would spawn a
+local daemon on the tunnel's port and serve an empty bank in place of the
+real one.
 
 ### Verify
 
@@ -8258,7 +8285,7 @@ the range (`mcp>=2.1,<2.2`); a shim pipx-installed from an older release may
 need:
 
 ```bash
-pipx runpip pseudolife-mcp install "mcp==2.1.1"
+pipx runpip pseudolife-mcp install "mcp<2.2"
 ```
 
 or a reinstall of `pseudolife-mcp`.
@@ -8269,17 +8296,12 @@ error line names the path it read.
 
 ## What latency to expect
 
-Measured once, 2026-09-28, on a Linux container client reaching a Windows
-daemon host over a direct tailnet path:
-
-| Call | Round trip |
-|---|---|
-| `/health` | 7-10 ms |
-| Authenticated REST call | 60-70 ms |
-| Per-turn prompt hook | 43-45 ms on the client (about 135 ms on the Windows daemon host itself) |
-
-The hook's cost is process start, not the network. A relayed (DERP) tailnet
-path adds tens of milliseconds per call.
+One informal measurement on one setup, not a benchmark: 2026-09-28, a Linux
+container client reaching a Windows daemon host over a direct tailnet path.
+`/health` took 7-10 ms, an authenticated REST call 60-70 ms, and the
+per-turn prompt hook 43-45 ms on the client (about 135 ms on the Windows
+host itself, because the hook's cost is process start, not the network). A
+relayed (DERP) tailnet path adds tens of milliseconds per call.
 
 ## Hosting the daemon on another machine
 

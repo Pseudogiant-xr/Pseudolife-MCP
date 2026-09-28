@@ -86,7 +86,7 @@ def backup(path: Path) -> str | None:
 def private_backup(path: Path) -> str | None:
     if not path.exists():
         return None
-    from pseudolife_memory.coordination_adapter import _open_state
+    from pseudolife_memory.private_state import open_private as _open_state
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     target = path.with_name(path.name + ".bak-pseudolife-credentials-" + stamp)
@@ -97,7 +97,7 @@ def private_backup(path: Path) -> str | None:
 
 
 def _private_json(path: Path, updates):
-    from pseudolife_memory.coordination_adapter import _open_state
+    from pseudolife_memory.private_state import open_private as _open_state
 
     current = {}
     if path.exists() or path.is_symlink():

@@ -10,10 +10,17 @@ behaves the same:
   registration-env     add the token file, daemon URL and agent state directory
                        to an existing Claude Code registration, in place
   claude-settings-env  point the Claude Code plugin's hooks at the token file
+                       (--replace: a client-only install's file and URL, whatever
+                       settings.json or the environment held before)
+  check-token-file     the shim's own check of a token file: owner-only, a
+                       regular file (no link), one well-formed token
+  write-token-file     create an owner-only token file from one token read on
+                       stdin; an existing file is never replaced
   board                print one line: whether the board is on, or why it is off
 
 Token values arrive through the environment (PSEUDOLIFE_INSTALLER_TOKEN and
-PSEUDOLIFE_INSTALLER_TOKENS), never the command line, and are never printed.
+PSEUDOLIFE_INSTALLER_TOKENS) or stdin, never the command line, and are never
+printed.
 Results are JSON on stdout (``board`` prints its line); exit 1 means failed.
 """
 from __future__ import annotations
@@ -215,11 +222,29 @@ def registration_env(config: Path, wanted: dict[str, str]) -> dict:
 
 # -- claude-settings-env ------------------------------------------------------
 
-def claude_settings_env(settings: Path, token_path: str, daemon_url: str) -> dict:
+def claude_settings_env(settings: Path, token_path: str, daemon_url: str,
+                        replace: bool = False) -> dict:
     """The plugin's hooks read the Claude Code process environment, not the
     MCP registration's env block, so they need the token file there too.
     The daemon URL rides with it: beside a managed Codex connection the
-    hooks refuse an explicit token file without the matching URL."""
+    hooks refuse an explicit token file without the matching URL.
+
+    ``replace`` is a client-only install's: the hooks must reach the remote
+    daemon with the operator's file, so both keys are set whatever the
+    installer's environment or an earlier local install left there."""
+    if replace:
+        data = _load_json(settings)
+        env = data.get("env") or {}
+        if not isinstance(env, dict):
+            raise HelperError("settings.json 'env' is not an object; fix it, then re-run")
+        wanted = {TOKEN_FILE_KEY: token_path, DAEMON_URL_KEY: daemon_url}
+        changed = sorted(key for key, value in wanted.items() if env.get(key) != value)
+        if not changed:
+            return {"status": "unchanged", "backup": None, "changed": []}
+        backup = _backup(settings)
+        data["env"] = {**env, **wanted}
+        _write_json(settings, data)
+        return {"status": "updated", "backup": backup, "changed": changed}
     if os.environ.get(TOKEN_KEY) or os.environ.get(TOKEN_FILE_KEY):
         return {"status": "kept", "backup": None}
     data = _load_json(settings)
@@ -235,6 +260,36 @@ def claude_settings_env(settings: Path, token_path: str, daemon_url: str) -> dic
     data["env"] = {**env, **additions}
     _write_json(settings, data)
     return {"status": "updated", "backup": backup}
+
+
+# -- check-token-file / write-token-file --------------------------------------
+
+def check_token_file(path: Path) -> dict:
+    """The shim's own check, so a file the installer accepts is one the
+    shim will read. The reason names what is wrong, never the value."""
+    try:
+        credentials.CredentialProvider(path=path).snapshot()
+    except credentials.CredentialError as error:
+        return {"status": "failed", "recovery": str(error)}
+    return {"status": "ready"}
+
+
+def write_token_file(path: Path, stream) -> dict:
+    """Create ``path`` owner-only from one token read on ``stream``."""
+    target = Path(os.path.abspath(path.expanduser()))
+    if target.exists() or target.is_symlink():
+        raise HelperError(f"{target} already exists; the installer creates a token file "
+                          "but never replaces one")
+    data = stream.read(credentials.MAX_TOKEN_BYTES + 3)
+    try:
+        token = data.decode("utf-8").rstrip("\r\n")
+        credentials._write_token_file(target, token)
+    except UnicodeDecodeError as error:
+        raise HelperError("the token read on stdin is not UTF-8 text") from error
+    except credentials.CredentialError as error:
+        raise HelperError("the token read on stdin is empty, too long, or holds "
+                          "whitespace or control characters") from error
+    return {"status": "written", "path": str(target)}
 
 
 # -- board --------------------------------------------------------------------
@@ -266,6 +321,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--settings", required=True, type=Path)
     p.add_argument("--token-file", required=True)
     p.add_argument("--daemon-url", required=True)
+    p.add_argument("--replace", action="store_true")
+    p = commands.add_parser("check-token-file")
+    p.add_argument("--path", required=True, type=Path)
+    p = commands.add_parser("write-token-file")
+    p.add_argument("--path", required=True, type=Path)
     p = commands.add_parser("board")
     p.add_argument("--daemon-url", required=True)
     p.add_argument("--token-file")
@@ -280,8 +340,13 @@ def main(argv: list[str] | None = None) -> int:
             report = token_file(args.principal, args.path)
         elif args.command == "registration-env":
             report = registration_env(args.config, _pairs(args.pairs))
+        elif args.command == "check-token-file":
+            report = check_token_file(args.path)
+        elif args.command == "write-token-file":
+            report = write_token_file(args.path, sys.stdin.buffer)
         else:
-            report = claude_settings_env(args.settings, args.token_file, args.daemon_url)
+            report = claude_settings_env(args.settings, args.token_file, args.daemon_url,
+                                         replace=args.replace)
     except HelperError as error:
         report = {"status": "failed", "recovery": str(error)}
     except (OSError, credentials.CredentialError) as error:

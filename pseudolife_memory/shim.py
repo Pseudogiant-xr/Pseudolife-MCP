@@ -72,6 +72,12 @@ _NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
 # round trip at 7-10 ms, and a session should not stall three minutes on a
 # link that is simply not there.
 _REMOTE_WAIT_S = 15.0
+# Per-probe timeout for a remote daemon. The loopback default (0.25 s) is
+# sized for a local round trip; a relayed tailnet path (DERP) can cost tens
+# to a few hundred ms per request, so a remote probe gets 2 s: a design
+# bound with room over the 2026-09-28 measured direct-path 7-10 ms and a
+# relayed path, not a measured tail.
+_REMOTE_PROBE_TIMEOUT_S = 2.0
 # Cancel optional coordination startup after 3s (experimental, 2026-09-11).
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
@@ -533,10 +539,11 @@ def _exit_unreachable_remote(url: str) -> NoReturn:
 
 def ensure_daemon(url: str) -> dict:
     url = _validated_daemon_url(url)
-    health = probe_health(url)
+    remote = not _is_loopback_url(url)
+    health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S) if remote else probe_health(url)
     if health is not None:
         return _accept_health(url, health)
-    if not _is_loopback_url(url):
+    if remote:
         # The daemon is on another machine: a host-side fallback would bind
         # loopback with an empty bank while the shim kept probing the remote
         # URL, then give up three minutes later (2026-09-28 dogfood). Wait
@@ -550,7 +557,7 @@ def ensure_daemon(url: str) -> dict:
         start = time.time()
         while time.time() - start < _REMOTE_WAIT_S:
             time.sleep(0.5)
-            health = probe_health(url, timeout=0.5)
+            health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S)
             if health is not None:
                 return _accept_health(url, health)
         _exit_unreachable_remote(url)

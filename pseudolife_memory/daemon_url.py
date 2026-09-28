@@ -63,9 +63,11 @@ def _is_loopback_url(url: str) -> bool:
     if hostname.lower() == "localhost":
         return True
     try:
-        return ipaddress.ip_address(hostname).is_loopback
+        address = ipaddress.ip_address(hostname)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    return address.is_loopback or bool(mapped and mapped.is_loopback)
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
