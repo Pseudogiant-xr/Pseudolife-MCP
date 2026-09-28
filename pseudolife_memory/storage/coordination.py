@@ -1797,9 +1797,9 @@ class CoordinationStore:
         when its row carries no live park record and its status is not
         done-shaped, or, given the turn's start ``since``, when it set no
         status or park during the turn. A live standing park allows the
-        stop unless a rung delivery during the turn is at or after the
-        park's last update. An address the caller's principal does not
-        own, or none at all, is allowed: there is nothing to ask."""
+        stop. A park set at or before the newest rung delivery during the
+        turn is stale. An address the caller's principal does not own, or
+        none at all, is allowed: there is nothing to ask."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
                         "AND credential_hash IS NOT NULL", (agent_id, principal))
         if row is None:
@@ -1814,7 +1814,8 @@ class CoordinationStore:
                     "SELECT max(created_at) AS created_at FROM coordination_wakes "
                     "WHERE recipient_agent_id=%s AND decision='rung' AND created_at>%s",
                     (agent_id, since))["created_at"]
-                if latest is not None and park["park_set_at"] <= latest:
+                if latest is not None and (park["park_set_at"] is None or
+                                           park["park_set_at"] <= latest):
                     return {"gate": "block", "reason": "not_updated_this_turn"}
             return {"gate": "allow", "reason": "parked"}
         if since is not None:

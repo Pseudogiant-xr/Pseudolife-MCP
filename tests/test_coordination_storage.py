@@ -813,6 +813,22 @@ def test_park_gate_ignores_rung_deliveries_before_or_at_the_turn_start(store, de
         "gate": "allow", "reason": "parked"}
 
 
+def test_park_gate_blocks_a_null_park_timestamp_after_a_rung_delivery(store):
+    sender, recipient = pair(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    store.storage.conn.execute(
+        "UPDATE coordination_agents SET park_set_at=NULL WHERE agent_id=%s",
+        (recipient["agent_id"],))
+    store.test_time[0] = 1600.0
+    store.storage.conn.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+        "decision,reason,ring_at,created_at) VALUES (%s,%s,%s,'rung','anyone',%s,%s)",
+        (recipient["agent_id"], sender["agent_id"], "fixture-message", 1600.0, 1600.0))
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "block", "reason": "not_updated_this_turn"}
+
+
 def test_park_gate_ignores_rung_deliveries_to_another_agent(store):
     sender, recipient = (_wake_capable(store) for _ in range(2))
     for agent in (sender, recipient):
