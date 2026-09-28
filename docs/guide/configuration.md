@@ -1140,8 +1140,11 @@ tool-result hints and the prompt-hook digest are unchanged.
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
-Only addressed messages may wake an opted-in recipient, and since v49 only
-when the daemon decided a ring for them. Board/status activity
+Only addressed messages may wake an opted-in recipient, and since v49 the
+live channel carries only mail the daemon decided to ring (`rung`,
+`nudged`) or hinted to an active session, plus mail sent before v49; mail
+it withheld, or found not needed, waits for an explicit `receive`, which
+still returns everything. Board/status activity
 and receipts do not produce conversational wake-ups. Each live event carries a
 fixed agent-origin header, built from daemon-verified sender fields, ahead of
 the peer's text. Explicit receive labels each message with `origin: agent` and

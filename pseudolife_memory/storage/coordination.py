@@ -1145,12 +1145,13 @@ class CoordinationStore:
                 # Hashed into the update event, like the status.
                 _refuse_secret(value)
             elif key == "park_expires":
-                if value is not None and (isinstance(value, bool)
-                                          or not isinstance(value, (int, float))
-                                          or not math.isfinite(value) or value <= 0):
+                # A null (REST passes JSON null through) would store a park
+                # that never lapses, past the default and the cap: refused.
+                if (value is None or isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value <= 0):
                     raise CoordinationError("invalid_park")
-                if value is not None:
-                    fields[key] = float(value)
+                fields[key] = float(value)
             else:
                 raise CoordinationError("invalid_update")
         return fields
@@ -2146,10 +2147,14 @@ class CoordinationStore:
     def receive(self, principal, agent_id, credential, *, after=None, limit=50,
                 for_delivery=False):
         """Page pending mail. ``for_delivery`` is the adapter's live path: it
-        skips messages whose attempts are exhausted, which an explicit receive
-        still returns. The first time a message is served, by either path, its
-        ``first_read_at`` is stamped and a ``read`` event logged; a replay of
-        unacknowledged mail writes nothing."""
+        skips messages whose attempts are exhausted, and (v49) messages the
+        daemon decided not to ring: every message it yields becomes a turn in
+        a live-channel recipient, so it carries only mail decided ``rung``,
+        ``nudged`` or ``hinted`` (and mail from before v49, which has no
+        decision). An explicit receive still returns all of it. The first
+        time a message is served, by either path, its ``first_read_at`` is
+        stamped and a ``read`` event logged; a replay of unacknowledged mail
+        writes nothing."""
         row = self._auth(principal, agent_id, credential)
         self._limit(limit)
         seq = 0
@@ -2161,7 +2166,8 @@ class CoordinationStore:
                     raise ValueError
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
-        attempt_clause = " AND attempts<%s" if for_delivery else ""
+        attempt_clause = (" AND attempts<%s AND (wake IS NULL OR "
+                          "wake->>'decision' IN ('rung','nudged','hinted'))" if for_delivery else "")
         now = self.clock()
         params = [agent_id, seq, now] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
