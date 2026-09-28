@@ -207,6 +207,8 @@ def test_park_records_gate_wakes_over_rest(pg_conn, pg_url, tmp_path):
                     "park_clear_by": "anyone", "park_resume": "apply the review and push"})
                 assert row["park_reason"] == "waiting_peer"
                 assert await gate(parked) == "allow"
+                turn_start = row["park_set_at"]
+                assert await gate(parked, since=turn_start) == "allow"
                 listed = next(r for r in (await post(sender, "agents", {}))["agents"]
                               if r["agent_id"] == parked_id)
                 assert (listed["park_needs"], listed["park_clear_by"]) == (
@@ -222,8 +224,14 @@ def test_park_records_gate_wakes_over_rest(pg_conn, pg_url, tmp_path):
                 await asyncio.sleep(0.05)
                 ring = (tmp_path / "digests" / "parked.ring").read_text().splitlines()
                 assert ring == [str(parked.digest_watermark), "rung anyone"]
-                # Parked, but silent this turn: asked again.
-                assert await gate(parked, since=4102444800) == "block"
+                delivery_at = storage.conn.execute(
+                    "SELECT created_at FROM coordination_wakes WHERE message_id=%s",
+                    (first["message_id"],)).fetchone()[0]
+                # Only a rung after the turn started invalidates a live park.
+                assert await gate(parked, since=delivery_at) == "allow"
+                assert await gate(parked, since=turn_start) == "block"
+                await post(parked, "update", {"park_reason": "waiting_peer"})
+                assert await gate(parked, since=turn_start) == "allow"
                 await post(parked, "update", {"status": "applying the review"})
                 assert await gate(parked) == "block"
             # A bearer that cannot use the board gets no answer.
