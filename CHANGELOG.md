@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — a Codex thread is asked to park at turn end on macOS and Linux too)
+- The Stop-hook park gate (the v49 entry below) reached Codex only on
+  Windows, where Codex runs the plugin's native command
+  (`lifecycle.ps1 -Event Stop`); on macOS and Linux Codex runs the bash
+  command, and `stop-wake.sh` exited unless Claude Code had started it, so
+  a Codex thread there was never asked to park when it stopped (its only
+  prompts were `memory_agents`' description and the doorbell's nudge, which
+  needs mail to arrive). Maintainer call flagged in #433, decided
+  2026-09-28: parity. In Codex context (`PSEUDOLIFE_CODEX_HOOK=1`, or
+  `PLUGIN_ROOT` equal to `CLAUDE_PLUGIN_ROOT`, as the sibling bash hooks
+  read it) the script now runs the same gate: one 2 s request to
+  `GET /api/hook/park-gate` for the thread the payload names, the daemon
+  and bearer resolved the way `coordination-start.sh` resolves them (the
+  managed connection file under the Codex home, else the explicit settings,
+  with the same URL-conflict and private-file checks), a block answered the
+  way Codex documents for `Stop` (`{"decision":"block","reason":...}` on
+  stdout, exit 0, the reason JSON-escaped; a message carrying a control
+  character the script does not escape is replaced by the fixed text), and
+  then exit without arming Claude's wake wait. Allow, no address, a
+  continuation's Stop (`stop_hook_active`) or no answer prints nothing. The
+  explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
+  Both Codex paths now append the `gate` ledger line Claude's gate writes,
+  so a block is auditable in `ledger.log` on every client. The hook script
+  changed, so Codex asks to approve it again after the plugin update; the
+  plugin and the shim upgrade together (`ops/update.ps1 -All`). Whether
+  Codex honours the decision of a hook declared `async` is still unprobed
+  on a live install, on every platform.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

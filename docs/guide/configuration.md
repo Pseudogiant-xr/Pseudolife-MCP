@@ -1435,19 +1435,24 @@ also capped (below, and by the daemon's `wake` caps under
   a minute on Windows, where it lists the process through `ps -W` at arm
   time and then once a minute (a Windows PID is invisible to `kill -0`). In
   `claude -p` runs, Claude Code ends a waiting hook at teardown.
-- Codex loads the same `hooks.json`. Its native command
-  (`lifecycle.ps1 -Event Stop`) runs only the park gate: the same one
-  request, through the managed connection file or the explicit daemon
-  settings, and a block is returned the way Codex documents for `Stop`,
-  `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
-  which Codex turns into a continuation prompt; allow, no address, a
+- Codex loads the same `hooks.json` and gets only the park gate, on every
+  platform: on Windows through the entry's native command
+  (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
+  script, which recognises Codex context the way the other bash hooks do
+  (`PSEUDOLIFE_CODEX_HOOK=1`, or `PLUGIN_ROOT` equal to
+  `CLAUDE_PLUGIN_ROOT`). Either makes the same one request, through the
+  managed connection file under the Codex home or the explicit daemon
+  settings (with the other hooks' checks: an explicit URL may not disagree
+  with the managed one, the bearer file must be private), and returns a
+  block the way Codex documents for `Stop`, `{"decision": "block",
+  "reason": <the message>}` on stdout with exit 0, which Codex turns into a
+  continuation prompt, plus the `gate` ledger line; allow, no address, a
   continuation's Stop, or no answer prints nothing. The wake itself stays
-  Claude Code's: the bash script exits unless Claude Code started it. Codex
-  runs the native command only on Windows (`commandWindows`), so the Codex
-  gate is Windows-only; an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
-  `PSEUDOLIFE_AGENT_COORDINATION` of `0`, `false`, `no` or `off` turns it
-  off. Whether Codex honours the decision
-  of a hook declared `async` has not been probed on a live install.
+  Claude Code's: in Codex context the script exits after the gate and never
+  arms the wait (the [doorbell](#codex-doorbell) is Codex's wake path). An
+  explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or `PSEUDOLIFE_AGENT_COORDINATION`
+  of `0`, `false`, `no` or `off` turns it off. Whether Codex honours the
+  decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 

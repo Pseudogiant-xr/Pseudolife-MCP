@@ -206,8 +206,9 @@ try {
 } catch {}
 
 # Stop carries Claude Code's wake hook (stop-wake.sh), which Claude runs
-# through the bash command. Codex loads the same hooks.json and runs this
-# one instead, and gets only the park gate (schema v49): when the turn is
+# through the bash command. Codex loads the same hooks.json and on Windows
+# runs this one instead (on macOS and Linux the bash script, which runs the
+# same gate in Codex context), and gets only the park gate (schema v49): when the turn is
 # not itself a Stop continuation and the shim has named this thread's board
 # address in <key>.agent, one bounded request asks the daemon whether the
 # thread parked since the turn began (the <key>.turn stamp CoordinationPrompt
@@ -334,6 +335,13 @@ try {
             }
             [ordered]@{ decision = 'block'; reason = $reason } |
                 ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii
+            # The same "gate" ledger line stop-wake.sh appends for a block,
+            # on every client; best effort, like Read-TurnDigest's.
+            try {
+                $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                [IO.File]::AppendAllText((Join-Path $digestDir 'ledger.log'),
+                    "$stamp`tgate`t$($key.Substring(0, 8))`t0`t$($reason.Length + 1)`tblock`n")
+            } catch {}
         }
         exit 0
     }
