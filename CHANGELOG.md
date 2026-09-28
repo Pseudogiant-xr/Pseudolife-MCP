@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — a lease notice skips a session whose park has lapsed)
+- The full-suite and GPU lease notices (the lease-mirror entry below) no
+  longer go to a peer whose park has lapsed. A peer parked with
+  `park_clear_by` naming the lease counts only while its park stands, by
+  the daemon's own rule (`CoordinationStore._live_park`): `park_reason`
+  set, and `park_expires` unset or still ahead. The peer list returns a
+  lapsed park's fields as they were stored, and the daemon ignores that
+  park everywhere else, so the notice was an extra message the session
+  had stopped waiting for. A lapsed peer whose status says
+  `suite=running|queued` or `gpu=` is still told, like any live peer.
+  Found in review of the lapsed-park re-park fix (2026-09-28).
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

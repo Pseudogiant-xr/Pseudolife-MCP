@@ -1223,12 +1223,15 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
         peer("a" * 32, "suite-runner", "SUITE-START 8f3d; suite=running",
              project="pseudolife-mcp"),  # the project matches whatever its case
         peer("b" * 32, "gpu-brief", "gpu=waiting for the bench server"),
-        peer("c" * 32, "parked", "parked until the GPU frees", park_clear_by="gpu"),
-        peer("d" * 32, "parked-list", "parked", park_clear_by=["maintainer", "gpu"]),
+        peer("c" * 32, "parked", "parked until the GPU frees", park_reason="needs_resource",
+             park_clear_by="gpu"),
+        peer("d" * 32, "parked-list", "parked", park_reason="needs_resource",
+             park_clear_by=["maintainer", "gpu"]),
         peer("e" * 32, "unrelated", "reviewing PR #431"),
         peer("f" * 32, "gone", "suite=queued", lifecycle="detached"),
         peer("g" * 32, "elsewhere", "suite=running", project="another-repo"),
-        peer("h" * 32, "other-lease", "parked", park_clear_by="full-suite"),
+        peer("h" * 32, "other-lease", "parked", park_reason="needs_resource",
+             park_clear_by="full-suite"),
         peer(AGENT, "lease-hold", "lease:gpu held"),  # this run's own address
     ]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
@@ -1481,13 +1484,36 @@ def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
 
 
 def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper):
-    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached", park_clear_by="gpu"),
+    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached",
+                  park_reason="needs_resource", park_clear_by="gpu"),
              peer("b" * 32, "gone", "suite=running", lifecycle="detached"),
-             peer("c" * 32, "revoked", "parked", lifecycle="revoked", park_clear_by="gpu")]
+             peer("c" * 32, "revoked", "parked", lifecycle="revoked",
+                  park_reason="needs_resource", park_clear_by="gpu")]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
     child = sleeper(0.5)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     assert {body["to"] for body in daemon.bodies("send")} == {"a" * 32}
+
+
+def test_only_a_standing_park_is_told(lease_env, sleeper):
+    # The daemon's rule (CoordinationStore._live_park): a park stands while
+    # its reason is set and its park_expires is unset or still ahead. The
+    # peer list returns a lapsed park's fields as they were stored.
+    now = time.time()
+    parked = {"park_reason": "needs_resource", "park_clear_by": "gpu"}
+    peers = [peer("a" * 32, "standing", "parked", park_expires=now + 3600, **parked),
+             peer("b" * 32, "no-expiry", "parked", park_expires=None, **parked),
+             peer("c" * 32, "lapsed", "parked", park_expires=now - 1, **parked),
+             peer("d" * 32, "no-reason", "parked", park_reason=None, park_clear_by="gpu",
+                  park_expires=now + 3600),
+             # A lapsed park still counts its status like any live peer.
+             peer("e" * 32, "lapsed-running", "suite=running", park_expires=now - 1,
+                  **parked)]
+    daemon = FakeDaemon(agents=[AGENTS(*peers)])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
+    assert told == {"a" * 32, "b" * 32, "e" * 32}
 
 
 def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):

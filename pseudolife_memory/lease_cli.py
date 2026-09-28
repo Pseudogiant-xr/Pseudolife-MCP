@@ -881,12 +881,26 @@ def hold_label(directory: Path) -> str:
     return f"{HOLD_LABEL}@{stamp}" if stamp else HOLD_LABEL
 
 
-def _clear_by(agent: dict):
-    """A peer's ``park_clear_by`` (a sibling change's field), flat or under
-    ``park``, as a list of names; empty when it has none."""
-    clear_by = agent.get("park_clear_by")
-    if clear_by is None and isinstance(agent.get("park"), dict):
-        clear_by = agent["park"].get("clear_by")
+def _park_field(agent: dict, key: str):
+    """A peer's ``park_<key>``, flat or under ``park``; None when unset."""
+    value = agent.get(f"park_{key}")
+    if value is None and isinstance(agent.get("park"), dict):
+        value = agent["park"].get(key)
+    return value
+
+
+def _clear_by(agent: dict, now: float):
+    """A peer's ``park_clear_by`` as a list of names, while its park stands;
+    empty when it has none. A park stands as the daemon's
+    ``CoordinationStore._live_park`` has it: a reason set, and no
+    ``park_expires`` at or before ``now``. The peer list returns a lapsed
+    park's fields as they were stored, and the daemon ignores that park
+    everywhere else, so its session is not told either."""
+    expires = _park_field(agent, "expires")
+    if _park_field(agent, "reason") is None or (
+            isinstance(expires, (int, float)) and expires <= now):
+        return []
+    clear_by = _park_field(agent, "clear_by")
     if isinstance(clear_by, str):
         return [clear_by]
     if isinstance(clear_by, (list, tuple)):
@@ -898,7 +912,8 @@ def _concerned(agent: dict, name: str, project: str) -> bool:
     """Whether a listed peer is told about ``name``. In ``project`` when one
     is known, compared without case (the board holds this repo as
     Pseudolife-MCP, PseudoLife-MCP and pseudolife-mcp). Then either parked
-    until this lease clears (``park_clear_by``), attached or detached, since
+    until this lease clears (``park_clear_by`` on a park that has not
+    lapsed), attached or detached, since
     mail waits for a parked session; or live (attached, or registered
     without an adapter) and working around the suite or the GPU by its
     status (``suite=running``, ``suite=queued``, ``gpu=``). Both leases go
@@ -909,7 +924,7 @@ def _concerned(agent: dict, name: str, project: str) -> bool:
         return False
     if project and str(agent.get("project") or "").lower() != project.lower():
         return False
-    if name in _clear_by(agent):
+    if name in _clear_by(agent, time.time()):
         return True
     if lifecycle not in (None, "attached", "registered"):
         return False
