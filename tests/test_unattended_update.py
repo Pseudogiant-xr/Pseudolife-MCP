@@ -24,6 +24,8 @@ sys.path.insert(0, str(ROOT))
 from pseudolife_memory import client_updates, unattended_update as uu, update_cli as up  # noqa: E402
 from tests.test_update_cli import World, _project, clients, world  # noqa: E402,F401
 
+REAL_COMMAND = uu._command          # the scheduler fixture replaces it; one test wants the real one
+
 
 @pytest.fixture
 def board(monkeypatch, tmp_path):
@@ -91,6 +93,59 @@ def test_an_active_session_holds_off_and_is_told(world, board, tmp_path, capsys)
     assert "held off" in _log(tmp_path)
 
 
+def test_flags_that_skip_a_safety_step_are_refused_unattended(world, board, tmp_path, capsys):
+    """The scheduled command passes none of these; a hand-run must not skip
+    the backup or half the update and then report a full one."""
+    _daemon(world, tmp_path)
+    for flag in ("--no-backup", "--clients-only", "--daemon-only", "--force-rollback-tag", "--allow-downgrade",
+                 "--reinstall", "--check"):
+        assert up.main(["--unattended", flag]) == 2, flag
+        assert "cannot be combined with --unattended" in capsys.readouterr().err
+    assert board["notices"] == [] and not any("pull" in c for c in world.docker_calls())
+
+
+def test_a_session_that_starts_during_the_backup_holds_the_recreate_off(world, board, clients, tmp_path):
+    """The board is read again right before the daemon is recreated: the
+    backup can take minutes."""
+    _daemon(world, tmp_path)
+    world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
+    reads = []
+
+    def activity(url, token):
+        reads.append(url)
+        return ([{"agent_id": "late", "label": "codex", "task": "started during the backup"}] if len(reads) > 1
+                else [], 0, "")
+
+    board["active"] = []
+    import pseudolife_memory.unattended_update as uu_module
+    original = uu_module.board_activity
+    uu_module.board_activity = activity
+    try:
+        assert up.main(["--unattended", "--health-delay-ms", "1"]) == 4
+    finally:
+        uu_module.board_activity = original
+    assert len(reads) == 2
+    calls = world.docker_calls()
+    assert any("pg_dump" in c for c in calls)                       # the backup ran
+    assert not any("up -d --no-deps pseudolife-daemon" in c for c in calls)   # the recreate did not
+    (_, _, text), = board["notices"]
+    assert "held off after the backup" in text and "codex (started during the backup)" in text
+    assert "the daemon was not recreated" in text
+
+
+def test_an_exit_2_reason_reaches_the_log(world, board, tmp_path):
+    _daemon(world, tmp_path)
+    world.pypi = None
+    assert up.main(["--unattended"]) == 2
+    assert "could not read the newest release from PyPI" in _log(tmp_path)
+
+
+def test_a_missing_daemon_version_is_an_error_not_current(world, board, tmp_path):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok"}]
+    assert up.main(["--unattended"]) == 2
+
+
 def test_an_unreadable_board_holds_off(world, board, tmp_path):
     _daemon(world, tmp_path)
     board["reason"] = "no bearer token in this environment"
@@ -140,7 +195,7 @@ def test_a_failed_update_is_told_with_the_rollback(world, board, clients, tmp_pa
     assert up.main(["--unattended", "--health-retries", "1", "--health-delay-ms", "1"]) == 1
     (_, _, text), = board["notices"]
     assert text.startswith("Pseudolife-MCP: the unattended update to 0.15.1 FAILED")
-    assert "PSEUDOLIFE_IMAGE_TAG=" in text                         # the rollback line
+    assert text.count("PSEUDOLIFE_IMAGE_TAG=") == 2                # the rollback lines once (pwsh + sh forms)
     assert "FAILED" in _log(tmp_path)
 
 
@@ -189,13 +244,39 @@ def test_board_activity_registers_a_throwaway_address_and_reads_the_page(monkeyp
     assert uu.board_activity("http://127.0.0.1:8765", None)[2].startswith("no bearer token")
 
 
+def test_board_activity_fails_closed_and_ignores_its_own_address(monkeypatch):
+    class FakeBoard:
+        reply = {"agents": [{"agent_id": "me", "label": uu.BOARD_LABEL}], "idle_omitted": 0}
+
+        def __init__(self, url, token):
+            pass
+
+        def register(self, **kw):
+            pass
+
+        def _post(self, action, body, **kw):
+            return self.reply
+
+        def close(self):
+            pass
+
+    from pseudolife_memory import lease_cli
+    monkeypatch.setattr(lease_cli, "_Board", FakeBoard)
+    active, _, reason = uu.board_activity("http://127.0.0.1:8765", "tok")
+    assert active == [] and reason == ""                          # a previous run's address is not a session
+    FakeBoard.reply = {"ok": True}
+    active, _, reason = uu.board_activity("http://127.0.0.1:8765", "tok")
+    assert active == [] and "not understood" in reason            # no list: fail closed, never "idle"
+
+
 # ── the schedule ────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def scheduler(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(uu, "run_cli", lambda argv, **kw: (calls.append([str(a) for a in argv]) or (0, "")))
-    monkeypatch.setattr(uu, "_command", lambda: [str(tmp_path / "bin" / "pseudolife-mcp"), "update", "--unattended"])
+    monkeypatch.setattr(uu, "_command",
+                        lambda daemon_url=None: [str(tmp_path / "bin" / "pseudolife-mcp"), "update", "--unattended"])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(up, "data_dir", lambda: tmp_path / "data")
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
@@ -231,9 +312,25 @@ def test_schedule_writes_a_systemd_timer_with_the_bearer_file(scheduler, tmp_pat
     assert "secret-token" not in service and token_file.read_text(encoding="utf-8") == "secret-token"
     if os.name != "nt":
         assert oct(token_file.stat().st_mode & 0o777) == "0o600"
+    assert "SuccessExitStatus=3 4" in service                     # current / held off are not unit failures
     assert "OnCalendar=*-*-* 03:05:00" in timer and "Persistent=true" in timer
     assert scheduler == [["systemctl", "--user", "daemon-reload"],
                          ["systemctl", "--user", "enable", "--now", "pseudolife-update.timer"]]
+
+
+def test_a_daemon_url_rides_into_the_scheduled_command(scheduler, tmp_path, monkeypatch):
+    monkeypatch.setattr(uu, "_command", REAL_COMMAND)
+    monkeypatch.setattr(uu.sys, "executable", str(tmp_path / "py"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "no-launcher"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
+    assert uu._command("http://127.0.0.1:8765") == [str(tmp_path / "py"), "-m", "pseudolife_memory.cli", "update", "--unattended"]
+    assert uu._command("http://10.0.0.7:8765")[-2:] == ["--daemon-url", "http://10.0.0.7:8765"]
+
+
+def test_unschedule_on_windows_is_idempotent(scheduler, monkeypatch):
+    monkeypatch.setattr(uu, "run_cli", lambda argv, **kw: (1, "ERROR: The system cannot find the file specified.")
+                        if argv[:2] == ["schtasks", "/Query"] else (0, ""))
+    assert uu.unschedule(_update(), platform="win32") == 0
 
 
 def test_schedule_refuses_a_bad_time_and_an_unsupported_platform(scheduler):
@@ -259,7 +356,43 @@ def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path):
     assert scheduler[0] == ["systemctl", "--user", "disable", "--now", "pseudolife-update.timer"]
     scheduler.clear()
     assert uu.unschedule(_update(), platform="win32") == 0
-    assert scheduler == [["schtasks", "/Delete", "/F", "/TN", uu.TASK_NAME]]
+    assert scheduler == [["schtasks", "/Query", "/TN", uu.TASK_NAME], ["schtasks", "/Delete", "/F", "/TN", uu.TASK_NAME]]
+
+
+# ── the route ───────────────────────────────────────────────────────────────
+
+def test_the_daemon_notice_route_admits_only_an_allowed_principal(monkeypatch):
+    """The reserved daemon sender is otherwise unforgeable: the route gates
+    the caller as mail does and stamps the notice with the principal."""
+    from pseudolife_memory import coordination
+    from pseudolife_memory.web.api import build_console_app
+    from pseudolife_memory.web.fixtures import FixtureService
+    from tests.asgi_helpers import call, stub_mcp
+
+    svc = FixtureService()
+    sent = []
+    monkeypatch.setattr(coordination, "daemon_notice", lambda service, text: sent.append(text) or {"recipients": 2})
+    app = build_console_app(stub_mcp, "secret", lambda: {"status": "ok"}, svc)
+    body = json.dumps({"text": "Pseudolife-MCP: updated"}).encode()
+    headers = [(b"content-type", b"application/json"), (b"authorization", b"Bearer secret")]
+    # no principal resolver on the stand-in: refused
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 400 and b"principal_not_allowed" in reply and sent == []
+    svc._request_principal = lambda: "default"
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 200 and json.loads(reply)["recipients"] == 2
+    assert sent == ["Pseudolife-MCP: updated\n(posted by the unattended updater, principal default)"]
+    svc._request_principal = lambda: "intruder"
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 400 and b"principal_not_allowed" in reply
+    svc._request_principal = lambda: "default"
+    st, reply = call(app, "POST", "/api/daemon-notice", body=json.dumps({"text": "x\x07y"}).encode(), headers=headers)
+    assert st == 400 and b"printable" in reply
+    st, reply = call(app, "POST", "/api/daemon-notice", body=json.dumps({"text": "y" * 4001}).encode(), headers=headers)
+    assert st == 400
+    monkeypatch.setattr(coordination, "daemon_notice", lambda service, text: None)
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 200 and json.loads(reply) == {"recipients": None, "reason": "board_unavailable"}
 
 
 def test_the_cli_routes_the_flags(scheduler, monkeypatch, capsys):

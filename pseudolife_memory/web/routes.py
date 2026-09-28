@@ -260,18 +260,30 @@ class ConsoleRoutes:
     # -- composed / guarded handlers ----------------------------------------
 
     def _daemon_notice(self, body: dict) -> dict:
-        """Post ``text`` to every attached session as the daemon's reserved
-        principal (``coordination.daemon_notice``): what the unattended
-        updater says when it updated or held off. Bearer-gated like every
-        ``/api`` route; ``recipients`` is ``None`` when the board cannot
-        carry it (off, no Postgres), which the caller reports as not said."""
+        """Post ``text`` to the sessions active on the board as the daemon's
+        reserved principal (``coordination.daemon_notice``): what the
+        unattended updater says when it updated or held off. The reserved
+        sender is otherwise unforgeable, so this is gated as mail is: the
+        caller's bearer principal must be in ``coordination.allowed_principals``
+        (a tokenless daemon has no principal and refuses), and the notice
+        carries a provenance line naming that principal. ``recipients`` is
+        ``None`` when the board cannot carry it (off, no Postgres), which
+        the caller reports as not said."""
         from pseudolife_memory import coordination
+        resolve = getattr(self.svc, "_request_principal", None)
+        principal = resolve() if resolve else None
+        allowed = self.svc.config.coordination.allowed_principals
+        if principal is None or principal not in allowed:
+            raise ValueError("principal_not_allowed: a daemon notice needs a bearer whose principal is in "
+                             "coordination.allowed_principals")
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("text is required")
-        if len(text) > 4000 or any(ord(ch) < 32 and ch not in "\n\t" for ch in text):
-            raise ValueError("text must be at most 4000 characters of printable text")
-        result = coordination.daemon_notice(self.svc, text.strip())
+        text = text.strip()
+        if len(text.encode("utf-8")) > 4000 or any(
+                (ord(ch) < 32 and ch not in "\n\t") or 127 <= ord(ch) < 160 for ch in text):
+            raise ValueError("text must be at most 4000 bytes of printable text")
+        result = coordination.daemon_notice(self.svc, f"{text}\n(posted by the unattended updater, principal {principal})")
         if result is None:
             return {"recipients": None, "reason": "board_unavailable"}
         return {"recipients": result.get("recipients", 0)}

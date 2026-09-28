@@ -14,24 +14,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `updates.unattended_daemon: true` (default false, read from `/health`,
   so the timer alone changes nothing) and the agent board lists no active
   session, with the same backup and rollback tag as an attended update,
-  and posts a board notice from the daemon's reserved principal saying it
+  reading the board once more right before the recreate, and posts a
+  board notice from the daemon's reserved principal, stamped with the
+  posting principal, to the sessions the board lists as active, saying it
   updated (rollback tag, client states, the Codex steps when the hooks
-  changed) or held off and why (active sessions, the knob off, the board
-  unreadable); a failed update posts the rollback line. Exit 0 updated,
-  3 current, 4 held off. The log is
-  `~/.pseudolife-mcp/unattended-update.log`. New route
-  `POST /api/daemon-notice` (bearer-gated) carries the notice.
+  changed) or held off and why (active sessions, the board unreadable;
+  with the knob off it only logs); a failed update posts the failure with
+  the rollback line when the daemon can still take it. Exit 0 updated,
+  3 current, 4 held off, 2 could not check, 1 failed; every line goes to
+  `~/.pseudolife-mcp/unattended-update.log`, the durable record.
+  `--unattended` refuses the flags that would skip the backup or half
+  the update. New route `POST /api/daemon-notice` carries the notice:
+  only a bearer whose principal is in `coordination.allowed_principals`
+  may post, as for mail, since the reserved sender is otherwise
+  unforgeable. The systemd unit carries `SuccessExitStatus=3 4` and the
+  guide says to enable lingering; a `--daemon-url` given with
+  `--schedule` rides into the task or unit.
   [Configuration](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
 - Every update path (`pseudolife-mcp update`, `ops/update.*`,
   `ops/update_clients.py`, the unattended notice) prints the complete
   Codex re-approval steps when and only when Codex's hook copy differs
   from the scripts just deployed: the changed files (from Codex's
   marketplace clone against the checkout or the Claude plugin cache), the
-  refresh, the `/hooks` approval or `--trust yes` for unattended installs,
-  what is off until then, and the check `pseudolife-mcp doctor` now
-  reports as `codex_hooks`. An update whose hooks did not change says
-  nothing about Codex; until now one generic line fired for any
-  non-current state.
+  refresh, the `/hooks` approval or `--trust yes` for unattended installs
+  (the manual-copy commands for a `setup-codex-hooks.py --source manual`
+  install), what is off until then, and the check `pseudolife-mcp doctor`
+  now reports as `codex_hooks`. An update whose hooks did not change says
+  nothing about Codex, and neither does one that finds no marketplace
+  clone at all; until now one generic line fired for any non-current
+  state. A daemon-only update (`ops/update.ps1` without `-All`,
+  `update --daemon-only`) whose hook scripts changed says in one line
+  that the client side and the Codex steps are still to do; the shim's
+  unattended client half leaves the steps beside its result file and its
+  next session's note points at them.
 
 ### Added (2026-09-29 — sessions are told when a release is out, and the shim can take the client half of an update by itself)
 - The daemon reads the newest release from PyPI on a background thread

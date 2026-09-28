@@ -597,9 +597,12 @@ def _unattended_clients(url: str, health: dict) -> str:
                     f"failed (exit {outcome}; log {log}); this shim is still {__version__}. Run "
                     f"pseudolife-mcp update --clients-only --tag {daemon_version} yourself.")
         else:
+            codex_file = result.with_suffix(".codex")
+            codex = (f" Codex's hook copy needs re-approval: the steps are in {codex_file}."
+                     if outcome == "0" and codex_file.is_file() else "")
             note = (f"Pseudolife-MCP: an unattended client update to {daemon_version} started at {when} "
                     f"({'finished' if outcome == '0' else 'still running'}; log {log}); this shim is "
-                    f"{__version__}. Start a new session to run on the new runtime.")
+                    f"{__version__}. Start a new session to run on the new runtime.{codex}")
         _UNATTENDED_NOTES[(url, daemon_version)] = note
         return note
     argv = [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", daemon_version,

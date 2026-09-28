@@ -288,6 +288,13 @@ class Update:
                 try:
                     self.o.result_file.parent.mkdir(parents=True, exist_ok=True)
                     self.o.result_file.write_text(f"{self.report.exit_code}\n", encoding="utf-8")
+                    # The Codex steps beside it, so the shim's next session can
+                    # point at them (the unattended client half has no console).
+                    codex = self.o.result_file.with_suffix(".codex")
+                    if self.report.codex_reapproval:
+                        codex.write_text(self.report.codex_reapproval + "\n", encoding="utf-8")
+                    elif codex.exists():
+                        codex.unlink()
                 except OSError as exc:
                     self.warn(f"could not write the result file {self.o.result_file}: {exc}")
         if self.o.as_json:
@@ -302,6 +309,16 @@ class Update:
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
+        if self.o.unattended:
+            # The scheduled run passes none of these; a hand-run must not
+            # skip the backup or the daemon and then report an update.
+            for name, value in (("--no-backup", self.o.no_backup), ("--clients-only", self.o.clients_only),
+                                ("--daemon-only", self.o.daemon_only), ("--force-rollback-tag", self.o.force_rollback_tag),
+                                ("--allow-downgrade", self.o.allow_downgrade), ("--checkout", self.o.checkout),
+                                ("--reinstall", self.o.reinstall), ("--check", self.o.check)):
+                if value:
+                    raise UpdateError(f"{name} cannot be combined with --unattended: the unattended run always backs "
+                                      f"up, tags a rollback and moves the daemon and the clients together", 2)
         if self.o.schedule or self.o.unschedule:
             from pseudolife_memory import unattended_update
             if self.o.unschedule:
@@ -702,6 +719,7 @@ class Update:
             self.step("scaffolded ops/.env from ops/.env.example (all values commented)")
         compose = self._compose_args([compose_file, repo / "ops" / "docker-compose.override.yml"], env_file)
         self._compose_shown = compose
+        previous_digest = (self.daemon_health() or {}).get("hooks_digest")
         self.backup(repo)
         image_tag = _compose_image_tag(compose_file)
         if not image_tag:
@@ -732,16 +750,25 @@ class Update:
         health = self.wait_health()
         if self.o.all_clients:
             self.clients(repo, str(repo), health)
+        else:
+            self.hooks_changed_note(previous_digest, health)
         self.prune_cache(repo)
 
     # -- docker: release mode ----------------------------------------------
-    def deploy_release(self, current: str | None = None) -> None:
-        """``current`` is the daemon's version when the caller has just read
-        it (the unattended run), else it is read here."""
+    def deploy_release(self, current: str | None = None, before_recreate: Callable[[], None] | None = None,
+                       previous_digest: str | None = None) -> None:
+        """``current`` and ``previous_digest`` are the daemon's version and
+        hooks digest when the caller has just read them (the unattended
+        run), else they are read here. ``before_recreate`` runs after the
+        backup and the rollback tag, right before the daemon is recreated;
+        it may raise ``UpdateError`` to stop there (the unattended run
+        re-reads the board at that point)."""
         target = self.target_version()
         self.report.target = target
         if current is None:
-            current = self.current_version("docker")
+            health = self.daemon_health()
+            current = (health or {}).get("version") if isinstance((health or {}).get("version"), str) else None
+            previous_digest = (health or {}).get("hooks_digest")
         self.report.current = current
         if current is None:
             # /health silent (the daemon crashed, say): the image the container
@@ -784,6 +811,8 @@ class Update:
         self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
                           rollback_lines=lines)
         self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
+        if before_recreate is not None:
+            before_recreate()
         self.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", DAEMON_SERVICE],
                             timeout=3600, env=compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target}),
@@ -794,7 +823,20 @@ class Update:
         health = self.wait_health(expect_version=target)
         if not self.o.daemon_only:
             self.clients(None, f"pseudolife-mcp=={target}", health)
+        else:
+            self.hooks_changed_note(previous_digest, health)
         # No cache prune: nothing was built.
+
+    def hooks_changed_note(self, previous_digest: str | None, health: dict | None) -> None:
+        """When the daemon's hook scripts changed and this run moved no
+        client, say that the client side (and Codex's re-approval) is still
+        to do; otherwise nothing."""
+        current = (health or {}).get("hooks_digest")
+        if previous_digest and current and previous_digest != current:
+            self.step("the daemon's hook scripts changed with this update and the client side was not moved: run "
+                      "pseudolife-mcp update --clients-only --tag <this version> (from a checkout: ops/update.ps1 -All, "
+                      "ops/update.sh --all, or python ops/update_clients.py) for the shim, the plugin cache and the "
+                      "Codex re-approval steps")
 
     def compose_context(self) -> dict:
         """The compose files and env file the running daemon container was

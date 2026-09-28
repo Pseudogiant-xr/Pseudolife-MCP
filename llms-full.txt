@@ -6706,16 +6706,31 @@ The scheduled run applies a new release only when BOTH hold: the daemon's
 board lists no active session. It then takes the same path as an attended
 `pseudolife-mcp update`: backup (the checkout's script or the built-in
 `pg_dump` + state tar), the rollback tag, recreate only the daemon, wait
-for `/health` at the new version, then the client side. Either way it
-posts a board notice from the daemon's reserved principal to every
-attached session: updated (with the rollback tag, the client states and,
-when the hook scripts changed, the Codex re-approval steps), or held off
-and why (which sessions are active; the knob off; the board unreadable),
-and appends the same to `~/.pseudolife-mcp/unattended-update.log`. A
-failed update posts the rollback line. Idle sessions do not hold it off:
-a session with no activity in the board's active window keeps its shim
-runtime and reconnects to the recreated daemon on its next call; the
-notice says how many were idle.
+for `/health` at the new version, then the client side; the board is
+read once more right before the daemon is recreated, since the backup
+can take minutes, and a session that started meanwhile holds the
+recreate off (the backup and the rollback tag already taken are
+harmless). When a release is out it posts a board notice from the
+daemon's reserved principal, stamped with the posting principal, to the
+sessions the board lists as active: updated (with the rollback tag, the
+client states and, when the hook scripts changed, the Codex re-approval
+steps), or held off and why (which sessions are active; the board
+unreadable). With the knob off it only logs, so a daily run never
+nags. The durable record is `~/.pseudolife-mcp/unattended-update.log`,
+which every line reaches; the notice is best effort. An update succeeds
+only when no session is active, so its notice usually reaches nobody
+and a session that starts later meets the new daemon through the
+version handshake and the log; a failed update posts the failure with
+the rollback line when the daemon can still take it, and always logs
+it. Idle sessions do not hold it off: a session with no activity in the
+board's active window keeps its shim runtime and reconnects to the
+recreated daemon on its next call; the held-off notice says how many
+were idle (a count of stale addresses, so an upper bound). Exit codes:
+0 updated, 3 current, 4 held off, 2 the run could not check, 1 the
+update failed. `--unattended` refuses `--no-backup`, `--clients-only`,
+`--daemon-only`, `--force-rollback-tag`, `--allow-downgrade`,
+`--reinstall` and `--check`: it always backs up and moves the daemon
+and the clients together.
 
 What the run needs: a Docker-tier daemon on this host and the bearer
 (`PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN` in the run's
@@ -6725,15 +6740,26 @@ check registers a throwaway board address. `--schedule` on Linux writes
 daemon URL and the token file as `Environment=` lines (a token given only
 as `PSEUDOLIFE_MCP_TOKEN` is written to a private
 `~/.pseudolife-mcp/unattended-update.token` first; the token itself never
-lands in the unit) and enables the timer; on Windows it registers the
-task `Pseudolife Unattended Update` through `schtasks`, which on an
-administrator account needs an elevated PowerShell opened from the Start
-menu (the refusal says so). The task or timer runs the shim launcher
+lands in the unit; `SuccessExitStatus=3 4` keeps "current" and "held
+off" from counting as unit failures) and enables the timer. A `--user`
+timer runs only while that user has a session unless lingering is on:
+`loginctl enable-linger <user>` once, which is the headless case this
+is for. On Windows it registers the task `Pseudolife Unattended Update`
+through `schtasks`, which on an administrator account needs an elevated
+PowerShell opened from the Start menu (the refusal says so); the task
+runs while the user is signed in, with the user's persistent environment
+variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` (the installer sets it as a
+User variable) and any `PSEUDOLIFE_MCP_DAEMON_URL` must be set there,
+not only in a shell. A `--daemon-url` given with `--schedule` rides
+along in the task or unit. The task or timer runs the shim launcher
 (`pseudolife-mcp update --unattended`), so it follows the side-by-side
-runtimes. A tokenless install cannot read the board and therefore never
-updates unattended; nor does macOS get a scheduler here (run
-`--unattended` from your own). The bank backup is taken every time and
-is never skipped by this path.
+runtimes; `--unschedule` removes the task or the unit, the timer and the
+private token file. A tokenless install cannot read the board and
+therefore never updates unattended; nor does macOS get a scheduler here
+(run `--unattended` from your own). The bank backup is taken every time
+and is never skipped by this path. The board read registers a throwaway
+address labelled "unattended update", pruned by the board after its
+hour; a run never counts that label as a session.
 
 ### Codex hook re-approval, on every update path
 

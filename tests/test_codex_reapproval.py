@@ -40,7 +40,7 @@ def _clone(cli, *, change: str | None = None) -> Path:
 
 def test_nothing_is_said_when_the_hooks_did_not_change():
     for codex in (None, {}, {"state": "current"}, {"state": "not-configured"}, {"state": "bundle-present"},
-                  {"state": "unknown"}):
+                  {"state": "unknown"}, {"state": "plugin-managed"}):      # no clone at all is not "changed"
         assert uc.codex_reapproval_text(codex) == ""
 
 
@@ -50,15 +50,21 @@ def test_the_complete_steps_name_the_changed_files_the_approval_and_the_check():
     assert "/hooks" in text
     assert "python ops/setup-codex-hooks.py --source plugin --trust yes" in text
     assert "--codex-hook-trust yes" in text and "-CodexHookTrust yes" in text
-    assert "without the memory briefing" in text
+    assert "without the memory briefing" in text and "Stop-hook park gate" in text
     assert uc.CODEX_REAPPROVAL_VERIFY in text and "codex_hooks = current" in text
+    assert "does not pull one" in text                             # setup-codex-hooks approves; Codex refreshes
     assert text.count("\n") == 3                                  # one head line, three numbered steps
+
+
+def test_manual_copies_get_the_manual_commands():
+    text = uc.codex_reapproval_text({"state": "stale", "source": "manual"})
+    assert "--source manual" in text and "--source plugin" not in text and "/hooks" not in text
+    assert "codex_hooks = bundle-present" in text
 
 
 def test_the_text_says_what_it_knows_when_files_cannot_be_named():
     assert "new handler positions" in uc.codex_reapproval_text({"state": "needs-approval", "changed_files": []})
     assert "differs from the current scripts" in uc.codex_reapproval_text({"state": "stale", "changed_files": None})
-    assert "no marketplace clone" in uc.codex_reapproval_text({"state": "plugin-managed"})
 
 
 # ── which files changed ─────────────────────────────────────────────────────
@@ -150,6 +156,43 @@ def test_update_clients_prints_the_steps_after_the_ladder(cli, capsys):
     _clone(cli)
     assert uc.main(["--repo", str(ROOT), "--only", "codex"]) == 0
     assert "re-approval" not in capsys.readouterr().out
+
+
+def test_a_daemon_only_update_says_when_the_hooks_changed(world, tmp_path, monkeypatch, capsys):
+    """ops/update.ps1 without -All (and update --daemon-only) moves no
+    client: when the daemon's scripts changed, one line says the client
+    side and the Codex steps are still to do; nothing when they did not."""
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0", "hooks_digest": "a" * 64},
+                    {"status": "ok", "version": "0.15.1", "hooks_digest": "b" * 64}]
+    assert up.main(["--daemon-only", "--health-delay-ms", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "hook scripts changed with this update and the client side was not moved" in out
+    assert "--clients-only --tag" in out
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0", "hooks_digest": "a" * 64},
+                    {"status": "ok", "version": "0.15.1", "hooks_digest": "a" * 64}]
+    assert up.main(["--daemon-only", "--health-delay-ms", "1"]) == 0
+    assert "hook scripts changed" not in capsys.readouterr().out
+
+
+def test_the_result_file_gets_the_codex_steps_beside_it(world, tmp_path, monkeypatch):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    monkeypatch.setattr(uc, "run_steps", lambda steps, **kw: {
+        "shim": {"state": "installed:0.15.1", "detail": "ok"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
+        "codex": {"state": "stale", "changed_files": ["stop-wake.sh"], "detail": "stale"}, "ok": True})
+    result = tmp_path / "state" / "update-clients.0.15.1.result"
+    assert up.main(["--clients-only", "--tag", "0.15.1", "--result-file", str(result)]) == 0
+    assert result.read_text(encoding="utf-8").strip() == "0"
+    steps = result.with_suffix(".codex").read_text(encoding="utf-8")
+    assert steps.startswith("Codex: its hook copy needs re-approval (changed: stop-wake.sh)")
+    monkeypatch.setattr(uc, "run_steps", lambda steps, **kw: {
+        "shim": {"state": "installed:0.15.1", "detail": "ok"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
+        "codex": {"state": "current", "detail": "ok"}, "ok": True})
+    world.health = [{"status": "ok", "version": "0.15.1"}]
+    assert up.main(["--clients-only", "--tag", "0.15.1", "--result-file", str(result)]) == 0
+    assert not result.with_suffix(".codex").exists()             # the steps file goes when nothing is due
 
 
 def test_doctor_reports_the_codex_hooks_line(monkeypatch, capsys):

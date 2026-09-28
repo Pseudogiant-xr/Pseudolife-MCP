@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 import sys
 import time
 import urllib.error
@@ -78,7 +77,14 @@ def board_activity(url: str, token: str | None) -> tuple[list[dict], int, str]:
         return [], 0, str(exc)
     finally:
         board.close()
-    agents = [a for a in (reply.get("agents") or []) if isinstance(a, dict) and isinstance(a.get("agent_id"), str)]
+    listed = reply.get("agents")
+    if not isinstance(listed, list):
+        # Fail closed: a reply without the list is not "nobody is active".
+        return [], 0, "the daemon's agents reply was not understood"
+    # This run's own throwaway address, and a previous run's within the
+    # active window, are not sessions.
+    agents = [a for a in listed if isinstance(a, dict) and isinstance(a.get("agent_id"), str)
+              and a.get("label") != BOARD_LABEL]
     idle = reply.get("idle_omitted")
     return agents, int(idle) if isinstance(idle, int) else 0, ""
 
@@ -145,6 +151,11 @@ def run_unattended(update) -> int:
     update._log, update._warn = tee("", original_log), tee("WARNING: ", original_warn)
     try:
         return _run(update)
+    except UpdateError as exc:
+        # Into the log while it is still tee'd: run() prints the warning
+        # after the tee is gone, and on a headless host the log is the record.
+        update._log(f"stopped: {exc}")
+        raise
     finally:
         update._log, update._warn = original_log, original_warn
         handle.close()
@@ -167,7 +178,9 @@ def _run(update) -> int:
     update.report.target = latest
     if latest is None:
         raise UpdateError("could not read the newest release from PyPI; nothing was changed", 2)
-    if not (version_key(latest) and version_key(current or "") and version_key(latest) > version_key(current)):
+    if not current or not version_key(current):
+        raise UpdateError("the daemon's /health carries no version; nothing was changed", 2)
+    if not (version_key(latest) and version_key(latest) > version_key(current)):
         update.step(f"current: {current} is the newest release; nothing to do")
         update.report.exit_code = 3
         return 3
@@ -198,12 +211,30 @@ def _run(update) -> int:
         return 4
     update.step(f"applying release {latest} unattended: no session is active on the board"
                 + (f" ({idle} idle)" if idle else ""))
+    def board_still_idle() -> None:
+        # The backup can take minutes: a session that started meanwhile
+        # must not get its daemon recreated under it. The backup and the
+        # rollback tag already taken are harmless.
+        active, _idle, reason = board_activity(o.daemon_url.rstrip("/"), bearer())
+        if reason or active:
+            why = f"the board could not be read ({reason})" if reason else \
+                f"{len(active)} session(s) became active during the backup: {_describe(active)}"
+            text = (f"Pseudolife-MCP: the unattended update to {latest} held off after the backup because {why}; "
+                    f"the daemon was not recreated. It tries again at the next scheduled run.")
+            post_notice(update, text)
+            raise UpdateError(text, 4)
+
     try:
-        update.deploy_release(current=current)
+        update.deploy_release(current=current, before_recreate=board_still_idle,
+                              previous_digest=health.get("hooks_digest"))
     except UpdateError as exc:
-        text = (f"Pseudolife-MCP: the unattended update to {latest} FAILED: {exc}. The log is "
-                f"{data_dir() / LOG_NAME}." + ("\n".join([" To roll back:"] + update.rollback_lines)
-                                               if update.rollback_lines else ""))
+        if exc.exit_code == 4:
+            raise
+        message = str(exc)
+        rollback = "" if "to roll back" in message.lower() or not update.rollback_lines else \
+            "\n".join(["", "To roll back:"] + update.rollback_lines)
+        text = (f"Pseudolife-MCP: the unattended update to {latest} FAILED: {message}. The log is "
+                f"{data_dir() / LOG_NAME}.{rollback}")
         update._log(text)          # into the log while it is still tee'd; run() prints the warning after
         post_notice(update, text)
         raise
@@ -225,7 +256,7 @@ def _updated_text(update, current: str | None, latest: str) -> str:
     rollback = update.report.rollback.get("tag") if isinstance(update.report.rollback, dict) else None
     text = (f"Pseudolife-MCP: the daemon was updated unattended from {current} to {latest} (backup taken; "
             f"rollback tag {rollback or 'none'}; {', '.join(parts) or 'clients not moved'}). Start a new "
-            f"session to run on the new shim runtime.")
+            f"session to run on the new shim runtime; the log is {data_dir() / LOG_NAME}.")
     codex = client_updates.codex_reapproval_text(clients.get("codex"))
     if codex:
         text += "\n" + codex
@@ -234,17 +265,21 @@ def _updated_text(update, current: str | None, latest: str) -> str:
 
 # ── the schedule ────────────────────────────────────────────────────────────
 
-def _command() -> list[str]:
+def _command(daemon_url: str | None = None) -> list[str]:
     """What the task or unit runs: the stable shim launcher when one is
-    installed, else this interpreter's module."""
+    installed, else this interpreter's module; a daemon URL other than the
+    default rides along, since the task or unit inherits no shell."""
+    tail = ["update", "--unattended"]
+    if daemon_url and daemon_url.rstrip("/") != _cli.DEFAULT_DAEMON_URL:
+        tail += ["--daemon-url", daemon_url]
     try:
         from pseudolife_memory import runtimes
         launcher = runtimes.default_layout().launcher
         if launcher.is_file():
-            return [str(launcher), "update", "--unattended"]
+            return [str(launcher), *tail]
     except Exception:  # noqa: BLE001 - no runtime layout here
         pass
-    return [sys.executable, "-m", "pseudolife_memory.cli", "update", "--unattended"]
+    return [sys.executable, "-m", "pseudolife_memory.cli", *tail]
 
 
 def _at(when: str) -> tuple[int, int]:
@@ -271,11 +306,11 @@ def _unit_environment() -> list[str]:
     token_file = os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE")
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN")
     if not token_file and token:
+        from pseudolife_memory.credentials import _write_token_file
+
         path = data_dir() / "unattended-update.token"
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(token)
+        _write_token_file(path, token)          # owner-only, atomically, whatever was there before
         token_file = str(path)
     if token_file:
         lines.append(f"Environment=PSEUDOLIFE_MCP_TOKEN_FILE={token_file}")
@@ -284,7 +319,7 @@ def _unit_environment() -> list[str]:
 
 def schedule(update, when: str, platform: str = sys.platform) -> int:
     hour, minute = _at(when)
-    command = _command()
+    command = _command(getattr(update.o, "daemon_url", None))
     if platform.startswith("win"):
         quoted = " ".join(f'"{part}"' if " " in part else part for part in command)
         code, out = run_cli(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", f"{hour:02d}:{minute:02d}",
@@ -300,7 +335,9 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
         unit_dir.mkdir(parents=True, exist_ok=True)
         exec_start = " ".join(f'"{part}"' if " " in part else part for part in command)
         service = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended daemon update", "",
-                             "[Service]", "Type=oneshot", f"ExecStart={exec_start}", *_unit_environment(), ""])
+                             "[Service]", "Type=oneshot", f"ExecStart={exec_start}",
+                             # 3 = current, 4 = held off: not failures of the unit.
+                             "SuccessExitStatus=3 4", *_unit_environment(), ""])
         timer = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended daemon update (daily)", "",
                            "[Timer]", f"OnCalendar=*-*-* {hour:02d}:{minute:02d}:00", "Persistent=true",
                            "RandomizedDelaySec=300", "", "[Install]", "WantedBy=timers.target", ""])
@@ -324,6 +361,10 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
 
 def unschedule(update, platform: str = sys.platform) -> int:
     if platform.startswith("win"):
+        code, _out = run_cli(["schtasks", "/Query", "/TN", TASK_NAME])
+        if code != 0:
+            update.step(f"no scheduled task '{TASK_NAME}' is registered; nothing to remove")
+            return 0
         code, out = run_cli(["schtasks", "/Delete", "/F", "/TN", TASK_NAME])
         if code != 0:
             raise UpdateError(f"schtasks /Delete failed ({out.strip() or code})", 2)
@@ -337,6 +378,10 @@ def unschedule(update, platform: str = sys.platform) -> int:
             except FileNotFoundError:
                 pass
         run_cli(["systemctl", "--user", "daemon-reload"])
+        try:
+            (data_dir() / "unattended-update.token").unlink()
+        except FileNotFoundError:
+            pass
         update.step(f"removed {UNIT_NAME}.timer and its service from {unit_dir}")
     else:
         raise UpdateError("nothing to remove on this platform", 2)

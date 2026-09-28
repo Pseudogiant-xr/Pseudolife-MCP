@@ -664,23 +664,35 @@ def codex_reapproval_text(codex: dict | None) -> str:
     ``needs-approval`` or ``plugin-managed``); '' for every other state, so
     an update whose hooks did not change prints nothing about Codex."""
     state = (codex or {}).get("state")
-    if state not in ("stale", "needs-approval", "plugin-managed"):
+    # plugin-managed (the config names the plugin but Codex holds no clone
+    # where it is looked for) says nothing about a change: no steps.
+    if state not in ("stale", "needs-approval"):
         return ""
     changed = (codex or {}).get("changed_files")
     if changed:
         which = f"changed: {', '.join(changed)}"
     elif state == "needs-approval":
         which = "new handler positions Codex has not approved"
-    elif state == "plugin-managed":
-        which = "Codex has no marketplace clone of the plugin yet"
     else:
         which = "Codex's copy differs from the current scripts"
+    off = ("so until this is done Codex sessions start without the memory briefing, the per-turn "
+           "memory and mail notes, the board check-in, the SessionEnd close and the Stop-hook park gate.")
+    if (codex or {}).get("source") == "manual":
+        # Content-addressed manual copies (ops/setup-codex-hooks.py --source
+        # manual): the same script refreshes, approves and verifies them.
+        return "\n".join([
+            f"Codex: its manual hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
+            f"approved handlers, {off}",
+            "  1. Refresh and approve the copy from a checkout: python ops/setup-codex-hooks.py --source manual "
+            "--trust ask (unattended: --trust yes)",
+            "  2. Verify: the same command reports status ready; pseudolife-mcp doctor reports "
+            "codex_hooks = bundle-present for manual copies.",
+        ])
     return "\n".join([
         f"Codex: its hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
-        f"approved handlers, so until this is done Codex sessions start without the memory briefing, "
-        f"the per-turn memory and mail notes and the Stop wake.",
-        "  1. Refresh Codex's copy of the plugin: through Codex's plugin manager, or from a checkout: "
-        "python ops/setup-codex-hooks.py --source plugin --trust ask",
+        f"approved handlers, {off}",
+        "  1. Update the plugin in Codex's plugin manager, so its marketplace clone holds the new scripts "
+        "(python ops/setup-codex-hooks.py --source plugin approves what the clone holds; it does not pull one)",
         "  2. Approve the handlers: in a Codex session run /hooks and approve every pseudolife-memory "
         "handler; unattended: python ops/setup-codex-hooks.py --source plugin --trust yes, or the "
         "installer's --codex-hook-trust yes (-CodexHookTrust yes on Windows)",
@@ -721,7 +733,7 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
             return {"state": "bundle-present",
                     "detail": "bundle present; trust and execution not checked; rerun setup to verify with "
                               "consent: python ops/setup-codex-hooks.py --source manual --trust ask"}
-        return {"state": "stale",
+        return {"state": "stale", "source": "manual",
                 "detail": "the installed copy predates the checkout's hook scripts; hooks are trusted by "
                           "hash, so refresh with consent: python ops/setup-codex-hooks.py --trust ask"}
     config = codex_home / "config.toml"
@@ -739,7 +751,7 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current:
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing:
-            return {"state": "needs-approval", "changed_files": [],
+            return {"state": "needs-approval", "source": "plugin", "changed_files": [],
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
                               "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
                               "(or /hooks in the Codex terminal app)"}
@@ -749,7 +761,8 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     # the checkout's, or the daemon's through the plugin cache.
     reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
     changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
-    return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "changed_files": changed,
+    return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
+            "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "
                       "python ops/setup-codex-hooks.py --source plugin --trust ask"}
 
