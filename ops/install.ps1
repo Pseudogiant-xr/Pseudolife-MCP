@@ -973,48 +973,6 @@ if (-not $ClientOnly) {
     if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 }
 
-# -- 8. CLI shim autostart (Claude / Codex modes) ---------------------------------
-# A mode switch must tear down the OTHER family's autostart: an abandoned
-# shim task keeps making real CLI calls at every /health refresh, forever,
-# on a plan whose owner believes it is turned off. Best-effort like the
-# registration below (unelevated removal fails; warn with the manual step).
-function Remove-ShimTask($name) {
-    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
-    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
-    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
-        Write-Warning "could not remove autostart task '$name' (needs an ELEVATED pwsh opened from the Start menu, not from inside Claude Desktop) - its shim keeps starting at logon until you remove it"
-    } else {
-        Step "Removed autostart task '$name' (a running shim process, if any, persists until logoff)"
-    }
-}
-# A client-only install leaves any local daemon's extractor shims alone.
-if (-not $codexShimMode -and -not $ClientOnly) { Remove-ShimTask "Pseudolife Codex Shim" }
-if (-not $claudeShimMode -and -not $ClientOnly) {
-    Remove-ShimTask "Pseudolife Claude Shim"
-    Remove-ShimTask "Pseudolife Sonnet Shim"   # pre-rename installs
-}
-if ($claudeShimMode) {
-    Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration or start failed (registration: usually elevation): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
-        Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model"
-        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
-    }
-} elseif ($codexShimMode) {
-    Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
-    try {
-        & (Join-Path $PSScriptRoot "install-codex-shim-autostart.ps1") -Port $ShimPort -Model $Model
-    } catch {
-        Write-Warning "Shim autostart registration failed (usually elevation): $_"
-        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-codex-shim-autostart.ps1):"
-        Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model"
-        Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
-    }
-}
-
 # -- 8b. Claude Code plugin (hooks + commands layer) ------------------------------
 # >>> claude plugin >>>
 # The plugin is the third install beside the daemon and the shim, and the
@@ -2248,6 +2206,59 @@ function Show-EndpointContainer {
     }
 }
 # <<< endpoint container probe <<<
+# -- 12a. CLI shim autostart (Claude / Codex modes) -------------------------------
+# Placed here, at the top of stage 12, for three reasons: after stage 11's
+# shim install (below); before the health wait, so a daemon that is not yet
+# healthy still leaves the autostart registered, as when this was stage 8;
+# and outside every stage range the installer tests extract (they run
+# stages 9 through the '12. health' header), so no test ever reaches the
+# real systemctl / Task Scheduler calls below.
+# >>> shim autostart >>>
+# Runs after stage 11 on purpose: the shim install there (pipx, or pip
+# --user) is what puts the package where an interpreter imports it on a
+# host without a checkout venv, and the autostart script's interpreter pick
+# (ops\shim_python.py) finds it there instead of building a venv of its own.
+# A mode switch must tear down the OTHER family's autostart: an abandoned
+# shim task keeps making real CLI calls at every /health refresh, forever,
+# on a plan whose owner believes it is turned off. Best-effort like the
+# registration below (unelevated removal fails; warn with the manual step).
+function Remove-ShimTask($name, $family) {
+    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+        Write-Warning "could not remove autostart task '$name' (needs an ELEVATED pwsh opened from the Start menu, not from inside Claude Desktop) - its shim keeps starting at logon until you remove it"
+    } else {
+        Step "Removed autostart task '$name' (the $family shim): extractor mode $Extractor does not use it, and an abandoned shim keeps making real CLI calls at every health refresh (a running shim process, if any, persists until logoff)"
+    }
+}
+# A client-only install leaves any local daemon's extractor shims alone.
+if (-not $codexShimMode -and -not $ClientOnly) { Remove-ShimTask "Pseudolife Codex Shim" "Codex" }
+if (-not $claudeShimMode -and -not $ClientOnly) {
+    Remove-ShimTask "Pseudolife Claude Shim" "Claude"
+    Remove-ShimTask "Pseudolife Sonnet Shim" "Claude"   # pre-rename installs
+}
+if ($claudeShimMode) {
+    Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
+    try {
+        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
+    } catch {
+        Write-Warning "Shim autostart registration or start failed (registration: usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
+        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-shim-autostart.ps1):"
+        Write-Host "    ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
+        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v5.md"
+    }
+} elseif ($codexShimMode) {
+    Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh opened from the Start menu - not from a shell inside Claude Desktop)..."
+    try {
+        & (Join-Path $PSScriptRoot "install-codex-shim-autostart.ps1") -Port $ShimPort -Model $Model
+    } catch {
+        Write-Warning "Shim autostart registration failed (usually elevation; or no interpreter imports pseudolife_memory for the task - see the message above): $_"
+        Write-Host "  Re-run later from an admin pwsh opened fresh from the Start menu (never from a shell inside Claude Desktop - see the note in ops\install-codex-shim-autostart.ps1):"
+        Write-Host "    ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model   (add -PythonExe <interpreter> to name one)"
+        Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
+    }
+}
+# <<< shim autostart <<<
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if (-not $ClientOnly) {

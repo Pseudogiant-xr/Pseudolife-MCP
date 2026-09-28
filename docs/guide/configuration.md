@@ -34,6 +34,17 @@ every value is commented, a missing file runs entirely on defaults). The
 dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 [Dreaming](dreaming.md).
 
+An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
+reads such a file fine, but a value the shell installer read from it ended
+in a CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
+an invalid name (Debian 13, 2026-09-29). `ops/install.sh` and
+`ops/update.sh` therefore rewrite a CRLF `ops/.env` with LF endings before
+reading it — in place, keeping the file's owner-only mode, with the
+original kept beside it as `ops/.env.crlf-<stamp>` (gitignored like every
+`ops/.env*`) — and print one line saying so; a file already on LF is not
+touched. `ops/install.ps1` reads the file line by line and needs no
+rewrite.
+
 When deploying with `ops/update.ps1` or `ops/update.sh`, an explicit assignment
 to either authentication variable in `ops/.env` makes that file authoritative
 for both. Inherited client token variables cannot add an unintended fallback;

@@ -64,12 +64,29 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-if (-not $PythonExe) {
-    $venv = Join-Path $repo ".venv\Scripts\python.exe"
-    $PythonExe = (Test-Path $venv) ? $venv : (Get-Command python).Source
-}
 $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
+# >>> shim python >>>
+# The task's interpreter must import pseudolife_memory with its
+# dependencies (the shim imports the dream system prompt from it): the
+# Linux twin registered a unit with a bare python3 that exited 1 in a
+# restart loop (Debian 13, 2026-09-29). ops\shim_python.py picks one (the
+# checkout's .venv, pipx's pseudolife-mcp venv, a venv it made earlier, a
+# PATH python that imports the package, else a venv it creates from the
+# checkout), verifies it the way the task will use it, and says which and
+# why; -PythonExe names one to verify instead.
+$helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+    throw "no python on PATH to run ops\shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run."
+}
+$pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
+if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }
+$picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+if ($LASTEXITCODE -ne 0 -or -not $picked) {
+    throw "shim autostart not registered: no interpreter imports pseudolife_memory for the task (see the message above; -PythonExe <interpreter> names one)."
+}
+$PythonExe = "$picked".Trim()
+# <<< shim python <<<
 # Absolute up front: the task's cmd.exe would otherwise resolve a relative
 # -LogFile against its WorkingDirectory ($repo) while the verification below
 # resolves it against this shell's location.
@@ -244,7 +261,7 @@ if ($startup.Count -eq 0) {
 } else {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
-Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), log $LogFile)."
+Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

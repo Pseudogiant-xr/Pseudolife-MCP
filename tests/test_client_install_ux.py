@@ -647,6 +647,74 @@ def test_shim_autostart_installer_replaces_the_running_tree_and_verifies_the_bin
     assert after.index("throw") < after.index("Registered + started")
 
 
+def test_shim_autostart_scripts_pick_an_interpreter_that_imports_the_package() -> None:
+    """Both shims import the dream system prompt from ``pseudolife_memory``,
+    which pulls in torch. On a Docker-tier Linux host with no checkout
+    ``.venv`` the autostart scripts fell back to a bare ``python3`` and
+    registered ``pseudolife-codex-shim.service`` with an ExecStart that
+    exited 1 in a restart loop until it was re-registered with ``--python``
+    (Debian 13, 2026-09-29). All four scripts now ask ``ops/shim_python.py``
+    for an interpreter (the checkout's venv, pipx's venv, a venv it made
+    earlier, a PATH python that imports the package, else a venv it creates
+    from the checkout — each verified before the unit is written), say
+    which one was chosen, and refuse rather than register a unit that
+    cannot start."""
+    for rel in ("ops/install-shim-autostart.sh", "ops/install-codex-shim-autostart.sh"):
+        sh = _read(rel)
+        assert "shim_python.py" in sh, rel
+        assert "--python" in sh, rel                       # the override stays
+        assert 'PYTHON_EXE="$(command -v python3)"' not in sh, rel   # the old fallback
+        # Quoted in ExecStart: systemd splits an unquoted path with a space,
+        # which is the crash loop this pick exists to prevent (review, 2026-09-29).
+        assert 'ExecStart="$PYTHON_EXE" "$repo/evals/' in sh, rel
+        # The chosen interpreter is printed with the registration line.
+        assert "Registered + started" in sh and "$PYTHON_EXE" in sh.split("Registered + started", 1)[1], rel
+    for rel in ("ops/install-shim-autostart.ps1", "ops/install-codex-shim-autostart.ps1"):
+        ps = _read(rel)
+        assert "shim_python.py" in ps, rel
+        assert "(Get-Command python).Source" not in ps, rel  # the old fallback
+        assert "Registered + started" in ps and "$PythonExe" in ps.split("Registered + started", 1)[1], rel
+
+
+def test_installers_register_the_shim_autostart_after_installing_the_shim() -> None:
+    """The MCP shim install (pipx, or pip --user) is what puts the package
+    where an interpreter imports it on a host without a checkout venv, so the
+    autostart registration must run after it, or the picker builds a venv of
+    its own that the installer then duplicates a few steps later."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    assert sh.index("ensure_shim() {") < sh.index("CLI shim autostart (Claude / Codex modes)")
+    assert ps.index("function Install-ShimOnce") < ps.index("CLI shim autostart (Claude / Codex modes)")
+    # And it sits OUTSIDE every stage range the installer tests execute
+    # (stages 9 through the '12. health' header, and stage 11's loop up to
+    # that header): a test that reached it would call the real systemctl
+    # or Task Scheduler and could disable a live shim on the machine running
+    # the suite. Before the health wait, so an unhealthy daemon still leaves
+    # the autostart registered.
+    for text, health, wait in (
+            (sh, "\n# ── 12. health", 'step "Waiting for the daemon to report healthy..."'),
+            (ps, "\n# -- 12. health", 'Step "Waiting for the daemon to report healthy..."')):
+        start = text.index("# >>> shim autostart >>>")
+        assert text.count("# >>> shim autostart >>>") == 1
+        assert text.index(health) < start < text.index("# <<< shim autostart <<<") < text.index(wait)
+    # The failure hint names the interpreter refusal beside the systemd one.
+    assert "imports pseudolife_memory" in sh.split("CLI shim autostart (Claude / Codex modes)", 1)[1]
+
+
+def test_a_mode_switch_says_which_shim_autostart_it_removed_and_why() -> None:
+    """Choosing a mode removes the other family's shim autostart (pinned
+    above); the 2026-09-29 Debian install did that without a line the
+    operator could read. The removal now names the unit, the family and the
+    extractor mode that made it redundant."""
+    sh = _read("ops/install.sh")
+    ps = _read("ops/install.ps1")
+    for text in (sh, ps):
+        removal = text.split("A mode switch must tear down the OTHER family", 1)[1]
+        removal = removal.split("Registering the", 1)[0]
+        assert "does not use it" in removal
+        assert "$EXTRACTOR" in removal or "$Extractor" in removal
+
+
 def test_installers_wire_claude_desktop_through_the_shared_register_script() -> None:
     """Claude Desktop has no `mcp add` CLI and launches MCP servers with a
     sanitized environment (no PATH extras, no user env vars), so its entry

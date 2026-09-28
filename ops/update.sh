@@ -146,6 +146,25 @@ if [ ! -f "$env_file" ] && [ -f "$repo/ops/.env.example" ]; then
     cp "$repo/ops/.env.example" "$env_file"
     step "Scaffolded ops/.env from ops/.env.example (all values commented)."
 fi
+# >>> env line endings >>>
+# An ops/.env copied from a Windows host carries CRLF line endings, and a
+# value read from it here then ends in a CR: `docker volume create` refused
+# "pseudolife-mcp-bank-pg18\r" as an invalid name (Debian 13, 2026-09-29).
+# Compose tolerates CRLF; the shell reads do not. The file is rewritten in
+# place with LF endings, keeping its mode (owner-only once a token is
+# minted) and a copy of the original beside it; a file already on LF is not
+# touched. ops/install.sh and ops/update.sh carry this same block, and
+# tests/test_installer_env_file.py keeps the two identical.
+normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
+    [ -f "$1" ] || return 0
+    grep -q "$(printf '\r')" "$1" || return 0
+    env_backup="$1.crlf-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$1" "$env_backup"
+    tr -d '\r' < "$env_backup" > "$1"
+    step "Rewrote $(basename "$1") with LF line endings (it had CRLF, which put a stray CR into every value read from it); the original is kept as $(basename "$env_backup")"
+}
+normalize_env_line_endings "$env_file"
+# <<< env line endings <<<
 # Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
 # override file; explicit -f disables compose's auto-merge, so add it here.
 [ -f "$override_file" ] && compose+=(-f "$override_file")

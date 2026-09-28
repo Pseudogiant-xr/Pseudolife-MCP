@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
+- `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
+  line endings (one copied from a Windows host) with LF endings before
+  reading it — in place, keeping the file's mode, with the original kept
+  beside it as `ops/.env.crlf-<stamp>` — and say so; a file already on LF
+  is not touched. A value the installer read from such a file ended in a
+  CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
+  an invalid name (Debian 13, 2026-09-29). Compose itself tolerates CRLF;
+  the installer's own volume-name reads now drop a trailing CR as well.
+  [Environment variables](docs/guide/configuration.md#environment-variables)
+- The shim autostart scripts (`ops/install-shim-autostart.sh`,
+  `ops/install-codex-shim-autostart.sh` and their `.ps1` twins) no longer
+  fall back to a bare `python3` / `python`: `evals/claude_shim.py` and
+  `evals/codex_shim.py` import the dream system prompt from
+  `pseudolife_memory`, so on a host without a checkout `.venv` the unit's
+  `ExecStart` exited 1 in a restart loop until it was re-registered with
+  `--python` (same install). The new `ops/shim_python.py` picks an
+  interpreter that imports the package — the checkout's `.venv`, pipx's
+  `pseudolife-mcp` venv, a venv it made earlier, a PATH python that
+  imports it, else a venv it creates from the checkout (torch from the CPU
+  wheel index) — verifies each candidate the way the unit runs, prints the
+  choice, and refuses with the fix when none qualifies; `--python` /
+  `-PythonExe` names one to verify instead. Both one-shot installers now
+  register the autostart after their own shim install, so that install's
+  venv is what the unit uses, and a mode switch says which family's
+  autostart it removed and why.
+  [Claude primary with local fallback](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
 ### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
 - The one-shot installers' extractor modes are renamed from the models that
   were current when they were written: `claude-only` / `claude-fallback`
