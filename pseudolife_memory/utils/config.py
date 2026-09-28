@@ -1416,6 +1416,37 @@ class CoordinationConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    """How an install learns about, and takes, a new release.
+
+    ``check_releases``: the daemon asks PyPI for the newest release once per
+    ``check_interval_seconds`` on a background thread (never on a request),
+    ``/health`` carries the answer, and the session-start briefing opens
+    with ``pseudolife-mcp update`` when the daemon is behind. Off, nothing
+    leaves the daemon and no session is told.
+
+    ``unattended_clients`` (off by default): when the daemon runs a newer
+    release than the shim a session starts from, that shim installs the
+    daemon's release as a new runtime beside itself and refreshes the
+    plugin cache in the background (``pseudolife-mcp update
+    --clients-only``); running sessions keep their runtime, the next
+    session starts on the new one. The daemon recreate, with its backup
+    and rollback tag, is never taken unattended by this knob.
+    """
+
+    check_releases: bool = True
+    check_interval_seconds: int = 6 * 3600
+    unattended_clients: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("check_releases", "unattended_clients"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"updates.{name} must be a boolean")
+        if type(self.check_interval_seconds) is not int or self.check_interval_seconds < 60:
+            raise ValueError("updates.check_interval_seconds must be a whole number of seconds, 60 or more")
+
+
+@dataclass
 class AppConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
@@ -1424,6 +1455,7 @@ class AppConfig:
     time: TimeConfig = field(default_factory=TimeConfig)
     coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
     memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1556,5 +1588,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
     if "memory_policy" in raw:
         config.memory_policy = _dict_to_dataclass(MemoryPolicyConfig, raw["memory_policy"])
+    if "updates" in raw:
+        config.updates = _dict_to_dataclass(UpdatesConfig, raw["updates"])
 
     return config

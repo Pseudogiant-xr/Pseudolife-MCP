@@ -47,10 +47,16 @@ HOOK_CONTEXT_MAX_CHARS = 9_500
 # A plugin version arrives on the hook's query string. Only a version-shaped
 # value may be echoed into the model's context; anything else is dropped.
 _VERSION_SHAPE = re.compile(r"[0-9A-Za-z.+-]{1,32}")  # used with fullmatch: `$` would admit a trailing newline
-PLUGIN_UPDATE_COMMANDS = ("/plugin marketplace update pseudolife-mcp, then "
+PLUGIN_UPDATE_COMMANDS = ("pseudolife-mcp update --clients-only, or in Claude Code "
+                          "/plugin marketplace update pseudolife-mcp, then "
                           "/plugin update pseudolife-memory@pseudolife-mcp")
-DAEMON_UPDATE_COMMANDS = "git pull, then ops/update.ps1 or ops/update.sh"
-ALL_UPDATE_COMMANDS = "ops/update.ps1 -All (Windows) or ops/update.sh --all, from the checkout"
+DAEMON_UPDATE_COMMANDS = ("pseudolife-mcp update (from a checkout: git pull, then "
+                          "ops/update.ps1 or ops/update.sh)")
+ALL_UPDATE_COMMANDS = ("pseudolife-mcp update --clients-only (from a checkout: ops/update.ps1 -All "
+                       "on Windows or ops/update.sh --all)")
+# The offer, when the daemon knows of a newer release (pseudolife_memory.
+# release_check): the one command that moves the whole install.
+RELEASE_UPDATE_COMMAND = "pseudolife-mcp update"
 # A hooks digest is 64 lowercase hex characters (pseudolife_memory.plugin_hooks).
 _DIGEST_SHAPE = re.compile(r"[0-9a-f]{64}")
 
@@ -96,6 +102,29 @@ def _version_key(value: str) -> tuple[int, ...] | None:
     dependency on ``packaging``, which the daemon image does not declare."""
     match = re.match(r"^(\d+(?:\.\d+)*)", value)
     return tuple(int(part) for part in match.group(1).split(".")) if match else None
+
+
+def update_notice(daemon_version: str | None, latest_release: str | None,
+                  plugin_version: str | None) -> str:
+    """One line when the daemon knows of a release newer than itself, else
+    ''. It names the one command that moves the whole install, and the
+    plugin's version when that differs too, so a session never opens with
+    an offer and then a second line about the same thing. Both versions
+    are shape-checked: the release string was read from PyPI and the
+    plugin's arrives on a query string."""
+    if not isinstance(latest_release, str) or not _VERSION_SHAPE.fullmatch(latest_release):
+        return ""
+    if not isinstance(daemon_version, str) or not _VERSION_SHAPE.fullmatch(daemon_version):
+        return ""
+    latest_key, daemon_key = _version_key(latest_release), _version_key(daemon_version)
+    if latest_key is None or daemon_key is None or latest_key <= daemon_key:
+        return ""
+    where = f"daemon {daemon_version}"
+    if plugin_version and _VERSION_SHAPE.fullmatch(plugin_version) and plugin_version != daemon_version:
+        where += f", plugin {plugin_version}"
+    return (f"Pseudolife-MCP: release {latest_release} is available ({where}) — run "
+            f"{RELEASE_UPDATE_COMMAND} (it backs the bank up, tags a rollback, recreates the "
+            f"daemon, then updates the shim and the plugin cache), then start a new session.")
 
 
 def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERSION) -> str:
@@ -556,16 +585,19 @@ def hook_session_start(
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
     session (identity tier 3), and prepends the episode-handle advertisement.
-    A ``plugin_version`` that differs from the daemon's puts
-    :func:`version_notice` first of all; an equal version whose
-    ``plugin_hooks_digest`` differs puts :func:`hooks_notice` there instead.
-    Without ``session_id`` or a mismatch this is exactly
-    ``session_start_context``'s behaviour. A ``source`` in
+    A release newer than the daemon (``release_check``) puts
+    :func:`update_notice` first of all; else a ``plugin_version`` that
+    differs from the daemon's puts :func:`version_notice` there; else an
+    equal version whose ``plugin_hooks_digest`` differs puts
+    :func:`hooks_notice` there. Without ``session_id`` or a mismatch this
+    is exactly ``session_start_context``'s behaviour. A ``source`` in
     :data:`CONTINUED_SOURCES` keeps the notices and the handle line but
     replaces that body with :func:`_continued_context`. Never raises; the
     endpoint always answers 200."""
+    from pseudolife_memory import release_check
     prefix_parts = []
-    notice = version_notice(plugin_version) or hooks_notice(plugin_version, plugin_hooks_digest)
+    notice = (update_notice(DAEMON_VERSION, release_check.latest_release(), plugin_version)
+              or version_notice(plugin_version) or hooks_notice(plugin_version, plugin_hooks_digest))
     if notice:
         prefix_parts.append(notice)
     if authorized:

@@ -600,6 +600,15 @@ runs from wherever it was registered, so use its full path when
 the package in the interpreter that holds it (pip, or pipx) and restarts
 nothing: it says what to restart.
 
+You are told when it is time: the daemon checks PyPI for the newest
+release in the background (`updates.check_releases`, on by default) and
+every session's briefing then opens with `release X is available — run
+pseudolife-mcp update`. With `updates.unattended_clients: true` in
+`config.yaml` (off by default) the shim installs the daemon's release as
+its own new runtime and refreshes the plugin cache by itself whenever the
+daemon is newer than it; the daemon recreate stays a deliberate command.
+See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
+
 **Lite tier by hand:** one command, bank untouched:
 
 ```bash

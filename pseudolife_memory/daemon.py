@@ -221,6 +221,17 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         from dataclasses import asdict
         payload["coordination"] = {"enabled": bool(coordination.enabled),
                                    "wake": asdict(coordination.wake)}
+    # The newest release the daemon knows of (config.yaml `updates`, read
+    # from PyPI on a background thread) and whether a shim may take the
+    # client half of an update unattended; the shim and the briefing read
+    # this. Absent when the service carries no config (stand-ins).
+    updates = getattr(getattr(svc, "config", None), "updates", None)
+    if updates is not None:
+        from pseudolife_memory import release_check
+        known = release_check.snapshot()
+        payload["updates"] = {"latest_release": known["latest_release"],
+                              "checked_at": known["checked_at"],
+                              "unattended_clients": bool(updates.unattended_clients)}
     # Deliberately does NOT touch `status`: a bank with no extractor is
     # serving correctly, and web/api.py turns any non-ok payload into a
     # 503 that the Docker healthcheck and ops/update.* treat as fatal.
@@ -456,6 +467,12 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
     mcp_server.start_session_reaper()
+    # The newest-release check (config.yaml `updates.check_releases`): its
+    # own thread, so a daemon with no route to PyPI answers /health as fast
+    # as one with.
+    from pseudolife_memory import release_check
+
+    release_check.start(getattr(mcp_server.service.config, "updates", None))
     # Returns what glibc keeps resident after encode bursts (Linux only).
     from pseudolife_memory.utils import heap_trim
 

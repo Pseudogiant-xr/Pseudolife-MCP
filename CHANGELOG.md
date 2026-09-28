@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-29 — sessions are told when a release is out, and the shim can take the client half of an update by itself)
+- The daemon reads the newest release from PyPI on a background thread
+  once per `updates.check_interval_seconds` (six hours; `config.yaml`
+  `updates.check_releases: false` turns it off), keeps the last good
+  answer and serves it on `/health` (`updates.latest_release`,
+  `checked_at`). When it is newer than the daemon, the session-start
+  briefing opens with one line naming the command (`release X is
+  available (daemon Y, plugin Z) — run pseudolife-mcp update`) in place
+  of the plugin-version notice. Every notice that names an update now
+  names `pseudolife-mcp update` or `--clients-only` first (the briefing's
+  plugin-behind, daemon-behind and hooks-differ lines, the shim's version
+  line, `doctor`), with the checkout scripts as the alternative. Nothing
+  compared the daemon with the release page until now.
+- `updates.unattended_clients: true` (default off): when a session's shim
+  finds the daemon on a newer release than itself, it starts
+  `pseudolife-mcp update --clients-only --tag <daemon version>` in the
+  background (a new shim runtime beside the running one, the plugin cache
+  refreshed; log `~/.pseudolife-mcp/update-clients.log`), at most once per
+  release per hour, and its served instructions say so instead of asking
+  for the command. The running session keeps its runtime; the next starts
+  on the new one. The daemon recreate, with its backup and rollback tag,
+  is never taken unattended by this knob. [Configuration](docs/guide/configuration.md#being-told-and-the-unattended-client-half-updates)
+
 ### Changed (2026-09-29 — the extractor shims start from ops/.env; changing a model is an edit plus a restart, not an elevated re-registration)
 - The Claude and Codex shim autostart task (Windows) and units (Linux)
   now run `python ops/shim_autostart.py run claude|codex` and nothing
