@@ -751,8 +751,9 @@ def test_a_retried_send_repeats_its_wake_decision(store):
 
 def test_park_gate_asks_an_unparked_session_once(store):
     """What the Stop hook asks at turn end: block when the session's row has
-    no live park record and its status is not done-shaped, or when it did
-    not update its status during the turn; allow otherwise."""
+    no live park record and its status is not done-shaped, or when an
+    unparked session did not update its status during the turn. A live
+    standing park allows when no rung delivery invalidated it."""
     a = store.register("alice")
 
     def gate(since=None):
@@ -766,9 +767,9 @@ def test_park_gate_asks_an_unparked_session_once(store):
     store.update(*creds(a), status="working", park_reason="blocked", park_needs="x",
                  park_clear_by="anyone")
     assert gate() == {"gate": "allow", "reason": "parked"}
-    # Parked last turn, but this turn ended without a word: ask again.
+    # A live standing park needs no repeat when this turn received no ring.
     store.test_time[0] = 2000.0
-    assert gate(since=1500.0) == {"gate": "block", "reason": "not_updated_this_turn"}
+    assert gate(since=1500.0) == {"gate": "allow", "reason": "parked"}
     store.update(*creds(a), park_reason="blocked")
     assert gate(since=1500.0) == {"gate": "allow", "reason": "parked"}
     # An expired park is no park.
@@ -778,6 +779,140 @@ def test_park_gate_asks_an_unparked_session_once(store):
     # Unknown or foreign addresses are allowed: the hook has nothing to ask.
     assert store.park_gate("0" * 32, "alice") == {"gate": "allow", "reason": "unknown_agent"}
     assert store.park_gate(a["agent_id"], "bob") == {"gate": "allow", "reason": "unknown_agent"}
+
+
+@pytest.mark.parametrize("reset_at", [None, 1600.0, 1700.0])
+def test_park_gate_requires_a_park_strictly_after_a_rung_delivery(store, reset_at):
+    sender = store.register("alice")
+    recipient = _wake_capable(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    # An update earlier in the turn must not excuse a later cleared need.
+    store.test_time[0] = 1510.0
+    store.update(*creds(recipient), park_reason="blocked")
+    store.test_time[0] = 1600.0
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    if reset_at is not None:
+        store.test_time[0] = reset_at
+        store.update(*creds(recipient), park_reason="blocked")
+    expected = ({"gate": "allow", "reason": "parked"} if reset_at == 1700.0
+                else {"gate": "block", "reason": "not_updated_this_turn"})
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == expected
+
+
+@pytest.mark.parametrize("delivery_at", [1499.0, 1500.0])
+def test_park_gate_ignores_rung_deliveries_before_or_at_the_turn_start(store, delivery_at):
+    sender = store.register("alice")
+    recipient = _wake_capable(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    store.test_time[0] = delivery_at
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    store.test_time[0] = 2000.0
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "allow", "reason": "parked"}
+
+
+def test_park_gate_blocks_a_null_park_timestamp_after_a_rung_delivery(store):
+    sender, recipient = pair(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    store.storage.conn.execute(
+        "UPDATE coordination_agents SET park_set_at=NULL WHERE agent_id=%s",
+        (recipient["agent_id"],))
+    store.test_time[0] = 1600.0
+    store.storage.conn.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+        "decision,reason,ring_at,created_at) VALUES (%s,%s,%s,'rung','anyone',%s,%s)",
+        (recipient["agent_id"], sender["agent_id"], "fixture-message", 1600.0, 1600.0))
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "block", "reason": "not_updated_this_turn"}
+
+
+def test_park_gate_ignores_rung_deliveries_to_another_agent(store):
+    sender, recipient = (_wake_capable(store) for _ in range(2))
+    for agent in (sender, recipient):
+        store.update(*creds(agent), park_reason="blocked", park_needs="a review",
+                     park_clear_by="anyone")
+    store.test_time[0] = 1600.0
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    assert store.park_gate(sender["agent_id"], "alice", since=1500.0) == {
+        "gate": "allow", "reason": "parked"}
+
+
+def test_park_gate_ignores_a_nudge_when_the_recipient_then_parks(store):
+    sender = store.register("alice")
+    recipient = _wake_capable(store)
+    store.test_time[0] = 1600.0
+    _idle(store, recipient)
+    assert _wake(store, sender, recipient)["decision"] == "nudged"
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "allow", "reason": "parked"}
+
+
+def test_park_gate_compares_the_park_with_the_newest_rung_delivery(store):
+    sender = store.register("alice")
+    recipient = _wake_capable(store)
+    store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
+                 park_clear_by="anyone")
+    store.test_time[0] = 1550.0
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    store.test_time[0] = 1600.0
+    store.update(*creds(recipient), park_reason="blocked")
+    store.test_time[0] = 1700.0
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "block", "reason": "not_updated_this_turn"}
+
+
+def test_park_gate_uses_delivery_time_not_the_staggered_or_served_ring(store):
+    sender = store.register("alice")
+    other, recipient = (_wake_capable(store) for _ in range(2))
+    for agent in (other, recipient):
+        store.update(*creds(agent), park_reason="blocked", park_needs="a review",
+                     park_clear_by="anyone")
+    store.test_time[0] = 1550.0
+    assert _wake(store, sender, other)["decision"] == "rung"
+    store.test_time[0] = 1560.0
+    assert _wake(store, sender, recipient)["ring_at"] == 1580.0
+    store.test_time[0] = 1570.0
+    store.update(*creds(recipient), park_reason="blocked")
+    store.test_time[0] = 1700.0
+    assert store.attach(*creds(recipient), attachment_id=recipient["agent_id"][:8],
+                        wake_enabled=True)["wake"]["decision"] == "rung"
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "allow", "reason": "parked"}
+
+
+@pytest.mark.parametrize("updated", [False, True])
+def test_park_gate_still_checks_this_turn_when_the_park_lapsed(store, updated):
+    recipient = store.register("alice")
+    store.update(*creds(recipient), park_reason="blocked", park_expires=1600.0)
+    if updated:
+        store.test_time[0] = 1510.0
+        store.update(*creds(recipient), park_reason="blocked")
+    store.test_time[0] = 2000.0
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
+        "gate": "block", "reason": "no_park" if updated else "not_updated_this_turn"}
+
+
+@pytest.mark.parametrize("status, gate, reason", [
+    ("working", "block", "no_park"),
+    ("DONE: review ready", "allow", "done"),
+])
+@pytest.mark.parametrize("updated", [False, True])
+def test_park_gate_preserves_the_unparked_status_check(store, status, gate, reason, updated):
+    recipient = store.register("alice")
+    store.update(*creds(recipient), status=status)
+    if updated:
+        store.test_time[0] = 1600.0
+        store.update(*creds(recipient), status=status)
+    store.test_time[0] = 2000.0
+    assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == (
+        {"gate": gate, "reason": reason} if updated
+        else {"gate": "block", "reason": "not_updated_this_turn"})
 
 
 # --- review fixes (2026-09-28) ------------------------------------------------
