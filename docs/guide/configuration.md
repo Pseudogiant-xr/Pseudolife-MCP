@@ -2555,6 +2555,39 @@ embedded instance, attached or started for the duration — never
 initialized: importing is how a fresh bank gets *filled*, but creating
 one is the daemon's job.
 
+## Updating: `pseudolife-mcp update`
+
+The installed shim carries the update (`pseudolife_memory/update_cli.py`;
+`ops/update.ps1` and `ops/update.sh` are thin wrappers over the same code
+for a checkout). It needs no checkout:
+
+| command | what it does |
+|---|---|
+| `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
+| `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon |
+| `--reinstall` | recreate the daemon at the version it already runs |
+| `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+Where things come from: the compose files are the ones the running daemon
+container was created with (its `com.docker.compose.project.*` labels),
+plus `docker-compose.ghcr.yml` beside them; when they are gone the
+package's bundled copies (pinned byte-equal to `ops/`) are written under
+`~/.pseudolife-mcp/compose/`. The backup is the checkout's `ops/backup.*`
+when the compose project's working directory is still a checkout — that
+one keeps the row-count gate and the mirror — else the built-in one: a
+`pg_dump -Z9` inside the Postgres container, copied out and checked for
+the dump's closing marker (a killed dump is a valid gzip of a truncated
+file, so a missing marker stops the update with the `.part` artifact
+kept), plus a tar of the daemon's `/data`, both under
+`~/.pseudolife-mcp/backups` in the names `ops/restore.*` looks for. The
+rollback tag is taken by image id, so it is the deployed image whatever
+the tag points at by now. `PSEUDOLIFE_DOCKER` names the docker command
+(the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or `--daemon-url` names
+the daemon. The Codex hook step is printed, never automated: Codex trusts
+hooks by hash and asks again when a script changes.
+
 ## Schema version history
 
 The current Postgres meta version is **v49**; migrations are additive

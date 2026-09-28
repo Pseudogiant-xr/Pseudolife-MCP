@@ -582,18 +582,43 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**Lite tier:** one command, bank untouched:
+**One command, no checkout:** the installed shim updates the whole install
+from a release:
+
+```bash
+pseudolife-mcp update            # the newest release on PyPI
+pseudolife-mcp update --tag 0.15.1
+pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
+```
+
+On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
+bank up (the checkout's backup script when the compose project still has
+one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
+backups`), tags the running image for rollback, recreates **only** the
+daemon container from the compose files it was created with (or the
+package's bundled copies when the checkout is gone), waits for `/health`
+at the new version, then installs the release as a new shim runtime beside
+the running one, refreshes the plugin cache and prints the Codex hook
+step. The backup stays visible and deliberate: nothing here automates it
+away. `--clients-only` / `--daemon-only` take one half; the shim itself
+runs from wherever it was registered, so use its full path when
+`pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
+the package in the interpreter that holds it (pip, or pipx) and restarts
+nothing: it says what to restart.
+
+**Lite tier by hand:** one command, bank untouched:
 
 ```bash
 pip install -U "pseudolife-mcp[lite]"
 ```
 
 On Windows, first close every Claude Code, Codex and Claude Desktop
-session using the shim (quit Desktop from the tray): upgrading a shim
+session using the shim (quit Desktop from the tray): upgrading a package
 that is running can leave it half-removed.
 
-**Docker tier:** after a `git pull` (or local code change), redeploy the
-**daemon only** — safely, without touching Postgres or the extractor:
+**Docker tier from a checkout:** after a `git pull` (or local code
+change), redeploy the **daemon only** — safely, without touching Postgres
+or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -602,7 +627,9 @@ that is running can leave it half-removed.
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+Both are thin wrappers over the same Python deploy `pseudolife-mcp update`
+runs (`ops/update.py` → `pseudolife_memory/update_cli.py`), so there is
+one implementation. It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
 image (when a previous one exists — it says so loudly when there isn't),
 rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —
@@ -6506,6 +6533,39 @@ ops/.env>@127.0.0.1:5433/pseudolife_memory`), else the lite tier's
 embedded instance, attached or started for the duration — never
 initialized: importing is how a fresh bank gets *filled*, but creating
 one is the daemon's job.
+
+## Updating: `pseudolife-mcp update`
+
+The installed shim carries the update (`pseudolife_memory/update_cli.py`;
+`ops/update.ps1` and `ops/update.sh` are thin wrappers over the same code
+for a checkout). It needs no checkout:
+
+| command | what it does |
+|---|---|
+| `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
+| `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon |
+| `--reinstall` | recreate the daemon at the version it already runs |
+| `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+Where things come from: the compose files are the ones the running daemon
+container was created with (its `com.docker.compose.project.*` labels),
+plus `docker-compose.ghcr.yml` beside them; when they are gone the
+package's bundled copies (pinned byte-equal to `ops/`) are written under
+`~/.pseudolife-mcp/compose/`. The backup is the checkout's `ops/backup.*`
+when the compose project's working directory is still a checkout — that
+one keeps the row-count gate and the mirror — else the built-in one: a
+`pg_dump -Z9` inside the Postgres container, copied out and checked for
+the dump's closing marker (a killed dump is a valid gzip of a truncated
+file, so a missing marker stops the update with the `.part` artifact
+kept), plus a tar of the daemon's `/data`, both under
+`~/.pseudolife-mcp/backups` in the names `ops/restore.*` looks for. The
+rollback tag is taken by image id, so it is the deployed image whatever
+the tag points at by now. `PSEUDOLIFE_DOCKER` names the docker command
+(the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or `--daemon-url` names
+the daemon. The Codex hook step is printed, never automated: Codex trusts
+hooks by hash and asks again when a script changes.
 
 ## Schema version history
 

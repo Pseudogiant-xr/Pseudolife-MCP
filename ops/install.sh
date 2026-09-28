@@ -2627,4 +2627,5 @@ if [ -n "$codex_shim_mode" ]; then
 fi
 if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
+echo "Update later with one command, no checkout needed: pseudolife-mcp update (--check reports whether a newer release exists); from this checkout, ops/update.sh --all does the same after a git pull."
 echo "Done. First session: tell your coding agent to remember something."

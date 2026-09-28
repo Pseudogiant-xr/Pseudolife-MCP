@@ -15,7 +15,7 @@ a fake CLI and a fixture home and never touch this machine's registrations.
 """
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 import os
 import shutil
@@ -26,9 +26,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("update_clients", ROOT / "ops/update_clients.py")
-uc = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(uc)
+sys.path.insert(0, str(ROOT))
+uc = importlib.import_module("pseudolife_memory.client_updates")   # what ops/update_clients.py runs
 REAL_RUN_CLI = uc.run_cli                                   # the fixture fakes both
 
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
@@ -858,14 +857,16 @@ def test_helper_does_not_import_the_installed_package(tmp_path):
     assert "Codex hooks" in proc.stdout and "plugin-managed" in proc.stdout
 
 
-def test_update_scripts_offer_all_and_call_the_helper_after_health():
+def test_update_scripts_offer_all_and_hand_it_to_the_python_deploy():
+    """The wrappers map -All / --all onto the one Python deploy
+    (pseudolife_memory/update_cli.py via ops/update.py), which runs this
+    module's steps after the daemon is healthy."""
     sh = (ROOT / "ops/update.sh").read_text(encoding="utf-8")
     ps1 = (ROOT / "ops/update.ps1").read_text(encoding="utf-8")
-    assert "--all)" in sh and "update_clients.py" in sh
-    assert "[switch]$All" in ps1 and "update_clients.py" in ps1
-    # The call site (the last mention; the usage header mentions it first).
-    assert sh.rindex("update_clients.py") > sh.index('step "Healthy."')
-    assert ps1.rindex("update_clients.py") > ps1.index('Step "Healthy.')
+    assert "--all)" in sh and "args+=(--all)" in sh and 'ops/update.py' in sh
+    assert "[switch]$All" in ps1 and '$updateArgs += "--all"' in ps1 and '"update.py"' in ps1
+    deploy = (ROOT / "pseudolife_memory/update_cli.py").read_text(encoding="utf-8")
+    assert deploy.index("client_updates.run_steps") > deploy.index("def wait_health")
 
 
 @pytest.mark.parametrize("state", ['"not a table"', "[1, 2]"])

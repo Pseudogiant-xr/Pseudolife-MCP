@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-29 — `pseudolife-mcp update`: the whole install updates from a release, with no checkout)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`) updates a
+  Docker-tier install from a published release: it pulls the pinned GHCR
+  daemon image for the newest release on PyPI (or `--tag`), backs the bank
+  up (the checkout's `ops/backup.*` when the compose project's working
+  directory is still a checkout, else a built-in `pg_dump -Z9` in the
+  Postgres container checked for the dump's closing marker plus a tar of
+  the daemon's `/data`, under `~/.pseudolife-mcp/backups`), tags the
+  running image by id as `…-pre-update-<stamp>`, recreates only the daemon
+  container from the compose files the running container was created with
+  (its compose labels; the package's bundled copies, pinned byte-equal to
+  `ops/`, when those are gone) plus the GHCR overlay, waits for `/health`
+  at the new version, then installs the release as a new shim runtime
+  beside the running one, refreshes the plugin cache and prints the Codex
+  hook step. `--check` reports only (exit 0 when a newer release exists, 3
+  when current); `--clients-only` / `--daemon-only` take one half;
+  `--reinstall` recreates at the same version. On a pip / lite install it
+  upgrades the package where it is installed (pip, or pipx) and restarts
+  nothing. [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+- `ops/update.ps1` and `ops/update.sh` are now thin wrappers that map their
+  flags onto the same Python deploy (`ops/update.py` runs it from the
+  checkout, ahead of any installed package), so there is one
+  implementation of the clean-tree guard and build stamp, the rollback-tag
+  guard, the credential scoping around `docker compose`, the health wait,
+  the client step and the retention calls. Their flags and exit codes are
+  unchanged. `tests/test_update_cli.py` carries the contracts the three
+  shell test files held; `tests/test_ops_update_wrappers.py` pins the
+  flag mapping.
+- `ops/update_clients.py`'s logic moved into the package as
+  `pseudolife_memory/client_updates.py` (the script now runs it from the
+  checkout), so the installed command can move the shim runtime, the
+  plugin cache and the Codex check without a checkout; the Codex check
+  compares the marketplace clone against the daemon's `hooks_digest` when
+  there is no checkout to compare with.
+
 ### Changed (2026-09-29 — the shim installs side by side, behind one launcher path; no session has to close for an upgrade)
 - Every shim version now installs into its own runtime directory
   (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN` on Windows,

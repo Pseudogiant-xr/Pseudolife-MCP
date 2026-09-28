@@ -576,18 +576,43 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**Lite tier:** one command, bank untouched:
+**One command, no checkout:** the installed shim updates the whole install
+from a release:
+
+```bash
+pseudolife-mcp update            # the newest release on PyPI
+pseudolife-mcp update --tag 0.15.1
+pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
+```
+
+On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
+bank up (the checkout's backup script when the compose project still has
+one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
+backups`), tags the running image for rollback, recreates **only** the
+daemon container from the compose files it was created with (or the
+package's bundled copies when the checkout is gone), waits for `/health`
+at the new version, then installs the release as a new shim runtime beside
+the running one, refreshes the plugin cache and prints the Codex hook
+step. The backup stays visible and deliberate: nothing here automates it
+away. `--clients-only` / `--daemon-only` take one half; the shim itself
+runs from wherever it was registered, so use its full path when
+`pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
+the package in the interpreter that holds it (pip, or pipx) and restarts
+nothing: it says what to restart.
+
+**Lite tier by hand:** one command, bank untouched:
 
 ```bash
 pip install -U "pseudolife-mcp[lite]"
 ```
 
 On Windows, first close every Claude Code, Codex and Claude Desktop
-session using the shim (quit Desktop from the tray): upgrading a shim
+session using the shim (quit Desktop from the tray): upgrading a package
 that is running can leave it half-removed.
 
-**Docker tier:** after a `git pull` (or local code change), redeploy the
-**daemon only** — safely, without touching Postgres or the extractor:
+**Docker tier from a checkout:** after a `git pull` (or local code
+change), redeploy the **daemon only** — safely, without touching Postgres
+or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -596,7 +621,9 @@ that is running can leave it half-removed.
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+Both are thin wrappers over the same Python deploy `pseudolife-mcp update`
+runs (`ops/update.py` → `pseudolife_memory/update_cli.py`), so there is
+one implementation. It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
 image (when a previous one exists — it says so loudly when there isn't),
 rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —

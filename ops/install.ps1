@@ -2576,4 +2576,5 @@ if ($codexShimMode) {
 }
 if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
+Write-Host "Update later with one command, no checkout needed: pseudolife-mcp update (--check reports whether a newer release exists); from this checkout, ops\update.ps1 -All does the same after a git pull."
 Write-Host "Done. First session: tell your coding agent to remember something."

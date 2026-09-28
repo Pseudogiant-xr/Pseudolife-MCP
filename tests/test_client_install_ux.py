@@ -461,18 +461,17 @@ def test_providers_guide_matches_installer_matrix() -> None:
 
 
 def test_update_scripts_carry_the_shared_header_style() -> None:
-    """The deploy scripts get the installers' colored step styling (gated on
-    NO_COLOR / TTY, literal `==>` prefix kept for log greps) but no banner —
-    their output is tee'd into deploy logs."""
-    sh = _read("ops/update.sh")
-    ps = _read("ops/update.ps1")
-    for text in (sh, ps):
-        assert "NO_COLOR" in text
-        assert "==>" in text
+    """The deploy's step lines keep the literal `==>` prefix for log greps
+    (the output is tee'd into deploy logs) and carry no escape bytes; the
+    wrappers print no banner. The steps are printed by the Python deploy
+    the wrappers hand over to."""
+    deploy = _read("pseudolife_memory/update_cli.py")
+    assert '"==> ' in deploy and "\x1b" not in deploy
+    for path in ("ops/update.sh", "ops/update.ps1"):
+        text = _read(path)
         assert "\x1b" not in text
         assert "# >>> banner >>>" not in text
-    assert "step()" in sh
-    assert "function Step" in ps
+        assert "update.py" in text
 
 
 def test_installer_ps1_parses() -> None:
