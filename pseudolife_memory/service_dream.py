@@ -41,6 +41,153 @@ logger = logging.getLogger(__name__)
 SESSION_END_DREAM_THREAD_NAME = "session-end-dream"
 
 
+class DreamStallTracker:
+    """In-memory record of whether live dreams are being served.
+
+    On 2026-08-11 the primary extractor's CLI login had expired for over a
+    day and ten dream runs served silently from the fallback; with no
+    fallback the dream holds its cursor and simply stops. Nothing said so.
+    This keeps the evidence ``dream_status``, ``/health``, the session-start
+    line and the board notices read.
+
+    A failed extraction (``extractor_failed`` from ``dream_run``) or a dream
+    the fallback served in ``auto`` mode is a primary failure; the second in
+    a row opens the stall (one is noise: the first probe after a restart
+    fails spuriously, see ``_probe_primary``). A dream the primary served
+    that pulled entries is a success and closes it, keeping the closed
+    record with ``recovered_at``. Skipped, errored and empty-pull runs say
+    nothing about the extractor and change nothing. ``check_overdue`` covers
+    a primary that never answers at all: a due backlog no dream has served
+    for ``OVERDUE_SWEEPS`` sweep intervals.
+
+    Process-local by design: a daemon restart forgets the stall, and the
+    next two failed sweeps re-open it. Thread-safe; never takes the service
+    lock.
+    """
+
+    FAILURES_TO_STALL = 2
+    OVERDUE_SWEEPS = 3
+
+    def __init__(self, clock=None) -> None:
+        import threading
+        import time
+
+        self._lock = threading.Lock()
+        self.notify_lock = threading.Lock()
+        self.clock = clock or time.time
+        self.failures = 0
+        self.first_failure_at: float | None = None
+        self.reason: str | None = None
+        self.last_error: str | None = None
+        self.last_success_at: float | None = None
+        self.due_since: float | None = None
+        # Set by the sweep's tick; ``dream_status`` evaluates the overdue
+        # rule only once a sweep is running (embedded mode never sweeps).
+        self.sweep_interval: float | None = None
+        self.stall: dict | None = None
+        self.last_stall: dict | None = None
+        # When the open incident's last notice was delivered, and a closed
+        # incident whose recovery notice is still owed.
+        self.notice_at: float | None = None
+        self.clear_owed: dict | None = None
+
+    def _open(self, since: float) -> None:
+        self.stall = {"since": since, "reason": self.reason,
+                      "consecutive_failures": self.failures,
+                      "last_error": self.last_error,
+                      "last_success_at": self.last_success_at}
+
+    def record(self, result: dict, *, served_by_fallback: bool) -> None:
+        """Account one ``dream_run_auto`` result."""
+        if result.get("skipped") or result.get("error"):
+            return
+        with self._lock:
+            now = self.clock()
+            if result.get("extractor_failed"):
+                err = result.get("extractor_error") or {}
+                reason = err.get("reason") or "extractor_error"
+                error = err.get("error") or "extraction failed"
+            elif served_by_fallback:
+                reason, error = "served_by_fallback", "primary health probe failed"
+            elif (result.get("pulled") or 0) > 0:
+                self._succeed(now)
+                return
+            else:
+                return
+            self.failures += 1
+            if self.first_failure_at is None:
+                self.first_failure_at = now
+            self.reason, self.last_error = reason, error
+            if self.stall is not None or self.failures >= self.FAILURES_TO_STALL:
+                self._open(self.stall["since"] if self.stall else self.first_failure_at)
+
+    def _succeed(self, now: float) -> None:
+        self.last_success_at = now
+        self.failures = 0
+        self.first_failure_at = self.reason = self.last_error = None
+        self.due_since = None
+        if self.stall is not None:
+            self.last_stall = {**self.stall, "recovered_at": now}
+            if self.notice_at is not None:
+                self.clear_owed = self.last_stall
+            self.stall = None
+            self.notice_at = None
+
+    def check_overdue(self, *, backlog: int, min_batch: int, would_fire: bool,
+                      interval: float) -> None:
+        with self._lock:
+            now = self.clock()
+            if not (would_fire and backlog >= min_batch):
+                self.due_since = None
+                return
+            if self.due_since is None:
+                self.due_since = now
+            if (self.stall is None
+                    and now - self.due_since > self.OVERDUE_SWEEPS * float(interval)):
+                self.reason = self.reason or "extractor_unreachable"
+                self.last_error = (self.last_error
+                                   or "no dream succeeded while the backlog was due")
+                self._open(self.due_since)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {"stall": dict(self.stall) if self.stall else None,
+                    "last_stall": dict(self.last_stall) if self.last_stall else None}
+
+    def take_notice(self, repeat_seconds: float) -> tuple[str, dict] | None:
+        """The notice due now, if any: ``begin`` once per incident,
+        ``repeat`` at most every ``repeat_seconds`` while it lasts, ``clear``
+        once after an incident whose notice was delivered. Nothing is marked
+        until :meth:`mark_noticed`, so an undelivered notice stays owed."""
+        with self._lock:
+            now = self.clock()
+            if self.stall is not None:
+                if self.notice_at is None:
+                    return "begin", dict(self.stall)
+                if now - self.notice_at >= repeat_seconds:
+                    return "repeat", dict(self.stall)
+                return None
+            if self.clear_owed is not None:
+                return "clear", dict(self.clear_owed)
+            return None
+
+    def mark_noticed(self, kind: str) -> None:
+        with self._lock:
+            if kind == "clear":
+                self.clear_owed = None
+            elif self.stall is not None:
+                self.notice_at = self.clock()
+
+
+def _stall_tracker(service) -> DreamStallTracker:
+    """The service's tracker; created on first use for stand-ins that
+    borrow ``dream_run_auto`` without ``MemoryService.__init__``."""
+    tracker = getattr(service, "_dream_stall_tracker", None)
+    if tracker is None:
+        tracker = service._dream_stall_tracker = DreamStallTracker()
+    return tracker
+
+
 @contextmanager
 def _staged_slot(lessons, task: str, aspect: str):
     """Undo one staged lesson write when its body raises.
@@ -1200,11 +1347,16 @@ class DreamOps:
         constraint_misses: list[dict] = []
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
+            from pseudolife_memory.memory.dream import classify_extractor_error
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
                            "next sweep", reason, exc)
+            why, error = classify_extractor_error(exc)
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
                     "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
+                    # Sanitized: a reason and a fixed-vocabulary error, never
+                    # the exception text (the dream-stall record reads it).
+                    "extractor_error": {"reason": why, "error": error},
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
                     "span_flagged": span_flagged,
@@ -2320,7 +2472,69 @@ class DreamOps:
         }
         result = self.dream_run(extractor, limit=limit)
         result["extractor"] = which
+        # A fallback dream counts against the primary only when the probe
+        # chose it (auto mode); a forced fallback is the operator's choice.
+        from pseudolife_memory.memory.dream import resolve_endpoints
+        forced = resolve_endpoints(self.config.memory.dream)["mode"] == "fallback"
+        _stall_tracker(self).record(
+            result, served_by_fallback=which == "fallback" and not forced)
+        notify = getattr(self, "dream_stall_notify", None)
+        if notify is not None:
+            notify()
         return result
+
+    def dream_stall_state(self) -> dict:
+        """``{"stall": record | None, "last_stall": record | None}`` without
+        the service lock, for /health and the session-start hook."""
+        return _stall_tracker(self).snapshot()
+
+    def dream_stall_tick(self, status: dict) -> None:
+        """The sweep's stall step, after its ``dream_status``: arm and apply
+        the overdue rule, then post any notice that is due. Never raises."""
+        try:
+            cfg = self.config.memory.dream
+            tracker = _stall_tracker(self)
+            tracker.sweep_interval = float(cfg.sweep_interval_seconds)
+            tracker.check_overdue(backlog=int(status.get("backlog") or 0),
+                                  min_batch=int(cfg.min_batch),
+                                  would_fire=bool(status.get("would_fire")),
+                                  interval=tracker.sweep_interval)
+        except Exception:  # noqa: BLE001 — never kill the sweep
+            logger.warning("dream stall check failed", exc_info=True)
+        self.dream_stall_notify()
+
+    def dream_stall_notify(self) -> dict | None:
+        """Post the board notice a stall owes (``memory.dream.stall_notice``),
+        rate-limited by the tracker: one when it begins, at most one per
+        ``stall_repeat_hours`` while it lasts, one when it clears. Skips
+        silently where the board cannot carry it (disabled, no Postgres).
+        Must be called without the service lock held. Never raises."""
+        try:
+            cfg = self.config.memory.dream
+            if not getattr(cfg, "stall_notice", True):
+                return None
+            tracker = _stall_tracker(self)
+            # One notifier at a time (the sweep and a manual dream can both
+            # get here), so a notice cannot be taken twice before marking.
+            if not tracker.notify_lock.acquire(blocking=False):
+                return None
+            try:
+                due = tracker.take_notice(float(cfg.stall_repeat_hours) * 3600.0)
+                if due is None:
+                    return None
+                kind, record = due
+                from pseudolife_memory import coordination
+                from pseudolife_memory.memory.dream import dream_stall_notice_text
+                sent = coordination.daemon_notice(
+                    self, dream_stall_notice_text(kind, record))
+                if sent is not None:
+                    tracker.mark_noticed(kind)
+                return sent
+            finally:
+                tracker.notify_lock.release()
+        except Exception:  # noqa: BLE001 — a notice must never break a dream
+            logger.warning("dream stall notice failed", exc_info=True)
+            return None
 
     def _dream_reflush_stale(self, entries: list[dict]) -> int:
         """After a claim/trace write failure, verify the pulled batch's
@@ -2397,6 +2611,14 @@ class DreamOps:
             # digest progress at broken cadence (pre-PR review, 2026-08-27).
             or (digest_pending >= 1 and backlog == 0)
         ))
+        tracker = _stall_tracker(self)
+        if tracker.sweep_interval:
+            # Only once a sweep runs: the embedded mode never sweeps, so a
+            # due backlog there is not a stalled extractor.
+            tracker.check_overdue(backlog=backlog, min_batch=int(cfg.min_batch),
+                                  would_fire=would_fire,
+                                  interval=tracker.sweep_interval)
+        stall_state = tracker.snapshot()
         from pseudolife_memory.memory.dream import _status_extractor_fields
         result = {"backlog": backlog, "idle_seconds": idle,
                 "dream_cursor": cursor, "would_fire": would_fire,
@@ -2409,6 +2631,10 @@ class DreamOps:
                 # user. Computed outside the lock above — deep_dream_need
                 # takes the (non-reentrant) service lock itself.
                 "deep_dream": self.deep_dream_need(),
+                # Dream-stall signal: null while dreams are served; see
+                # DreamStallTracker. ``last_stall`` is the latest closed one.
+                "stall": stall_state["stall"],
+                "last_stall": stall_state["last_stall"],
                 **_status_extractor_fields(
                     cfg, getattr(self, "_last_dream_extractor", None))}
         if self._dream_tracking_error:

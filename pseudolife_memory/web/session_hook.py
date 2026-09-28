@@ -461,7 +461,9 @@ def session_start_context(service: Any, authorized: bool, *,
             # slots into transcripts, while the Console Insight view keeps
             # it (2026-09-23 review; maintainer decision 2026-09-25). The
             # REST and CLI briefings still carry it.
-            md = (service.session_briefing(include_coordination=False, max_unsure=0)
+            # The dream-stall line rides hook_session_start's prefix.
+            md = (service.session_briefing(include_coordination=False, max_unsure=0,
+                                           include_dream_stall=False)
                   or {}).get("markdown", "") or ""
         except Exception:  # noqa: BLE001 — never break a session start
             md = ""
@@ -531,6 +533,21 @@ def hook_memory_policy(service: Any, session_id: str | None = None,
     return MEMORY_LOOP_BLOCK if _utf8_len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS else ""
 
 
+def _dream_stall_line(service: Any) -> str:
+    """The dream-stall line (2026-09-28) while live dreams are stalled or
+    the fallback is serving for the primary, else ''. On 2026-08-11 an
+    expired extractor login went unseen for over a day; a session start is
+    where an operator will read it. Never raises."""
+    try:
+        state = getattr(service, "dream_stall_state", None)
+        if state is None:
+            return ""
+        from pseudolife_memory.memory.dream import dream_stall_line
+        return dream_stall_line((state() or {}).get("stall"))
+    except Exception:  # noqa: BLE001 — never break a session start
+        return ""
+
+
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
@@ -551,6 +568,10 @@ def hook_session_start(
     notice = version_notice(plugin_version) or hooks_notice(plugin_version, plugin_hooks_digest)
     if notice:
         prefix_parts.append(notice)
+    if authorized:
+        stall = _dream_stall_line(service)
+        if stall:
+            prefix_parts.append(stall)
     ad = ""
     if session_id:
         ad = _episode_advertisement(session_id, source, service)

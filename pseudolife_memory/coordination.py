@@ -10,14 +10,20 @@ initialization once. Waiting for messages belongs to the async web adapter.
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
+import uuid
 from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import parse_token_map, resolve_principal
-from pseudolife_memory.storage.coordination import CoordinationClockChanged, CoordinationError
+from pseudolife_memory.storage.coordination import (
+    DAEMON_PRINCIPAL, CoordinationClockChanged, CoordinationError,
+)
+
+logger = logging.getLogger(__name__)
 
 
 _PARAMETERS = {
@@ -277,7 +283,7 @@ def unavailable_reason(service, headers: Mapping[str, str], *,
         principal = authenticated_principal(headers, token_map=token_map, token=token)
     except ValueError as exc:
         return str(exc)
-    if principal not in cfg.allowed_principals:
+    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
         return "principal_not_allowed"
     if not getattr(service, "_db_url", None):
         return "coordination_requires_postgres"
@@ -425,7 +431,9 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
         headers = _http_request_headers() or {}
     headers = {k.lower(): v for k, v in headers.items()}
     principal = principal or authenticated_principal(headers)
-    if principal not in cfg.allowed_principals:
+    # The daemon's own sender is never a client, whatever the token map or
+    # allowed_principals say: only ``daemon_notice`` speaks as it.
+    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
         raise ValueError("principal_not_allowed")
     if action not in _PARAMETERS:
         raise ValueError("unknown_coordination_action")
@@ -508,6 +516,51 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
             for recipient in (send_recipients(result) if action == "send" else [agent_id]):
                 notify(recipient)
     return result
+
+
+def daemon_notice(service, text: str) -> dict | None:
+    """Post ``text`` from the daemon itself to every attached, non-idle
+    session (``to: "all"``), as the reserved ``DAEMON_PRINCIPAL``.
+
+    The first notice registers the daemon's board address, kept for the
+    process (and registered again if the board pruned it). No bearer can
+    reach this path. Each recipient's wake decision is ``hinted``: the
+    notice is context for the next turn and rings no one, so no notifier
+    is called. Returns ``{"recipients": n}`` (0 when nobody is attached),
+    or ``None`` when the board cannot carry it (disabled, no Postgres, or
+    any failure), which the caller treats as not yet said. Never raises."""
+    try:
+        if not service.config.coordination.enabled or not getattr(service, "_db_url", None):
+            return None
+        _ensure_tier(service, full=True)
+        with service._coordination_lock:
+            store = _store(service)
+            for attempt in range(2):
+                identity = getattr(service, "_daemon_board_identity", None)
+                if identity is None:
+                    row = store.register(DAEMON_PRINCIPAL, label="daemon",
+                                         status="daemon notices")
+                    identity = (row["agent_id"], row["credential"])
+                    service._daemon_board_identity = identity
+                epoch = {}
+                if hasattr(service, "_coordination_hlc_epoch"):
+                    epoch = {"enforce_writer_epoch": True,
+                             "expected_writer_epoch": service._coordination_hlc_epoch}
+                try:
+                    result = store.send(DAEMON_PRINCIPAL, *identity, to="all", text=text,
+                                        request_id=uuid.uuid4().hex, notice=True,
+                                        hlc=":".join(map(str, service._hlc.tick())), **epoch)
+                except CoordinationError as exc:
+                    if exc.code == "no_recipients":
+                        return {"recipients": 0}
+                    if attempt == 0 and exc.code in {"instance_not_found", "invalid_credential"}:
+                        service._daemon_board_identity = None
+                        continue
+                    raise
+                return {"recipients": result["recipients"]}
+    except Exception as exc:  # noqa: BLE001 — a notice never breaks its caller
+        logger.info("daemon board notice not sent (%s)", type(exc).__name__)
+    return None
 
 
 def send_recipients(result) -> list[str]:

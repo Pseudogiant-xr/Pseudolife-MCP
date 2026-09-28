@@ -509,6 +509,47 @@ tokens you already pay for (a scheduled daily dream is small but non-zero).
 Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
 (e.g. Ollama) keeps it on-machine.
 
+## When dreaming stalls
+
+A dream whose extraction fails holds its cursor and retries next sweep, so
+nothing is lost, but nothing is consolidated either. The daemon keeps a
+stall record and reports it:
+
+- **When it opens.** On the second consecutive failed extraction (one is
+  noise), or when the backlog is due (`backlog ≥ min_batch` and the sweep
+  would fire) and no dream has succeeded for three sweep intervals (30 min
+  at the default 600 s). A dream the primary serves closes it and records
+  `recovered_at`. The record lives in the daemon process: a restart forgets
+  it, and two failed sweeps open it again.
+- **Why.** `login_expired` (the endpoint answered 401/403, or its error
+  named a failed login, as the CLI shims do when `claude -p` or `codex exec`
+  loses its session), `extractor_unreachable` (refused, timed out),
+  `extractor_error` (any other failure), or `served_by_fallback` (auto mode
+  found the primary down and the fallback served: a warning, not a stall,
+  since dreams still land). `last_error` is an HTTP status or an exception
+  type, never the endpoint's answer.
+- **Where it shows.** `memory_dream(action="status")` carries `stall` (null
+  while dreams are served) and `last_stall`; `/health` reports
+  `extractor: "stalled"` with a `stall` sub-object while `status` stays
+  `ok` (the fallback warning keeps `configured`); the session-start block
+  and `pseudolife-mcp briefing` open with one line, for example:
+
+  ```text
+  Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host.
+  ```
+- **On the board.** The daemon posts, as the reserved sender `daemon`, one
+  message to every attached, non-idle session when a stall begins, at most
+  one repeat every `memory.dream.stall_repeat_hours` (6) while it lasts,
+  and one when it clears. The notices are context (wake decision `hinted`):
+  they never ring a parked session. No client can send as `daemon`. Set
+  `memory.dream.stall_notice: false` to turn them off; with the board off
+  or without Postgres they are skipped.
+
+On a headless daemon host, an expired CLI login is the expected cause: log
+the CLI in again on that host (`claude auth login`, or `codex login` for
+the Codex shim). The shim's health check recovers within its TTL and the
+next sweep's dream closes the stall.
+
 ## Session digests (opt-in) — one prose memory per closed session
 
 With `memory.dream.digest_enabled` on, the idle dream cycle writes one

@@ -101,6 +101,10 @@ def _extractor_status(svc) -> str | None:
     startup, but the shim spawns it with ``stderr=DEVNULL``, so ``/health``
     is the only place a lite user can actually read it.
 
+    ``"stalled"`` is a configured extractor that live dreams stopped
+    reaching (the service's dream-stall record, 2026-09-28): read from
+    memory, not probed.
+
     Returns ``None`` — key omitted — when the service carries no resolvable
     dream config, so the bare stubs this builder is called with elsewhere
     keep working. Never probes the network: this is a config reading, not a
@@ -122,7 +126,27 @@ def _extractor_status(svc) -> str | None:
     # extract, so calling it "none" would be a lie.
     configured = (r.get("primary_url") and r.get("primary_model")) or (
         r.get("fallback_url") and r.get("fallback_model"))
-    return "configured" if configured else "none"
+    if not configured:
+        return "none"
+    # A configured extractor that live dreams have stopped reaching. The
+    # fallback serving for the primary is a warning, not a stall: dreams
+    # still land, so it stays "configured" with the ``stall`` sub-object.
+    stall = _dream_stall(svc)
+    if stall is not None and stall.get("reason") != "served_by_fallback":
+        return "stalled"
+    return "configured"
+
+
+def _dream_stall(svc) -> dict | None:
+    """The service's open dream-stall record, or ``None`` (none open, or a
+    stand-in without a tracker). Lock-free; never raises."""
+    tracker = getattr(svc, "_dream_stall_tracker", None)
+    if tracker is None:
+        return None
+    try:
+        return tracker.snapshot()["stall"]
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
 
 
 def _warn_near_memory_limit(memory: dict) -> None:
@@ -185,6 +209,13 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     extractor = _extractor_status(svc)
     if extractor is not None:
         payload["extractor"] = extractor
+    # The dream-stall record behind "stalled" (or the fallback warning),
+    # same refusal to touch `status`. This probe is unauthenticated, so
+    # only the reason and times: the error string stays in dream_status.
+    stall = _dream_stall(svc) if extractor in ("stalled", "configured") else None
+    if stall is not None:
+        payload["stall"] = {key: stall.get(key) for key in (
+            "since", "reason", "consecutive_failures", "last_success_at")}
     # The hook scripts this daemon was built with, so a cached plugin at the
     # same version but with different hooks can be told apart (2026-09-21).
     # Absent from a bare pip install, which ships no plugin tree.

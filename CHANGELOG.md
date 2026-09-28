@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — a stalled dream extractor is reported, not silent)
+- When live dreams stop being served, the daemon now says so. On 2026-08-11
+  the primary extractor's CLI login had been expired for over a day and ten
+  dream runs served silently from the fallback; with no fallback the dream
+  holds its cursor and stops, and nothing told anyone. The service keeps a
+  stall record: opened on the second consecutive failed extraction (one is
+  noise), or when a due backlog (`backlog >= min_batch`, `would_fire`) has
+  had no successful dream for three sweep intervals (a primary that never
+  answers); closed by the next dream the primary serves, which records
+  `recovered_at`. Its reason is `login_expired` (HTTP 401/403, or an error
+  naming a failed login, such as the CLI shims' "OAuth session expired"),
+  `extractor_unreachable` (refused, timed out), `extractor_error` (anything
+  else) or `served_by_fallback` (auto mode chose the fallback: a warning,
+  not a stall). `last_error` is an HTTP status or an exception type name,
+  never exception text or a response body. Process-local: a restart forgets
+  it and two failed sweeps re-open it.
+- Surfaces: `memory_dream(action="status")` gains `stall` (null or the
+  record) and `last_stall`; `/health` reports `extractor: "stalled"` with a
+  `stall` sub-object (reason and times only; the probe is unauthenticated)
+  while `status` stays `ok`, and the fallback warning keeps `configured`
+  with the sub-object; the briefing (`GET /api/briefing`,
+  `pseudolife-mcp briefing`) and the SessionStart hook (the plugin's
+  `session-start.sh` and `briefing --hook-json`, authorized callers) open
+  with one line naming the stall and its remedy, such as re-running
+  `claude auth login` / `codex login` on the daemon host.
+- Board notices from the daemon itself: a reserved sender principal
+  `daemon`, which no bearer can use (dispatch refuses it with
+  `principal_not_allowed` whatever the token map or `allowed_principals`
+  say), posts one message to every attached, non-idle session when a stall
+  begins, at most one repeat per `memory.dream.stall_repeat_hours` (default
+  6) while it lasts, and one when it clears. The wake decision is `hinted`
+  (reason `daemon_notice`): the notice is context for the next turn, never
+  rings a parked session and is not a live-channel turn. Skipped silently
+  where the board is off or has no Postgres, and retried at the next sweep.
+  `memory.dream.stall_notice: false` turns the notices off. No DDL.
+  [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls)
+
 ### Changed (2026-09-28 — merge gate trial: CI gates ordinary code; the local full suite is reserved for schema, test-infrastructure and process-model changes)
 - Through 2026-10-12, ordinary code uses touched and dependent local tests
   plus current-merge-ref CI; required local full runs queue after review
