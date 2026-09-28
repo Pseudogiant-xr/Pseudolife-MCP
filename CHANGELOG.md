@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — Codex hook readiness distinguishes mailbox approval and bundle presence)
+- Successful Codex hook setup now prints the documented `memory_message`
+  approval choice for unattended receive, ack and send, and includes it in
+  its JSON report; setup continues to leave tool approvals unchanged.
+- Client updates report a matching manual hook bundle as present with trust
+  and execution unchecked, and show the setup command to verify with consent.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

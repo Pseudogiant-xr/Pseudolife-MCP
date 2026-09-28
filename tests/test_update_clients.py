@@ -953,10 +953,34 @@ def test_tree_differs_ignores_line_endings_and_git_metadata(tmp_path):
 
 # ── Codex hooks ─────────────────────────────────────────────────────────────
 
-def test_codex_hooks_current_when_the_checkout_digest_dir_exists(cli, tmp_path):
+def test_codex_hooks_bundle_presence_does_not_claim_trust_or_execution(cli, tmp_path):
+    hooks_root = cli.home / "codex" / "pseudolife" / "hooks"
+    # An empty matching directory proves only presence, not active hook definitions.
+    (hooks_root / uc.codex_bundle_digest(ROOT)).mkdir(parents=True)
+    result = uc.check_codex_hooks(ROOT)
+    assert result["state"] == "bundle-present"
+    assert uc._marker(result["state"]) == "[-]"
+    assert "trust and execution not checked" in result["detail"]
+    assert "rerun setup to verify with consent" in result["detail"]
+    assert "python ops/setup-codex-hooks.py --source manual --trust ask" in result["detail"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_manual_bundle_presence_always_prints_setup_verification_command(cli, capsys, json_output):
     hooks_root = cli.home / "codex" / "pseudolife" / "hooks"
     (hooks_root / uc.codex_bundle_digest(ROOT)).mkdir(parents=True)
-    assert uc.check_codex_hooks(ROOT)["state"] == "current"
+    args = ["--repo", str(ROOT), "--only", "codex"]
+    assert uc.main(args + (["--json"] if json_output else [])) == 0
+    output = capsys.readouterr().out
+    if json_output:
+        result = json.loads(output)["codex"]
+        assert result["state"] == "bundle-present"
+        detail = result["detail"]
+    else:
+        assert "[-] Codex hooks" in output and "[x]" not in output
+        detail = output
+    assert "trust and execution not checked" in detail
+    assert "python ops/setup-codex-hooks.py --source manual --trust ask" in detail
 
 
 def test_codex_hooks_stale_names_the_setup_command(cli, tmp_path):

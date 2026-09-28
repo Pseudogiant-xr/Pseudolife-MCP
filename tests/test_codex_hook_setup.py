@@ -1,5 +1,6 @@
 """Scoped consent, preservation, and real runtime coverage for hook setup."""
 import argparse
+from contextlib import nullcontext
 import hashlib
 import hmac
 import importlib.util
@@ -454,6 +455,60 @@ def test_failed_setup_keeps_promised_fallback_and_redacts_errors(tmp_path, monke
     result = setup.setup(options(trust="yes"))
     assert result["status"] == "unavailable" and result["instructions"] == "appended"
     assert "secret-token" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("approval_mode", [None, "prompt", "approve"])
+@pytest.mark.parametrize("trusted", [True, False])
+def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
+        tmp_path, monkeypatch, approval_mode, trusted):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    original = '# User tool approvals\n'
+    if approval_mode:
+        original += ('[mcp_servers.pseudolife-memory.tools.memory_message]\n'
+                     f'approval_mode = "{approval_mode}"\n')
+    path = tmp_path / "config.toml"
+    path.write_text(original, encoding="utf-8")
+    writer = Writer()
+    selected = [hook(tmp_path, trustStatus="trusted" if trusted else "untrusted")]
+    runtime_config = {**config(tmp_path), "config": {}}
+    monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup, "codex", lambda *args: nullcontext(writer))
+    monkeypatch.setattr(setup, "inventory", lambda *args: (runtime_config, selected))
+    monkeypatch.setattr(setup, "configure_credential_file", lambda *args: {
+        "backup": None, "credential_file_configured": False})
+    monkeypatch.setattr(setup, "credential_environment", lambda *args: nullcontext())
+    monkeypatch.setattr(setup, "select_hooks", lambda *args: ("manual", selected, []))
+    monkeypatch.setattr(setup, "vet_manual", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup, "complete_set", lambda *args: True)
+    monkeypatch.setattr(setup, "verify", lambda *args: {"session_start": True})
+    result = setup.setup(options(source="manual", trust="no", non_interactive=True))
+    assert result["status"] == ("ready" if trusted else "pending")
+    assert path.read_text(encoding="utf-8") == original
+    assert not writer.calls
+    if trusted:
+        notice = result["mailbox_approval_notice"]
+        assert "Hooks ready" in notice
+        assert "[mcp_servers.pseudolife-memory.tools.memory_message]" in notice
+        assert 'approval_mode = "approve"' in notice
+        assert "receive, ack and send" in notice
+        assert "approval prompt" in notice
+        assert "unchanged" in notice
+        assert "docs/guide/configuration.md" in notice
+    else:
+        assert not result.get("mailbox_approval_notice")
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_main_prints_mailbox_notice_only_for_ready_hooks(monkeypatch, capsys, ready):
+    result = {"status": "ready" if ready else "unavailable", "instructions": "skipped"}
+    if ready:
+        result["mailbox_approval_notice"] = "Hooks ready; mailbox approval choice."
+    monkeypatch.setattr(setup, "setup", lambda args: result)
+    monkeypatch.setattr(setup.sys, "argv", ["setup-codex-hooks.py", "--non-interactive"])
+    assert setup.main() == (0 if ready else 1)
+    output = capsys.readouterr()
+    assert json.loads(output.out) == result
+    assert output.err == (result["mailbox_approval_notice"] + "\n" if ready else "")
 
 
 def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_path):
