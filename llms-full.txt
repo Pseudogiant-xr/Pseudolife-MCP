@@ -556,15 +556,15 @@ logon autostart task:
 ## Updating
 
 **Upgrading from before the agent board (no bearer token yet):** this
-migration step applies to installer-managed Docker installations. On
-Windows, first close every Claude Code, Codex and Claude Desktop session
-using the shim (quit Desktop from the tray). Rerun `ops/install.ps1`
-(Windows) or `ops/install.sh` (Linux / macOS) with the same client selection.
+migration step applies to installer-managed Docker installations. Rerun
+`ops/install.ps1` (Windows) or `ops/install.sh` (Linux / macOS) with the
+same client selection (close sessions first on Windows, as below).
 The installer creates a bearer token for the default shim install and
-migrates the supported Claude Code registration environment in place.
-Custom registrations are preserved; follow any manual credential warnings
-from the installer. `-All` / `--all` and `ops/update_clients.py` do not create
-the token or migrate the registration environment. Then refresh clients
+migrates the environment of the installer-managed `pseudolife-memory`
+stdio registration for Claude Code in place. Custom registrations are
+preserved; follow the installer's printed credential warnings for Gemini
+or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
+create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
 **Lite tier:** one command, bank untouched:
