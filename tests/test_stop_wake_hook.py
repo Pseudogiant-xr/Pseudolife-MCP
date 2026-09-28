@@ -720,9 +720,11 @@ GATE_MESSAGE = ("Before ending: update your board status with why you stopped an
                 "park_resume=...)")
 
 
-def _gate_daemon(answer):
-    """A fixture daemon answering the park gate with ``answer`` and
-    recording each request's path and bearer."""
+def _gate_daemon(answer, status=200, stall=0):
+    """A fixture daemon answering the park gate with ``answer`` (and
+    ``status``) and recording each request's path and bearer. ``stall``
+    promises more body than it sends and holds the connection that many
+    seconds, so the client's time limit cuts the answer off."""
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -732,13 +734,19 @@ def _gate_daemon(answer):
         def do_GET(self):
             requests.append((self.path, self.headers.get("Authorization")))
             body = answer.encode("utf-8")
-            self.send_response(200)
+            self.send_response(status)
+            if 300 <= status < 400:
+                self.send_header("Location", "http://127.0.0.1:1/elsewhere")
             self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(body) + (100 if stall else 0)))
             self.end_headers()
             self.wfile.write(body)
+            if stall:
+                self.wfile.flush()
+                time.sleep(stall)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
     Thread(target=server.serve_forever, daemon=True).start()
     return server, requests
 
@@ -1071,6 +1079,77 @@ def test_the_codex_bash_gate_is_open_without_an_answer(tmp_path):
     result, elapsed = _run(env)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert elapsed < 8
+
+
+def test_codex_context_is_read_from_the_plugin_root_codex_sets(tmp_path):
+    """The plugin's Stop entry carries no marker: Codex is recognised, as
+    in the sibling hooks, by PLUGIN_ROOT equal to CLAUDE_PLUGIN_ROOT."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        del env["PSEUDOLIFE_CODEX_HOOK"]
+        env["PLUGIN_ROOT"] = env["CLAUDE_PLUGIN_ROOT"]
+        result, _ = _run(env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert json.loads(result.stdout) == {"decision": "block", "reason": GATE_MESSAGE}
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("marker", [("PLUGIN_ROOT", None), ("PSEUDOLIFE_CODEX_HOOK", "1")])
+def test_claude_codes_own_session_is_never_taken_for_codex(tmp_path, marker):
+    """A hook Claude Code started for this session (CLAUDECODE=1 and its
+    session id in the environment) stays Claude's, whatever Codex marker
+    leaks into it: the wake still fires, on stderr with exit 2."""
+    _digest(tmp_path, 3, BODY)
+    env = _env(tmp_path)
+    env[marker[0]] = marker[1] or env["CLAUDE_PLUGIN_ROOT"]
+    result, _ = _run(env)
+    assert result.returncode == 2 and result.stdout == ""
+    assert _woke(result.stderr)
+
+
+@pytest.mark.parametrize("codex", [False, True])
+def test_a_gate_answer_that_is_not_a_plain_success_is_open(tmp_path, codex):
+    """A redirect is not the daemon's answer: its body must not block, on
+    either client (curl -f passes a 3xx through unless -L is set)."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n", status=302)
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env = _codex_env(tmp_path, **extra) if codex else _gate_env(tmp_path, server)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("codex", [False, True])
+def test_an_answer_cut_off_at_the_time_limit_is_open(tmp_path, codex):
+    """curl prints what arrived before its 2 s limit and then fails: a
+    truncated "block" is not the daemon's answer and must not block."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n", stall=4)
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env = _codex_env(tmp_path, **extra) if codex else _gate_env(tmp_path, server)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "

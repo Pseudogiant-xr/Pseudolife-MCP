@@ -118,6 +118,12 @@ case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 # A Codex run nested inside a Claude Bash tool inherits CLAUDECODE; Claude
 # Code sets CLAUDE_CODE_SESSION_ID in a hook's environment to the payload's
 # session_id, updated on /clear. Codex names its thread in the payload only.
+# A hook Claude Code started for this very session stays Claude's whatever
+# Codex marker its environment carries: taken for Codex it would lose the
+# wake, and its block would go to a stdout an async hook cannot use.
+if [ "${CLAUDECODE:-}" = "1" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+    CODEX_HOOK_CONTEXT=""
+fi
 [ -n "$CODEX_HOOK_CONTEXT" ] || [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] || exit 0
 
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
@@ -265,14 +271,16 @@ codex_connection() {
 }
 
 # The park gate's one request, to the client's daemon. Prints the body; any
-# failure prints nothing, which is allow.
+# failure is allow, and the caller drops what a failed request printed (a
+# body cut off at the time limit). -L with no redirects allowed makes a 3xx
+# a failure: without it curl -f passes a redirect's body through.
 gate_answer() {
     if [ -n "$CODEX_HOOK_CONTEXT" ]; then
         codex_connection || return 1
     else
         claude_connection || return 1
     fi
-    curl -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
+    curl -L -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
         "${GATE_AUTH[@]}" "$GATE_URL/api/hook/park-gate?$1"
 }
 
@@ -307,7 +315,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
         [ "${#SINCE}" -le 12 ] || SINCE=""
         QUERY="agent=$AGENT_ID"
         [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
-        ANSWER=$(gate_answer "$QUERY")
+        ANSWER=$(gate_answer "$QUERY") || ANSWER=""
         ANSWER=${ANSWER//$'\r'/}
         case "$ANSWER" in
             block|block$'\n'*)
@@ -318,7 +326,10 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
                 [ -n "$MESSAGE" ] || MESSAGE=$DEFAULT_MESSAGE
                 if [ -n "$CODEX_HOOK_CONTEXT" ]; then
                     # Codex reads the decision from stdout (exit 0).
-                    REASON=$(json_string "$MESSAGE") || REASON=$(json_string "$DEFAULT_MESSAGE")
+                    if ! REASON=$(json_string "$MESSAGE"); then
+                        MESSAGE=$DEFAULT_MESSAGE
+                        REASON=$(json_string "$MESSAGE")
+                    fi
                     printf '{"decision":"block","reason":%s}\n' "$REASON"
                 else
                     printf '%s\n' "$MESSAGE" >&3

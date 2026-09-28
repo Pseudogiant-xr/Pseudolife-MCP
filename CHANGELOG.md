@@ -29,11 +29,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
   `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
   Both Codex paths now append the `gate` ledger line Claude's gate writes,
-  so a block is auditable in `ledger.log` on every client. The hook script
-  changed, so Codex asks to approve it again after the plugin update; the
-  plugin and the shim upgrade together (`ops/update.ps1 -All`). Whether
-  Codex honours the decision of a hook declared `async` is still unprobed
-  on a live install, on every platform.
+  so a block is auditable in `ledger.log` on every client. A hook Claude
+  Code started for its own session (`CLAUDECODE=1` and
+  `CLAUDE_CODE_SESSION_ID` equal to the payload's id) stays Claude's
+  whatever Codex marker its environment carries, so a leaked marker cannot
+  cost it the wake. The gate's request, on both clients, now treats a
+  redirect as a failure (`curl -L --max-redirs 0`, as the sibling hooks do)
+  and drops whatever a failed request printed, so neither a 3xx body nor an
+  answer cut off at the 2 s limit can block. Whether Codex honours the
+  decision of a hook declared `async` is still unprobed on a live install,
+  on every platform.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

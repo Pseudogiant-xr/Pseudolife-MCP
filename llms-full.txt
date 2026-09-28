@@ -5195,8 +5195,8 @@ also capped (below, and by the daemon's `wake` caps under
   (Claude Code also caps stop-hook continuations at eight in a row). An
   async Stop hook cannot use the `decision: "block"` JSON, so the block
   rides the same exit-2 rewake as the mail wake. No answer (a daemon that
-  is down, a bearer it refuses, no address) is allow: the gate never holds
-  a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
+  is down, a bearer it refuses, a redirect, an answer cut off at the time
+  limit, no address) is allow: the gate never holds a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
   private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
   as the other hooks; Git Bash cannot show an NTFS file is owner-only, so
   on Windows use the variable), the URL from
@@ -5220,7 +5220,9 @@ also capped (below, and by the daemon's `wake` caps under
   (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
   script, which recognises Codex context the way the other bash hooks do
   (`PSEUDOLIFE_CODEX_HOOK=1`, or `PLUGIN_ROOT` equal to
-  `CLAUDE_PLUGIN_ROOT`). Either makes the same one request, through the
+  `CLAUDE_PLUGIN_ROOT`), unless Claude Code started the hook for its own
+  session (`CLAUDECODE=1` and `CLAUDE_CODE_SESSION_ID` equal to the
+  payload's id), which always stays Claude's. Either makes the same one request, through the
   managed connection file under the Codex home or the explicit daemon
   settings (with the other hooks' checks: an explicit URL may not disagree
   with the managed one, the bearer file must be private), and returns a
