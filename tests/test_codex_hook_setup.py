@@ -493,7 +493,10 @@ def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
         assert "receive, ack and send" in notice
         assert "approval prompt" in notice
         assert "unchanged" in notice
-        assert "docs/guide/configuration.md" in notice
+        assert notice.startswith("Hooks ready; setup leaves tool approvals unchanged. ")
+        assert "\nSee docs/guide/configuration.md" in notice
+        assert notice.splitlines()[1:] == [
+            "See docs/guide/configuration.md (Experimental agent coordination)."]
     else:
         assert not result.get("mailbox_approval_notice")
 
@@ -509,6 +512,16 @@ def test_main_prints_mailbox_notice_only_for_ready_hooks(monkeypatch, capsys, re
     output = capsys.readouterr()
     assert json.loads(output.out) == result
     assert output.err == (result["mailbox_approval_notice"] + "\n" if ready else "")
+
+
+def test_main_accepts_ready_report_without_mailbox_notice(monkeypatch, capsys):
+    result = {"status": "ready", "instructions": "skipped"}
+    monkeypatch.setattr(setup, "setup", lambda args: result)
+    monkeypatch.setattr(setup.sys, "argv", ["setup-codex-hooks.py", "--non-interactive"])
+    assert setup.main() == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out) == result
+    assert output.err == "\n"
 
 
 def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_path):
