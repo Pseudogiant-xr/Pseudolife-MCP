@@ -759,9 +759,15 @@ def test_the_checkouts_scripts_run_with_their_mapped_flags(world, clients, tmp_p
     [cache] = _script_calls(world, scripts["prune-build-cache"])
     assert cache[-2:] == ["-MaxAgeHours" if os.name == "nt" else "--max-age-hours", "24"]
     assert not any("pg_dump" in c for c in world.docker_calls())
-    order = [i for i, c in enumerate(world.calls) if str(scripts["backup"]) in c or c[1:2] == ["compose"]
-             or str(scripts["prune-build-cache"]) in c]
-    assert order == sorted(order) and len(order) == 3          # backup, build, then the cache prune
+    kinds = []
+    for c in world.calls:
+        if str(scripts["backup"]) in c:
+            kinds.append("backup")
+        elif c[1:2] == ["compose"]:
+            kinds.append("compose")
+        elif str(scripts["prune-build-cache"]) in c:
+            kinds.append("prune-build-cache")
+    assert kinds == ["backup", "compose", "prune-build-cache"]
 
 
 def test_an_unhealthy_checkout_deploy_never_runs_the_checkouts_cache_prune(world, clients, tmp_path):
@@ -836,19 +842,25 @@ def test_a_foreign_owned_checkout_names_the_git_fix(world, clients, tmp_path, mo
 
 
 def test_the_builtin_backup_rotates_only_its_own_old_files(world, clients, tmp_path):
+    """Files older than a week go, except the newest three of each kind
+    (updates are usually further apart than a week: an age-only rule would
+    leave one dump behind after each), and never a file this tool did not
+    write."""
     _project(world, tmp_path)
     backups = tmp_path / "data" / "backups"
     backups.mkdir(parents=True)
-    old_dump = backups / "pseudolife_memory-20200101-000000.sql.gz"
-    old_state = backups / "pseudolife_state-20200101-000000.tgz"
+    old_dumps = [backups / f"pseudolife_memory-2020010{i}-000000.sql.gz" for i in range(1, 5)]
+    old_states = [backups / f"pseudolife_state-2020010{i}-000000.tgz" for i in range(1, 3)]
     foreign = backups / "pseudolife_manifest-20200101-000000.json"
     recent = backups / "pseudolife_memory-20990101-000000.sql.gz"
-    for path in (old_dump, old_state, foreign, recent):
+    for path in old_dumps + old_states + [foreign, recent]:
         path.write_bytes(b"x")
-    ancient = 0
-    for path in (old_dump, old_state, foreign):
-        os.utime(path, (ancient, ancient))
+        if path is not recent:
+            os.utime(path, (0, 0))
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
     assert _run(["--health-delay-ms", "1"]) == 0
-    assert not old_dump.exists() and not old_state.exists()
-    assert foreign.exists() and recent.exists()
+    # dumps: the run's own, the 2099 one and 2020-01-04 are the newest three
+    assert [p.exists() for p in old_dumps] == [False, False, False, True]
+    assert recent.exists() and foreign.exists()
+    # states: the run's own plus the two old ones are three; nothing goes
+    assert all(p.exists() for p in old_states)

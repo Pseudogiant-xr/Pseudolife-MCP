@@ -574,10 +574,8 @@ def update_plugin(repo: Path | None = None) -> dict:
 # ── Codex hooks ─────────────────────────────────────────────────────────────
 
 def _load_from_checkout(repo: Path, relative: str, name: str):
-    """Import a module by file path from the checkout being installed. The
-    package importable from the running interpreter may be an older release
-    (or an editable install of another checkout), so nothing here relies
-    on ``import pseudolife_memory``."""
+    """Import a script by file path from the checkout being installed
+    (``ops/setup-codex-hooks.py`` is not a package module)."""
     spec = importlib.util.spec_from_file_location(name, Path(repo) / relative)
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

@@ -6575,7 +6575,11 @@ kept), plus a tar of the daemon's `/data`, both under
 `~/.pseudolife-mcp/backups` in the checkout scripts' file names (restore
 them with `ops/restore.ps1 -BackupFile <path>` / `restore.sh
 --backup-file <path>`; the built-in backup keeps no manifest, row-count
-gate or mirror, and rotates only its own files older than seven days).
+gate or mirror, and rotates only its own files older than seven days,
+always keeping the newest three of each kind). When the compose files are
+gone AND no env file was found beside them, the update stops unless
+`--env-file` names one: the bundled compose files without the env would
+reset the Postgres password, the volume names and the bearer.
 The rollback is the running image tagged by id as
 `ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>-pre-update-<stamp>`,
 because the GHCR overlay selects the daemon's image through

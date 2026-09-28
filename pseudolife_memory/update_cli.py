@@ -174,21 +174,28 @@ def _stamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S")
 
 
-def _env_file_sets_credentials(env_file: Path | None) -> bool:
-    if env_file is None or not env_file.is_file():
-        return False
-    try:
-        lines = env_file.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return False
-    return any(re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_MCP_TOKENS?\s*=", line) for line in lines)
+def _env_file_sets_credentials(env_file) -> bool:
+    """Whether the env file (or any of a list of them) sets the daemon's
+    bearer variables."""
+    files = env_file if isinstance(env_file, list) else ([env_file] if env_file else [])
+    for path in files:
+        if path is None or not Path(path).is_file():
+            continue
+        try:
+            lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        if any(re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_MCP_TOKENS?\s*=", line) for line in lines):
+            return True
+    return False
 
 
-def compose_environment(env_file: Path | None, extra: dict | None = None) -> dict:
+def compose_environment(env_file, extra: dict | None = None) -> dict:
     """The environment a ``docker compose`` call gets: this process's, with
-    the bearer variables removed when the env file sets its own (explicit
-    machine-local authentication must not be shadowed by a client's
-    credentials inherited from the calling process), plus ``extra``."""
+    the bearer variables removed when the env file(s) set their own
+    (explicit machine-local authentication must not be shadowed by a
+    client's credentials inherited from the calling process), plus
+    ``extra``."""
     env = dict(os.environ)
     if _env_file_sets_credentials(env_file):
         for name in list(env):
@@ -374,8 +381,11 @@ class Update:
             self.step(f"pseudolife-mcp {__version__} is already the target version; --reinstall to reinstall")
             return
         prefix = Path(sys.prefix)
-        layout = runtimes.default_layout()
-        if runtimes._under(str(prefix), layout.root):
+        try:
+            root = runtimes.default_layout().root
+        except ValueError:      # a half-set layout override: no runtime root to compare with
+            root = None
+        if root is not None and runtimes._under(str(prefix), root):
             raise UpdateError(f"this command runs from the shim runtime {prefix}, which serves no daemon: the "
                               f"daemon is a container this run could not see. Start Docker and retry; a shim "
                               f"runtime is never pip-upgraded in place", 2)
@@ -461,7 +471,7 @@ class Update:
             self.warn(f"the state volume could not be archived ({_last_line(out)}); the bank dump {dump.name} is complete")
         self.step(f"backup: {dump}" + (f" + {state.name}" if state.is_file() else "")
                   + f"; restore with ops/restore.* -BackupFile / --backup-file {dump}")
-        rotated = _rotate_backups(out_dir, keep_days=7, keep={dump.name, state.name})
+        rotated = _rotate_backups(out_dir, keep_days=7, keep={dump.name} | ({state.name} if state.is_file() else set()))
         if rotated:
             self.step(f"rotated {len(rotated)} backup file(s) older than 7 days")
         return {"dump": str(dump), "state": str(state) if state.is_file() else None, "rotated": rotated}
@@ -695,10 +705,16 @@ class Update:
         self.report.target = target
         current = self.current_version("docker")
         self.report.current = current
+        if current is None:
+            # /health silent (the daemon crashed, say): the image the container
+            # runs still says which release it is.
+            _id, ref = self.running_image()
+            current = ref.rsplit(":", 1)[-1] if ref and ":" in ref and version_key(ref.rsplit(":", 1)[-1]) else None
+            self.report.current = current
+        self.refuse_downgrade(current, target)
         if self.o.clients_only:
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
-        self.refuse_downgrade(current, target)
         if current == target and not self.o.reinstall:
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
@@ -785,6 +801,11 @@ class Update:
         elif working_dir and (Path(working_dir) / "pyproject.toml").is_file():
             checkout = Path(working_dir)
         if not existing:
+            if not env_files:
+                raise UpdateError("the daemon's compose files are gone and no env file was found beside them; "
+                                  "recreating the container from the bundled compose files without one would "
+                                  "reset the Postgres password, the volume names and the bearer. Name the file "
+                                  "with --env-file. Nothing was changed", 2)
             base = self._bundled("docker-compose.yml")
             self.step(f"the daemon's compose files are gone; using the bundled {base}")
             existing = [base]
@@ -792,7 +813,7 @@ class Update:
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
         args = ["-p", project] + self._compose_args(files, env_files)
-        return {"args": args, "env_file": env_files[0] if env_files else None, "checkout": checkout,
+        return {"args": args, "env_file": env_files, "checkout": checkout,
                 "files": [str(p) for p in files], "project": project}
 
     def _bundled(self, name: str) -> Path:
@@ -858,21 +879,27 @@ def _compose_image_tag(compose_file: Path) -> str | None:
     return None
 
 
-def _rotate_backups(out_dir: Path, *, keep_days: int, keep: set) -> list[str]:
+def _rotate_backups(out_dir: Path, *, keep_days: int, keep: set, keep_newest: int = 3) -> list[str]:
     """Remove this tool's own artifacts (``pseudolife_memory-<stamp>.sql.gz``,
-    ``pseudolife_state-<stamp>.tgz``) older than ``keep_days`` in
-    ``out_dir``; anything else there is left alone."""
-    removed = []
+    ``pseudolife_state-<stamp>.tgz``) older than ``keep_days``, keeping the
+    ``keep_newest`` most recent of each kind whatever their age: updates are
+    usually further apart than a week, and an age-only rule would leave a
+    single dump behind after each one. ``keep`` names what this run just
+    wrote (only files that exist count). Anything else there is left alone."""
+    removed: list[str] = []
     cutoff = time.time() - keep_days * 86400
-    for path in sorted(out_dir.iterdir()):
-        if path.name in keep or not re.fullmatch(r"pseudolife_(memory-\d{8}-\d{6}\.sql\.gz|state-\d{8}-\d{6}\.tgz)", path.name):
-            continue
-        try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink()
-                removed.append(str(path))
-        except OSError:
-            continue
+    for kind in (r"pseudolife_memory-\d{8}-\d{6}\.sql\.gz", r"pseudolife_state-\d{8}-\d{6}\.tgz"):
+        candidates = sorted((p for p in out_dir.iterdir() if re.fullmatch(kind, p.name)), key=lambda p: p.name,
+                            reverse=True)
+        for path in candidates[keep_newest:]:
+            if path.name in keep:
+                continue
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed.append(str(path))
+            except OSError:
+                continue
     return removed
 
 
