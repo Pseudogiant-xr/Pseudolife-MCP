@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — the Stop gate honours a live standing park)
+- A session whose park still stands can end a turn without recording the
+  same park again. A `rung` delivery to that session after the turn started
+  still requires a park set strictly after the newest such delivery,
+  including when the session updated earlier in the turn. The gate uses
+  the delivery's `created_at`, not the staggered ring or adapter hand-off;
+  lapsed parks and unparked status checks keep their existing behaviour.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

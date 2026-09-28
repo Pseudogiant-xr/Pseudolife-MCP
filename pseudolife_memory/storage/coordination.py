@@ -1796,13 +1796,27 @@ class CoordinationStore:
         session should first record a park, ``allow`` otherwise. Blocked
         when its row carries no live park record and its status is not
         done-shaped, or, given the turn's start ``since``, when it set no
-        status or park during the turn. An address the caller's principal
-        does not own, or none at all, is allowed: there is nothing to ask."""
+        status or park during the turn. A live standing park allows the
+        stop unless a rung delivery during the turn is at or after the
+        park's last update. An address the caller's principal does not
+        own, or none at all, is allowed: there is nothing to ask."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
                         "AND credential_hash IS NOT NULL", (agent_id, principal))
         if row is None:
             return {"gate": "allow", "reason": "unknown_agent"}
         now = self.clock()
+        park = self._live_park(row, now)
+        if park is not None:
+            if since is not None:
+                # Delivery time, not the staggered ring or its hand-off:
+                # a cleared need requires a park set strictly afterwards.
+                latest = self._one(
+                    "SELECT max(created_at) AS created_at FROM coordination_wakes "
+                    "WHERE recipient_agent_id=%s AND decision='rung' AND created_at>%s",
+                    (agent_id, since))["created_at"]
+                if latest is not None and park["park_set_at"] <= latest:
+                    return {"gate": "block", "reason": "not_updated_this_turn"}
+            return {"gate": "allow", "reason": "parked"}
         if since is not None:
             # Status and park changes are update events whose fields name
             # them; the CASE keeps the cast off other events' payloads.
@@ -1814,8 +1828,6 @@ class CoordinationStore:
                 (agent_id, since))
             if updated is None:
                 return {"gate": "block", "reason": "not_updated_this_turn"}
-        if self._live_park(row, now) is not None:
-            return {"gate": "allow", "reason": "parked"}
         if DONE_STATUS.search(row["status"] or ""):
             return {"gate": "allow", "reason": "done"}
         return {"gate": "block", "reason": "no_park"}

@@ -5186,8 +5186,16 @@ also capped (below, and by the daemon's `wake` caps under
   the start from the `<key>.turn` stamp the prompt hook leaves), whether
   the session parked. The daemon answers `block` when the row has no live
   park record and its status is not done-shaped (it does not start with
-  done, complete, finished or merged), or when the session set no status or
-  park during the turn; the hook then ends the turn at once with "Before
+  done, complete, finished or merged), or when an unparked session set no
+  status or park during the turn. A live standing park allows the stop
+  without another update unless the session received a `rung` delivery
+  after the turn started: then the park must have been set strictly after
+  the newest such delivery, or the gate answers `block` with
+  `not_updated_this_turn`, even if an earlier update occurred this turn.
+  Delivery means the wake decision's `created_at`, not its staggered
+  `ring_at` or the adapter's `served_at`; mail to another session and
+  other wake decisions do not invalidate the park. The hook then ends
+  a blocked turn at once with "Before
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
   park_resume=...)" as the wake text and a `gate` ledger line. Once: the
