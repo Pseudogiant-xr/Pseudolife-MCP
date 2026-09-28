@@ -822,9 +822,7 @@ def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
     assert (result.returncode, result.stderr) == (0, "")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
-                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
-                    "coordination-start.sh, the file is refused there")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; Windows ACLs tested separately")
 def test_the_gate_reads_a_private_token_file(tmp_path):
     server, requests = _gate_daemon("allow\n")
     try:
@@ -842,6 +840,157 @@ def test_the_gate_reads_a_private_token_file(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("private", [True, False])
+def test_windows_gate_validates_the_installer_token_file(tmp_path, private):
+    from pseudolife_memory.credentials import _write_token_file
+    token_file = tmp_path / "token ' with spaces"
+    if private:
+        _write_token_file(token_file, "file-token")
+    else:
+        token_file.write_bytes(b"file-token\n")
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _env(tmp_path, wait=0,
+                   PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert result.returncode == (2 if private else 0)
+        assert [bearer for _, bearer in requests] == (["Bearer file-token"] if private else [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("guard", ["owner", "protected", "shared", "links", "size", "empty"])
+def test_windows_private_file_guards_are_load_bearing(tmp_path, guard):
+    from pseudolife_memory.credentials import _secure_windows_file, _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _secure_windows_file(directory)
+    token_file = directory / "token"
+    _write_token_file(token_file, "fixture-token")
+    function = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
+                         HOOK.read_text(encoding="utf-8"))[0]
+    edits = {
+        "owner": ("$owner -ne $current", "$false"),
+        "protected": ("-not $acl.AreAccessRulesProtected", "$false"),
+        "shared": ('$sid -notin $owner, "S-1-3-4"', "$false"),
+        "links": ('[ "${3:-0}" = 1 ] || return 1', ":"),
+        "size": ('[ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1', ":"),
+        "empty": ("$item.Length -lt 1", "$false"),
+    }
+    if guard == "owner":
+        # A different caller identity, without requiring host privileges to
+        # transfer fixture ownership to another account.
+        function = function.replace(
+            "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value", '"S-1-5-18"')
+    elif guard in ("protected", "shared"):
+        import ctypes
+        from ctypes import wintypes
+        # Apply only the DACL. Set-Acl can also try to write the SACL, which
+        # requires SeSecurityPrivilege even for a file the caller owns.
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+        convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                            ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+        apply = advapi.SetFileSecurityW
+        apply.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+        descriptor = ctypes.c_void_p()
+        sddl = "D:(A;;FA;;;OW)" if guard == "protected" else "D:P(A;;FA;;;OW)(A;;FR;;;WD)"
+        assert convert(sddl, 1, ctypes.byref(descriptor), None)
+        try:
+            flags = 0x20000004 if guard == "protected" else 0x80000004
+            assert apply(str(token_file), flags, descriptor)
+        finally:
+            kernel = ctypes.WinDLL("kernel32")
+            kernel.LocalFree.argtypes = [ctypes.c_void_p]
+            kernel.LocalFree(descriptor)
+    elif guard == "links":
+        os.link(token_file, directory / "alias")
+    else:
+        token_file.write_bytes(b"" if guard == "empty" else b"x" * 4097)
+    env = _env(tmp_path, PSEUDOLIFE_TEST_FILE=str(token_file))
+    try:
+        for mutated, expected in ((False, 1), (True, 0)):
+            candidate = function.replace(*edits[guard]) if mutated else function
+            result = subprocess.run(
+                [bash_exe(), "-c", candidate + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
+                env=env, capture_output=True, text=True, timeout=DEADLINE)
+            assert result.returncode == expected, (guard, mutated, result.stderr)
+    finally:
+        _secure_windows_file(token_file)
+
+
+def test_windows_acl_blocks_are_byte_identical():
+    pattern = rb"(?ms)^        PSEUDOLIFE_PRIVATE_FILE=.*?^        return \$\?"
+    expected = re.search(pattern, HOOK.read_bytes())[0]
+    for name in ("coordination-start.sh", "session-start.sh", "session-end.sh"):
+        assert re.search(pattern, (HOOK.parent / name).read_bytes())[0] == expected, name
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_path):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _write_token_file(directory / "token", "fixture-token")
+    junction = tmp_path / "junction"
+    server, requests = _gate_daemon("allow\n")
+    env = _gate_env(tmp_path, server, PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"))
+    env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
+               PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0")
+    try:
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+        lines = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert len(lines) == 1
+        stamp, *fields = lines[0].split("\t")
+        assert stamp.isdigit() and fields == ["token", _key()[:8], "0", "0", "rejected"]
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove only the junction, preserving its target.
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("unsafe", ["junction", "missing-validator"])
+def test_windows_private_file_fails_closed(tmp_path, unsafe):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    token_file = directory / "token"
+    _write_token_file(token_file, "fixture-token")
+    env = _env(tmp_path, PSEUDOLIFE_TEST_FILE=str(token_file))
+    function = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
+                         HOOK.read_text(encoding="utf-8"))[0]
+    junction = tmp_path / "junction"
+    if unsafe == "junction":
+        env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory))
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        env["PSEUDOLIFE_TEST_FILE"] = str(junction / "token")
+    else:
+        function = 'powershell.exe() { return 1; }\n' + function
+    try:
+        result = subprocess.run(
+            [bash_exe(), "-c", function + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
+            env=env, capture_output=True, text=True, timeout=DEADLINE)
+        assert result.returncode == 1 and result.stdout == "" and result.stderr == ""
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove the junction itself, never its target.
 
 
 def test_the_prompt_hook_stamps_the_turn_start(tmp_path):

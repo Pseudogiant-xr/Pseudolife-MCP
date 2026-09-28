@@ -62,6 +62,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its JSON report; setup continues to leave tool approvals unchanged.
 - Client updates report a matching manual hook bundle as present with trust
   and execution unchecked, and show the setup command to verify with consent.
+### Fixed (2026-09-28 — Windows plugin hooks read installer-created token files)
+- The Bash Stop gate, board check-in, SessionStart and SessionEnd hooks now
+  validate Windows token files with the native ACL rules used by
+  `lifecycle.ps1`: current-user ownership, a protected DACL, and allow rules
+  only for the owner or OWNER RIGHTS. They retain regular-file, link and
+  size checks and reject reparse points in the file or its parents. Git
+  Bash's POSIX mode check previously rejected the installer's private NTFS
+  file, so a fresh install's hooks could silently skip their requests.
+  POSIX hosts retain the existing permission check. The installer summary
+  distinguishes saving the setting from verifying hook authentication.
+  A token file rejected by the Stop gate or coordination-start hook leaves
+  a `token` / `rejected` digest-ledger line without a path or credential,
+  so a refused file can be diagnosed while its daemon request stays suppressed.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
@@ -205,9 +218,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `commandWindows`; elsewhere it runs the bash command, which exits unless
   Claude Code started it), and an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
   `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off` turns it off.
-  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when it is private
-  (the sibling hooks' check), so under Git Bash, which cannot show an NTFS
-  file is owner-only, it needs `PSEUDOLIFE_MCP_TOKEN`.
+  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when its private-file
+  check passes (the sibling hooks' check): native Windows ACLs under Git
+  Bash since the 2026-09-28 fix above, POSIX owner and mode elsewhere.
+  A configured file that fails validation suppresses the gate request;
+  it does not fall back to `PSEUDOLIFE_MCP_TOKEN`. Saving the setting alone
+  does not verify hook authentication.
 - `memory_agents` and `memory_message` grew by 199 characters after each
   docstring was tightened to pay for its own line; the core and full
   description budgets move deliberately (11,500 -> 11,750, 17,800 ->
