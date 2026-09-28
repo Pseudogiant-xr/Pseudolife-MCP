@@ -460,6 +460,32 @@ def build_console_app(
                               "text/plain; charset=utf-8", "no-store")
             return
 
+        # 4e) plugin Stop hook: the woke marker. After a wake fires the hook
+        # posts that the address's turn is starting; the daemon logs a
+        # ``woke`` audit event for it. A write, so POST only; "ok" when
+        # recorded, an empty body otherwise. 200 always: the hook does not
+        # read the answer.
+        if path == "/api/hook/woke":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import woke
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(woke, service, headers, agent=params.get("agent"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)

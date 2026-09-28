@@ -24,7 +24,7 @@ modes:
   (no arg)       stdio shim: find/start the daemon and proxy to it
   channel        experimental Claude channel transport (requires explicit opt-in)
   coordination-recovery  offline mailbox recovery after a database restore
-  board-audit    export, verify or redact the agent board's audit log
+  board-audit    export, verify, redact or stats on the agent board's audit log
                  (operator-only; reads PSEUDOLIFE_MCP_DATABASE_URL)
   serve          run the HTTP memory daemon (deployment mode)
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)

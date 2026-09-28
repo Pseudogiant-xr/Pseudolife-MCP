@@ -388,3 +388,42 @@ def test_park_gate_is_open_where_the_board_is_not(monkeypatch):
     # A malformed address is not looked up.
     assert park_gate(_board_service(), headers, agent="not-an-id", since=None,
                      token="fixture-secret") == "allow\n"
+
+
+# --- the Stop-hook woke marker -----------------------------------------------
+
+def test_woke_route_records_the_marker_for_a_board_bearer_only(monkeypatch):
+    """``POST /api/hook/woke?agent=<id>``: the Stop hook's one call after it
+    fires. ``ok`` for a recorded marker; an empty body for a bearer that
+    cannot use the board, which the hook ignores either way."""
+    from pseudolife_memory import coordination
+    seen = []
+
+    def woke(service, headers, *, agent, token_map=None, token=None):
+        seen.append((agent, headers.get("authorization")))
+        return "ok\n"
+    monkeypatch.setattr(coordination, "woke", woke)
+    app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, _board_service())
+    bearer = [(b"authorization", b"Bearer fixture-secret")]
+    status, body = call(app, "POST", "/api/hook/woke", headers=bearer, query="agent=" + "a" * 32)
+    assert (status, body) == (200, b"ok\n")
+    assert seen == [("a" * 32, "Bearer fixture-secret")]
+    status, body = call(app, "POST", "/api/hook/woke", query="agent=" + "a" * 32)
+    assert (status, body) == (200, b"")
+    assert len(seen) == 1
+    # A marker is a write: POST only, and browser-gated like the gate.
+    status, _ = call(app, "GET", "/api/hook/woke", headers=bearer, query="agent=" + "a" * 32)
+    assert status == 405
+    open_app = build_console_app(stub_mcp, None, lambda: {}, _board_service())
+    status, _ = call(open_app, "POST", "/api/hook/woke",
+                     headers=[(b"origin", b"http://evil.example")])
+    assert status == 403
+
+
+def test_woke_records_nothing_where_the_board_is_not(monkeypatch):
+    from pseudolife_memory.coordination import woke
+    headers = {"authorization": "Bearer fixture-secret"}
+    assert woke(_board_service(enabled=False), headers, agent="a" * 32,
+                token="fixture-secret") == ""
+    assert woke(_board_service(), {}, agent="a" * 32, token="fixture-secret") == ""
+    assert woke(_board_service(), headers, agent="not-an-id", token="fixture-secret") == ""

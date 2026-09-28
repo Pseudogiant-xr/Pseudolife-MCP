@@ -780,6 +780,39 @@ def test_park_gate_asks_an_unparked_session_once(store):
     assert store.park_gate(a["agent_id"], "bob") == {"gate": "allow", "reason": "unknown_agent"}
 
 
+def test_a_woke_marker_is_logged_against_the_rings_it_answers(store):
+    """When the Stop hook fires it tells the daemon the turn is starting;
+    the daemon logs one ``woke`` event for the recipient, counting the rings
+    served to it in the last hour and nothing else (no text, no ids beyond
+    the row's own), so ``board-audit stats`` measures wake precision from
+    the turn actually starting rather than from ``served_at``."""
+    from tests.test_coordination_audit import events
+    a = store.register("alice")
+    b = store.register("alice", capabilities={"ring": True})
+    store.update(*creds(b), status="parked", park_reason="blocked", park_needs="the review",
+                 park_clear_by="anyone")
+    store.test_time[0] = 2000.0
+    assert store.send(*creds(a), to=b["agent_id"], text="review is in",
+                      request_id="r1")["wake"]["decision"] == "rung"
+    # Nothing served yet: the marker still lands (a hook may fire on a ring
+    # the heartbeat served before this daemon restarted), counting zero.
+    assert store.woke(b["agent_id"], "alice") == {"recorded": True, "rings": 0}
+    store.test_time[0] = 2005.0
+    store.attach(*creds(b), attachment_id="one", ring=True)
+    store.test_time[0] = 2010.0
+    assert store.woke(b["agent_id"], "alice") == {"recorded": True, "rings": 1}
+    woke = events(store, "woke")
+    assert [(e["actor"], e["principal"], e["agent_id"], e["recipient_agent_id"], e["payload"],
+             e["created_at"]) for e in woke] == [
+        ("agent", "alice", b["agent_id"], b["agent_id"], {"rings": 0}, 2000.0),
+        ("agent", "alice", b["agent_id"], b["agent_id"], {"rings": 1}, 2010.0)]
+    assert all(e["body"] is None for e in woke)
+    # Unknown or foreign addresses record nothing: the hook has no standing.
+    assert store.woke("0" * 32, "alice") == {"recorded": False, "reason": "unknown_agent"}
+    assert store.woke(b["agent_id"], "bob") == {"recorded": False, "reason": "unknown_agent"}
+    assert len(events(store, "woke")) == 2
+
+
 # --- review fixes (2026-09-28) ------------------------------------------------
 
 def _ring_capable(store, principal="alice"):

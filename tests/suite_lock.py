@@ -201,6 +201,10 @@ class HeldLock:
     worktree: str = ""
     taken_at: float = 0.0  # time.monotonic() at acquisition
     mirror: object | None = None  # the board's view of this lock, if any
+    # Wall-clock ISO stamps for the durations record: when this run joined
+    # the queue and when it took the lock (their difference is the queue wait).
+    queued_at: str = ""
+    started_at: str = ""
 
 
 def _slot_file(name: str, slot: int) -> str:
@@ -514,6 +518,7 @@ def acquire(directory: Path, mode: str, *, worktree: str,
     handles: dict[int, IO[bytes]] = {}
     slot = None
     waited_from = next_notice = None
+    queued_at = datetime.now().astimezone().isoformat(timespec="seconds")
     try:
         ticket = _enqueue(directory / QUEUE_DIR)
         try:
@@ -578,7 +583,8 @@ def acquire(directory: Path, mode: str, *, worktree: str,
         print(f"full-suite lock acquired{which} after waiting "
               f"{minutes}m{seconds:02d}s", file=out, flush=True)
     held = HeldLock(handles[slot], directory, slot, worktree=str(worktree),
-                    taken_at=time.monotonic(), mirror=mirror)
+                    taken_at=time.monotonic(), mirror=mirror,
+                    queued_at=queued_at, started_at=record["started"])
     if mirror is not None:
         _mirror_call(mirror, "hold", out)
     return held
@@ -592,7 +598,8 @@ def release(held: HeldLock, *, record: bool = True) -> None:
     if record and held.taken_at:
         try:
             record_duration(held.directory, time.monotonic() - held.taken_at,
-                            worktree=held.worktree)
+                            worktree=held.worktree, queued_at=held.queued_at or None,
+                            started_at=held.started_at or None)
         except (OSError, ValueError):
             pass  # a record for the next run's estimate; the lock is what counts
     # Drop the record before unlocking, so it never describes a successor.
@@ -610,11 +617,20 @@ def release(held: HeldLock, *, record: bool = True) -> None:
         _mirror_call(held.mirror, "release", sys.stderr)
 
 
-def record_duration(directory: Path, seconds: float, *, worktree: str) -> None:
-    """Append how long a run held the lock, keeping the last DURATIONS_KEEP."""
+def record_duration(directory: Path, seconds: float, *, worktree: str,
+                    queued_at: str | None = None, started_at: str | None = None) -> None:
+    """Append how long a run held the lock, keeping the last DURATIONS_KEEP.
+    ``queued_at`` and ``started_at`` (ISO stamps) let ``board-audit stats``
+    read the queue wait as well as the hold; left out, the record keeps the
+    shape every run before them wrote."""
     path = directory / DURATIONS_FILE
-    line = json.dumps({"seconds": round(seconds, 1), "worktree": worktree,
-                       "ended": datetime.now().astimezone().isoformat(timespec="seconds")})
+    record = {"seconds": round(seconds, 1), "worktree": worktree,
+              "ended": datetime.now().astimezone().isoformat(timespec="seconds")}
+    if queued_at is not None:
+        record["queued_at"] = queued_at
+    if started_at is not None:
+        record["started_at"] = started_at
+    line = json.dumps(record)
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:

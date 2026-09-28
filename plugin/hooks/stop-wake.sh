@@ -44,6 +44,12 @@
 # refuses) is allow too, so the gate never holds a turn on an error. It
 # appends a "gate" line to the ledger when it blocks.
 #
+# After a wake fires, and with the same address, the hook posts one woke
+# marker (POST /api/hook/woke?agent=<id>, 2 s): the daemon logs that this
+# session's turn is starting, so wake precision can be measured from the
+# turn rather than from the ring being served. The answer is ignored; a
+# daemon that is down costs the timeout and nothing else.
+#
 # One watcher per session: every firing writes a fresh token to <key>.wake,
 # and an older watcher that finds another token there exits quietly at its
 # next poll, so the newest turn end always owns the wait.
@@ -154,12 +160,14 @@ private_regular() {
     [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
 }
 
-# The park gate's one request. The daemon URL and bearer come from the
-# hook's environment the way the other hooks read them (PSEUDOLIFE_MCP_TOKEN,
-# or a private PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file
-# is lifecycle.ps1's concern, which runs this gate for Codex on Windows.
-# Prints the body; any failure prints nothing, which is allow.
-gate_answer() {
+# One bounded request to the daemon's hook routes ($1 the method, $2 the
+# path and query after /api/hook/): the park gate's question and the woke
+# marker. The daemon URL and bearer come from the hook's environment the way
+# the other hooks read them (PSEUDOLIFE_MCP_TOKEN, or a private
+# PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file is
+# lifecycle.ps1's concern, which runs the gate for Codex on Windows. Prints
+# the body; any failure prints nothing, which the gate reads as allow.
+hook_request() {
     local url="${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}" token="" rest
     local file="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
     url=${url%/}
@@ -177,43 +185,48 @@ gate_answer() {
     fi
     local auth=()
     [ -n "$token" ] && auth=(-H "Authorization: Bearer $token")
-    curl -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
-        "${auth[@]}" "$url/api/hook/park-gate?$1"
+    curl -sf -X "$1" --max-redirs 0 --connect-timeout 1 --max-time 2 \
+        "${auth[@]}" "$url/api/hook/$2"
 }
+gate_answer() { hook_request GET "park-gate?$1"; }
 
-ACTIVE=$(printf '%s' "$INPUT" |
-         grep -o '[{,][[:space:]]*"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
-if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
-    AGENT_ID=""
+# This session's board address, as the shim names it in <key>.agent: what
+# the gate asks about and the woke marker is filed under. Anything but a
+# 32-hex id in a regular file is no address.
+AGENT_ID=""
+if [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
     IFS= read -r AGENT_ID < "$AGENT"
     AGENT_ID=${AGENT_ID%$'\r'}
     case "$AGENT_ID" in *[!0123456789abcdef]*) AGENT_ID="" ;; esac
     [ "${#AGENT_ID}" -eq 32 ] || AGENT_ID=""
-    if [ -n "$AGENT_ID" ]; then
-        SINCE=""
-        if [ -f "$TURN" ] && [ ! -L "$TURN" ]; then
-            IFS= read -r SINCE < "$TURN"
-            SINCE=${SINCE%$'\r'}
-        fi
-        case "$SINCE" in ''|*[!0123456789]*) SINCE="" ;; esac
-        [ "${#SINCE}" -le 12 ] || SINCE=""
-        QUERY="agent=$AGENT_ID"
-        [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
-        ANSWER=$(gate_answer "$QUERY")
-        ANSWER=${ANSWER//$'\r'/}
-        case "$ANSWER" in
-            block|block$'\n'*)
-                MESSAGE=""
-                case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
-                while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
-                [ -n "$MESSAGE" ] || MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
-                printf '%s\n' "$MESSAGE" >&3
-                printf '%s\tgate\t%s\t0\t%s\tblock\n' "$(date +%s)" "${KEY:0:8}" \
-                    "$(( ${#MESSAGE} + 1 ))" >> "$DIGEST_DIR/ledger.log"
-                exit 2
-                ;;
-        esac
+fi
+
+ACTIVE=$(printf '%s' "$INPUT" |
+         grep -o '[{,][[:space:]]*"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
+if [ -z "$ACTIVE" ] && [ -n "$AGENT_ID" ]; then
+    SINCE=""
+    if [ -f "$TURN" ] && [ ! -L "$TURN" ]; then
+        IFS= read -r SINCE < "$TURN"
+        SINCE=${SINCE%$'\r'}
     fi
+    case "$SINCE" in ''|*[!0123456789]*) SINCE="" ;; esac
+    [ "${#SINCE}" -le 12 ] || SINCE=""
+    QUERY="agent=$AGENT_ID"
+    [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
+    ANSWER=$(gate_answer "$QUERY")
+    ANSWER=${ANSWER//$'\r'/}
+    case "$ANSWER" in
+        block|block$'\n'*)
+            MESSAGE=""
+            case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
+            while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
+            [ -n "$MESSAGE" ] || MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
+            printf '%s\n' "$MESSAGE" >&3
+            printf '%s\tgate\t%s\t0\t%s\tblock\n' "$(date +%s)" "${KEY:0:8}" \
+                "$(( ${#MESSAGE} + 1 ))" >> "$DIGEST_DIR/ledger.log"
+            exit 2
+            ;;
+    esac
 fi
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
@@ -385,6 +398,8 @@ Set your park status before you stop: memory_agents(action=update, park_reason=.
     printf '%s%s\n' "$RECENT" "$NOW" > "$WAKES.$$" && mv -f "$WAKES.$$" "$WAKES"
     printf '%s\twait\t%s\t%s\t%s\t%s\n' "$NOW" "${KEY:0:8}" "$WATERMARK" "$(( ${#text} + 1 ))" \
         "$RING_REASON" >> "$DIGEST_DIR/ledger.log"
+    # The turn is starting: say so, once, and ignore the answer.
+    [ -n "$AGENT_ID" ] && hook_request POST "woke?agent=$AGENT_ID" >/dev/null
     exit 2
 }
 

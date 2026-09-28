@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — coordination telemetry from the board's own records)
+- `pseudolife-mcp board-audit stats`: one JSON object of coordination
+  telemetry for a window (default the last 24 h; `--since`/`--until`,
+  `--out` a new file, `--append` a JSON lines log, `--input` an export file
+  instead of the bank, `--durations` the suite lock's file), computed from
+  the audit log, the v49 `coordination_wakes` table and the suite lock's
+  `full-suite.durations.jsonl`: mail latency (send to first read, p50/p95,
+  by wake decision and by recipient principal), wake precision (the share of
+  `rung`/`nudged` rows served, followed by a recipient board action within
+  120 s of being served and of the turn starting, and the share never
+  served), park outcomes (parks by reason, time from park to clear, and how
+  each cleared: a clearing send, an owner update, or expiry), sends per
+  attached session-hour by principal, and the full-suite lock's queue wait
+  and hold. Only counts, seconds, decision, reason and principal names and
+  version strings leave the tool: no body, no agent id (not even a prefix),
+  no path, no worktree, no user name. The report shape is `"shape": 1`.
+  [Coordination telemetry](docs/guide/configuration.md#coordination-telemetry)
+- Two recording gaps closed so the figures above exist. The suite lock's
+  durations record (`tests/suite_lock.py` `record_duration`) now carries
+  `queued_at` and `started_at` beside `seconds` and `ended` (queue wait is
+  their difference); a record without them still reads. And the Claude Code
+  Stop hook (`plugin/hooks/stop-wake.sh`), once a wake has fired, posts one
+  woke marker, `POST /api/hook/woke?agent=<id>` (2 s, the gate's bearer and
+  URL), which the daemon logs as a `woke` audit event for the address whose
+  payload counts the rings served to it in the last hour, and nothing else;
+  the wake fires whether or not the daemon answers. No DDL: the marker is
+  an event, tied to its ring by recipient and time. The hook script
+  changed, so `ops/update.ps1 -All` (or `ops/update_clients.py`) is needed
+  for it to reach installed plugins.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

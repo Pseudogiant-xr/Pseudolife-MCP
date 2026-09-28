@@ -235,6 +235,29 @@ def park_gate(service, headers: Mapping[str, str], *, agent, since,
     return f"block\n{PARK_GATE_MESSAGE}\n"
 
 
+def woke(service, headers: Mapping[str, str], *, agent, token_map=None, token=None) -> str:
+    """Body for ``POST /api/hook/woke?agent=<id>``: what the Stop hook posts
+    after a wake fires, so the daemon logs that the address's turn is
+    starting (a ``woke`` audit event counting the rings served to it). ``ok``
+    when recorded; empty wherever the board is not served to this bearer,
+    for an address that is not a 32-hex id or that the bearer's principal
+    does not own, and on any failure. The hook ignores the answer either
+    way: a marker is telemetry, never a condition of the wake."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return ""
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)):
+        return ""
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            result = _store(service).woke(agent, principal)
+    except Exception:  # noqa: BLE001 - telemetry never surfaces an error to the hook
+        return ""
+    return "ok\n" if result.get("recorded") else ""
+
+
 def unavailable_reason(service, headers: Mapping[str, str], *,
                        token_map=None, token=None) -> str | None:
     """Why this caller cannot use the board now, or ``None`` when it can.
