@@ -21,8 +21,10 @@ registers ONE launcher path that starts the newest complete runtime:
 * ``<launcher>`` — Windows: ``%LOCALAPPDATA%\\pseudolife-mcp\\bin\\
   pseudolife-mcp.exe``, a console-script launcher (the same kind pip writes)
   whose script picks the highest-numbered complete runtime and runs its
-  ``pseudolife-mcp.exe``; elsewhere ``~/.local/bin/pseudolife-mcp``, a
-  ``/bin/sh`` script that ``exec``s the same choice.
+  ``pseudolife-mcp.exe``; elsewhere ``~/.local/share/pseudolife-mcp/bin/
+  pseudolife-mcp``, a ``/bin/sh`` script that ``exec``s the same choice
+  (not ``~/.local/bin``: that is the file pip --user and pipx write, which
+  a later ``pip uninstall`` would delete).
 
 A running session keeps the runtime it started from; the next session
 start takes the newest. A runtime is removed only when it is not the
@@ -36,6 +38,7 @@ load this file from a checkout by path before any package is installed, so
 nothing here imports the rest of ``pseudolife_memory``.
 """
 import argparse
+import copy
 import json
 import os
 import re
@@ -114,13 +117,20 @@ def default_layout(env: dict | None = None, windows: bool | None = None) -> Layo
     windows = (os.name == "nt") if windows is None else windows
     root_override, launcher_override = env.get("PSEUDOLIFE_SHIM_RUNTIMES"), env.get("PSEUDOLIFE_SHIM_LAUNCHER")
     if root_override and launcher_override:
-        return Layout(Path(root_override), Path(launcher_override))
+        launcher = Path(launcher_override)
+        # The launcher's suffix decides the runtime shape (Scripts\ + .exe or
+        # bin/): a Windows override without .exe would build POSIX runtimes.
+        if windows and launcher.suffix.lower() != ".exe":
+            raise ValueError("PSEUDOLIFE_SHIM_LAUNCHER must end with .exe on Windows")
+        if not windows and launcher.suffix.lower() == ".exe":
+            raise ValueError("PSEUDOLIFE_SHIM_LAUNCHER must not end with .exe off Windows")
+        return Layout(Path(root_override), launcher)
     user = home(env)
     if windows:
         local = Path(env.get("LOCALAPPDATA") or user / "AppData" / "Local") / PACKAGE
         return Layout(local / "runtimes", local / "bin" / "pseudolife-mcp.exe")
     data = Path(env.get("XDG_DATA_HOME") or user / ".local" / "share") / PACKAGE
-    return Layout(data / "runtimes", user / ".local" / "bin" / "pseudolife-mcp")
+    return Layout(data / "runtimes", data / "bin" / "pseudolife-mcp")
 
 
 def _windows(layout: Layout) -> bool:
@@ -223,34 +233,46 @@ class RuntimeInstallError(RuntimeError):
 
 
 def base_interpreter(python: str | None = None) -> str:
-    """The interpreter new runtimes are created from: the one given, else
-    this process's base interpreter (a runtime's own python is a venv whose
-    base is named in ``pyvenv.cfg``), else this interpreter."""
+    """The interpreter new runtimes are created from: the one given (a
+    command name such as ``python3`` or a path), else this process's
+    interpreter — in either case reduced to its base when it is a
+    virtualenv's, since a runtime that depends on someone's ``.venv`` dies
+    with it (``pyvenv.cfg`` names the base)."""
     if python:
         # A command name (the installers probe "python3") as well as a path.
-        return python if os.sep in python or Path(python).is_file() else (shutil.which(python) or python)
+        resolved = python if os.sep in python or Path(python).is_file() else (shutil.which(python) or python)
+        return _base_of(Path(resolved))
     base = getattr(sys, "_base_executable", None)
     if base and Path(base).is_file():
-        return base
-    cfg = Path(sys.prefix) / "pyvenv.cfg"
-    try:
-        lines = cfg.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return sys.executable
-    keys = {}
-    for line in lines:
-        if "=" in line:
-            key, _, value = line.partition("=")
-            keys[key.strip().lower()] = value.strip()
-    executable = keys.get("executable")
-    if executable and Path(executable).is_file():
-        return executable
-    if keys.get("home"):
-        for name in ("python.exe", "python3", "python"):
-            candidate = Path(keys["home"]) / name
-            if candidate.is_file():
-                return str(candidate)
-    return sys.executable
+        return _base_of(Path(base))
+    return _base_of(Path(sys.executable))
+
+
+def _base_of(executable: Path) -> str:
+    """``executable`` itself unless it lives in a virtualenv, whose base
+    interpreter is returned instead (recursively: a venv made from a venv)."""
+    seen = set()
+    current = executable
+    while str(current) not in seen:
+        seen.add(str(current))
+        cfg = current.parent.parent / "pyvenv.cfg"
+        try:
+            lines = cfg.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return str(current)
+        keys = {}
+        for line in lines:
+            if "=" in line:
+                key, _, value = line.partition("=")
+                keys[key.strip().lower()] = value.strip()
+        candidates = [keys["executable"]] if keys.get("executable") else []
+        if keys.get("home"):
+            candidates += [str(Path(keys["home"]) / name) for name in ("python.exe", "python3", "python")]
+        base = next((c for c in candidates if Path(c).is_file()), None)
+        if base is None:
+            return str(current)
+        current = Path(base)
+    return str(current)
 
 
 _VERSION_PROBE = "import importlib.metadata as m; print(m.version('pseudolife-mcp'))"
@@ -333,13 +355,28 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _replace_config(path: Path, text: str) -> None:
+    """Rewrite a client config file in place: through a symlink (a dotfile
+    manager's link must stay a link), keeping the file's permission bits
+    (``~/.claude.json`` can hold credentials; a 0600 file must not come
+    back 0644 from the umask)."""
+    target = path.resolve() if path.is_symlink() else path
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        shutil.copymode(target, tmp)
+    except OSError:
+        pass
+    os.replace(tmp, target)
+
+
 # ── the launcher ────────────────────────────────────────────────────────────
 
 _POSIX_LAUNCHER = """\
 #!/bin/sh
 # pseudolife-mcp launcher: starts the newest complete shim runtime under the
 # directory below. Written by pseudolife_memory.runtimes (the installer and
-# `pseudolife-mcp update`); it is rewritten whenever its content changes, so
+# ops/update_clients.py); it is rewritten whenever its content changes, so
 # do not edit it by hand. Sessions already running keep their runtime.
 root='__ROOT__'
 chosen=''
@@ -349,7 +386,7 @@ for candidate in "$root"/[0-9][0-9][0-9][0-9][0-9][0-9]/; do
     fi
 done
 if [ -z "$chosen" ]; then
-    echo "[pseudolife-mcp] no complete shim runtime under $root; re-run the installer (ops/install.sh) or 'pseudolife-mcp update'" >&2
+    echo "[pseudolife-mcp] no complete shim runtime under $root; re-run the installer (ops/install.sh) or, from a checkout, python ops/shim_runtime.py install --source <checkout>" >&2
     exit 1
 fi
 exec "${chosen}bin/pseudolife-mcp" "$@"
@@ -425,7 +462,8 @@ def main():
     exe = _newest()
     if exe is None:
         sys.stderr.write("[pseudolife-mcp] no complete shim runtime under %s; re-run the installer "
-                         "(ops\\install.ps1) or 'pseudolife-mcp update'\n" % ROOT)
+                         "(ops\\install.ps1) or, from a checkout, python ops\\shim_runtime.py "
+                         "install --source <checkout>\n" % ROOT)
         return 1
     job = _job()
     proc = subprocess.Popen([exe] + sys.argv[1:])
@@ -534,17 +572,37 @@ def ensure_launcher(layout: Layout, runtime: Runtime | None = None, *, run: Call
     if layout.launcher.is_file() and existing and all(existing.get(k) == v for k, v in record.items()):
         return "current"
     built = _build_windows_launcher(layout, runtime, run, base)
+    aside = None
     try:
         replaced = layout.launcher.is_file()
         if replaced:
             aside = layout.launcher.with_name(f"{_OLD_LAUNCHER_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}")
             os.rename(layout.launcher, aside)
-        os.replace(built, layout.launcher)
+        try:
+            _replace_with_retry(built, layout.launcher)
+        except OSError:
+            # Every registration names this path: with the old file moved
+            # aside and the new one refused (a scanner holding a fresh .exe
+            # is the usual cause), put the old one back before giving up.
+            if aside is not None:
+                os.replace(aside, layout.launcher)
+            raise
         _write_atomic(_launcher_record(layout), json.dumps(record, indent=2) + "\n")
         log(f"launcher {'replaced' if replaced else 'written'}: {layout.launcher}")
         return "replaced" if replaced else "written"
     finally:
         shutil.rmtree(built.parent, ignore_errors=True)
+
+
+def _replace_with_retry(source: Path, target: Path, attempts: int = 5) -> None:
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
 
 
 def _launcher_record(layout: Layout) -> Path:
@@ -756,7 +814,13 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
             continue
         try:
             if path.is_dir():
-                shutil.rmtree(path)
+                # Rename first: a directory a process runs from cannot be
+                # renamed on Windows (a second, free in-use check), and a
+                # rename that succeeds takes the whole tree out of the
+                # launcher's sight before any file inside is deleted.
+                doomed = path.with_name(f"{path.name}.removing-{os.getpid()}")
+                os.rename(path, doomed)
+                shutil.rmtree(doomed)
             else:
                 path.unlink()
         except OSError as exc:
@@ -777,6 +841,20 @@ class Registration:
     command: str
     args: list[str] = field(default_factory=list)
     cwd: str | None = None
+    env: dict = field(default_factory=dict)
+
+    @property
+    def spawns_a_daemon(self) -> bool:
+        """Whether a session of this registration would start its own daemon
+        when none answers: no ``PSEUDOLIFE_MCP_NO_SPAWN`` and a loopback (or
+        default) daemon URL. A shim runtime cannot serve (no torch), so such
+        a registration must not be moved onto one."""
+        no_spawn = str(self.env.get("PSEUDOLIFE_MCP_NO_SPAWN", "")).strip().lower()
+        if no_spawn in ("1", "true", "yes", "on"):
+            return False
+        url = str(self.env.get("PSEUDOLIFE_MCP_DAEMON_URL", "")).strip().lower()
+        host = url.split("://", 1)[-1].split("/", 1)[0].split("@")[-1].rsplit(":", 1)[0].strip("[]")
+        return host in ("", "127.0.0.1", "localhost", "::1")
 
 
 def _claude_config_file(env: dict) -> Path:
@@ -830,8 +908,10 @@ def _json_registrations(client: str, path: Path, keys: Iterable[str]) -> list[Re
         if entry.get("type") not in (None, "stdio"):
             continue
         args = entry.get("args") if isinstance(entry.get("args"), list) else []
+        env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
         found.append(Registration(client, path, key, entry["command"], [str(a) for a in args],
-                                  entry.get("cwd") if isinstance(entry.get("cwd"), str) else None))
+                                  entry.get("cwd") if isinstance(entry.get("cwd"), str) else None,
+                                  {str(k): str(v) for k, v in env.items()}))
     return found
 
 
@@ -861,8 +941,10 @@ def _codex_registrations(path: Path) -> list[Registration]:
     if not isinstance(entry, dict) or not isinstance(entry.get("command"), str):
         return []
     args = entry.get("args") if isinstance(entry.get("args"), list) else []
+    env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
     return [Registration("codex", path, SERVER, entry["command"], [str(a) for a in args],
-                         entry.get("cwd") if isinstance(entry.get("cwd"), str) else None)]
+                         entry.get("cwd") if isinstance(entry.get("cwd"), str) else None,
+                         {str(k): str(v) for k, v in env.items()})]
 
 
 def find_registrations(env: dict | None = None, windows: bool | None = None) -> list[Registration]:
@@ -892,10 +974,13 @@ def registers_launcher(registration: Registration, layout: Layout) -> bool:
 
 def registers_runtime_path(registration: Registration, layout: Layout, roots: Iterable[Path] = ()) -> bool:
     """Whether the registration names a shim inside the runtimes root (a
-    managed runtime, or a hand-made one placed there) or under one of
-    ``roots`` (a pipx venv, a pip --user scripts directory the caller has
-    identified as the shim's)."""
-    return _under(registration.command, layout.root) or any(_under(registration.command, r) for r in roots)
+    managed runtime, or a hand-made one placed there), under one of
+    ``roots`` (a pipx venv, a scripts directory the caller has identified
+    as the shim's) or exactly one of them (the launcher file itself, as
+    pipx's bin-dir copy or a pip --user script)."""
+    command = registration.command
+    return (_under(command, layout.root)
+            or any(_under(command, r) or _same_path(command, str(r)) for r in roots))
 
 
 def registered_runtime(registration: Registration, layout: Layout) -> Path | None:
@@ -932,7 +1017,7 @@ _TOML_HEADER = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
 _TOML_KEY = re.compile(r"^\s*(command|args|cwd)\s*=")
 
 
-def _migrate_codex_text(text: str, launcher: str) -> str | None:
+def _migrate_codex_text(text: str, launcher: str, args: list) -> str | None:
     """The config with the shim's table pointed at the launcher, or ``None``
     when the table is not there in a shape this can edit."""
     lines = text.splitlines(keepends=True)
@@ -964,7 +1049,7 @@ def _migrate_codex_text(text: str, launcher: str) -> str | None:
             edited.append(f"command = {_toml_string(launcher)}{newline}")
             saw_command = True
         elif name == "args":
-            edited.append(f"args = []{newline}")
+            edited.append(f"args = {json.dumps(args)}{newline}")
         # cwd: dropped — the launcher needs no working directory.
     if not saw_command:
         return None
@@ -979,42 +1064,50 @@ def migrate_registration(registration: Registration, layout: Layout, *, backup: 
     to change) or ``failed`` (the write did not verify; the backup was put
     back)."""
     launcher = str(layout.launcher)
-    if registers_launcher(registration, layout) and not registration.args and not registration.cwd:
+    args = migrated_args(registration.args)
+    if registers_launcher(registration, layout) and registration.args == args and not registration.cwd:
         return {"state": "current", "detail": f"{registration.client}: already {launcher}", "backup": None}
     path = registration.file
+    shown_args = json.dumps(args)
     if registration.client == "codex":
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
             return {"state": "failed", "detail": f"codex: cannot read {path}: {exc}", "backup": None}
         before = _toml_loads(text)
-        edited = _migrate_codex_text(text, launcher)
+        edited = _migrate_codex_text(text, launcher, args)
         if before is None or edited is None:
             return {"state": "manual",
                     "detail": f"codex: could not edit {path}; set command = {_toml_string(launcher)}, "
-                              f"args = [] and remove cwd under [mcp_servers.{SERVER}]",
+                              f"args = {shown_args} and remove cwd under [mcp_servers.{SERVER}]",
                     "backup": None}
         after = _toml_loads(edited)
-        expected = json.loads(json.dumps(before))
+        expected = copy.deepcopy(before)
         expected["mcp_servers"][SERVER]["command"] = launcher
         expected["mcp_servers"][SERVER].pop("cwd", None)
         if "args" in expected["mcp_servers"][SERVER]:
-            expected["mcp_servers"][SERVER]["args"] = []
+            expected["mcp_servers"][SERVER]["args"] = args
         if after != expected:
             return {"state": "manual",
                     "detail": f"codex: the edit of {path} would change more than the shim's table; "
-                              f"set command = {_toml_string(launcher)}, args = [] and remove cwd under "
-                              f"[mcp_servers.{SERVER}] by hand",
+                              f"set command = {_toml_string(launcher)}, args = {shown_args} and remove cwd "
+                              f"under [mcp_servers.{SERVER}] by hand",
                     "backup": None}
         saved = _backup(path) if backup else None
         try:
-            _write_atomic(path, edited)
-            if _toml_loads(path.read_text(encoding="utf-8")) != expected:
-                raise OSError("read-back differs")
+            _replace_config(path, edited)
         except OSError as exc:
+            # Our own write failed: the file is whatever it was; the backup
+            # is put back only in case the replace left it partial.
             if saved is not None:
                 shutil.copy2(saved, path)
-            return {"state": "failed", "detail": f"codex: writing {path} failed ({exc}); restored", "backup": str(saved) if saved else None}
+            return {"state": "failed", "detail": f"codex: writing {path} failed ({exc}); restored",
+                    "backup": str(saved) if saved else None}
+        if _toml_loads(path.read_text(encoding="utf-8")) != expected:
+            # Someone else wrote after us (Codex itself, say): theirs is the
+            # newer content and stays; the backup is not put over it.
+            return {"state": "failed", "detail": f"codex: {path} changed under the edit (read-back differs); "
+                                                 f"left as it is now, backup kept", "backup": str(saved) if saved else None}
         return {"state": "migrated", "detail": f"codex: {path} now runs {launcher}", "backup": str(saved) if saved else None}
     data = _read_json(path)
     servers = data.get("mcpServers") if data else None
@@ -1024,21 +1117,33 @@ def migrate_registration(registration: Registration, layout: Layout, *, backup: 
                 "backup": None}
     saved = _backup(path) if backup else None
     entry["command"] = launcher
-    entry["args"] = []
+    entry["args"] = args
     entry.pop("cwd", None)
     try:
-        _write_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-        check = _read_json(path)
-        written = (check or {}).get("mcpServers", {}).get(registration.key, {})
-        if written.get("command") != launcher or written.get("args") != []:
-            raise OSError("read-back differs")
+        _replace_config(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
         if saved is not None:
             shutil.copy2(saved, path)
         return {"state": "failed", "detail": f"{registration.client}: writing {path} failed ({exc}); restored",
                 "backup": str(saved) if saved else None}
+    check = _read_json(path)
+    written = (check or {}).get("mcpServers", {}).get(registration.key, {})
+    if written.get("command") != launcher or written.get("args") != args:
+        return {"state": "failed", "detail": f"{registration.client}: {path} changed under the edit (read-back "
+                                             f"differs); left as it is now, backup kept",
+                "backup": str(saved) if saved else None}
     return {"state": "migrated", "detail": f"{registration.client}: {path} [{registration.key}] now runs {launcher}",
             "backup": str(saved) if saved else None}
+
+
+def migrated_args(args: list) -> list:
+    """The arguments a registration keeps on the launcher: a leading
+    ``-m pseudolife_memory.cli`` (the Codex registration form) goes, a mode
+    such as ``channel`` stays."""
+    args = [str(a) for a in args]
+    if len(args) >= 2 and args[0] == "-m" and args[1] in ("pseudolife_memory.cli", "pseudolife_memory"):
+        return args[2:]
+    return args
 
 
 def registers_bare_shim(registration: Registration) -> bool:

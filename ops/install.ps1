@@ -1727,11 +1727,14 @@ function Write-UnverifiedNoSpawnGuard([string]$client, [string]$verification) {
     Write-Host "  Edit the existing registration in place and set PSEUDOLIFE_MCP_NO_SPAWN=1; preserve its command, arguments, daemon URL, token file, and all other environment values."
     Write-Host "  Re-run this installer after verifying the effective value with $verification."
 }
-function Test-ShimRegistrationMigrates($Client) {
+function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
     # $true once the client's registration runs the launcher (moved now, or
     # already there). Only the side-by-side runtime takes a registration
-    # over; the file is backed up first. Exit 3 (nothing to move) and 1 (the
-    # write failed) both leave the registration as it was.
+    # over; the file is backed up first. $RegisteredPath names the exact
+    # file the registration was found to run (a pipx bin-dir copy, a pip
+    # --user script), so it moves even when it is not under a known root.
+    # Exit 3 (nothing to move) and 1 (the write failed) both leave the
+    # registration as it was.
     # Without a runtime python there is no launcher to move to, and the
     # pipx / pip fallback must not be triggered for a registration that is
     # only being looked at.
@@ -1741,6 +1744,7 @@ function Test-ShimRegistrationMigrates($Client) {
     if ($script:shimManagerKind -ne "runtime") { return $false }
     $migrateArgs = @("migrate", "--client", $Client, "--bare")
     if ($script:shimPipxVenv) { $migrateArgs += @("--from", $script:shimPipxVenv) }
+    if ($RegisteredPath) { $migrateArgs += @("--from", $RegisteredPath) }
     & $script:shimPython (Join-Path $repo "ops\shim_runtime.py") @migrateArgs 2>&1 | Out-Host
     return ($LASTEXITCODE -eq 0)
 }
@@ -1995,9 +1999,16 @@ foreach ($selectedClient in $clients) {
                             $mcpState["codex"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the side-by-side launcher
-                            [void](Test-ShimRegistrationMigrates "codex")
-                            Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
-                            $mcpState["codex"] = "present-upgraded"
+                            if ($script:shimManagerKind -ne "runtime") {
+                                Step "Codex registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                $mcpState["codex"] = "present-upgraded"
+                            } elseif (Test-ShimRegistrationMigrates "codex" $registeredShim) {
+                                Step "Codex registration moved to the shim launcher; a new shim runtime was installed from this checkout."
+                                $mcpState["codex"] = "present-upgraded"
+                            } else {
+                                Write-Warning "The Codex registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client codex --from `"$registeredShim`""
+                                $mcpState["codex"] = "failed"
+                            }
                         } elseif (Test-ShimRegistrationMigrates "codex") {
                             Step "Codex registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
                             $mcpState["codex"] = "present-upgraded"
@@ -2101,9 +2112,16 @@ foreach ($selectedClient in $clients) {
                             $mcpState["gemini"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the side-by-side launcher
-                            [void](Test-ShimRegistrationMigrates "gemini")
-                            Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
-                            $mcpState["gemini"] = "present-upgraded"
+                            if ($script:shimManagerKind -ne "runtime") {
+                                Step "Gemini CLI registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                $mcpState["gemini"] = "present-upgraded"
+                            } elseif (Test-ShimRegistrationMigrates "gemini" $registeredShim) {
+                                Step "Gemini CLI registration moved to the shim launcher; a new shim runtime was installed from this checkout."
+                                $mcpState["gemini"] = "present-upgraded"
+                            } else {
+                                Write-Warning "The Gemini CLI registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client gemini --from `"$registeredShim`""
+                                $mcpState["gemini"] = "failed"
+                            }
                         } elseif (Test-ShimRegistrationMigrates "gemini") {
                             Step "Gemini CLI registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
                             $mcpState["gemini"] = "present-upgraded"
@@ -2199,9 +2217,16 @@ foreach ($selectedClient in $clients) {
                             $mcpState["claude"] = "failed"
                         } elseif (-not $bareRegisteredShim) {
                             # a pipx or pip launcher registration moves to the side-by-side launcher
-                            [void](Test-ShimRegistrationMigrates "claude-code")
-                            Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
-                            $mcpState["claude"] = "present-upgraded"
+                            if ($script:shimManagerKind -ne "runtime") {
+                                Step "Claude Code registration preserved; upgraded its pseudolife-mcp shim from this checkout."
+                                $mcpState["claude"] = "present-upgraded"
+                            } elseif (Test-ShimRegistrationMigrates "claude-code" $registeredShim) {
+                                Step "Claude Code registration moved to the shim launcher; a new shim runtime was installed from this checkout."
+                                $mcpState["claude"] = "present-upgraded"
+                            } else {
+                                Write-Warning "The Claude Code registration still names $registeredShim, which nothing upgrades any more: a new shim runtime was installed but the registration could not be moved to its launcher (see above). Move it by hand: python ops\\shim_runtime.py migrate --client claude-code --from `"$registeredShim`""
+                                $mcpState["claude"] = "failed"
+                            }
                         } elseif (Test-ShimRegistrationMigrates "claude-code") {
                             Step "Claude Code registration moved from bare pseudolife-mcp to the shim launcher; a new shim runtime was installed from this checkout."
                             $mcpState["claude"] = "present-upgraded"

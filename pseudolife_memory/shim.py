@@ -484,9 +484,10 @@ def _accept_health(url: str, health: dict) -> dict:
     if _version_note(url, health):
         print(
             f"[shim] this shim is pseudolife-mcp {__version__} but the daemon "
-            f"at {url} is {health['version']} — reinstall the shim from the "
-            f"daemon's checkout (re-run the installer, or pipx install --force "
-            f"<checkout>), or redeploy the daemon (ops/update.ps1 / update.sh).",
+            f"at {url} is {health['version']} — install the daemon's checkout as a "
+            f"new shim runtime beside this one (re-run the installer, or from that "
+            f"checkout: python ops/update_clients.py --only shim), or redeploy the "
+            f"daemon (ops/update.ps1 / update.sh); then start a new session.",
             file=sys.stderr,
         )
     return _notice_if_cortex_is_inert(health)
@@ -505,8 +506,9 @@ def _version_note(url: str, health: dict) -> str:
             or not re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", daemon_version)):
         return ""
     return (f"Pseudolife-MCP: this shim is pseudolife-mcp {__version__} but the "
-            f"daemon at {url} is {daemon_version}; reinstall the shim from the "
-            f"daemon's checkout (re-run the installer) or redeploy the daemon.")
+            f"daemon at {url} is {daemon_version}; install the daemon's checkout as a "
+            f"new shim runtime (re-run the installer, or python ops/update_clients.py "
+            f"--only shim from that checkout) or redeploy the daemon, then start a new session.")
 
 
 def _exit_unreachable(url: str) -> NoReturn:

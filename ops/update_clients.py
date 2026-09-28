@@ -371,21 +371,35 @@ def update_shim(repo: Path) -> dict:
         if not isinstance(pipx_listing, dict):
             pipx_listing = {}
     pipx_roots = _pipx_venv_roots(pipx_listing)
+    if pipx:
+        # pipx exposes a COPY of the launcher in its bin dir on Windows
+        # without Developer Mode (no symlink): that copy is pipx's too.
+        code, text = run_cli([pipx, "environment", "--value", "PIPX_BIN_DIR"])
+        bin_dir = text.strip().splitlines()[-1].strip() if code == 0 and text.strip() else ""
+        if bin_dir:
+            pipx_roots.append(Path(bin_dir) / f"pseudolife-mcp{'.exe' if os.name == 'nt' else ''}")
     managed: list = []          # (registration, kind)
     results: list[dict] = []
     for registration in registrations:
         if rt.registers_launcher(registration, layout):
             managed.append((registration, "launcher"))
             continue
-        if any(rt.registers_runtime_path(registration, layout, [root]) and not rt.registers_runtime_path(
-                registration, layout) for root in pipx_roots):
-            managed.append((registration, "pipx"))
-            continue
         if rt.registers_runtime_path(registration, layout):
             managed.append((registration, "runtime"))
             continue
-        kind, interpreter = _classify(registration.command, " ".join(registration.args), repo, pipx_listing)
-        if kind in ("pipx", "pip", "pip-user"):
+        pipx_owned = rt.registers_runtime_path(registration, layout, pipx_roots)
+        kind, interpreter = ("pipx", None) if pipx_owned else _classify(
+            registration.command, " ".join(registration.args), repo, pipx_listing)
+        if kind in ("pipx", "pip", "pip-user") and registration.spawns_a_daemon:
+            # A shim runtime holds no daemon (no torch): a registration that
+            # would spawn one (pip / lite tier, no PSEUDOLIFE_MCP_NO_SPAWN)
+            # stays where its full install is.
+            results.append({"state": "spawning",
+                            "detail": f"{registration.client}: {registration.command} spawns its own daemon "
+                                      "(no PSEUDOLIFE_MCP_NO_SPAWN=1 and a loopback daemon URL), which a shim "
+                                      "runtime cannot serve; left as it is. Upgrade its own install: "
+                                      f"<its python> -m pip install --upgrade \"{repo}\""})
+        elif kind in ("pipx", "pip", "pip-user"):
             managed.append((registration, kind))
         elif kind == "editable":
             venv_python = interpreter or _interpreter_beside(Path(registration.command)) \
@@ -412,7 +426,7 @@ def update_shim(repo: Path) -> dict:
                                       "pip --user); upgrade it in its own environment, e.g. <its python> -m pip "
                                       f"install --upgrade \"{repo}\""})
     if not managed:
-        order = ("failed", "unknown", "editable", "unmanaged")
+        order = ("failed", "unknown", "spawning", "editable", "unmanaged")
         results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
@@ -639,7 +653,7 @@ def check_codex_hooks(repo: Path) -> dict:
 def _marker(state: str) -> str:
     if state == "failed":
         return "[!]"
-    if state.startswith(("installed", "refreshed", "current")) or state == "editable":
+    if state.startswith(("installed", "refreshed", "current")) or state in ("editable", "spawning"):
         return "[x]"
     if state in ("stale", "needs-approval"):
         return "[!]"

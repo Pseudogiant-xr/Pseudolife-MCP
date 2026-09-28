@@ -13,7 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the package and the shim's dependencies only, plus a `runtime.json`
   marker written last), and every client registration points at ONE
   launcher path (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
-  `~/.local/bin/pseudolife-mcp`) that starts the newest complete runtime.
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp` — not `~/.local/bin`,
+  the file pip --user and pipx own) that starts the newest complete runtime.
   Sessions already running keep the runtime they started with; the next
   session start uses the new one; a runtime is removed only when no process
   runs from it and no registration names it (the process-table check the
@@ -35,7 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names the ones still held or hand-made. The `in-use` refusal, the pip
   stash restore and the "close every session and rerun" instruction are
   gone with the in-place upgrade they guarded. An editable checkout
-  `.venv` is still named, never reinstalled.
+  `.venv` is still named, never reinstalled, and a registration that would
+  spawn its own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1`, loopback URL: the
+  pip and lite tiers) is left where its full install is, since a shim
+  runtime cannot serve. Migration keeps a mode argument (`channel`), the
+  file's permission bits and a dotfile symlink; pipx's bin-dir copy of the
+  launcher and a pip --user script are moved by their exact path. The
+  shim's and `doctor`'s version-mismatch advice name the runtime install
+  instead of `pipx install --force`.
 - The installers (`ops/install.sh`, `ops/install.ps1`) install the shim
   runtime first and register the launcher; pipx / `pip install --user`
   remain the fallback for a host whose Python cannot make a virtualenv, with

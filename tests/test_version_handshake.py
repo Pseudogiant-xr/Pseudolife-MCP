@@ -159,7 +159,7 @@ def test_shim_accept_health_says_one_line_when_it_is_not_the_daemon_version(caps
     assert err.count("[shim]") == 1
     assert f"shim is pseudolife-mcp {__version__}" in err
     assert "daemon at http://127.0.0.1:8765 is 0.0.1" in err
-    assert "pipx install --force" in err
+    assert "update_clients.py --only shim" in err
 
 
 def test_shim_accept_health_is_quiet_when_versions_match_or_are_unknown(capsys):
@@ -215,7 +215,7 @@ def test_doctor_reports_a_shim_daemon_version_mismatch(monkeypatch, capsys):
     assert report["daemon_version"] == "0.0.1"
     assert report["version_mismatch"] is True
     assert "0.0.1" in report["recovery"] and report["pseudolife-mcp"] in report["recovery"]
-    assert "pipx install --force" in report["recovery"]
+    assert "update_clients.py --only shim" in report["recovery"]
     assert "ops/update" in report["recovery"]
 
 

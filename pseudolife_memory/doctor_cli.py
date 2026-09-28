@@ -318,10 +318,11 @@ def run_doctor() -> None:
                 report["version_mismatch"] = True
                 report["recovery"] = (
                     f"The shim is pseudolife-mcp {report['pseudolife-mcp']} but the daemon "
-                    f"is {report['daemon_version']}. Reinstall the shim from the daemon's "
-                    f"checkout in the registered interpreter (re-run the installer, or "
-                    f"pipx install --force <checkout>), or redeploy the daemon "
-                    f"(ops/update.ps1 / ops/update.sh); then retry.")
+                    f"is {report['daemon_version']}. Install the daemon's checkout as a new shim "
+                    f"runtime beside the running one (re-run the installer, or from that "
+                    f"checkout: python ops/update_clients.py --only shim; no session has to "
+                    f"close), or redeploy the daemon (ops/update.ps1 / ops/update.sh); then "
+                    f"start a new session and retry.")
     except TimeoutError:
         report["error"] = "TimeoutError"
         report["recovery"] = "Check daemon health and MCP access; if startup is slow, retry doctor with a larger --timeout budget."

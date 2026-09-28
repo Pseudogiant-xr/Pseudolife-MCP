@@ -419,7 +419,7 @@ Add-Content -LiteralPath '{escaped_log}' -Value ('resolved|' + $script:shimInsta
 @pytest.mark.parametrize("state", ["fresh", "stale"])
 def test_install_ps1_installs_a_side_by_side_runtime_behind_the_launcher(tmp_path: Path, state: str) -> None:
     calls, resolved, diagnostics = _run_powershell_helper(tmp_path, manager="runtime", state=state)
-    assert calls == [f"python|{ROOT}\ops\shim_runtime.py install --source {ROOT} --python python"]
+    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python"]
     assert Path(resolved).name == "pseudolife-mcp.exe"
     assert Path(resolved).parent.name == "installed"
     assert "falling back" not in diagnostics
@@ -448,7 +448,7 @@ def test_install_ps1_pip_uses_upgrade_from_checkout_once(tmp_path: Path, state: 
     fallback runs as before."""
     calls, resolved, diagnostics = _run_powershell_helper(tmp_path, manager="pip", state=state)
     assert "falling back to pipx / pip --user" in diagnostics
-    assert calls == [f"python|{ROOT}\ops\shim_runtime.py install --source {ROOT} --python python",
+    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python",
                      "python|-c import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
                      f"python|-m pip install --user --upgrade {ROOT}",
                      ("python|-c import sysconfig; "

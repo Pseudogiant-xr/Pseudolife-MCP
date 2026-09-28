@@ -2182,7 +2182,7 @@ The installers put the shim into its own **runtime** and register one
 | | Windows | Linux / macOS |
 |---|---|---|
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
-| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `~/.local/bin/pseudolife-mcp` |
+| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp` (not `~/.local/bin`, which pip --user and pipx own) |
 
 A runtime is a plain virtualenv holding the package (`pip install
 --no-deps`) and the shim's own dependencies — not torch, chromadb or the
@@ -2200,7 +2200,12 @@ start takes the new one, and an old runtime is removed (by the same step,
 or `shim_runtime.py prune`) only once no process runs from it and no
 registration names it. A registration that still names a runtime, pipx or
 virtualenv path directly is moved to the launcher in place, the file
-backed up first (`shim_runtime.py migrate`). Set `PSEUDOLIFE_SHIM_PYTHON`
+backed up first and its permission bits kept (`shim_runtime.py migrate`); a
+mode argument such as `channel` stays. A registration that would spawn its
+own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon URL — the
+pip and lite tiers) is never moved onto a shim runtime, which cannot serve.
+The launcher directory is not on `PATH`; run `pseudolife-mcp doctor` and
+friends through its full path. Set `PSEUDOLIFE_SHIM_PYTHON`
 to choose the interpreter the runtimes are created from;
 `PSEUDOLIFE_SHIM_RUNTIMES` and `PSEUDOLIFE_SHIM_LAUNCHER` (together) move
 both paths. A host whose Python cannot make a virtualenv falls back to the

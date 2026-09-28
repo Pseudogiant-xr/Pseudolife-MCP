@@ -633,7 +633,10 @@ into its own **runtime** (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN`
 on Windows, `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere) and
 every client registers one **launcher** path
 (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` /
-`~/.local/bin/pseudolife-mcp`) that starts the newest complete runtime.
+`~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) that starts the newest
+complete runtime. Neither directory is on `PATH`: run `doctor`, `lease` or
+`wait-mail` through the launcher's full path, or add its directory to
+`PATH` yourself.
 The step installs the checkout as a new runtime beside the old one, moves
 any registration that still names a runtime, pipx or virtualenv path to
 the launcher in place (Claude Code, Codex, Claude Desktop and Gemini CLI;

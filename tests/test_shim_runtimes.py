@@ -445,11 +445,12 @@ def test_the_real_windows_launcher_runs_the_runtime_it_chooses(tmp_path):
 
 
 def test_the_checkout_script_runs_without_an_installed_package(tmp_path):
+    launcher = tmp_path / "bin" / _console_name("windows" if os.name == "nt" else "posix")
     env = {**os.environ, "PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "runtimes"),
-           "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "bin" / "pseudolife-mcp")}
+           "PSEUDOLIFE_SHIM_LAUNCHER": str(launcher)}
     proc = subprocess.run([sys.executable, str(ROOT / "ops" / "shim_runtime.py"), "launcher"],
                           capture_output=True, text=True, env=env, timeout=60)
-    assert proc.returncode == 0 and proc.stdout.strip() == str(tmp_path / "bin" / "pseudolife-mcp")
+    assert proc.returncode == 0 and proc.stdout.strip() == str(launcher)
     proc = subprocess.run([sys.executable, str(ROOT / "ops" / "shim_runtime.py"), "launcher", "--if-installed"],
                           capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode == 3
@@ -459,18 +460,26 @@ def test_the_checkout_script_runs_without_an_installed_package(tmp_path):
 
 
 def test_default_layout_by_platform(tmp_path):
-    windows = rt.default_layout({"LOCALAPPDATA": r"C:\Users\u\AppData\Local", "USERPROFILE": r"C:\Users\u"},
-                                windows=True)
-    assert windows.root == Path(r"C:\Users\u\AppData\Local\pseudolife-mcp\runtimes")
-    assert windows.launcher == Path(r"C:\Users\u\AppData\Local\pseudolife-mcp\bin\pseudolife-mcp.exe")
+    local = r"X:\profile\AppData\Local"
+    windows = rt.default_layout({"LOCALAPPDATA": local, "USERPROFILE": r"X:\profile"}, windows=True)
+    assert windows.root == Path(local) / "pseudolife-mcp" / "runtimes"
+    assert windows.launcher == Path(local) / "pseudolife-mcp" / "bin" / "pseudolife-mcp.exe"
     posix = rt.default_layout({"HOME": "/home/u"}, windows=False)
     assert posix.root == Path("/home/u/.local/share/pseudolife-mcp/runtimes")
-    assert posix.launcher == Path("/home/u/.local/bin/pseudolife-mcp")
+    # not ~/.local/bin: pip --user and pipx write that file
+    assert posix.launcher == Path("/home/u/.local/share/pseudolife-mcp/bin/pseudolife-mcp")
     xdg = rt.default_layout({"HOME": "/home/u", "XDG_DATA_HOME": "/data"}, windows=False)
     assert xdg.root == Path("/data/pseudolife-mcp/runtimes")
     overridden = rt.default_layout({"HOME": "/home/u", "PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "r"),
                                     "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l")}, windows=False)
     assert overridden == rt.Layout(tmp_path / "r", tmp_path / "l")
+    # the launcher's suffix decides the runtime shape, so an override must match the platform
+    with pytest.raises(ValueError):
+        rt.default_layout({"PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "r"),
+                           "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l")}, windows=True)
+    with pytest.raises(ValueError):
+        rt.default_layout({"PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "r"),
+                           "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l.exe")}, windows=False)
 
 
 # ── registrations ───────────────────────────────────────────────────────────
@@ -613,13 +622,14 @@ def test_a_codex_table_the_editor_cannot_isolate_is_reported_for_hand_editing(tm
                       'args = ["-m", "pseudolife_memory.cli"] } }\n', encoding="utf-8")
     [codex] = [r for r in rt.find_registrations(env, windows=True) if r.client == "codex"]
     result = rt.migrate_registration(codex, layout)
-    assert result["state"] == "manual" and "by hand" in result["detail"] or "set command" in result["detail"]
+    assert result["state"] == "manual"
+    assert "by hand" in result["detail"] or "set command" in result["detail"]
     assert config.read_text(encoding="utf-8").startswith("mcp_servers = {")
     assert not list(home.rglob("*.bak-*"))
 
 
 def test_codex_registration_migrates_from_the_checkout_script(tmp_path):
-    layout = _layout(tmp_path, "windows")
+    layout = _layout(tmp_path, "windows" if os.name == "nt" else "posix")
     runtime = layout.root / "coordination-e41a575a"
     home, env = _fixture_home(tmp_path, layout, runtime)
     env = {**os.environ, **env, "PSEUDOLIFE_SHIM_RUNTIMES": str(layout.root),
@@ -645,3 +655,121 @@ def test_codex_registration_migrates_from_the_checkout_script(tmp_path):
     assert proc.returncode == 0
     gemini = json.loads((home / ".gemini" / "settings.json").read_text(encoding="utf-8"))
     assert gemini["mcpServers"]["pseudolife-memory"]["command"] == str(layout.launcher)
+
+
+# ── review fixes (2026-09-29) ───────────────────────────────────────────────
+
+def test_migration_keeps_a_mode_argument_and_drops_only_the_module_prefix(tmp_path):
+    """`channel` is an opt-in shim mode: a registration running it must keep
+    it on the launcher; Codex's `-m pseudolife_memory.cli channel` form
+    loses only the module prefix. A registration already on the launcher
+    with a mode is current, not rewritten."""
+    layout = _layout(tmp_path, "windows")
+    runtime = layout.root / "coordination-e41a575a"
+    home, env = _fixture_home(tmp_path, layout, runtime)
+    claude = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
+    claude["mcpServers"]["pseudolife-memory"]["args"] = ["channel"]
+    (home / ".claude.json").write_text(json.dumps(claude), encoding="utf-8")
+    config = home / ".codex" / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8").replace(
+        'args = ["-m", "pseudolife_memory.cli"]', 'args = ["-m", "pseudolife_memory.cli", "channel"]'), encoding="utf-8")
+    results = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True))
+    by_client = {r["client"]: r["state"] for r in results}
+    assert by_client["claude-code"] == "migrated" and by_client["codex"] == "migrated"
+    assert json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["args"] == ["channel"]
+    import tomllib
+    assert tomllib.loads(config.read_text(encoding="utf-8"))["mcp_servers"]["pseudolife-memory"]["args"] == ["channel"]
+    again = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True))
+    assert {r["client"]: r["state"] for r in again}["claude-code"] == "current"
+    assert rt.migrated_args(["-m", "pseudolife_memory.cli"]) == []
+    assert rt.migrated_args(["-m", "pseudolife_memory", "channel"]) == ["channel"]
+    assert rt.migrated_args(["channel"]) == ["channel"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_migration_keeps_the_config_files_permission_bits(tmp_path):
+    layout = _layout(tmp_path, "posix")
+    runtime = layout.root / "coordination-e41a575a"
+    home, env = _fixture_home(tmp_path, layout, runtime)
+    for path in (home / ".claude.json", home / ".codex" / "config.toml"):
+        path.chmod(0o600)
+    results = rt.migrate_registrations(layout, rt.find_registrations(env, windows=False),
+                                       roots=[runtime])
+    assert [r["state"] for r in results if r["client"] in ("claude-code", "codex")] == ["migrated", "migrated"]
+    for path in (home / ".claude.json", home / ".codex" / "config.toml"):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+
+
+def test_migration_edits_through_a_symlinked_config_file(tmp_path):
+    layout = _layout(tmp_path, "windows")
+    runtime = layout.root / "coordination-e41a575a"
+    home, env = _fixture_home(tmp_path, layout, runtime)
+    real = tmp_path / "dotfiles" / "claude.json"
+    real.parent.mkdir()
+    shutil.move(str(home / ".claude.json"), str(real))
+    try:
+        os.symlink(real, home / ".claude.json")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable here")
+    [claude] = [r for r in rt.find_registrations(env, windows=True) if r.client == "claude-code"]
+    result = rt.migrate_registration(claude, layout)
+    assert result["state"] == "migrated"
+    assert (home / ".claude.json").is_symlink()
+    assert json.loads(real.read_text(encoding="utf-8"))["mcpServers"]["pseudolife-memory"]["command"] == str(layout.launcher)
+
+
+def test_a_root_that_is_the_registered_file_itself_matches(tmp_path):
+    """pipx exposes a COPY of the launcher in its bin dir on Windows and pip
+    --user writes a script beside other tools': the installer passes that
+    exact path, which must count even though nothing is under it."""
+    layout = _layout(tmp_path, "windows")
+    launcher = tmp_path / "pipx-bin" / "pseudolife-mcp.exe"
+    registration = rt.Registration("claude-code", tmp_path / "x.json", "pseudolife-memory", str(launcher))
+    assert rt.registers_runtime_path(registration, layout, [launcher])
+    assert not rt.registers_runtime_path(registration, layout, [tmp_path / "pipx-bin" / "other.exe"])
+    assert not rt.registers_runtime_path(registration, layout, [])
+
+
+def test_a_registration_that_would_spawn_a_daemon_is_recognised(tmp_path):
+    reg = lambda env: rt.Registration("claude-code", tmp_path / "x.json", "pseudolife-memory", "x", env=env)
+    assert reg({}).spawns_a_daemon
+    assert reg({"PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"}).spawns_a_daemon
+    assert not reg({"PSEUDOLIFE_MCP_NO_SPAWN": "1"}).spawns_a_daemon
+    assert not reg({"PSEUDOLIFE_MCP_DAEMON_URL": "http://100.64.0.2:8765"}).spawns_a_daemon
+    assert not reg({"PSEUDOLIFE_MCP_DAEMON_URL": "https://bank.example.com"}).spawns_a_daemon
+
+
+def test_a_refused_launcher_swap_puts_the_old_launcher_back(tmp_path, monkeypatch):
+    """Every registration names the launcher: a replace the OS refuses (a
+    scanner holding the fresh .exe) must not leave the path empty."""
+    tools = FakeTools("windows")
+    layout = _layout(tmp_path, "windows")
+    _install(layout, tools, "0.15.0")
+    before = layout.launcher.read_bytes()
+    record = layout.launcher.with_name("pseudolife-mcp.exe.json")
+    record.write_text(json.dumps({"root": "elsewhere"}), encoding="utf-8")
+
+    def refuse(source, target, attempts=5):
+        raise PermissionError("[WinError 5] Access is denied")
+
+    monkeypatch.setattr(rt, "_replace_with_retry", refuse)
+    with pytest.raises(PermissionError):
+        rt.ensure_launcher(layout, run=tools)
+    assert layout.launcher.read_bytes() == before
+    assert not list(layout.launcher_dir.glob("pseudolife-mcp.exe.old-*"))
+    assert not list(layout.launcher_dir.glob("pseudolife-launcher-*"))
+
+
+def test_a_given_venv_interpreter_is_reduced_to_its_base(tmp_path):
+    """A runtime created from someone's .venv python would die with that
+    venv: the base interpreter named in pyvenv.cfg is used instead."""
+    venv = tmp_path / "dev-venv"
+    python = _real_venv(venv)
+    base = rt.base_interpreter(str(python))
+    assert Path(base).resolve() != python.resolve()
+    assert Path(base).is_file() and (tmp_path / "dev-venv" / "pyvenv.cfg").is_file()
+    # a venv made from that venv still resolves to the real base
+    inner = tmp_path / "inner"
+    subprocess.run([str(python), "-m", "venv", "--without-pip", str(inner)], check=True, capture_output=True, timeout=180)
+    inner_python = inner / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
+    assert Path(rt.base_interpreter(str(inner_python))).resolve() == Path(base).resolve()

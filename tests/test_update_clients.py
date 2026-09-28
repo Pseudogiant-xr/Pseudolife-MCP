@@ -45,6 +45,7 @@ class FakeCli:
         self.home = home
         self.calls: list[list[str]] = []
         self.pipx_list = (1, "")
+        self.pipx_bin_dir: str | None = None
         self.venv = (0, "")
         self.pip_no_deps = (0, "Successfully installed pseudolife-mcp")
         self.pip_deps = (0, "Successfully installed mcp")
@@ -117,6 +118,8 @@ class FakeCli:
             return (0, str(self.user_scripts)) if self.user_scripts else (1, "no user scheme")
         if name == "pipx" and rest[:2] == ["list", "--json"]:
             return self.pipx_list
+        if name == "pipx" and rest[:3] == ["environment", "--value", "PIPX_BIN_DIR"]:
+            return (0, self.pipx_bin_dir + "\n") if self.pipx_bin_dir else (1, "")
         if name == "claude" and rest[:3] == ["plugin", "marketplace", "update"]:
             return self.marketplace_update
         if name == "claude" and rest[:3] == ["plugin", "install", "--help"]:
@@ -222,7 +225,8 @@ def _register_codex(cli, command: str, args: list[str] | None = None, cwd: str |
         f"args = {json.dumps(args or [])}\n"
         "startup_timeout_sec = 240\n"
         + (f"cwd = '{cwd}'\n" if cwd else "")
-        + "\n[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_WRITER_ID = \"codex\"\n")
+        + "\n[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_WRITER_ID = \"codex\"\n"
+        + "PSEUDOLIFE_MCP_NO_SPAWN = \"1\"\n")
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -302,7 +306,8 @@ def test_registrations_naming_a_runtime_path_are_moved_to_the_launcher_with_back
     codex = tomllib.loads((cli.home / "codex" / "config.toml").read_text(encoding="utf-8"))
     table = codex["mcp_servers"]["pseudolife-memory"]
     assert table["command"] == str(layout.launcher) and table["args"] == [] and "cwd" not in table
-    assert table["startup_timeout_sec"] == 240 and table["env"] == {"PSEUDOLIFE_WRITER_ID": "codex"}
+    assert table["startup_timeout_sec"] == 240
+    assert table["env"] == {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_NO_SPAWN": "1"}
     gemini = _read(cli.home / ".gemini" / "settings.json")["mcpServers"]["pseudolife-memory"]
     assert gemini["command"] == str(layout.launcher)
     backups = sorted(p.name for p in cli.home.rglob("*.bak-*"))
@@ -574,6 +579,41 @@ def test_main_reports_an_installed_runtime_as_done(cli, capsys):
     out = capsys.readouterr().out
     assert "[x] Shim" in out and "installed:0.15.0" in out
 
+
+
+def test_a_registration_that_spawns_its_own_daemon_is_left_where_its_full_install_is(cli, tmp_path):
+    """A pip/lite-tier registration with no PSEUDOLIFE_MCP_NO_SPAWN relies on
+    the spawn fallback, which a shim runtime (no torch) cannot serve."""
+    scripts = tmp_path / "venv" / SCRIPTS
+    scripts.mkdir(parents=True)
+    (scripts / f"python{EXE}").write_text("", encoding="utf-8")
+    (tmp_path / "venv" / "pyvenv.cfg").write_text("", encoding="utf-8")
+    path = cli.home / ".claude.json"
+    path.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "type": "stdio", "command": str(scripts / f"pseudolife-mcp{EXE}"), "args": [],
+        "env": {"PSEUDOLIFE_WRITER_ID": "claude-code"}}}}), encoding="utf-8")
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "spawning" and "spawns its own daemon" in result["detail"]
+    assert not _install_calls(cli) and _runtime_dirs(cli) == []
+    assert _read(path)["mcpServers"]["pseudolife-memory"]["command"] == str(scripts / f"pseudolife-mcp{EXE}")
+
+
+def test_pipx_bin_dir_copy_of_the_launcher_moves_to_the_launcher(cli, tmp_path):
+    """On Windows without Developer Mode pipx puts a copy (not a symlink) of
+    the launcher in its bin dir; `pipx list` does not name it, so the bin
+    dir is asked for."""
+    bin_dir = tmp_path / "pipx-home" / "bin"
+    bin_dir.mkdir(parents=True)
+    copy = bin_dir / f"pseudolife-mcp{EXE}"
+    copy.write_text("", encoding="utf-8")
+    cli.pipx_list = (0, json.dumps({"venvs": {"pseudolife-mcp": {"metadata": {"main_package": {
+        "app_paths": [{"__Path__": str(tmp_path / "pipx-home" / "venvs" / "pseudolife-mcp" / SCRIPTS / f"pseudolife-mcp{EXE}")}]}}}}}))
+    cli.pipx_bin_dir = str(bin_dir)
+    _register_claude(cli, str(copy))
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0", result
+    assert _read(cli.home / ".claude.json")["mcpServers"]["pseudolife-memory"]["command"] == str(_layout(cli).launcher)
+    assert "pipx uninstall pseudolife-mcp" in result["detail"]
 
 # ── the plugin cache ────────────────────────────────────────────────────────
 
