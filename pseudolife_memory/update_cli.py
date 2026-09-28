@@ -135,6 +135,8 @@ class Options:
     clients_only: bool = False
     daemon_only: bool = False
     reinstall: bool = False            # release mode: proceed at the same version
+    allow_downgrade: bool = False      # release mode: a target older than the daemon
+    env_file: Path | None = None       # release mode: the compose env file when the labelled one is gone
     check: bool = False
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
@@ -265,12 +267,22 @@ class Update:
         return self.report.exit_code
 
     def _run(self) -> None:
+        if self.o.checkout is not None:
+            for name, value in (("--clients-only", self.o.clients_only), ("--tag", self.o.tag),
+                                ("--reinstall", self.o.reinstall), ("--allow-downgrade", self.o.allow_downgrade),
+                                ("--env-file", self.o.env_file)):
+                if value:
+                    raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
+                                      f"holds (for the clients alone: python ops/update_clients.py)", 2)
         tier = self.detect_tier()
         self.report.tier = tier
         if self.o.check:
             self.check_for_release(tier)
             return
         if tier == "pip":
+            if self.o.daemon_only or self.o.clients_only:
+                raise UpdateError("no daemon container here: this is a pip install, which has no daemon/client "
+                                  "halves; run without --daemon-only / --clients-only", 2)
             self.upgrade_pip()
             return
         if self.o.checkout is not None:
@@ -283,14 +295,22 @@ class Update:
     # -- tier --------------------------------------------------------------
     def detect_tier(self) -> str:
         """``docker`` when the daemon container exists (running or stopped)
-        or a checkout with the compose file was named, else ``pip``."""
+        or a checkout with the compose file was named; ``pip`` when Docker
+        answers that there is no such container, or there is no docker at
+        all. Docker present but not answering (Docker Desktop stopped, the
+        engine down) is neither: the daemon may well be a container, so
+        the update stops rather than pip-upgrade the shim's own runtime."""
         if self.o.checkout is not None:
             return "docker"
-        if which(self.docker) or self.docker != "docker":
-            code, _ = run_cli([self.docker, "inspect", "-f", "{{.Id}}", DAEMON_CONTAINER], timeout=60)
-            if code == 0:
-                return "docker"
-        return "pip"
+        if not which(self.docker) and self.docker == "docker":
+            return "pip"
+        code, out = run_cli([self.docker, "inspect", "-f", "{{.Id}}", DAEMON_CONTAINER], timeout=60)
+        if code == 0:
+            return "docker"
+        if "no such object" in out.lower() or "no such container" in out.lower():
+            return "pip"
+        raise UpdateError(f"docker is installed but did not answer ({_last_line(out)}): start Docker and retry. "
+                          f"Nothing was changed", 2)
 
     # -- versions ----------------------------------------------------------
     def latest_release(self) -> str | None:
@@ -314,8 +334,15 @@ class Update:
         latest = self.latest_release()
         if latest:
             return latest
-        self.warn(f"could not read the newest release from PyPI; targeting this package's own version {__version__}")
-        return __version__
+        raise UpdateError("could not read the newest release from PyPI; name one with --tag <version>. "
+                          "Nothing was changed", 2)
+
+    def refuse_downgrade(self, current: str | None, target: str) -> None:
+        if current and version_key(current) and version_key(target) and version_key(target) < version_key(current) \
+                and not self.o.allow_downgrade:
+            raise UpdateError(f"{target} is older than the running {current}; a downgrade needs --tag {target} "
+                              f"--allow-downgrade (the bank's schema may be newer than that release knows). "
+                              f"Nothing was changed", 2)
 
     def check_for_release(self, tier: str) -> None:
         current = self.current_version(tier)
@@ -333,26 +360,49 @@ class Update:
 
     # -- pip tier ----------------------------------------------------------
     def upgrade_pip(self) -> None:
+        """The pip / lite tier: the package is upgraded in the interpreter
+        that holds it. Never in place over a shim runtime (the daemon is a
+        container that was not reachable), an editable checkout (the
+        2026-09-21 incident) or, on Windows, the running install itself
+        (pip cannot replace a running console script); those get the
+        command printed instead."""
+        from pseudolife_memory import client_updates, runtimes
         target = self.target_version()
         self.report.target, self.report.current = target, __version__
-        if self.o.daemon_only:
-            raise UpdateError("no daemon container to update; this is a pip install", 2)
+        self.refuse_downgrade(__version__, target)
         if target == __version__ and not self.o.reinstall:
             self.step(f"pseudolife-mcp {__version__} is already the target version; --reinstall to reinstall")
             return
-        pipx_home = os.environ.get("PIPX_HOME") or str(home() / ".local" / "pipx")
         prefix = Path(sys.prefix)
+        layout = runtimes.default_layout()
+        if runtimes._under(str(prefix), layout.root):
+            raise UpdateError(f"this command runs from the shim runtime {prefix}, which serves no daemon: the "
+                              f"daemon is a container this run could not see. Start Docker and retry; a shim "
+                              f"runtime is never pip-upgraded in place", 2)
+        kind, where = client_updates.install_kind(Path(sys.executable))
+        if kind in ("editable", "unknown"):
+            raise UpdateError(f"the running package is {'an editable install of ' + where if kind == 'editable' else 'of a kind this cannot tell'} "
+                              f"({sys.executable}); it is never pip-upgraded in place. Pull that checkout, or "
+                              f"upgrade it yourself: \"{sys.executable}\" -m pip install --upgrade pseudolife-mcp=={target}", 2)
+        pipx_home = os.environ.get("PIPX_HOME") or str(home() / ".local" / "pipx")
         under_pipx = "pipx" in prefix.parts or str(prefix).lower().startswith(str(pipx_home).lower())
-        if under_pipx and which("pipx"):
-            argv = [which("pipx"), "install", "--force", f"pseudolife-mcp=={target}"]
+        if under_pipx:
+            argv = [which("pipx") or "pipx", "install", "--force", f"pseudolife-mcp=={target}"]
         else:
             argv = [sys.executable, "-m", "pip", "install", "--upgrade", f"pseudolife-mcp=={target}"]
-        self.step(f"upgrading the package: {' '.join(argv)}")
+        shown = " ".join(argv)
+        self.step("a pip install carries the bank with it: back it up first (pseudolife-mcp backup) if you have not")
+        if os.name == "nt" or under_pipx:
+            # pipx deletes the venv this command runs from; on Windows pip cannot
+            # replace the running console script either. The command is the deliverable.
+            self.step(f"run this from a shell where no pseudolife-mcp process is running: {shown}")
+            self.step("then restart the daemon (`pseudolife-mcp serve`) and start new sessions")
+            return
+        self.step(f"upgrading the package: {shown}")
         code, out = run_cli(argv, timeout=1800)
         if code != 0:
-            raise UpdateError(f"the package upgrade failed ({_last_line(out)}); nothing running was changed. "
-                              f"A session or daemon running from this install holds its files on Windows: "
-                              f"stop them and retry, or install the release into a new environment")
+            raise UpdateError(f"the package upgrade failed ({_last_line(out)}); run it yourself with every "
+                              f"pseudolife-mcp process stopped: {shown}")
         self.step(f"pseudolife-mcp {target} installed. Nothing running was restarted: restart the daemon "
                   f"(`pseudolife-mcp serve`) and start new sessions to run it")
 
@@ -376,8 +426,11 @@ class Update:
         checked for the dump's closing marker (a killed dump is a valid gzip
         of a truncated file), and the daemon's /data tarred from inside its
         container. The artifacts land in ``<data dir>/backups`` under the
-        checkout scripts' names, so ``ops/restore.*`` finds them, and this
-        rotates only files it wrote itself."""
+        checkout scripts' names (``ops/restore.* -BackupFile <path>`` reads
+        them; they are not in the checkout's ``data/backups``), and files
+        older than seven days that match those names in that directory are
+        rotated once the new pair is in place. No manifest, row-count gate
+        or mirror: those stay with the checkout's ``ops/backup.*``."""
         out_dir = data_dir() / "backups"
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = _stamp()
@@ -386,6 +439,7 @@ class Update:
         code, out = run_cli([self.docker, "exec", PG_CONTAINER, "sh", "-c",
                              f"pg_dump -U pseudolife -d pseudolife_memory -Z9 > {tmp}"], timeout=3600)
         if code != 0:
+            run_cli([self.docker, "exec", PG_CONTAINER, "rm", "-f", tmp], timeout=120)
             raise UpdateError(f"pg_dump failed inside {PG_CONTAINER} ({_last_line(out)}); nothing was deployed")
         part = dump.with_name(dump.name + ".part")
         code, out = run_cli([self.docker, "cp", f"{PG_CONTAINER}:{tmp}", str(part)], timeout=3600)
@@ -405,8 +459,12 @@ class Update:
             run_cli([self.docker, "exec", DAEMON_CONTAINER, "rm", "-f", state_tmp], timeout=120)
         if code != 0 or not state.is_file() or state.stat().st_size == 0:
             self.warn(f"the state volume could not be archived ({_last_line(out)}); the bank dump {dump.name} is complete")
-        self.step(f"backup: {dump}" + (f" + {state.name}" if state.is_file() else ""))
-        return {"dump": str(dump), "state": str(state) if state.is_file() else None}
+        self.step(f"backup: {dump}" + (f" + {state.name}" if state.is_file() else "")
+                  + f"; restore with ops/restore.* -BackupFile / --backup-file {dump}")
+        rotated = _rotate_backups(out_dir, keep_days=7, keep={dump.name, state.name})
+        if rotated:
+            self.step(f"rotated {len(rotated)} backup file(s) older than 7 days")
+        return {"dump": str(dump), "state": str(state) if state.is_file() else None, "rotated": rotated}
 
     def running_image(self) -> tuple[str | None, str | None]:
         """``(image id, image ref)`` of the daemon container, or Nones."""
@@ -417,14 +475,18 @@ class Update:
         return image_id.strip() or None, ref.strip() or None
 
     def tag_rollback(self, image_tag: str, running_id: str | None, tag_id: str | None,
-                     source: str | None = None) -> str:
+                     source: str | None = None, rollback: str | None = None,
+                     rollback_lines: list[str] | None = None) -> str:
         """Tag the last-good image (``source``, default the version tag
-        itself) as ``<image_tag>-<suffix>``. Returns the rollback state:
-        ``tagged``, ``kept`` (refused: the version tag is not the running
-        daemon's image, so it is an unvalidated build the 2026-08-13 deploy
-        nearly promoted) or ``none``."""
+        itself) as ``rollback`` (default ``<image_tag>-<suffix>``). Returns
+        the rollback state: ``tagged``, ``kept`` (refused: the version tag
+        is not the running daemon's image, so it is an unvalidated build the
+        2026-08-13 deploy nearly promoted) or ``none``. ``rollback_lines``
+        are the instructions printed for a tagged rollback (release mode
+        passes its own, since the GHCR overlay selects the image through
+        ``PSEUDOLIFE_IMAGE_TAG``)."""
         suffix = self.o.rollback_suffix or f"pre-update-{_stamp()}"
-        rollback = f"{image_tag}-{suffix}"
+        rollback = rollback or f"{image_tag}-{suffix}"
         self.report.rollback = {"tag": rollback, "state": "none", "image_tag": image_tag}
         if not tag_id:
             self.warn(f"no current {image_tag} image to tag (first build, or the version was bumped before this image was ever built)")
@@ -455,8 +517,9 @@ class Update:
         self.step(f"tagged rollback image: {rollback}")
         if self.o.force_rollback_tag and running_id and running_id != tag_id:
             self.warn(f"--force-rollback-tag: tagged {image_tag} even though the running daemon deployed a different image")
-        self.rollback_lines = [f"      docker tag {rollback} {image_tag}",
-                               f"      docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}"]
+        self.rollback_lines = rollback_lines or [
+            f"      docker tag {rollback} {image_tag}",
+            f"      docker compose {self._compose_display()} up -d --no-deps {DAEMON_SERVICE}"]
         return "tagged"
 
     def prune_rollbacks(self, checkout: Path | None, repository: str) -> None:
@@ -465,7 +528,7 @@ class Update:
             flag = "-Keep" if script.suffix == ".ps1" else "--keep"
             repo_flag = "-Repository" if script.suffix == ".ps1" else "--repository"
             code, out = run_cli(self._script_argv(script) + [flag, str(self.o.keep_rollbacks), repo_flag, repository],
-                                timeout=600)
+                                timeout=600, stream=not self.o.as_json)
             if code != 0:
                 self.warn(f"rollback-tag retention failed (deploy continues): {_last_line(out)}")
             return
@@ -519,8 +582,10 @@ class Update:
         self.step(f"healthy. version={health.get('version')} schema={health.get('schema')} "
                   f"persist_errors={health.get('persist_errors')}")
         if expect_version and health.get("version") != expect_version:
-            self.warn(f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
-                      f"the compose project's image setting won; check `docker compose config` for the daemon service")
+            lines = [f"the daemon reports version {health.get('version')}, not the {expect_version} that was pulled: "
+                     f"the compose project's image setting won (check `docker compose config` for the daemon "
+                     f"service). The client side was not moved. To roll back:"] + self.rollback_lines
+            raise UpdateError("\n".join(lines))
         if self.rollback_lines and not self.o.as_json:
             print("    Rolled-back deploy if ever needed:")
             for line in self.rollback_lines:
@@ -533,7 +598,8 @@ class Update:
         script = self._checkout_script(checkout, "prune-build-cache")
         if script is not None:
             flag = "-MaxAgeHours" if script.suffix == ".ps1" else "--max-age-hours"
-            code, out = run_cli(self._script_argv(script) + [flag, str(self.o.keep_cache_hours)], timeout=1800)
+            code, out = run_cli(self._script_argv(script) + [flag, str(self.o.keep_cache_hours)], timeout=1800,
+                                stream=not self.o.as_json)
         else:
             code, out = run_cli([self.docker, "builder", "prune", "-f", "--filter", f"until={self.o.keep_cache_hours}h"],
                                 timeout=1800)
@@ -541,6 +607,10 @@ class Update:
             self.warn(f"build-cache retention failed (deploy already succeeded): {_last_line(out)}")
 
     def clients(self, checkout: Path | None, source: str, health: dict | None) -> None:
+        """The client side. ``checkout`` is the tree the shim runtime comes
+        from in checkout mode; in release mode it is None even when the
+        compose project still has one, so the Codex check compares with the
+        daemon that was just deployed, not with a checkout at some commit."""
         from pseudolife_memory import client_updates
         self.step("updating the client side (shim, plugin cache, Codex hooks)...")
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
@@ -593,8 +663,16 @@ class Update:
             raise UpdateError(f"could not find the {DAEMON_SERVICE} image tag in {compose_file}")
         code, out = run_cli([self.docker, "image", "inspect", "-f", "{{.Id}}", image_tag], timeout=60)
         tag_id = out.strip().splitlines()[-1].strip() if code == 0 and out.strip() else None
-        running_id, _ref = self.running_image()
-        self.tag_rollback(image_tag, running_id, tag_id)
+        running_id, ref = self.running_image()
+        if running_id and ref and ref.split(":")[0] != image_tag.split(":")[0]:
+            # The daemon runs an image from another repository (a release
+            # pulled from GHCR by `pseudolife-mcp update`): that IS the
+            # last-good image, tagged by id; the version-tag guard does not
+            # apply, since the two were never the same build.
+            self.step(f"the running daemon is {ref}, not a local build: tagging it by id for rollback")
+            self.tag_rollback(image_tag, None, running_id, source=running_id)
+        else:
+            self.tag_rollback(image_tag, running_id, tag_id)
         self.prune_rollbacks(repo, image_tag.split(":")[0])
         self.step("rebuilding the daemon only (Postgres + extractor untouched)...")
         now = tree_state(repo)
@@ -620,6 +698,7 @@ class Update:
         if self.o.clients_only:
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
+        self.refuse_downgrade(current, target)
         if current == target and not self.o.reinstall:
             self.step(f"the daemon already runs {target}; nothing to do (--reinstall to recreate it anyway, "
                       f"--clients-only for the shim and plugin)")
@@ -632,14 +711,25 @@ class Update:
         code, out = run_cli([self.docker, "pull", image], timeout=7200, stream=not self.o.as_json)
         if code != 0:
             raise UpdateError(f"docker pull {image} failed" + (f" ({_last_line(out)})" if out.strip() else "")
-                              + "; nothing was changed. Is {target} a published release?")
+                              + f"; nothing was changed. Is {target} a published release?")
         self.backup(context["checkout"])
         running_id, ref = self.running_image()
-        image_tag = ref or f"{GHCR_IMAGE}:{current or 'unknown'}"
-        # By image id: the container's image IS the deployed one, whatever
-        # its tag points at by now.
-        self.tag_rollback(image_tag, running_id, running_id, source=running_id)
-        self.prune_rollbacks(context["checkout"], image_tag.split(":")[0])
+        if not running_id:
+            raise UpdateError(f"the {DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
+        # The rollback tag lives in the GHCR repository: the overlay picks the
+        # daemon's image as ghcr.io/...:${PSEUDOLIFE_IMAGE_TAG}, so a rollback
+        # is that variable naming the tag, whatever repository the previous
+        # image (a local build, say) came from. Tagged by id: the container's
+        # image IS the deployed one, whatever its tag points at by now.
+        suffix = self.o.rollback_suffix or f"pre-update-{_stamp()}"
+        rollback_tag = f"{current or 'previous'}-{suffix}"
+        rollback = f"{GHCR_IMAGE}:{rollback_tag}"
+        shown = self._compose_display()
+        lines = [f"      PSEUDOLIFE_IMAGE_TAG={rollback_tag} docker compose {shown} up -d --no-deps {DAEMON_SERVICE}",
+                 f"      (PowerShell: $env:PSEUDOLIFE_IMAGE_TAG='{rollback_tag}'; docker compose {shown} up -d --no-deps {DAEMON_SERVICE})"]
+        self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
+                          rollback_lines=lines)
+        self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
         self.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", DAEMON_SERVICE],
                             timeout=3600, env=compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target}),
@@ -649,8 +739,8 @@ class Update:
                               + "\nto roll back:\n" + "\n".join(self.rollback_lines))
         health = self.wait_health(expect_version=target)
         if not self.o.daemon_only:
-            self.clients(context["checkout"], f"pseudolife-mcp=={target}", health)
-        self.prune_cache(context["checkout"])
+            self.clients(None, f"pseudolife-mcp=={target}", health)
+        # No cache prune: nothing was built.
 
     def compose_context(self) -> dict:
         """The compose files and env file the running daemon container was
@@ -667,8 +757,27 @@ class Update:
                 labels = {}
         config_files = [Path(p) for p in (labels.get("com.docker.compose.project.config_files") or "").split(",") if p]
         working_dir = labels.get("com.docker.compose.project.working_dir")
-        env_file = Path(labels.get("com.docker.compose.project.environment_file")) \
-            if labels.get("com.docker.compose.project.environment_file") else None
+        project = labels.get("com.docker.compose.project") or "pseudolife-mcp"
+        # The env file: --env-file, else the labelled one(s) (comma-joined
+        # when several were given), else compose's implicit <working dir>/.env.
+        # It carries the Postgres password, the volume names and the daemon's
+        # bearer; recreating the daemon without it would interpolate defaults.
+        labelled = [Path(p) for p in (labels.get("com.docker.compose.project.environment_file") or "").split(",") if p]
+        env_files: list[Path] = []
+        if self.o.env_file is not None:
+            env_files = [Path(self.o.env_file)]
+        elif labelled:
+            env_files = [p for p in labelled if p.is_file()]
+        elif working_dir and (Path(working_dir) / ".env").is_file():
+            env_files = [Path(working_dir) / ".env"]
+        if (labelled or self.o.env_file) and not env_files:
+            raise UpdateError(f"the daemon's env file(s) {', '.join(map(str, labelled or [self.o.env_file]))} no "
+                              f"longer exist; recreating the container without them would reset the Postgres "
+                              f"password, the volume names and the bearer. Name the file with --env-file. "
+                              f"Nothing was changed", 2)
+        for path in env_files:
+            if not path.is_file():
+                raise UpdateError(f"--env-file {path} does not exist; nothing was changed", 2)
         existing = [p for p in config_files if p.is_file()]
         checkout = None
         if working_dir and (Path(working_dir).parent / "pyproject.toml").is_file() and (Path(working_dir).parent / "ops").is_dir():
@@ -679,13 +788,12 @@ class Update:
             base = self._bundled("docker-compose.yml")
             self.step(f"the daemon's compose files are gone; using the bundled {base}")
             existing = [base]
-            if env_file is not None and not env_file.is_file():
-                env_file = None
         overlay = next((p.with_name("docker-compose.ghcr.yml") for p in existing
                         if p.with_name("docker-compose.ghcr.yml").is_file()), None) or self._bundled("docker-compose.ghcr.yml")
         files = existing + ([overlay] if overlay not in existing else [])
-        return {"args": self._compose_args(files, env_file), "env_file": env_file, "checkout": checkout,
-                "files": [str(p) for p in files]}
+        args = ["-p", project] + self._compose_args(files, env_files)
+        return {"args": args, "env_file": env_files[0] if env_files else None, "checkout": checkout,
+                "files": [str(p) for p in files], "project": project}
 
     def _bundled(self, name: str) -> Path:
         target = data_dir() / "compose" / name
@@ -701,10 +809,12 @@ class Update:
     # -- small helpers ------------------------------------------------------
     _compose_shown: list = []
 
-    def _compose_args(self, files, env_file: Path | None) -> list[str]:
+    def _compose_args(self, files, env_file) -> list[str]:
         args: list[str] = []
-        if env_file is not None and Path(env_file).is_file():
-            args += ["--env-file", str(env_file)]
+        env_files = env_file if isinstance(env_file, list) else ([env_file] if env_file else [])
+        for path in env_files:
+            if path is not None and Path(path).is_file():
+                args += ["--env-file", str(path)]
         for path in files:
             if Path(path).is_file():
                 args += ["-f", str(path)]
@@ -746,6 +856,24 @@ def _compose_image_tag(compose_file: Path) -> str | None:
     except OSError:
         return None
     return None
+
+
+def _rotate_backups(out_dir: Path, *, keep_days: int, keep: set) -> list[str]:
+    """Remove this tool's own artifacts (``pseudolife_memory-<stamp>.sql.gz``,
+    ``pseudolife_state-<stamp>.tgz``) older than ``keep_days`` in
+    ``out_dir``; anything else there is left alone."""
+    removed = []
+    cutoff = time.time() - keep_days * 86400
+    for path in sorted(out_dir.iterdir()):
+        if path.name in keep or not re.fullmatch(r"pseudolife_(memory-\d{8}-\d{6}\.sql\.gz|state-\d{8}-\d{6}\.tgz)", path.name):
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed.append(str(path))
+        except OSError:
+            continue
+    return removed
 
 
 def _dump_complete(path: Path) -> bool:
@@ -802,6 +930,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--clients-only", action="store_true", help="only the client side; the daemon is left as it is")
     parser.add_argument("--daemon-only", action="store_true", help="only the daemon; the client side is left as it is")
     parser.add_argument("--reinstall", action="store_true", help="release mode: recreate the daemon even at the same version")
+    parser.add_argument("--allow-downgrade", action="store_true",
+                        help="release mode: allow a --tag older than the version the daemon runs")
+    parser.add_argument("--env-file", default=None,
+                        help="release mode: the compose env file, when the one the container was created with is gone")
     parser.add_argument("--daemon-url", default=os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL") or DEFAULT_DAEMON_URL)
     parser.add_argument("--json", action="store_true", help="one JSON report instead of the step lines")
     return parser
@@ -814,7 +946,9 @@ def options_from_args(args) -> Options:
                    force_rollback_tag=args.force_rollback_tag, allow_dirty=args.allow_dirty,
                    health_retries=args.health_retries, health_delay_ms=args.health_delay_ms,
                    all_clients=args.all, clients_only=args.clients_only, daemon_only=args.daemon_only,
-                   reinstall=args.reinstall, check=args.check, as_json=args.json, daemon_url=args.daemon_url)
+                   reinstall=args.reinstall, allow_downgrade=args.allow_downgrade,
+                   env_file=Path(args.env_file) if args.env_file else None,
+                   check=args.check, as_json=args.json, daemon_url=args.daemon_url)
 
 
 def main(argv: list[str] | None = None) -> int:

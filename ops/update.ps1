@@ -40,16 +40,21 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
+# A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
 $python = $null
+$pyArgs = @()
 foreach ($candidate in @("python", "python3", "py")) {
-    if (Get-Command $candidate -ErrorAction SilentlyContinue) { $python = $candidate; break }
+    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+    $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+    try {
+        & $candidate @probeArgs -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>$null
+        if ($LASTEXITCODE -eq 0) { $python = $candidate; $pyArgs = $probeArgs; break }
+    } catch { continue }
 }
 if (-not $python) {
-    Write-Warning "No python on PATH: the deploy is Python (ops/update.py). Install Python >= 3.10 and re-run."
+    Write-Warning "No Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run."
     exit 1
 }
-$pyArgs = @()
-if ($python -eq "py") { $pyArgs = @("-3") }
 
 $updateArgs = @("--checkout", $repo, "--keep-rollbacks", "$KeepRollbacks", "--keep-cache-hours", "$KeepCacheHours",
                 "--health-retries", "$HealthRetries", "--health-delay-ms", "$HealthDelayMs")

@@ -6547,7 +6547,19 @@ for a checkout). It needs no checkout:
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon |
 | `--reinstall` | recreate the daemon at the version it already runs |
+| `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
+| `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+What it refuses: a target it cannot read (PyPI unreachable and no
+`--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
+Docker installed but not answering (Docker Desktop stopped is not "no
+daemon container": the shim runtime this runs from is never pip-upgraded
+in its place), and on a pip install an editable checkout or a shim
+runtime. On Windows a pip install's own upgrade command is printed
+rather than run, since pip cannot replace the running console script;
+pipx's `install --force` likewise, since it deletes the environment the
+command runs from.
 
 Where things come from: the compose files are the ones the running daemon
 container was created with (its `com.docker.compose.project.*` labels),
@@ -6560,12 +6572,23 @@ one keeps the row-count gate and the mirror — else the built-in one: a
 the dump's closing marker (a killed dump is a valid gzip of a truncated
 file, so a missing marker stops the update with the `.part` artifact
 kept), plus a tar of the daemon's `/data`, both under
-`~/.pseudolife-mcp/backups` in the names `ops/restore.*` looks for. The
-rollback tag is taken by image id, so it is the deployed image whatever
-the tag points at by now. `PSEUDOLIFE_DOCKER` names the docker command
-(the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or `--daemon-url` names
-the daemon. The Codex hook step is printed, never automated: Codex trusts
-hooks by hash and asks again when a script changes.
+`~/.pseudolife-mcp/backups` in the checkout scripts' file names (restore
+them with `ops/restore.ps1 -BackupFile <path>` / `restore.sh
+--backup-file <path>`; the built-in backup keeps no manifest, row-count
+gate or mirror, and rotates only its own files older than seven days).
+The rollback is the running image tagged by id as
+`ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>-pre-update-<stamp>`,
+because the GHCR overlay selects the daemon's image through
+`PSEUDOLIFE_IMAGE_TAG`: the printed rollback is that variable naming the
+tag on the same `docker compose … up -d --no-deps pseudolife-daemon`. A
+daemon that comes back healthy at a version other than the one pulled
+fails the update with that rollback and moves no client. Release mode
+builds nothing, so it prunes no build cache. `PSEUDOLIFE_DOCKER` names
+the docker command (the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or
+`--daemon-url` names the daemon. The Codex hook step is printed, never
+automated: Codex trusts hooks by hash and asks again when a script
+changes; the check compares Codex's clone with the daemon just deployed,
+never with a checkout at some other commit.
 
 ## Schema version history
 

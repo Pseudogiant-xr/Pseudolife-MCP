@@ -22,9 +22,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   beside the running one, refreshes the plugin cache and prints the Codex
   hook step. `--check` reports only (exit 0 when a newer release exists, 3
   when current); `--clients-only` / `--daemon-only` take one half;
-  `--reinstall` recreates at the same version. On a pip / lite install it
-  upgrades the package where it is installed (pip, or pipx) and restarts
-  nothing. [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+  `--reinstall` recreates at the same version; `--allow-downgrade` is
+  needed for a `--tag` older than the daemon; `--env-file` names the
+  compose env file when the labelled one is gone (the update stops rather
+  than recreate the daemon with default password, volumes and bearer).
+  The rollback tag lives in the GHCR repository and the printed rollback
+  sets `PSEUDOLIFE_IMAGE_TAG` to it; a daemon back at a version other than
+  the one pulled fails the update and moves no client. Docker installed
+  but not answering stops the update (never a pip upgrade of the shim's
+  own runtime), and a target that cannot be read from PyPI is not guessed.
+  On a pip / lite install it upgrades the package where it is installed
+  (pip; on Windows or under pipx the command is printed, since pip cannot
+  replace the running console script and pipx deletes the environment
+  the command runs from), never an editable checkout or a shim runtime,
+  and restarts nothing. [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
 - `ops/update.ps1` and `ops/update.sh` are now thin wrappers that map their
   flags onto the same Python deploy (`ops/update.py` runs it from the
   checkout, ahead of any installed package), so there is one

@@ -43,6 +43,9 @@ Every CLI call goes through :func:`run_cli`, every lookup through
 :func:`which` and :func:`home`, so the tests drive the real logic with
 fakes and never touch this machine's registrations. Nothing here prints
 tokens: registration files are parsed for the command line only.
+``ops/update_clients.py`` runs this from the checkout by putting it first
+on ``sys.path``, so an older installed release never answers for the
+checkout being installed.
 """
 from __future__ import annotations
 
@@ -369,7 +372,7 @@ def update_shim(source, repo: Path | None = None) -> dict:
     if repo is None and Path(source).is_dir():
         repo = Path(source)
     repo = Path(repo) if repo else None
-    upgrade_hint = f'"{repo}"' if repo else f"pseudolife-mcp=={__version__}"
+    upgrade_hint = f'"{repo}"' if repo else source
     rt = runtimes_module()
     env = client_env()
     layout = rt.default_layout(env)

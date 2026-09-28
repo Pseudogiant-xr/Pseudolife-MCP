@@ -47,10 +47,13 @@ done
 
 python_cmd=""
 for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then python_cmd="$candidate"; break; fi
+    if command -v "$candidate" >/dev/null 2>&1 &&
+        "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        python_cmd="$candidate"; break
+    fi
 done
 if [ -z "$python_cmd" ]; then
-    echo "WARNING: no python on PATH: the deploy is Python (ops/update.py). Install Python >= 3.10 and re-run." >&2
+    echo "WARNING: no Python >= 3.10 on PATH: the deploy is Python (ops/update.py). Install one and re-run." >&2
     exit 1
 fi
 exec "$python_cmd" "$repo/ops/update.py" "${args[@]}"
