@@ -254,9 +254,7 @@ stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
 support. Codex setup offers one choice to enable automatic memory briefings,
-reminders, and session cleanup (plus, where the agent board is on, a board
-check-in at session start and a new-mail hint per prompt), use standing
-instructions only, or skip.
+reminders, and session cleanup, use standing instructions only, or skip.
 Automatic setup reuses an enabled PseudoLife plugin or installs the three
 lifecycle hooks, backs up configuration, approves only their exact current
 definitions, and verifies execution. If verification fails, the same approval
@@ -941,8 +939,7 @@ start).
 For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
 The helper asks once, detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
-reminder, and session cleanup, plus the agent-board check-in where the board
-is on. The Docker installer runs this step for you.
+reminder, and session cleanup. The Docker installer runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy
@@ -4264,12 +4261,15 @@ pid, worktree, held for`) by board mail to the peers the lease concerns, in
 the same project (compared without case; every project when the sender has
 none set): live agents (attached, or registered without an adapter) whose
 status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
-with `park_clear_by` naming the lease while the park stands (a reason set, and
-`park_expires` not yet passed), attached or not, since mail waits for a parked
-session. Both leases go to both status groups on purpose: a GPU server
-beside a full suite is the contention. At most 20 peers are told per event; one
-refused send does not stop the rest. The notices are automatic and need no
-reply; they replace hand-written SUITE-START/SUITE-END notes.
+with `park_clear_by` naming the lease, attached or not, since mail waits for a
+parked session. The release notice rings such a session, subject to the wake
+path and caps: for 60 seconds after a hold ends, the daemon counts its last
+holder as the clearer the lease name stands for (taking a lease clears
+nothing, so the acquire notice waits in the queue). Both leases go to both
+status groups on purpose: a GPU server beside a full suite is the contention.
+At most 20 peers are told per event; one refused send does not stop the rest.
+The notices are automatic and need no reply; they replace hand-written
+SUITE-START/SUITE-END notes.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
@@ -5010,15 +5010,11 @@ The **park record** lives on the agent row and is set through
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
 An omitted field stays; a refinement or a new reason keeps the standing
-expiry. A park past its `park_expires` no longer stands: a new reason over
-it is a new park, with the 12-hour default counted from then and none of
-the lapsed park's `park_needs`, `park_clear_by` or `park_resume` carried
-over. A plain status
-update while parked clears the record,
+expiry. A plain status update while parked clears the record,
 since a session that is working is not parked; a task or `children` update
 leaves it. A park field on its own refines a standing park and is refused
-(`invalid_park`) on an unparked row or a lapsed park, as are an unknown
-reason and a bad expiry; credential-shaped text is `secret_like_body`. Every peer row in
+(`invalid_park`) on an unparked row, as are an unknown reason and a bad
+expiry; credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the
@@ -5035,7 +5031,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
 | `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
@@ -6630,10 +6626,8 @@ This is runtime support, not a model capability or a promise about ordinary
 ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 The Docker installer defaults to automatic hook-source detection. One setup
-choice enables automatic memory briefings, reminders, and session cleanup
-(plus, where the agent board is on, a board check-in at session start and a
-new-mail hint when a peer's message is waiting), uses standing instructions
-only, or skips this integration. The automatic
+choice enables automatic memory briefings, reminders, and session cleanup,
+uses standing instructions only, or skips this integration. The automatic
 choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.

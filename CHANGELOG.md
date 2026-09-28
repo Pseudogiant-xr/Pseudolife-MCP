@@ -42,6 +42,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   had stopped waiting for. A lapsed peer whose status says
   `suite=running|queued` or `gpu=` is still told, like any live peer.
   Found in review of #442 (a park set after a lapsed one stands), 2026-09-28.
+### Fixed (2026-09-28 — a session parked on a lease is rung when the lease frees)
+- A session parked with `park_clear_by` naming a lease (`full-suite`,
+  `gpu`) slept through the release notice the lease CLI sends it: the
+  notice comes from the hold's own `lease-hold@` address, never equal to
+  the lease name, so the wake decision withheld it as chatter
+  (`need_not_cleared`). The daemon now counts the sender as the clearer
+  when its audit log shows the sender's hold on that lease released or
+  expired within the last 60 seconds (`LEASE_CLEAR_GRACE`); the CLI frees
+  the board lease before it mails the notice. It reads only the daemon's
+  own records, never a string the sender supplies; the receipt's reason
+  stays `clearer`. Taking a lease clears nothing, so the acquire notice
+  and mail from a current holder are still held, and no lease stands in
+  for `maintainer`, an agent id or an id prefix (8 or more hex
+  characters). Found in the review of #443.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

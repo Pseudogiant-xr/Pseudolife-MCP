@@ -481,12 +481,24 @@ pid, worktree, held for`) by board mail to the peers the lease concerns, in
 the same project (compared without case; every project when the sender has
 none set): live agents (attached, or registered without an adapter) whose
 status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
+<<<<<<< HEAD
 with `park_clear_by` naming the lease while the park stands (a reason set, and
 `park_expires` not yet passed), attached or not, since mail waits for a parked
 session. Both leases go to both status groups on purpose: a GPU server
 beside a full suite is the contention. At most 20 peers are told per event; one
 refused send does not stop the rest. The notices are automatic and need no
 reply; they replace hand-written SUITE-START/SUITE-END notes.
+=======
+with `park_clear_by` naming the lease, attached or not, since mail waits for a
+parked session. The release notice rings such a session, subject to the wake
+path and caps: for 60 seconds after a hold ends, the daemon counts its last
+holder as the clearer the lease name stands for (taking a lease clears
+nothing, so the acquire notice waits in the queue). Both leases go to both
+status groups on purpose: a GPU server beside a full suite is the contention.
+At most 20 peers are told per event; one refused send does not stop the rest.
+The notices are automatic and need no reply; they replace hand-written
+SUITE-START/SUITE-END notes.
+>>>>>>> origin/fix/lease-notice-rings-lease-park
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
@@ -1252,7 +1264,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
 | `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |

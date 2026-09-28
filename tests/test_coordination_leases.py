@@ -37,7 +37,7 @@ def store(pg_conn):
     from pseudolife_memory.storage.schema import assert_disposable_database
     assert_disposable_database(pg_conn)
     pg_conn.execute("TRUNCATE coordination_messages, coordination_agents, coordination_events, "
-                    "coordination_leases, coordination_lease_waiters")
+                    "coordination_leases, coordination_lease_waiters, coordination_wakes")
     # A fresh bank's fences start at 1; the sequence outlives TRUNCATE.
     pg_conn.execute("ALTER SEQUENCE coordination_lease_fence RESTART WITH 1")
     now = [1000.0]
@@ -530,3 +530,78 @@ def test_prune_locks_a_lease_before_its_queue(store, pg_url):
     finally:
         other.close()
         store.storage.conn.execute("SET lock_timeout = '5s'")
+
+
+# --- a park cleared by a lease (v49 wake decision) ---------------------------------
+
+def _parked_on(store, lease):
+    """A ring-capable session parked until ``lease`` clears, idle since."""
+    agent = store.register("alice", wake_enabled=True)
+    store.attach(*creds(agent), attachment_id=agent["agent_id"][:8], wake_enabled=True)
+    store.update(*creds(agent), park_reason="needs_resource",
+                 park_needs="the suite lock, then my suite result", park_clear_by=lease)
+    store.storage.conn.execute("UPDATE coordination_agents SET last_activity=0 WHERE agent_id=%s",
+                               (agent["agent_id"],))
+    return agent
+
+
+def _notice(store, sender, recipient, tag):
+    return store.send(*creds(sender), to=recipient["agent_id"], text="LEASE notice",
+                      request_id=f"notice-{tag}")["wake"]
+
+
+def test_a_release_notice_clears_a_park_on_that_lease(store):
+    """``park_clear_by`` may name a lease (full-suite, gpu). The lease CLI's
+    notices come from the mirror's own address, and its release notice after
+    the board lease is already free (a successor told "released" must find
+    it free), so the daemon's own record of the release, at most
+    LEASE_CLEAR_GRACE earlier, makes the sender the clearer. Taking the
+    lease clears nothing: the acquire notice is chatter, as is mail from a
+    peer that never held it or that let go of another lease."""
+    holder, successor, bystander, other = (store.register("alice") for _ in range(4))
+    parked = _parked_on(store, "full-suite")
+    store.acquire_lease(*creds(holder), name="full-suite", ttl=600)
+    store.acquire_lease(*creds(other), name="gpu", ttl=600)
+    assert _notice(store, holder, parked, "acquired")["decision"] == "withheld"
+    store.acquire_lease(*creds(successor), name="full-suite", ttl=600)   # queued
+    store.release_lease(*creds(holder), name="full-suite")               # granted on
+    store.release_lease(*creds(other), name="gpu")
+    store.test_time[0] = 1059.0
+    assert _notice(store, holder, parked, "released") == {
+        "decision": "rung", "reason": "clearer", "ring_at": 1059.0}
+    assert _notice(store, successor, parked, "successor")["decision"] == "withheld"
+    assert _notice(store, bystander, parked, "chatter")["decision"] == "withheld"
+    assert _notice(store, other, parked, "other-lease")["decision"] == "withheld"
+    store.test_time[0] = 1061.0
+    assert _notice(store, holder, parked, "late")["decision"] == "withheld"
+
+
+def test_no_lease_stands_in_for_the_maintainer_or_a_peer(store):
+    """Any string is a lease name, so a lease called ``maintainer``, or
+    after a peer's agent id or the 8-hex prefix every surface shows of it,
+    taken and released, clears no park that names the human or that peer."""
+    sender, peer = store.register("alice"), store.register("alice")
+    on_human = _parked_on(store, "maintainer")
+    on_peer = _parked_on(store, peer["agent_id"])
+    on_prefix = _parked_on(store, peer["agent_id"][:8])
+    for name in ("maintainer", peer["agent_id"], peer["agent_id"][:8]):
+        store.acquire_lease(*creds(sender), name=name, ttl=600)
+        store.release_lease(*creds(sender), name=name)
+    store.test_time[0] = 1010.0
+    assert _notice(store, sender, on_human, "human")["decision"] == "withheld"
+    assert _notice(store, sender, on_peer, "peer")["decision"] == "withheld"
+    assert _notice(store, sender, on_prefix, "prefix")["decision"] == "withheld"
+
+
+def test_a_hold_that_lapsed_moments_ago_still_clears(store):
+    """A mirror whose renewals stopped loses the board lease to expiry, then
+    announces its release: the expiry the daemon logged against it counts
+    like a release."""
+    holder, lister = store.register("alice"), store.register("alice")
+    parked = _parked_on(store, "full-suite")
+    store.acquire_lease(*creds(holder), name="full-suite", ttl=60)
+    store.test_time[0] = 1100.0
+    store.list_leases()                     # settles the lapsed hold
+    store.test_time[0] = 1105.0
+    assert _notice(store, holder, parked, "expired")["reason"] == "clearer"
+    assert _notice(store, lister, parked, "lister")["decision"] == "withheld"
