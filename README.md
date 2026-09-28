@@ -549,6 +549,18 @@ logon autostart task:
 
 ## Updating
 
+**Upgrading from before the agent board (no bearer token yet):** this
+migration step applies to installer-managed Docker installations. On
+Windows, first close every Claude Code, Codex and Claude Desktop session
+using the shim (quit Desktop from the tray). Rerun `ops/install.ps1`
+(Windows) or `ops/install.sh` (Linux / macOS) with the same client selection.
+The installer creates a bearer token for the default shim install and
+migrates the supported Claude Code registration environment in place.
+Custom registrations are preserved; follow any manual credential warnings
+from the installer. `-All` / `--all` and `ops/update_clients.py` do not create
+the token or migrate the registration environment. Then refresh clients
+with the **Everything at once** recipe below and restart them.
+
 **Lite tier:** one command, bank untouched:
 
 ```bash
@@ -593,6 +605,11 @@ commit has not changed.
 your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the
 daemon is healthy:
+
+On Windows, close every Claude Code, Codex and Claude Desktop session
+using the shim first (quit Desktop from the tray). If an in-use shim was
+skipped, the daemon deploy has already succeeded; after closing those
+sessions, retry only the shim: `python ops/update_clients.py --only shim`.
 
 ```powershell
 .\ops\update.ps1 -All   # Windows

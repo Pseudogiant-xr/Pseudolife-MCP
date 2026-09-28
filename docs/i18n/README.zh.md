@@ -1,8 +1,8 @@
-<!-- i18n-sync: v12 -->
+<!-- i18n-sync: v13 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v12 (2026-09-25)
+[英文版 README](../../README.md) · 已同步:v13 (2026-09-28)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -71,6 +71,7 @@ Codex——安装脚本默认(shim 模式)会为其接入与 Claude 相同的 st
 权威且始终保持最新的文档使用英文撰写:
 
 - [README](../../README.md) —— 完整的安装、接入、工具与故障排查说明
+- [更新](../../README.md#updating) —— 涵盖安装程序迁移、客户端刷新和重启会话
 - [配置](../guide/configuration.md) · [检索](../guide/retrieval.md)
   · [梦境机制](../guide/dreaming.md) · [会话片段](../guide/episodes.md)
   · [记忆模型](../guide/memory-model.md) · [性能基准](../guide/benchmarks.md)

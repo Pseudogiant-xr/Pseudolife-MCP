@@ -370,13 +370,18 @@ new installation. For an existing bare command, a reported path mismatch
 needs to be resolved before the installer can confirm the upgrade.
 
 For an update, use the intended checkout and rerun its installer with the
-same client selection. `ops/update.ps1` / `ops/update.sh` update the daemon;
-they do not upgrade host shims or client plugin caches. Existing custom MCP
+same client selection when migrating an installation from before the agent
+board. `ops/update.ps1` / `ops/update.sh` update the daemon only by default;
+`-All` / `--all` also refresh host shims and client plugin caches, followed
+by a client restart. Follow the [README update recipe](../../README.md#updating)
+for the installer migration and Windows prerequisites. Existing custom MCP
 registrations are preserved. If one points at a separate virtual environment,
-upgrade that exact environment as described below. Update the Pseudolife
-plugin through the client's plugin manager when its scripts differ from the
-checkout, then rerun hook setup and approve the changed scripts. Editing a
-plugin cache directly does not survive plugin updates.
+upgrade that exact environment as described below. For a versioned plugin release,
+update the Pseudolife plugin through the client's plugin manager. For changed
+hooks within the same version, the manager reports "already latest"; use
+`-All` / `--all` to refresh the cache instead. Then rerun hook setup and
+approve the changed scripts. Editing a plugin cache directly does not
+survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a
 client waits for the Docker daemon instead of starting a fallback over a
