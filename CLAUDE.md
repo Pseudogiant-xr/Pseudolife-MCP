@@ -26,24 +26,47 @@ exactly; they exist because each one was violated at least once.
    `tests/test_migrate_embeddings.py`, and `python ops/gen_llms_txt.py`
    after any doc edit (`tests/test_llms_txt.py` pins the generated
    `llms-full.txt`). The v30 bump found the last two the hard way.
-3. **Local validation before opening a PR; CI before merge.** Run the touched and dependent test files locally, with the bench Postgres available for PG-backed tests. A missing PostgreSQL service or an unexpected platform/database skip is not a pass for the affected behavior. Record the tested head, selected files, dependency reasoning and result in the PR.
+3. **Local validation before opening a PR; CI before merge.** Run the
+   touched and dependent test files locally, with the bench Postgres
+   available for PG-backed tests. A missing PostgreSQL service or an
+   unexpected platform/database skip is not a pass for the affected
+   behavior. Record the tested head, selected files, dependency reasoning
+   and result in the PR.
 
-   Ordinary code changes do not require a local full suite. A local full suite is required for schema/DDL/migration changes; shared test infrastructure, conftest, fixture or suite-lock changes; daemon process creation, ownership, shutdown or recovery changes; and changes whose dependent coverage cannot be bounded confidently. Documentation-only and test-only changes follow the narrower rules below.
+   Ordinary code changes do not require a local full suite. A local full
+   suite is required for schema/DDL/migration changes; shared test
+   infrastructure, conftest, fixture or suite-lock changes; daemon process
+   creation, ownership, shutdown or recovery changes; and changes whose
+   dependent coverage cannot be bounded confidently. Documentation-only and
+   test-only changes follow the narrower rules below.
 
-   For a required full run, finish review fixes and targeted validation before joining the queue, then run `HF_HUB_OFFLINE=1 python -m pytest tests/` with the bench Postgres up (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled. Keep the PostgreSQL authentication preflight: a fresh worktree must have the correct bench configuration before queueing. A refused or interrupted run is not a pass; a changed imported tree requires a fresh process on the revised head.
+   For a required full run, finish review fixes and targeted validation
+   before joining the queue, then run
+   `HF_HUB_OFFLINE=1 python -m pytest tests/` with the bench Postgres up
+   (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled. Keep
+   the PostgreSQL authentication preflight: a fresh worktree must have the
+   correct bench configuration before queueing. A refused or interrupted run
+   is not a pass; a changed imported tree requires a fresh process on the
+   revised head.
 
-   **A full run the bench Postgres rejects
-   refuses to start** (conftest asks the server before queueing for the
-   suite lock): a fresh worktree has no `ops/.env`, or the `.example` copy,
-   so the suite resolves the compose default password and every PG-backed
-   test would ERROR on setup (1,424 in one 2026-09-27 run). The refusal
-   names the fix: copy `ops/.env` from the main checkout into the
-   worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD` for the
-   pytest process. Targeted runs print one line and start.
+   Note that **a full run the bench Postgres rejects refuses to start**
+   (conftest asks the server before queueing for the suite lock): a fresh
+   worktree has no `ops/.env`, or the `.example` copy, so the suite resolves
+   the compose default password and every PG-backed test would ERROR on
+   setup (1,424 in one 2026-09-27 run). The refusal names the fix: copy
+   `ops/.env` from the main checkout into the worktree's `ops/`, or export
+   `PSEUDOLIFE_TEST_PG_PASSWORD` for the pytest process. Targeted runs print
+   one line and start.
 
-   Every PR requires passing CI for its current head integrated with current master, including the full PostgreSQL job, lite Linux, Windows, macOS and required analysis checks. If master has moved since that integration was tested, update the branch and wait for fresh CI; rerunning an old job tests its old merge commit. Independent review remains required, and the maintainer owns the merge.
+   Every PR requires passing CI for its current head integrated with current
+   master, including the full PostgreSQL job, lite Linux, Windows, macOS and
+   required analysis checks. If master has moved since that integration was
+   tested, update the branch and wait for fresh CI; rerunning an old job
+   tests its old merge commit. Independent review remains required, and the
+   maintainer owns the merge.
 
-   Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against the measures in the maintainer's private suite-gate memo of 2026-09-28.
+   Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
+   the measures in the maintainer's private suite-gate memo of 2026-09-28.
 4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
    `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
    volumes are external precisely so that this is survivable, but don't test it.
@@ -91,7 +114,15 @@ python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest
 
 or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
-**Dependent local tests.** Select the union of touched test files, tests reached through reverse imports and fixture dependencies, and tests found by references to changed paths, module names, commands and configuration keys. Include relevant cross-cutting guards and affected platform tests. `--lf` may add previously failing tests; `--co` may verify the inventory; neither replaces dependency analysis or a passing run. Document dynamic-import, subprocess and fixture gaps; if they cannot be bounded, take the local-full path. A broad selection remains subject to the suite lock; do not split it to bypass admission.
+**Dependent local tests.** Select the union of touched test files, tests
+reached through reverse imports and fixture dependencies, and tests found by
+references to changed paths, module names, commands and configuration keys.
+Include relevant cross-cutting guards and affected platform tests. `--lf`
+may add previously failing tests; `--co` may verify the inventory; neither
+replaces dependency analysis or a passing run. Document dynamic-import,
+subprocess and fixture gaps; if they cannot be bounded, take the local-full
+path. A broad selection remains subject to the suite lock; do not split it
+to bypass admission.
 
 **One full suite at a time per machine** — every session, worktree and
 harness (Claude Code, Codex, anything else) — **and CPU-only.** Measured
@@ -181,9 +212,28 @@ took 143 CUDA OOMs.
   `tests/test_eval_evidence.py`, `tests/test_i18n_readme.py`) plus every
   test file that names a touched path (`git grep -l <file basename> tests/`).
   CI's full PostgreSQL job (`test`) must still be green before merge.
-- **Merging origin/master forward needs no new local full suite** when no code conflict is resolved by hand and any local full suite required for the branch's own change has already passed. Run the test files covering the overlap, plus doc guards when docs overlap, and require fresh CI on the updated merge ref. A manually resolved code conflict requires a local full suite. Ordinary code branches with no local-full requirement do not acquire one merely by merging master forward.
-- **Test-only changes skip the local full suite** when the diff touches only `tests/test_*.py`, non-code test data and optional docs-only files, and does not change shared fixture behavior, module-level state affecting other files, conftest, suite admission or imported test helpers. Run touched and dependent test files locally, plus the docs-only checks when applicable, and require current-merge-ref CI. Shared fixtures/helpers and uncertain cross-file effects take the local-full path regardless of filename.
-- **Open the PR while a required local full suite is queued.** Review and CI may run in parallel. State “local full suite: queued” with the queued head, then record its actual result. Merge only after all required local validation and current-merge-ref CI pass. Ordinary code PRs state the local selection and “local full suite: not required under the ordinary-code rule”; an old-head full pass is not evidence for a changed head.
+- **Merging origin/master forward needs no new local full suite** when no
+  code conflict is resolved by hand and any local full suite required for
+  the branch's own change has already passed. Run the test files covering
+  the overlap, plus doc guards when docs overlap, and require fresh CI on
+  the updated merge ref. A manually resolved code conflict requires a local
+  full suite. Ordinary code branches with no local-full requirement do not
+  acquire one merely by merging master forward.
+- **Test-only changes skip the local full suite** when the diff touches only
+  `tests/test_*.py`, non-code test data and optional docs-only files, and
+  does not change shared fixture behavior, module-level state affecting
+  other files, conftest, suite admission or imported test helpers. Run
+  touched and dependent test files locally, plus the docs-only checks when
+  applicable, and require current-merge-ref CI. Shared fixtures/helpers and
+  uncertain cross-file effects take the local-full path regardless of
+  filename.
+- **Open the PR while a required local full suite is queued.** Review and CI
+  may run in parallel. State “local full suite: queued” with the queued
+  head, then record its actual result. Merge only after all required local
+  validation and current-merge-ref CI pass. Ordinary code PRs state the
+  local selection and “local full suite: not required under the
+  ordinary-code rule”; an old-head full pass is not evidence for a changed
+  head.
 
 ## Review discipline
 

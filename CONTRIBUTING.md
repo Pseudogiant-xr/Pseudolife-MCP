@@ -97,8 +97,6 @@ use it locally for changes to retrieval, ranking or embedding, since the
 default run exercises those only in the marked tests (CI's `test` lane
 always runs them on the real weights).
 
-Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against the
-measures in the maintainer's private suite-gate memo of 2026-09-28.
 Ordinary code changes run touched and dependent test files locally; they
 do not require a local full suite. Select dependent tests through reverse
 imports, fixture dependencies and references to changed paths, commands
@@ -122,7 +120,12 @@ integrated with current master, including the full PostgreSQL, lite Linux,
 Windows, macOS and required analysis checks. If master moves, update the
 branch and wait for fresh CI; rerunning an old job tests its old merge
 commit. Independent review remains required, and the maintainer owns the
-merge. CI's two full-suite lanes run this exact invocation
+merge.
+
+Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against the
+measures in the maintainer's private suite-gate memo of 2026-09-28.
+
+CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
 module-scoped fixtures keep their semantics): the `test` lane with
 `PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
