@@ -11,7 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no follow-up is expected and nothing will ring the session. Awaiting a merge
   click or a review that may bring fixes uses `needs_approval` with
   `park_clear_by` set to the reviewer's agent id or `maintainer`, or
-  `waiting_peer`. The wake decision is unchanged.
+  `waiting_peer`. The wake decision is unchanged. Both local hook fallback
+  prompts match the served prompt. Install this update with
+  `ops/update.ps1 -All` because the plugin hook files change.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

@@ -715,10 +715,10 @@ def test_a_malformed_ring_never_wakes(tmp_path, ring):
 
 GATE_MESSAGE = ("Before ending: update your board status with why you stopped and what you need "
                 "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
-                "park_resume=...). Use done only when no follow-up is expected; nothing will ring "
-                "you. If awaiting a merge click or a review that may still bring fixes, use "
+                "park_resume=...). Use done only when no follow-up is expected: nothing will ring "
+                "you. Waiting on a merge click or a review that may still bring fixes? Park "
                 "needs_approval with park_clear_by set to the reviewer's agent id or maintainer, "
-                "or use waiting_peer.")
+                "or waiting_peer.")
 
 
 def test_the_served_park_gate_prompt_names_the_followup_distinction():
@@ -726,15 +726,19 @@ def test_the_served_park_gate_prompt_names_the_followup_distinction():
     assert PARK_GATE_MESSAGE == GATE_MESSAGE
 
 
-@pytest.mark.parametrize("surface", ["checkin_sentence", "configuration"])
+@pytest.mark.parametrize("surface", ["checkin_sentence", "configuration", "stop_hook_quote"])
 def test_the_park_guidance_keeps_done_distinct_from_followup(surface):
     from pseudolife_memory.coordination import PARK_CHECKIN_SENTENCE
     if surface == "checkin_sentence":
         text = PARK_CHECKIN_SENTENCE
     else:
         text = (ROOT / "docs/guide/configuration.md").read_text(encoding="utf-8")
-        text = text.split("### Park records and the wake decision", 1)[1]
-        text = text.split("An omitted field stays", 1)[0]
+        if surface == "configuration":
+            text = text.split("### Park records and the wake decision", 1)[1]
+            text = text.split("An omitted field stays", 1)[0]
+        else:
+            text = text.split("### Waking an idle Claude Code session: the Stop hook", 1)[1]
+            text = text.split("park_resume=...)", 1)[1].split('" as the wake text', 1)[0]
     guidance = GATE_MESSAGE.split(")", 1)[1].strip(". ")
     assert guidance in " ".join(text.replace("`", "").split())
 
@@ -777,11 +781,12 @@ def _gate_env(tmp_path, server, **extra):
                 PSEUDOLIFE_MCP_TOKEN="fixture-token", **extra)
 
 
-def test_an_unparked_session_is_asked_once_to_park(tmp_path):
+@pytest.mark.parametrize("daemon_message", [GATE_MESSAGE, ""], ids=["served", "fallback"])
+def test_an_unparked_session_is_asked_once_to_park(tmp_path, daemon_message):
     """At turn end the hook asks the daemon whether this address parked; a
     block ends the turn with the request as the wake text, at once, and
     the turn that follows (stop_hook_active) is not asked again."""
-    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    server, requests = _gate_daemon("block\n" + daemon_message + "\n")
     try:
         _digest(tmp_path, 3, "", ring=False)
         _agent(tmp_path)

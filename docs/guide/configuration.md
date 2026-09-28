@@ -1225,10 +1225,10 @@ The **park record** lives on the agent row and is set through
 | `park_resume` | What to do once cleared (240) |
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
-Use `done` only when no follow-up is expected; nothing will ring you. If
-awaiting a merge click or a review that may still bring fixes, use
+Use `done` only when no follow-up is expected: nothing will ring you.
+Waiting on a merge click or a review that may still bring fixes? Park
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
-`maintainer`, or use `waiting_peer`.
+`maintainer`, or `waiting_peer`.
 
 An omitted field stays; a refinement or a new reason keeps the standing
 expiry. A plain status update while parked clears the record,
@@ -1415,10 +1415,10 @@ also capped (below, and by the daemon's `wake` caps under
   park during the turn; the hook then ends the turn at once with "Before
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
-  park_resume=...). Use done only when no follow-up is expected; nothing will
-  ring you. If awaiting a merge click or a review that may still bring fixes,
-  use needs_approval with park_clear_by set to the reviewer's agent id or
-  maintainer, or use waiting_peer." as the wake text and a `gate` ledger
+  park_resume=...). Use done only when no follow-up is expected: nothing will
+  ring you. Waiting on a merge click or a review that may still bring fixes?
+  Park needs_approval with park_clear_by set to the reviewer's agent id or
+  maintainer, or waiting_peer." as the wake text and a `gate` ledger
   line. Once: the
   continuation's Stop carries `stop_hook_active: true` and is not asked
   (Claude Code also caps stop-hook continuations at eight in a row). An
