@@ -57,6 +57,11 @@
 # script exits without arming the wait: the same behaviour lifecycle.ps1
 # gives Codex on Windows.
 #
+# After a wake fires, the hook posts one woke marker (POST
+# /api/hook/woke?agent=<id>, in the background, 2 s): the daemon logs that
+# this session's turn is starting, so wake precision can be measured from
+# the turn rather than from the ring being served. The answer is ignored.
+#
 # One watcher per session: every firing writes a fresh token to <key>.wake,
 # and an older watcher that finds another token there exits quietly at its
 # next poll, so the newest turn end always owns the wait.
@@ -342,6 +347,23 @@ json_string() {
     printf '"%s"' "$text"
 }
 
+# The woke marker, after a wake fired: one POST to /api/hook/woke naming this
+# session's board address (<key>.agent), on Claude Code's connection, in the
+# background with every output closed, so a daemon that hangs cannot hold
+# the wake back. The answer is ignored; no address, no marker.
+woke_marker() {
+    local agent=""
+    [ -f "$AGENT" ] && [ ! -L "$AGENT" ] || return 0
+    IFS= read -r agent < "$AGENT"
+    agent=${agent%$'\r'}
+    case "$agent" in *[!0123456789abcdef]*) return 0 ;; esac
+    [ "${#agent}" -eq 32 ] || return 0
+    claude_connection || return 0
+    curl -L -sf -X POST --max-redirs 0 --connect-timeout 1 --max-time 2 \
+        "${GATE_AUTH[@]}" "$GATE_URL/api/hook/woke?agent=$agent" \
+        >/dev/null 2>&1 3>&- </dev/null &
+}
+
 ACTIVE=$(printf '%s' "$INPUT" |
          grep -o '[{,][[:space:]]*"stop_hook_active"[[:space:]]*:[[:space:]]*true' | head -1)
 if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
@@ -367,7 +389,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
                 MESSAGE=""
                 case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
                 while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
-                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
+                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected: nothing will ring you. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer."
                 [ -n "$MESSAGE" ] || MESSAGE=$DEFAULT_MESSAGE
                 if [ -n "$CODEX_HOOK_CONTEXT" ]; then
                     # Codex reads the decision from stdout (exit 0).
@@ -561,6 +583,8 @@ Set your park status before you stop: memory_agents(action=update, park_reason=.
     printf '%s%s\n' "$RECENT" "$NOW" > "$WAKES.$$" && mv -f "$WAKES.$$" "$WAKES"
     printf '%s\twait\t%s\t%s\t%s\t%s\n' "$NOW" "${KEY:0:8}" "$WATERMARK" "$(( ${#text} + 1 ))" \
         "$RING_REASON" >> "$DIGEST_DIR/ledger.log"
+    # The turn is starting: say so, once.
+    woke_marker
     exit 2
 }
 

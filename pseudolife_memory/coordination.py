@@ -170,7 +170,10 @@ PARK_CHECKIN_SENTENCE = (
     "When you stop, park: memory_agents(action=update, park_reason=<done|blocked|"
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
     "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
-    "cleared>), so mail wakes you only when it clears that need.")
+    "cleared>), so mail wakes you only when it clears that need. Use done only "
+    "when no follow-up is expected: nothing will ring you. Waiting on a merge "
+    "click or a review that may still bring fixes? Park needs_approval with "
+    "park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer.")
 # The compact form for MCP initialization, which the shim appends only when
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
@@ -199,7 +202,10 @@ CHECKIN_INSTRUCTION = (
 PARK_GATE_MESSAGE = (
     "Before ending: update your board status with why you stopped and what you need "
     "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
-    "park_resume=...)")
+    "park_resume=...). Use done only when no follow-up is expected: nothing will "
+    "ring you. Waiting on a merge click or a review that may still bring fixes? "
+    "Park needs_approval with park_clear_by set to the reviewer's agent id or "
+    "maintainer, or waiting_peer.")
 
 
 def park_gate(service, headers: Mapping[str, str], *, agent, since,
@@ -233,6 +239,29 @@ def park_gate(service, headers: Mapping[str, str], *, agent, since,
     if verdict.get("gate") != "block":
         return "allow\n"
     return f"block\n{PARK_GATE_MESSAGE}\n"
+
+
+def woke(service, headers: Mapping[str, str], *, agent, token_map=None, token=None) -> str:
+    """Body for ``POST /api/hook/woke?agent=<id>``: what the Stop hook posts
+    after a wake fires, so the daemon logs that the address's turn is
+    starting (a ``woke`` audit event counting the rings served to it). ``ok``
+    when recorded; empty wherever the board is not served to this bearer,
+    for an address that is not a 32-hex id or that the bearer's principal
+    does not own, and on any failure. The hook ignores the answer either
+    way: a marker is telemetry, never a condition of the wake."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return ""
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)):
+        return ""
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            result = _store(service).woke(agent, principal)
+    except Exception:  # noqa: BLE001 - telemetry never surfaces an error to the hook
+        return ""
+    return "ok\n" if result.get("recorded") else ""
 
 
 def unavailable_reason(service, headers: Mapping[str, str], *,

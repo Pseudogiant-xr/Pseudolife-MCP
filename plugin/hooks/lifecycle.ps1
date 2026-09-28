@@ -331,7 +331,7 @@ try {
         if ($lines[0] -ceq 'block') {
             $reason = (($lines | Select-Object -Skip 1) -join "`n").TrimEnd("`n")
             if (-not $reason) {
-                $reason = 'Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)'
+                $reason = 'Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected: nothing will ring you. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer''s agent id or maintainer, or waiting_peer.'
             }
             [ordered]@{ decision = 'block'; reason = $reason } |
                 ConvertTo-Json -Compress -EscapeHandling EscapeNonAscii

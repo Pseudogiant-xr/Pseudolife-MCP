@@ -10,7 +10,9 @@ import re
 import stat
 import uuid
 
-import httpx
+# httpx is imported where it is used (fetch_context): the path helpers here
+# serve ops/setup-codex-hooks.py under a bare system python, which has no
+# third-party modules (2026-09-28 client-only dogfood).
 
 
 def default_digest_dir(env=None) -> Path:
@@ -117,6 +119,8 @@ def read_legacy(path: Path, url: str) -> dict:
 
 
 async def fetch_context(client, url: str, snapshot, *, identity=None) -> dict:
+    import httpx
+
     from .coordination_adapter import AdapterError
 
     body = {}

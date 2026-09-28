@@ -76,8 +76,10 @@ def test_windows_writer_assigns_token_user_before_protecting_file(monkeypatch, w
                         lambda name, **kwargs: advapi if name == "advapi32" else kernel,
                         raising=False)
     if writer == "coordination":
-        from pseudolife_memory import coordination_adapter
-        monkeypatch.setattr(coordination_adapter, "os", SimpleNamespace(name="nt"))
+        # The adapter's _private_fd is a wrapper over private_state's, which
+        # is what reads os.name: patch there, call through the wrapper.
+        from pseudolife_memory import coordination_adapter, private_state
+        monkeypatch.setattr(private_state, "os", SimpleNamespace(name="nt"))
         coordination_adapter._private_fd(-1, Path("new-identity-file"))
     else:
         _secure_windows_file(Path("new-credential-file"))

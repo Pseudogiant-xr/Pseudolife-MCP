@@ -160,5 +160,12 @@ problem than the limitation it hides.
   where an entity-level fold eventually gets accepted by whoever is in a
   hurry.
 
+Reaching the bank from other machines widens the network boundary, not the
+memory-integrity one: every remote client is still a model making tool
+calls. [Sharing one bank across machines](remote-bank.md) covers exposing
+the daemon safely (a tunnel or proxy in front of a token-gated daemon,
+Postgres kept on loopback) and giving each remote client its own principal,
+so its writes stay attributable and its board access is granted by name.
+
 Reporting a break in any of the boundaries above:
 [SECURITY.md](../../SECURITY.md).
