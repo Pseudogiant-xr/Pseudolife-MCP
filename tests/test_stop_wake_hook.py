@@ -770,6 +770,16 @@ def _gate_daemon(answer, status=200, stall=0):
                 self.wfile.flush()
                 time.sleep(stall)
 
+        def do_POST(self):
+            # The woke marker; recorded with its method so a test can tell
+            # it from the gate's GET.
+            requests.append(("POST " + self.path, self.headers.get("Authorization")))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", "3")
+            self.end_headers()
+            self.wfile.write(b"ok\n")
+
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     Thread(target=server.serve_forever, daemon=True).start()
@@ -816,6 +826,53 @@ def test_an_unparked_session_is_asked_once_to_park(tmp_path, daemon_message):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_a_firing_hook_posts_a_woke_marker_for_its_board_address(tmp_path):
+    """After a wake fires, and before it exits, the hook tells the daemon
+    that this address's turn is starting (``POST /api/hook/woke?agent=<id>``,
+    the same bearer and URL as the gate), so wake precision can be measured
+    from the turn rather than from the ring being served. Nothing else goes
+    with it, and it runs in the background, so a daemon that hangs cannot
+    hold the wake back."""
+    server, requests = _gate_daemon("allow\n")
+    try:
+        _digest(tmp_path, 3, BODY)
+        _agent(tmp_path)
+        result, _ = _run(_gate_env(tmp_path, server), _payload(stop_hook_active=True))
+        assert result.returncode == 2 and _woke(result.stderr)
+        # In the background, so it may land just after the hook exits. A
+        # continuation's Stop is not gated, so the marker is the only call.
+        assert _wait_until(lambda: requests)
+        assert requests == [("POST /api/hook/woke?agent=" + "a" * 32, "Bearer fixture-token")]
+        assert _read_seen(tmp_path) == "3"
+    finally:
+        server.shutdown()
+        server.server_close()
+    # Without a board address there is nothing to mark; the wake still fires.
+    server, requests = _gate_daemon("allow\n")
+    try:
+        (tmp_path / "digests" / f"{_key()}.agent").unlink()
+        (tmp_path / "digests" / f"{_key()}.seen").unlink()
+        result, _ = _run(_gate_env(tmp_path, server), _payload(stop_hook_active=True))
+        assert result.returncode == 2 and _woke(result.stderr)
+        assert requests == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_woke_marker_the_daemon_does_not_take_still_wakes(tmp_path):
+    server, _ = _gate_daemon("allow\n")
+    port = server.server_port
+    server.shutdown()
+    server.server_close()
+    _digest(tmp_path, 3, BODY)
+    _agent(tmp_path)
+    env = _env(tmp_path, wait=8, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
+               PSEUDOLIFE_MCP_TOKEN="fixture-token")
+    result, _ = _run(env, _payload(stop_hook_active=True))
+    assert result.returncode == 2 and _woke(result.stderr)
 
 
 def test_a_parked_session_ends_its_turn_quietly(tmp_path):

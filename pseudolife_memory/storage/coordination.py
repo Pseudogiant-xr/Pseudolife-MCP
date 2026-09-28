@@ -1877,6 +1877,28 @@ class CoordinationStore:
             return {"gate": "allow", "reason": "done"}
         return {"gate": "block", "reason": "no_park"}
 
+    def woke(self, agent_id, principal):
+        """What the Stop hook posts once a wake has fired: this address's turn
+        is starting. Logged as one ``woke`` audit event for the recipient
+        whose payload counts the rings served to it in the last hour (the
+        hook's longest wait) and nothing else, so ``board-audit stats`` can
+        measure wake precision from the turn starting rather than from
+        ``served_at``. An address the caller's principal does not own, or
+        none at all, records nothing."""
+        with self.storage._txn():
+            row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                            "AND credential_hash IS NOT NULL FOR UPDATE", (agent_id, principal))
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            rings = self._one(
+                "SELECT count(*) AS n FROM coordination_wakes WHERE recipient_agent_id=%s "
+                "AND served_at IS NOT NULL AND served_at>%s", (agent_id, now - 3600))["n"]
+            self._append([self._event("woke", {"rings": rings}, principal=principal,
+                                      agent_id=agent_id, recipient=agent_id,
+                                      project=row["project"], task=row["task"])], now)
+        return {"recorded": True, "rings": rings}
+
     def detach(self, principal, agent_id, credential, *, attachment_id, generation):
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)

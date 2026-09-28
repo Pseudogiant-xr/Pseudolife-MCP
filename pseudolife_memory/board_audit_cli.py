@@ -2,16 +2,21 @@
 
 ``export`` streams ``coordination_events`` as JSON lines, one event per line,
 in chain order; ``verify`` walks the hash chain and prints one JSON report;
-``redact`` (schema v46) removes one message body and records why.
+``redact`` (schema v46) removes one message body and records why; ``stats``
+computes coordination telemetry (mail latency, wake precision, park
+outcomes, sends per session-hour, suite lock waits) for a time window from
+the log, the v49 ``coordination_wakes`` table and the suite lock's durations
+file, as one JSON object that carries counts, seconds and names only.
 
-All three reach the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or
+All four reach the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or
 the lite tier's embedded instance, so they need the database owner's
-credentials, never a bearer token. ``export`` and ``verify`` read one
-read-only snapshot; ``redact`` writes one transaction under the same locks as
-the daemon's own writes. All are safe to run beside a live daemon. There is
-deliberately no MCP tool and no REST route: the log holds message bodies
-verbatim, and bodies carry machine paths and usernames. Treat the output as
-private: keep it out of repositories and anywhere public.
+credentials, never a bearer token. ``export``, ``verify`` and ``stats`` read
+one read-only snapshot; ``redact`` writes one transaction under the same
+locks as the daemon's own writes. All are safe to run beside a live daemon.
+There is deliberately no MCP tool and no REST route: the log holds message
+bodies verbatim, and bodies carry machine paths and usernames. Treat the
+output of ``export`` as private: keep it out of repositories and anywhere
+public. ``stats`` copies none of that into its report.
 
 Exit status: 0 success, 1 the chain failed verification, an expected head
 could not be confirmed, or a redaction was refused (the JSON result says why),
@@ -29,13 +34,20 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
 
+from pseudolife_memory.board_audit_stats import PARK_LOOKBACK, compute_stats
 from pseudolife_memory.storage.coordination import (
     AUDIT_COLUMNS, CoordinationError, CoordinationStore, audit_events, audit_has_body_column, resolve_agent_id,
     verify_audit_chain,
 )
 
 EXIT_OK, EXIT_BROKEN, EXIT_ERROR = 0, 1, 2
+# The suite lock's durations file (tests/suite_lock.py writes it); the lock
+# directory is the same one the suite reads, an override or the home default.
+LOCK_DIR_ENV = "PSEUDOLIFE_SUITE_LOCK_DIR"
+DURATIONS_FILE = "full-suite.durations.jsonl"
+DEFAULT_WINDOW = 24 * 3600
 
 # What each redaction refusal means, for the operator's terminal. None of
 # them repeats the reason or the body.
@@ -350,14 +362,116 @@ def _redact(args) -> int:
     return EXIT_OK
 
 
+def _window(since, until, now):
+    """The stats window: ``[since, until)``, the last DEFAULT_WINDOW seconds
+    up to now when neither is given."""
+    until = now if until is None else until
+    since = until - DEFAULT_WINDOW if since is None else since
+    if since >= until:
+        raise AuditCliError("--since must be before --until")
+    return since, until
+
+
+def _durations_path(environ) -> Path:
+    override = environ.get(LOCK_DIR_ENV)
+    directory = Path(override) if override else Path.home() / ".pseudolife-mcp" / "locks"
+    return directory / DURATIONS_FILE
+
+
+def _read_durations(path: Path):
+    """The lock's JSON lines as dicts, a line that is not one skipped; and
+    whether the file was there at all."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return [], False
+    records = []
+    for line in text.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records, True
+
+
+def _wake_rows(conn, since, until):
+    """The ``coordination_wakes`` rows decided in the window, or ``None`` on
+    a bank whose schema predates them (v49)."""
+    present = conn.execute("SELECT to_regclass('public.coordination_wakes') IS NOT NULL").fetchone()[0]
+    if not present:
+        return None
+    from psycopg.rows import dict_row
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("SELECT recipient_agent_id,sender_agent_id,message_id,decision,reason,urgent,"
+                    "ring_at,created_at,served_at FROM coordination_wakes "
+                    "WHERE created_at>=%s AND created_at<%s ORDER BY created_at,wake_id",
+                    (since, until))
+        return cur.fetchall()
+
+
+def _stats(args) -> int:
+    from pseudolife_memory import __version__
+    now = time.time()
+    since, until = _window(args.since, args.until, now)
+    target = Path(args.out) if args.out else None
+    if target is not None and target.exists():
+        raise AuditCliError(f"{target} exists; stats never replaces a file (--append adds a line "
+                            "to a running log instead)")
+    durations, found = _read_durations(Path(args.durations) if args.durations
+                                       else _durations_path(os.environ))
+    sources = {"durations": "file" if found else "absent"}
+    # The span the bank is read for, and an export clipped to: the window,
+    # plus the park lookback before it.
+    first = since - PARK_LOOKBACK
+    if args.input:
+        # An export already has the payload parsed; wakes are not exported.
+        events = [row for row in _read_export(Path(args.input))
+                  if first <= row["created_at"] < until]
+        wakes = []
+        sources.update(events="export", wakes="none")
+    else:
+        with _bank() as conn:
+            with closing(audit_events(conn, since=first, until=until)) as rows:
+                events = []
+                for row in rows:
+                    row = dict(row)
+                    row["payload"] = json.loads(row["payload"])
+                    events.append(row)
+            wakes = _wake_rows(conn, since, until)
+        sources.update(events="bank", wakes="bank" if wakes is not None else "absent")
+    report = compute_stats(events, wakes or [], durations, since=since, until=until, now=now,
+                           version=__version__, sources=sources)
+    line = json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n"
+    if target is not None:
+        try:
+            with target.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(line)
+        except OSError as exc:
+            raise AuditCliError(f"cannot write {target}: {exc.strerror}") from None
+    if args.append:
+        try:
+            with Path(args.append).open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(line)
+        except OSError as exc:
+            raise AuditCliError(f"cannot append to {args.append}: {exc.strerror}") from None
+    if target is None and not args.append:
+        try:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        except OSError as exc:
+            raise _write_error(None, exc) from None
+    return EXIT_OK
+
+
 def main(argv=None) -> int:
     """CLI entry point; accepts the arguments after ``board-audit``."""
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp board-audit",
-        description="Export, verify or redact the agent board's audit log (operator-only). "
-                    "Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank. The output "
-                    "holds message bodies: "
-                    "keep it private.")
+        description="Export, verify, redact or compute stats on the agent board's audit log "
+                    "(operator-only). Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's "
+                    "bank. An export holds message bodies: keep it private.")
     actions = parser.add_subparsers(dest="action", required=True)
     export = actions.add_parser("export", help="write events as JSON lines, oldest first")
     export.add_argument("--project", help="only events in this project")
@@ -379,12 +493,28 @@ def main(argv=None) -> int:
     redact.add_argument("--reason", required=True,
                         help="why, kept in the log for good (at most 240 characters; "
                              "never repeat the secret)")
+    stats = actions.add_parser(
+        "stats", help="one JSON object of coordination telemetry for a window (default the "
+                      "last 24 h): mail latency, wake precision, park outcomes, sends per "
+                      "session-hour, suite lock waits; counts, seconds and names only")
+    stats.add_argument("--since", type=_time, help="epoch seconds or ISO 8601, inclusive "
+                                                   "(default: 24 h before --until)")
+    stats.add_argument("--until", type=_time, help="epoch seconds or ISO 8601, exclusive "
+                                                   "(default: now)")
+    stats.add_argument("--input", help="read events from an export file instead of the bank "
+                                       "(wake rows are not exported, so wake precision is empty)")
+    stats.add_argument("--durations", help="the suite lock's durations file (default: "
+                                           f"{DURATIONS_FILE} in the lock directory)")
+    stats.add_argument("--out", help="a NEW file to write the object to instead of stdout")
+    stats.add_argument("--append", help="a JSON lines file to append the object to (created "
+                                        "if missing)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return EXIT_ERROR if exc.code else EXIT_OK
     try:
-        return {"export": _export, "verify": _verify, "redact": _redact}[args.action](args)
+        return {"export": _export, "verify": _verify, "redact": _redact,
+                "stats": _stats}[args.action](args)
     except AuditCliError as exc:
         print(f"board-audit: {exc}", file=sys.stderr)
     except _ReaderClosed:

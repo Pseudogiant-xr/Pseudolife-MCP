@@ -1325,6 +1325,33 @@ def test_release_records_how_long_the_run_held_the_lock(tmp_path):
     assert len(lines) == suite_lock.DURATIONS_KEEP == 50
 
 
+def test_the_duration_record_names_when_the_run_queued_and_started(tmp_path):
+    """``board-audit stats`` reads the queue wait (started minus queued) and
+    the hold from this file, so ``release`` records both stamps; a record
+    written without them (an older tree) keeps the old shape, and
+    ``expected_seconds`` reads either."""
+    from datetime import datetime
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="wt-x")
+    assert held_lock.queued_at and held_lock.started_at
+    assert datetime.fromisoformat(held_lock.queued_at) <= datetime.fromisoformat(
+        held_lock.started_at)
+    suite_lock.release(held_lock)
+    [line] = (tmp_path / suite_lock.DURATIONS_FILE).read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+    assert set(record) == {"seconds", "worktree", "ended", "queued_at", "started_at"}
+    assert (record["queued_at"], record["started_at"]) == (
+        held_lock.queued_at, held_lock.started_at)
+    assert datetime.fromisoformat(record["started_at"]) <= datetime.fromisoformat(
+        record["ended"])
+    # Backward compatible: the stamps are optional, and a record without
+    # them is the shape every run before them wrote.
+    suite_lock.record_duration(tmp_path, 900, worktree="wt-y")
+    old, = [json.loads(line) for line in
+            (tmp_path / suite_lock.DURATIONS_FILE).read_text(encoding="utf-8").splitlines()][1:]
+    assert set(old) == {"seconds", "worktree", "ended"}
+    assert suite_lock.expected_seconds(tmp_path) >= 1
+
+
 def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
         tmp_path, quick_board, capsys):
     for seconds in (600, 700, 800):

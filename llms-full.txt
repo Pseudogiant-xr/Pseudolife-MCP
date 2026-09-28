@@ -4831,6 +4831,90 @@ days for retries) is blanked too, so a retry of the redacted request is
 refused as `request_conflict`. The reason is hashed into the chain for good;
 describe the mistake, never repeat the secret.
 
+#### Coordination telemetry
+
+`pseudolife-mcp board-audit stats` turns the log, the v49
+`coordination_wakes` table and the suite lock's durations file into one
+JSON object of coordination telemetry for a window (default the last 24
+hours), so a maintainer can see whether mail moves, rings land and parks
+clear without reading an export:
+
+```sh
+pseudolife-mcp board-audit stats
+pseudolife-mcp board-audit stats --since 2026-09-27 --until 2026-09-28 --out stats.json
+pseudolife-mcp board-audit stats --append ~/board-stats.jsonl
+```
+
+It reads one read-only snapshot like `export`, so it is safe beside a running
+daemon (in the Docker tier, inside the daemon container). `--since` /
+`--until` take epoch seconds or ISO 8601 (a time without an offset is local);
+the window is `[since, until)` and every figure is as of `until`: a send
+still unread then counts as unread, a park still standing as open, a ring not
+yet served as never served. Events from up to 7 days before `since` (the
+longest a park can stand) are read only to know which parks stood or had
+lapsed when the window opened; a park set before the window is not counted.
+`--out` writes a new file (never
+replaced), `--append` adds one line to a JSON lines log (created if missing);
+with neither the object goes to stdout. `--input <export>` reads an export
+file instead of the bank, clipped to the same span (wake rows are not
+exported, so wake precision is empty there). `--durations` names the suite lock's
+`full-suite.durations.jsonl` (default: the lock directory,
+`PSEUDOLIFE_SUITE_LOCK_DIR` or `~/.pseudolife-mcp/locks`).
+
+The object (`"shape": 1`) carries `report`, `shape`, `version` (the package),
+`generated_at`, `window` (`since`, `until`, `hours`), `sources` (where
+events, wakes and durations came from: `bank`, `export`, `none`, `file`,
+`absent`), `events` (`total` and `by_kind`), and five sections. Percentiles
+are nearest-rank, in seconds, with the sample size beside them (`{"n", "p50",
+"p95"}`, `null` where there is no sample).
+
+- `mail_latency`: send to first read (the `send` event to the `read` event the
+  daemon logs once per message): `sends`, `read`, `unread`, `seconds`,
+  then the same `by_decision` (the send's wake decision: `rung`, `nudged`,
+  `hinted`, `withheld`, `no_path`, `capped`, `not_needed`, or `unknown` for a
+  send from before v49) and `by_principal` (the recipient's principal, as
+  the log saw it act in the window, else `unknown`). For a session with a
+  live channel the first read is usually the adapter pushing the mail in
+  (`path: delivery`), so there it measures delivery, not the model reading.
+- `wake_precision`: for each `rung` or `nudged` row decided in the window,
+  whether it was `served` to the recipient's adapter before `until` (`never_served`,
+  `share_never_served`, `seconds_to_served`), whether the recipient acted on
+  the board (an update, read, ack, send or register; not the adapter's own
+  delivery reads) within 120 s of being
+  served (`acted_after_served`, `share_acted_after_served`), and, where the
+  Stop hook posted its [woke marker](#waking-an-idle-claude-code-session-the-stop-hook)
+  within an hour of the serve, the same from the turn actually starting
+  (`woke`, `share_woke`, `seconds_served_to_woke`, `acted_after_woke`,
+  `share_acted_after_woke`); overall and `by_decision`.
+- `park_outcomes`: parks set in the window, read as the daemon applies
+  updates (the live-park rule): an `update` setting `park_reason` while no
+  park stands starts a park; one setting it, or any other park field, while
+  a park stands refines that park, which then counts under its latest
+  reason; a lapsed park's fields stay on the row, but the next park is a new
+  one and the lapsed one ended at its expiry (logs written before that rule,
+  when a park field could revive a lapsed park, are read as that daemon
+  applied them). `parks`, how each ended in `cleared` (`send`: a `rung`
+  message reached the agent between the park and its clearing update;
+  `owner_update`: the agent cleared it with no ring in between, by a plain
+  status or a null reason; `expiry`: `park_expires` passed before any
+  clearing and by `until`; `open`: still standing at `until`),
+  `seconds_to_clear` over the first two, then the same `by_reason`. A park
+  set before the 7-day lookback is never counted.
+- `sends_per_session_hour`: `sends` in the window over attached
+  `session_hours` (from an `attach` that is not a renewal to the same
+  address's `detach`, a `prune` removing it, or `until`, clipped to the
+  window; heartbeats are not logged, so an address attached before the window
+  with no fresh attach in it counts no hours, though its sends still count)
+  and their `rate`, overall and `by_principal` (the sender's).
+- `suite_lock`: the full-suite `runs` whose `ended` stamp falls in the
+  window, their `hold` and, where the record carries `queued_at` and
+  `started_at` (runs since this release), their `queue_wait`.
+
+Only counts, seconds, decision and reason names, principal names and version
+strings leave the tool: no message body, no agent id (not even a prefix),
+no path, no worktree and no user name is copied from any input, so the
+object can be kept beside a PR or a report where an export never could.
+
 #### Secret-shaped text
 
 The board refuses text shaped like a credential wherever it would keep it: a
@@ -5106,7 +5190,9 @@ asks the adapter for a due ring at the moment it would otherwise run
 `codex queue` (an offer whose mail the session has already seen, or that
 has nothing pending, is dropped). Every ring's ledger line (`ring` from the adapter, `wait` from
 the Stop hook, `bell` from the doorbell) carries the decision and reason as a
-sixth column. Against a daemon older than v49 nothing rings; pull delivery,
+sixth column, and a Stop hook that fires posts a `woke` marker the daemon
+logs for the address, so [`board-audit stats`](#coordination-telemetry)
+can tell a ring that was served from one whose turn started. Against a daemon older than v49 nothing rings; pull delivery,
 tool-result hints and the prompt-hook digest are unchanged.
 
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
@@ -5273,6 +5359,17 @@ also capped (below, and by the daemon's `wake` caps under
   a path or token. OneDrive-redirected profiles using reparse points are
   rejected: move the token file outside the redirected folder and update
   `PSEUDOLIFE_MCP_TOKEN_FILE`.
+- **The woke marker.** After a wake fires, the hook posts once to the daemon
+  that this address's turn is starting, `POST /api/hook/woke?agent=<id>` (in
+  the background, 2 s, the same bearer and URL as the gate, so a daemon that
+  hangs never delays the wake); the daemon logs a `woke` audit event for the
+  address whose payload counts the rings served to it in the last hour, and
+  nothing else. It is telemetry: [`board-audit
+  stats`](#coordination-telemetry) measures wake precision from the turn
+  actually starting rather than from the ring being served. The answer is
+  ignored, and a daemon that does not answer, or an address the bearer's
+  principal does not own, records nothing; without a `<key>.agent` address
+  there is no marker. The wake fires regardless.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
   the watch starts is waited for; one that vanishes during it (the shim
