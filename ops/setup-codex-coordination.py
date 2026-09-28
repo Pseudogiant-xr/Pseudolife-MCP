@@ -84,6 +84,60 @@ def served(url, token):
         return False
 
 
+def codex_cli(lookup):
+    """The codex CLI the shim's doorbell would run, from the merged view of the
+    server's ``env`` over the launching environment (as doctor looks)."""
+    from pseudolife_memory.codex_doorbell import resolve_codex_command
+    return resolve_codex_command(lookup)
+
+
+def wake_path(effective, env, board, board_reason, bank_token):
+    """``(path, reason)`` for how board mail reaches this Codex shim: ``live``
+    (the app-server bridge), ``doorbell`` (``codex queue``, on by default
+    since 2026-09-28) or ``pull-only``, read the way ``pseudolife_memory.shim``
+    reads the switches and ``pseudolife-mcp doctor`` reports them.
+    ``bank_token`` is the bearer the shim would send, from the token file
+    when one is configured, which is what it compares the bridge's with.
+    A missing bearer is caught before here: --check's board needs one, and
+    --enable refuses without one."""
+    def value(key):
+        return str(effective(key) or "").strip()
+
+    def raw(key):  # the shim reads the bridge values unstripped
+        return str(effective(key) or "")
+
+    if not board:
+        return "pull-only", board_reason
+    if value("PSEUDOLIFE_WRITER_ID").lower() != "codex":
+        return "pull-only", "PSEUDOLIFE_WRITER_ID is not codex"
+    if value("PSEUDOLIFE_AGENT_STATE"):
+        return "pull-only", ("PSEUDOLIFE_AGENT_STATE is set, which turns Codex "
+                             "coordination off")
+    bridge_token = raw("PSEUDOLIFE_CODEX_SERVER_TOKEN")
+    if (value("PSEUDOLIFE_AGENT_WAKE").lower() in TRUTHY
+            and raw("PSEUDOLIFE_CODEX_SERVER_URL") and bridge_token
+            and bridge_token != bank_token):
+        return "live", "PSEUDOLIFE_AGENT_WAKE with the app-server bridge"
+    doorbell = value("PSEUDOLIFE_CODEX_DOORBELL")
+    if doorbell and doorbell.lower() not in TRUTHY:
+        return "pull-only", f"PSEUDOLIFE_CODEX_DOORBELL={doorbell}"
+    # PATH and the rest come from the launching environment, but the CLI
+    # override is read where the shim gets it (the server's env or a
+    # forwarded variable), so the lookup and its reason agree. Doctor
+    # (doctor_cli.py _codex_wake) merges the whole environment instead.
+    lookup = {**os.environ, **{key: str(item) for key, item in env.items()}}
+    lookup.pop("PSEUDOLIFE_CODEX_BIN", None)
+    if value("PSEUDOLIFE_CODEX_BIN"):
+        lookup["PSEUDOLIFE_CODEX_BIN"] = value("PSEUDOLIFE_CODEX_BIN")
+    if codex_cli(lookup) is None:
+        return "pull-only", ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
+                             "existing file" if value("PSEUDOLIFE_CODEX_BIN")
+                             else "no codex CLI")
+    return "doorbell", ("PSEUDOLIFE_CODEX_DOORBELL is on by default and a codex "
+                        "CLI was found" if not doorbell
+                        else f"PSEUDOLIFE_CODEX_DOORBELL={doorbell} and a codex CLI was found")
+
+
 def private_backup(path):
     if not path.exists():
         return None
@@ -152,6 +206,21 @@ def configure(client, home, cwd, action):
     if access == "principal_not_allowed":
         report["reason"] = PRINCIPAL_REASON
     if action == "check":
+        if not server.get("enabled", True):
+            board, board_reason = False, "the Pseudolife MCP server is disabled in Codex"
+        elif mode == "disabled":
+            board_reason = f"PSEUDOLIFE_AGENT_COORDINATION={setting}"
+        elif not token:
+            board_reason = "no bearer token"
+        elif access == "principal_not_allowed":
+            board_reason = PRINCIPAL_REASON
+        elif access == "disabled":
+            board_reason = "coordination disabled on the daemon"
+        elif not daemon_ready:
+            board_reason = "the daemon is unreachable or refuses this bearer"
+        else:
+            board_reason = "the daemon does not serve the board to this bearer"
+        report["wake"], report["wake_reason"] = wake_path(effective, env, board, board_reason, token)
         return report
     if action == "enable":
         if server.get("enabled") is False:
@@ -186,15 +255,22 @@ def configure(client, home, cwd, action):
         actual = current.get("config", {}).get("mcp_servers", {}).get(SERVER, {}).get("env", {})
         if any(actual.get(key) != value for key, value in values.items()):
             raise SetupError("Codex saved settings but its effective configuration differs; check project or managed overrides before reconnecting.")
-    # Live delivery also needs the app-server bridge; the shim falls back to
-    # pull without it (docs/guide/configuration.md, "Optional Codex live delivery").
-    live = (str(effective("PSEUDOLIFE_AGENT_WAKE") or "").strip().lower() in TRUTHY
-            and effective("PSEUDOLIFE_CODEX_SERVER_URL")
-            and effective("PSEUDOLIFE_CODEX_SERVER_TOKEN"))
+    # The wake path after this write: live delivery needs the app-server
+    # bridge (docs/guide/configuration.md, "Optional Codex live delivery"),
+    # and without it the shim's default is the doorbell, not pull.
+    written = {**env, **values}
+
+    def effective_after(key):
+        return written.get(key, effective(key))
+
+    if action == "enable":
+        wake, wake_reason = wake_path(effective_after, written, True, "", token)
+    else:
+        wake, wake_reason = "pull-only", "PSEUDOLIFE_AGENT_COORDINATION=0"
     report.update(status="enabled" if action == "enable" else "disabled",
                   coordination_enabled=action == "enable",
                   coordination_mode="explicit" if action == "enable" else "disabled",
-                  wake="live" if action == "enable" and live else "pull-only")
+                  wake=wake, wake_reason=wake_reason)
     return report
 
 

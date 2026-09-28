@@ -481,11 +481,16 @@ pid, worktree, held for`) by board mail to the peers the lease concerns, in
 the same project (compared without case; every project when the sender has
 none set): live agents (attached, or registered without an adapter) whose
 status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
-with `park_clear_by` naming the lease, attached or not, since mail waits for a
-parked session. Both leases go to both status groups on purpose: a GPU server
-beside a full suite is the contention. At most 20 peers are told per event; one
-refused send does not stop the rest. The notices are automatic and need no
-reply; they replace hand-written SUITE-START/SUITE-END notes.
+with `park_clear_by` naming the lease while the park stands (a reason set, and
+`park_expires` not yet passed), attached or not, since mail waits for a parked
+session. The release notice rings such a session, subject to the wake path
+and caps: for 60 seconds after a hold ends, the daemon counts its last holder
+as the clearer the lease name stands for (taking a lease clears nothing, so
+the acquire notice waits in the queue). Both leases go to both status groups
+on purpose: a GPU server beside a full suite is the contention. At most 20
+peers are told per event; one refused send does not stop the rest. The
+notices are automatic and need no reply; they replace hand-written
+SUITE-START/SUITE-END notes.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
@@ -541,14 +546,25 @@ without `PSEUDOLIFE_AGENT_COORDINATION` reports `ready (default-on)` when the
 daemon serves the board to its bearer, the same question the shim asks at
 startup. Nothing more is needed then. When it reports `needs-configuration`
 because the daemon refuses the bearer's principal, its `reason` says so
-(below).
+(below). The report also names the wake path the shim would take with this
+registration, read the way the shim reads the switches and `pseudolife-mcp
+doctor` reports them: `wake` is `live` (the [app-server
+bridge](#optional-codex-live-delivery)), `doorbell` (the [Codex
+doorbell](#codex-doorbell), on by default since 2026-09-28, so a ready
+registration with a `codex` CLI reports it) or `pull-only`, and
+`wake_reason` says why: the switch that turned it off
+(`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`), `no codex
+CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a fixed
+`PSEUDOLIFE_AGENT_STATE`, a server disabled in Codex, or the board question
+the daemon answered no to.
 
 `python ops/setup-codex-coordination.py --enable` is only for pinning explicit
 mode (`PSEUDOLIFE_AGENT_COORDINATION=1`), after which the check reports
 `ready (explicit)`. In explicit mode the shim skips the startup question and
 keeps the adapter's own diagnostics. Enable also sets `PSEUDOLIFE_WRITER_ID=codex`
 and `PSEUDOLIFE_MCP_NO_SPAWN=1`. It leaves `PSEUDOLIFE_AGENT_WAKE` as it is:
-unset means pull-only, and a live-delivery opt-in survives a re-run. Enable
+unset means no live delivery (the doorbell still rings by default), and a
+live-delivery opt-in survives a re-run. Enable
 requires a configured bearer and an enabled daemon that allows its principal;
 it does not change the daemon's authentication or allowlist. The token must be
 in the MCP registration's `env`, or explicitly forwarded through `env_vars`.
@@ -640,8 +656,9 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged. A recipient running with approval
-policy `never` cannot execute a tool that still requires approval. To authorize
+Setup leaves Codex tool approvals unchanged and prints the approval choice at the
+end of successful hook setup. A recipient running with approval policy `never`
+cannot execute a tool that still requires approval. To authorize
 unattended mailbox operations specifically, configure the installed server's
 `tools.memory_message.approval_mode = "approve"` in Codex. This permits that
 tool's send, receive and acknowledgment actions; it does not approve file writes,
@@ -1226,11 +1243,15 @@ The **park record** lives on the agent row and is set through
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
 An omitted field stays; a refinement or a new reason keeps the standing
-expiry. A plain status update while parked clears the record,
+expiry. A park past its `park_expires` no longer stands: a new reason over
+it is a new park, with the 12-hour default counted from then and none of
+the lapsed park's `park_needs`, `park_clear_by` or `park_resume` carried
+over. A plain status
+update while parked clears the record,
 since a session that is working is not parked; a task or `children` update
 leaves it. A park field on its own refines a standing park and is refused
-(`invalid_park`) on an unparked row, as are an unknown reason and a bad
-expiry; credential-shaped text is `secret_like_body`. Every peer row in
+(`invalid_park`) on an unparked row or a lapsed park, as are an unknown
+reason and a bad expiry; credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the
@@ -1247,7 +1268,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
 | `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
@@ -1410,17 +1431,25 @@ also capped (below, and by the daemon's `wake` caps under
   park during the turn; the hook then ends the turn at once with "Before
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
-  park_resume=...)" as the wake text and a `gate` ledger line. Once: the
-  continuation's Stop carries `stop_hook_active: true` and is not asked
-  (Claude Code also caps stop-hook continuations at eight in a row). An
-  async Stop hook cannot use the `decision: "block"` JSON, so the block
+  park_resume=...)" as the wake text and a `gate` ledger line (its fifth
+  column is the message's length in UTF-8 bytes plus one, on every client).
+  Once: the continuation's Stop carries `stop_hook_active: true` and is not
+  asked (Claude Code also caps stop-hook continuations at eight in a row).
+  An async Stop hook cannot use the `decision: "block"` JSON, so the block
   rides the same exit-2 rewake as the mail wake. No answer (a daemon that
-  is down, a bearer it refuses, no address) is allow: the gate never holds
-  a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
-  private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
-  as the other hooks; Git Bash cannot show an NTFS file is owner-only, so
-  on Windows use the variable), the URL from
-  `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other hooks.
+  is down, a bearer it refuses, a redirect, an answer cut off at the time
+  limit, no address) is allow: the gate never holds a turn on an error.
+  The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a private
+  `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check as the
+  other hooks), the URL from `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other
+  hooks. On Windows, Git Bash uses the native ACL rules: current-user
+  ownership, a protected DACL, and allow rules only for the owner or OWNER
+  RIGHTS; reparse points in the file or its parents are rejected. A token
+  file rejected by the Stop gate or coordination-start hook leaves a `token`
+  line with value `rejected` in the digest directory's `ledger.log`, without
+  a path or token. OneDrive-redirected profiles using reparse points are
+  rejected: move the token file outside the redirected folder and update
+  `PSEUDOLIFE_MCP_TOKEN_FILE`.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
   the watch starts is waited for; one that vanishes during it (the shim
@@ -1435,19 +1464,29 @@ also capped (below, and by the daemon's `wake` caps under
   a minute on Windows, where it lists the process through `ps -W` at arm
   time and then once a minute (a Windows PID is invisible to `kill -0`). In
   `claude -p` runs, Claude Code ends a waiting hook at teardown.
-- Codex loads the same `hooks.json`. Its native command
-  (`lifecycle.ps1 -Event Stop`) runs only the park gate: the same one
-  request, through the managed connection file or the explicit daemon
-  settings, and a block is returned the way Codex documents for `Stop`,
-  `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
-  which Codex turns into a continuation prompt; allow, no address, a
+- Codex loads the same `hooks.json` and gets only the park gate, on every
+  platform: on Windows through the entry's native command
+  (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
+  script, which recognises Codex context the way the other bash hooks do
+  (`PSEUDOLIFE_CODEX_HOOK=1`, or `PLUGIN_ROOT` equal to
+  `CLAUDE_PLUGIN_ROOT`), unless Claude Code started the hook for its own
+  session (`CLAUDECODE=1` and `CLAUDE_CODE_SESSION_ID` equal to the
+  payload's id), which always stays Claude's. This is the plugin install:
+  a manual Codex install (`ops/setup-codex-hooks.py` without the plugin)
+  has no `Stop` hook, so no gate. Either path makes the same one request,
+  through the managed connection file under the Codex home or the explicit
+  daemon
+  settings (with the other hooks' checks: an explicit URL may not disagree
+  with the managed one, the bearer file must be private), and returns a
+  block the way Codex documents for `Stop`, `{"decision": "block",
+  "reason": <the message>}` on stdout with exit 0, which Codex turns into a
+  continuation prompt, plus the `gate` ledger line; allow, no address, a
   continuation's Stop, or no answer prints nothing. The wake itself stays
-  Claude Code's: the bash script exits unless Claude Code started it. Codex
-  runs the native command only on Windows (`commandWindows`), so the Codex
-  gate is Windows-only; an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
-  `PSEUDOLIFE_AGENT_COORDINATION` of `0`, `false`, `no` or `off` turns it
-  off. Whether Codex honours the decision
-  of a hook declared `async` has not been probed on a live install.
+  Claude Code's: in Codex context the script exits after the gate and never
+  arms the wait (the [doorbell](#codex-doorbell) is Codex's wake path). An
+  explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or `PSEUDOLIFE_AGENT_COORDINATION`
+  of `0`, `false`, `no` or `off` turns it off. Whether Codex honours the
+  decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 

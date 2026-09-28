@@ -775,7 +775,9 @@ def check_codex_hooks(repo: Path) -> dict:
     hooks_root = codex_home / "pseudolife" / "hooks"
     if hooks_root.is_dir():
         if (hooks_root / codex_bundle_digest(repo)).is_dir():
-            return {"state": "current", "detail": "the copy for the checkout's hook scripts is installed"}
+            return {"state": "bundle-present",
+                    "detail": "bundle present; trust and execution not checked; rerun setup to verify with "
+                              "consent: python ops/setup-codex-hooks.py --source manual --trust ask"}
         return {"state": "stale",
                 "detail": "the installed copy predates the checkout's hook scripts; hooks are trusted by "
                           "hash, so refresh with consent: python ops/setup-codex-hooks.py --trust ask"}

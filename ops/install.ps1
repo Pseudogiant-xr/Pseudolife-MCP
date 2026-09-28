@@ -1346,7 +1346,7 @@ if (($hookState["claude"] -eq "plugin") -and $claudeTokenFile) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
     $settingsOutput = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") claude-settings-env --settings (Join-Path $claudeSettingsHome "settings.json") --token-file $claudeTokenFile --daemon-url $clientDaemonUrl
     switch ("$(Get-HelperStatus $settingsOutput)") {
-        "updated" { Step "Claude Code plugin hooks: PSEUDOLIFE_MCP_TOKEN_FILE set in ~/.claude/settings.json (env)." }
+        "updated" { Step "Claude Code plugin hook settings: PSEUDOLIFE_MCP_TOKEN_FILE saved in ~/.claude/settings.json (env); hook authentication not verified." }
         "kept" { }
         default { Write-Warning "Could not give the plugin's hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the env block of ~/.claude/settings.json." }
     }

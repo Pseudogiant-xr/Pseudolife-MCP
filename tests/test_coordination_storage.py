@@ -878,6 +878,59 @@ def test_a_new_park_expires_by_default_and_is_capped(store):
         store.update(*creds(a), park_expires=2000.0 + PARK_MAX_TTL + 1)
 
 
+def test_a_park_after_a_lapsed_one_is_a_new_park(store):
+    """A lapsed park is no park: parking again without ``park_expires`` gets
+    the default from now, not the lapsed expiry, so the new park stands (the
+    Stop-hook gate allows it). Found by the review of PR #441 (2026-09-28):
+    the re-park kept the lapsed expiry and was dead on arrival."""
+    from pseudolife_memory.storage.coordination import PARK_DEFAULT_TTL
+    a = store.register("alice")
+    store.update(*creds(a), park_reason="waiting_peer", park_needs="a review",
+                 park_clear_by="anyone", park_expires=1500.0)
+    store.test_time[0] = 2000.0
+    out = store.update(*creds(a), park_reason="blocked", park_needs="the GPU",
+                       park_clear_by="anyone")
+    assert (out["park_expires"], out["park_set_at"]) == (2000.0 + PARK_DEFAULT_TTL, 2000.0)
+    assert store.park_gate(a["agent_id"], "alice") == {"gate": "allow", "reason": "parked"}
+
+
+def test_a_park_over_a_lapsed_one_does_not_revive_its_need(store):
+    """A new park over a lapsed one starts from an empty record: the lapsed
+    need, clearer and resume note are not carried into it, since they may
+    be stale and a fresh expiry would make them live again (a clearer's
+    chatter would ring for 12 hours). Over a live park they stay."""
+    a = store.register("alice")
+    b = store.register("alice")
+    store.update(*creds(a), park_reason="waiting_peer", park_needs="a review from b",
+                 park_clear_by=b["agent_id"], park_resume="merge it", park_expires=1500.0)
+    store.test_time[0] = 2000.0
+    out = store.update(*creds(a), park_reason="blocked")
+    assert (out["park_reason"], out["park_needs"], out["park_clear_by"],
+            out["park_resume"]) == ("blocked", "", "", "")
+    # Named fields are taken as given.
+    store.test_time[0] = 2000.0 + 13 * 3600
+    out = store.update(*creds(a), park_reason="needs_info", park_needs="which judge")
+    assert (out["park_needs"], out["park_clear_by"]) == ("which judge", "")
+
+
+def test_fields_alone_cannot_refine_a_lapsed_park(store):
+    """A refinement needs a standing park, and a lapsed one no longer stands:
+    its need may be stale, so the session restates it with a reason. Before,
+    the refinement was accepted and kept the lapsed expiry, so it changed
+    the text of a park nothing honoured."""
+    a = store.register("alice")
+    store.update(*creds(a), park_reason="waiting_peer", park_needs="a review",
+                 park_expires=1500.0)
+    store.test_time[0] = 2000.0
+    for fields in ({"park_needs": "a review of the diff"}, {"park_expires": 9000.0}):
+        with pytest.raises(CoordinationError, match="invalid_park"):
+            store.update(*creds(a), **fields)
+    assert store.authenticate(*creds(a))["park_needs"] == "a review"
+    # A status update still clears the lapsed record, as it clears a live one.
+    out = store.update(*creds(a), status="working again")
+    assert (out["park_reason"], out["park_expires"]) == (None, None)
+
+
 def test_clears_needs_a_distinctive_word(store):
     """A whole-word match of a filler word ("the", "of") is no match: the
     run must hold a word of four letters or more."""
