@@ -325,6 +325,83 @@ def test_an_xdist_worker_never_takes_the_lock(held):
     assert suite_lock.take_for_session(worker, environ, TESTS) is None
 
 
+def test_session_kind_classifies_what_the_lock_sees():
+    kind = suite_lock.session_kind
+    assert kind(_config(["tests"], worker=True), {}, TESTS) == "worker"
+    assert kind(_config(["tests"]), {"PSEUDOLIFE_SUITE_LOCK": "off"}, TESTS) == "off"
+    assert kind(_config(["tests"]), {"GITHUB_ACTIONS": "true"}, TESTS) == "off"
+    assert kind(_config(["tests"]), {}, TESTS) == "full"
+    assert kind(_config(["tests/test_bm25.py"]), {}, TESTS) == "targeted"
+    assert kind(_config(["tests"], keyword="graph"), {}, TESTS) == "targeted"
+    with pytest.raises(ValueError):
+        kind(_config(["tests"]), {"PSEUDOLIFE_SUITE_LOCK": "maybe"}, TESTS)
+
+
+def test_the_preflight_runs_for_gated_runs_only_and_before_the_lock(tmp_path):
+    # conftest's PG password check hangs on this hook: it must see a full run
+    # before that run queues (a refusal that had already taken the lock, or
+    # a ticket, would hold up the machine's one slot), see a targeted run
+    # too (it prints one line), and never see a worker or an off run.
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path), "PSEUDOLIFE_SUITE_LOCK": "fail"}
+    seen: list[str] = []
+
+    def record(kind: str) -> None:
+        seen.append(kind)
+
+    assert suite_lock.take_for_session(_config(["tests/test_bm25.py"]), environ, TESTS,
+                                       preflight=record) is None
+    assert suite_lock.take_for_session(_config(["tests"], worker=True), environ, TESTS,
+                                       preflight=record) is None
+    assert suite_lock.take_for_session(
+        _config(["tests"]), {**environ, "PSEUDOLIFE_SUITE_LOCK": "off"}, TESTS,
+        preflight=record) is None
+    assert seen == ["targeted"]
+
+    class Refused(Exception):
+        pass
+
+    def refuse(kind: str) -> None:
+        seen.append(kind)
+        raise Refused
+
+    with pytest.raises(Refused):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS, preflight=refuse)
+    assert seen == ["targeted", "full"]
+    # Refused before queueing: the lock is free and no ticket was left.
+    suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="after"))
+    queue_dir = tmp_path / suite_lock.QUEUE_DIR
+    assert not queue_dir.exists() or not list(queue_dir.iterdir())
+
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                            preflight=record)
+    try:
+        assert held_lock is not None
+        assert seen == ["targeted", "full", "full"]
+    finally:
+        suite_lock.release(held_lock)
+
+
+def test_a_refusing_preflight_wins_over_a_held_lock(held):
+    # The ordering, told apart: with another process holding the lock in
+    # fail mode, a preflight that ran after queueing would never be reached
+    # (the busy refusal comes first). Only a preflight run before the queue
+    # raises its own refusal, and leaves no ticket behind.
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(held.dir),
+               "PSEUDOLIFE_SUITE_LOCK": "fail"}
+
+    class Refused(Exception):
+        pass
+
+    def refuse(kind: str) -> None:
+        raise Refused(kind)
+
+    with pytest.raises(Refused, match="full"):
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS, preflight=refuse)
+    queue_dir = held.dir / suite_lock.QUEUE_DIR
+    assert not queue_dir.exists() or not list(queue_dir.iterdir())
+    assert suite_lock.read_holder(held.dir)["pid"] == held.pid
+
+
 def _lock_backend():
     return ((suite_lock.msvcrt, "locking") if os.name == "nt"
             else (suite_lock.fcntl, "flock"))
@@ -774,9 +851,18 @@ def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env["PSEUDOLIFE_SUITE_LOCK_DIR"] = str(directory)
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
     env.pop("PSEUDOLIFE_SUITE_SLOTS", None)  # each test sets its own
-    # These runs never reach a PG test; don't provision a database for them.
+    # These runs never reach a PG test; don't provision a database for them,
+    # and don't check the dev server's password for them either: an explicit
+    # test DSN is used verbatim, so the full-run password preflight has
+    # nothing to resolve. Nothing connects to this DSN in a run that collects
+    # no test (checked 2026-09-28 with the port unbound).
     env.pop("PSEUDOLIFE_REQUIRE_TEST_POSTGRES", None)
+    env["PSEUDOLIFE_TEST_DATABASE_URL"] = _UNUSED_TEST_DSN
     return env
+
+
+# Port 1 is never a PostgreSQL server; the name is a disposable one.
+_UNUSED_TEST_DSN = "dbname=pseudolife_memory_test host=127.0.0.1 port=1"
 
 
 def _full_run_collecting_nothing(workers: int = 0) -> list[str]:
@@ -843,6 +929,147 @@ def test_a_targeted_pytest_run_is_not_locked(held, procs):
                  "-p", "no:cacheprovider", "-p", "no:xdist"],
                 _pytest_env(held.dir, "fail"))
     assert run.drain() == pytest.ExitCode.OK, run.seen
+
+
+# --- a full run whose password the dev server rejects -------------------------
+#
+# 2026-09-27 (twice, and 2026-09-24 before): a full suite launched from a fresh
+# worktree, whose ops/.env was missing or a copy of ops/.env.example, resolved
+# the compose default password, the dev server rejected it, and the run went
+# to the end with 1,424 PG-backed setup errors: a gate that gated nothing, for
+# the machine's one full-suite slot. conftest now asks the server before the
+# run queues. These runs go through the real conftest against the real dev
+# server, so they need it up and telling passwords apart; the password check
+# itself is unit-tested in tests/test_pg_defaults.py against temp env files.
+
+_WRONG_PASSWORD = "not-the-dev-server-password-" + uuid.uuid4().hex
+_REFUSAL = "refusing the full suite"
+_FIX = "copy ops/.env from the main checkout"
+_EXAMPLE_COPY = "rejects the compose default password, as ops/.env is a copy of ops/.env.example"
+
+
+def _pg_env(directory: Path, mode: str, password: str | None) -> dict[str, str]:
+    """A lock-test environment that resolves the dev server's password the
+    way a worktree run does (no explicit DSN), lock in ``mode``: ``password``
+    as the override, or with ``None`` from the checkout's ops/.env."""
+    env = _pytest_env(directory, mode)
+    del env["PSEUDOLIFE_TEST_DATABASE_URL"]
+    # The parent's conftest seeded the bench URL from its own password; a
+    # child resolving from its ops/.env must seed its own.
+    for name in ("PSEUDOLIFE_TEST_PG_PASSWORD", "PSEUDOLIFE_BENCH_ADMIN_URL",
+                 "_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"):
+        env.pop(name, None)
+    if password is not None:
+        env["PSEUDOLIFE_TEST_PG_PASSWORD"] = password
+    return env
+
+
+def _fresh_worktree(tmp_path: Path) -> Path:
+    """What a full run imports, copied as a fresh worktree has it: ops/.env
+    is a byte copy of ops/.env.example."""
+    checkout = _copy_of_the_checkout(tmp_path / "checkout")
+    (checkout / "ops").mkdir()
+    example = (ROOT / "ops" / ".env.example").read_bytes()
+    (checkout / "ops" / ".env.example").write_bytes(example)
+    (checkout / "ops" / ".env").write_bytes(example)
+    return checkout
+
+
+def _full_run_in(checkout: Path, *extra: str) -> list[str]:
+    return [sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider",
+            "-p", "no:xdist", f"--ignore-glob={checkout / 'tests' / '*'}", *extra]
+
+
+@pytest.fixture
+def dev_server_answers(tmp_path):
+    """The dev server, when it tells passwords apart: it accepts this run's
+    resolved credentials and rejects both a wrong one and the compose
+    default a fresh worktree resolves, else the test skips. A server that
+    rejects every password fails the accepted-run test; one that accepts any
+    (trust auth), or runs on the compose default (as CI's service does),
+    never refuses the template copy."""
+    pytest.importorskip("psycopg")
+    from tests import pg_defaults
+
+    answer = pg_defaults.probe_dev_server()
+    if answer != "ok":
+        pytest.skip(f"the dev Postgres at {pg_defaults.DEV_HOST_PORT} did not "
+                    f"accept this run's credentials ({answer})")
+    for label, env in (("a wrong password", {"PSEUDOLIFE_TEST_PG_PASSWORD": _WRONG_PASSWORD}),
+                       ("the compose default password", {})):
+        verdict = pg_defaults.probe_dev_server(env, tmp_path / "no-env-file")
+        if verdict != "auth":
+            pytest.skip(f"the dev Postgres at {pg_defaults.DEV_HOST_PORT} does not "
+                        f"reject {label} ({verdict})")
+    return pg_defaults
+
+
+def test_a_full_pytest_run_from_a_fresh_worktree_is_refused_before_it_queues(
+        held, procs, tmp_path, dev_server_answers):
+    # The lock is held by another process: a run that queued would print the
+    # waiting notice. Refused first, it prints the fix and exits, leaving the
+    # holder alone and no ticket behind.
+    checkout = _fresh_worktree(tmp_path)
+    run = procs(_full_run_in(checkout), _pg_env(held.dir, "wait", None), cwd=checkout)
+    assert run.drain(timeout=START_TIMEOUT) == pytest.ExitCode.USAGE_ERROR, run.seen
+    refusal = [line for line in run.seen if _REFUSAL in line]
+    assert refusal, run.seen
+    assert _EXAMPLE_COPY in refusal[0], refusal
+    assert _FIX in refusal[0], refusal
+    assert "PSEUDOLIFE_TEST_PG_PASSWORD" in refusal[0], refusal
+    assert not any("waiting for the full-suite lock" in line for line in run.seen), run.seen
+    assert suite_lock.read_holder(held.dir)["pid"] == held.pid
+    assert not list((held.dir / suite_lock.QUEUE_DIR).iterdir())
+
+
+def test_a_full_pytest_run_with_a_rejected_override_names_the_override(
+        held, procs, dev_server_answers):
+    run = procs(_full_run_collecting_nothing(),
+                _pg_env(held.dir, "wait", _WRONG_PASSWORD))
+    assert run.drain(timeout=START_TIMEOUT) == pytest.ExitCode.USAGE_ERROR, run.seen
+    refusal = [line for line in run.seen if _REFUSAL in line]
+    assert refusal, run.seen
+    assert "correct or unset PSEUDOLIFE_TEST_PG_PASSWORD" in refusal[0], refusal
+    assert not any(_WRONG_PASSWORD in line for line in run.seen), run.seen
+
+
+def test_a_full_pytest_run_the_server_accepts_takes_the_lock(tmp_path, procs,
+                                                             dev_server_answers):
+    run = procs(_full_run_collecting_nothing(),
+                _pg_env(tmp_path, "fail", dev_server_answers.default_password()))
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    assert not any(_REFUSAL in line for line in run.seen), run.seen
+
+
+def test_a_targeted_pytest_run_from_a_fresh_worktree_gets_one_line_and_runs(
+        held, procs, tmp_path, dev_server_answers):
+    # -k narrows the run: targeted, so the held lock is ignored and the run
+    # collects nothing (exit 5) after one line saying why its PG tests
+    # would error.
+    checkout = _fresh_worktree(tmp_path)
+    run = procs(_full_run_in(checkout, "-k", "nothing_matches_this"),
+                _pg_env(held.dir, "fail", None), cwd=checkout)
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    notes = [line for line in run.seen if _EXAMPLE_COPY in line]
+    assert len(notes) == 1, run.seen
+    assert notes[0].startswith("note: "), notes
+    assert _FIX in notes[0]
+    assert not any(_REFUSAL in line for line in run.seen), run.seen
+
+
+def test_a_github_actions_run_is_never_asked_for_a_password(tmp_path, procs,
+                                                            dev_server_answers):
+    # CI hands the fixtures a full DSN and runs with the lock off; the check
+    # gates on the lock's conditions, so even without the DSN it stays out of
+    # the way there. The full run collects nothing and exits 5.
+    checkout = _fresh_worktree(tmp_path)
+    env = _pg_env(tmp_path, "wait", None)
+    del env["PSEUDOLIFE_SUITE_LOCK"]
+    env["GITHUB_ACTIONS"] = "true"
+    run = procs(_full_run_in(checkout), env, cwd=checkout)
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    assert not any(_EXAMPLE_COPY in line for line in run.seen), run.seen
+    assert not any(_REFUSAL in line for line in run.seen), run.seen
 
 
 # --- a tree that changes while its run is queued ------------------------------

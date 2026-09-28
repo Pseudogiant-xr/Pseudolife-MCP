@@ -28,7 +28,15 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass. Three exemptions, spelled out under
+   without it, which is not a pass. **A full run the bench Postgres rejects
+   refuses to start** (conftest asks the server before queueing for the
+   suite lock): a fresh worktree has no `ops/.env`, or the `.example` copy,
+   so the suite resolves the compose default password and every PG-backed
+   test would ERROR on setup (1,424 in one 2026-09-27 run). The refusal
+   names the fix: copy `ops/.env` from the main checkout into the
+   worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD` for the
+   pytest process. Targeted runs print one line and start. Three
+   exemptions, spelled out under
    "One full suite at a time per machine" below: **docs-only changes** run
    the doc guards instead, **test-only changes** run the touched test
    files, and **merging origin/master into a branch that already passed**,
@@ -115,6 +123,22 @@ took 143 CUDA OOMs.
   the coordination board (`memory_agents` / `memory_message`) and keep
   `suite=running|idle` in your status: the lock queues runs, the board lets
   peers plan around the queue.
+- **An announcement is a message, not a status line** (2026-09-28). Send
+  `SUITE-START` / `SUITE-END`, a GPU launch or any saturating window with
+  `memory_message` to every peer whose status shows the resource
+  (`suite=running`, `suite=queued`, `gpu=`), with your pid, worktree and
+  ETA; keep `suite=running|queued|idle` in your own status as well. The
+  status is what a peer sees when it looks; the message is what it acts
+  on, and a peer may not look until its next turn. Never infer that a
+  holder is idle from process stats, a quiet board or an old timestamp:
+  ask them. This host's dialect for the served check-in's rules is
+  `examples/hook-instructions.md`.
+- **A host-shaped symptom is broadcast before it is debugged**: a hung
+  interpreter, os error 1455, a database refusing its password, a daemon
+  that stopped answering, or anything else that fails in a way unrelated to
+  your change. Message every active peer first, then debug: on this host it
+  is usually breaking their run too (2026-09-28: several sessions timed out
+  on one hung `python3` alias and each investigated it alone).
 - **CPU- or memory-saturating work never overlaps a full suite**
   (maintainer rule 2026-09-25). That means load or stress repros (CPU
   burners, memory hogs), benchmark sweeps, parallel stress loops, and

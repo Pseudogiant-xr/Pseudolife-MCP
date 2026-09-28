@@ -9,6 +9,7 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 import yaml
@@ -971,3 +972,27 @@ def test_fixture_set_slot_contender_counts_once_in_overview(svc):
     assert len(contested_rows) == len(contested_slots) + len(members) - 1
     ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
     assert ov["counts"]["facts_contested"] == len(contested_slots)
+
+
+def test_example_hook_instructions_serve_whole_and_carry_only_the_host_dialect():
+    """``examples/hook-instructions.md`` is the maintainer host's dialect
+    (suite/gpu status words, the lease holder, the ops/.env pre-flight) for
+    ``<data_dir>/hook-instructions.md``: it must fit the 3,500-byte override
+    cap whole, so no paragraph is dropped and no partial notice is added,
+    and the served core stays free of those words (2026-09-27)."""
+    from pathlib import Path
+    from pseudolife_memory.coordination import CHECKIN_TEXT
+    from pseudolife_memory.web.session_hook import _bounded_custom_instructions
+    path = Path(__file__).resolve().parents[1] / "examples" / "hook-instructions.md"
+    text = path.read_text(encoding="utf-8").strip()
+    assert len(text.encode("utf-8")) <= 3_500
+    served = _bounded_custom_instructions(text, 3_500)
+    assert "Custom instructions are partial" not in served
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    assert served == "\n\n".join(blocks) and len(blocks) >= 3
+    for word in ("suite=running", "suite=queued", "suite=idle", "gpu=", "ops/.env",
+                 "SUITE-START", "SUITE-END", "<worktree>", "<pid>"):
+        assert word in text, word
+        assert word not in CHECKIN_TEXT, word
+    # Placeholders only: no user, host or drive-letter path.
+    assert not re.search(r"[A-Z]:\\|/Users/|/home/\w", text)

@@ -97,8 +97,15 @@ def test_message_send_passes_clears_and_urgent(monkeypatch):
                     ("send", {"to": "peer", "text": "fyi", "request_id": "r2"})]
 
 
-def test_checkin_asks_sessions_to_park_when_they_stop():
-    from pseudolife_memory.coordination import CHECKIN_TEXT
-    assert "park_reason" in CHECKIN_TEXT
-    for field in ("park_needs", "park_clear_by", "park_resume"):
-        assert field in CHECKIN_TEXT
+def test_sessions_are_asked_to_park_where_the_text_is_not_benched():
+    """The park request reaches a session through the tool description and
+    the Stop hook's gate. The check-in sentence is kept ready but not
+    served: CHECKIN_TEXT is pinned to the text the check-in bench measured
+    (#435), so it joins only with a new bench run."""
+    from pseudolife_memory import mcp_server as mod
+    from pseudolife_memory.coordination import (
+        CHECKIN_TEXT, PARK_CHECKIN_SENTENCE, PARK_GATE_MESSAGE)
+    for text in (PARK_CHECKIN_SENTENCE, PARK_GATE_MESSAGE, mod.memory_agents.__doc__):
+        for field in ("park_reason", "park_needs", "park_clear_by", "park_resume"):
+            assert field in text, (field, text[:40])
+    assert PARK_CHECKIN_SENTENCE not in CHECKIN_TEXT

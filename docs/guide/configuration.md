@@ -128,7 +128,37 @@ client that opted out only in its MCP env block (set the opt-out where the
 hooks see it too, since they cannot read that block); and a Docker install
 wired by `ops/install-hook.*`, whose `docker exec` check-in asks with the
 daemon container's own token. The check-in tells the agent to say so and
-continue when the tools are unavailable. Optional
+continue when the tools are unavailable.
+
+Since 2026-09-28 the check-in also says when a message is due, not only
+how to send one (a review of six sessions had found 15 status updates, 9
+peer lists and 7 receives against no sends until a human asked for one). It
+carries two field-neutral rules, the two of five candidates that changed
+decisions in `evals/coordination_checkin_bench.py` (see `evals/README.md`):
+before using something shared, look for whoever holds it or has it
+booked, and if someone does, message them that you are next, even when
+their status says when they expect to finish, because a status line is not
+a queue (if the board shows it free, use it and say so in your status); and
+keep your status true (what you hold, what you wait on, when you expect to
+finish). The Codex form, inside its
+512-character MCP-instructions budget, carries the first, bounded the same
+way. An install's own
+words for its shared things (a suite lock, a GPU, a style guide, an API
+quota) belong in the daemon's `<data_dir>/hook-instructions.md`, which the
+memory hook serves after its core (3.5 KB cap, see
+[Startup memory policy](#startup-memory-policy-memory_policy) below);
+[`examples/hook-instructions.md`](../../examples/hook-instructions.md) is
+one host's copy (suite and GPU status words, the lease holder, a
+pre-flight before a full run). For the Docker install the file goes into
+the daemon's data volume (`/data` in the container). The hook reads it at
+every session start, so no restart is needed:
+
+```bash
+docker cp examples/hook-instructions.md pseudolife-mcp-daemon:/data/hook-instructions.md
+```
+
+`evals/coordination_checkin_bench.py` measures whether the text moves the
+send/no-send decision (see `evals/README.md`). Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
@@ -1094,10 +1124,11 @@ leaves it. A park field on its own refines a standing park and is refused
 (`invalid_park`) on an unparked row, as are an unknown reason and a bad
 expiry; credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
-carries the six `park_*` fields, `park_set_at` being the daemon's stamp. The
-served check-in asks sessions to park when they stop, and the [Stop hook park
-gate](#waking-an-idle-claude-code-session-the-stop-hook) asks once when a turn
-ends without one.
+carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
+`memory_agents`' description asks sessions to park when they stop, and the
+[Stop hook park gate](#waking-an-idle-claude-code-session-the-stop-hook) asks
+once when a turn ends without one. (The served check-in does not say it yet:
+it is the text the check-in bench measured, and changes only with a new run.)
 
 **The daemon decides, the shim rings.** `memory_message(action="send")` takes
 two optional fields, `clears` (which parked need the message answers, 120
