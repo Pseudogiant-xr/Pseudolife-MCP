@@ -205,6 +205,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cap and the lock on the same minor line. A shim installed from an older
   release fixes itself with `pipx runpip pseudolife-mcp install
   "mcp==2.1.1"` or a reinstall from the daemon's checkout.
+### Changed (2026-09-28 — park guidance distinguishes completion from review waits)
+- The Stop-hook prompt and configuration guide now state that `done` means
+  no follow-up is expected and nothing will ring the session. Awaiting a merge
+  click or a review that may bring fixes uses `needs_approval` with
+  `park_clear_by` set to the reviewer's agent id or `maintainer`, or
+  `waiting_peer`. The wake decision is unchanged. Both local hook fallback
+  prompts match the served prompt. Install this update with
+  `ops/update.ps1 -All` because the plugin hook files change.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

@@ -95,6 +95,32 @@ def bash_run(script, *, input, env):
                           timeout=HOOK_PROCESS_TIMEOUT, check=True)
 
 
+def test_lifecycle_stop_fallback_literal_matches_served_park_prompt():
+    from pseudolife_memory.coordination import PARK_GATE_MESSAGE
+    script = (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
+    fallback = re.search(r"\$reason = '((?:[^']|'')*)'", script)
+    assert fallback is not None
+    assert fallback.group(1).replace("''", "'") == PARK_GATE_MESSAGE
+
+
+def test_lifecycle_stop_uses_served_park_prompt_when_daemon_omits_message(tmp_path):
+    from pseudolife_memory.coordination import PARK_GATE_MESSAGE
+    from tests.test_stop_wake_hook import _agent, _digest, _env, _gate_daemon, _payload
+    server, _ = _gate_daemon("block\n")
+    try:
+        env = _env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                          input=_payload(), env=env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert json.loads(result.stdout) == {"decision": "block", "reason": PARK_GATE_MESSAGE}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_codex_hook_install_preserves_existing_hooks_and_is_idempotent(tmp_path):
     settings = tmp_path / "hooks.json"
     original = {"type": "command", "command": "echo existing"}
