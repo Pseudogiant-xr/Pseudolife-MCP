@@ -481,24 +481,16 @@ pid, worktree, held for`) by board mail to the peers the lease concerns, in
 the same project (compared without case; every project when the sender has
 none set): live agents (attached, or registered without an adapter) whose
 status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
-<<<<<<< HEAD
 with `park_clear_by` naming the lease while the park stands (a reason set, and
 `park_expires` not yet passed), attached or not, since mail waits for a parked
-session. Both leases go to both status groups on purpose: a GPU server
-beside a full suite is the contention. At most 20 peers are told per event; one
-refused send does not stop the rest. The notices are automatic and need no
-reply; they replace hand-written SUITE-START/SUITE-END notes.
-=======
-with `park_clear_by` naming the lease, attached or not, since mail waits for a
-parked session. The release notice rings such a session, subject to the wake
-path and caps: for 60 seconds after a hold ends, the daemon counts its last
-holder as the clearer the lease name stands for (taking a lease clears
-nothing, so the acquire notice waits in the queue). Both leases go to both
-status groups on purpose: a GPU server beside a full suite is the contention.
-At most 20 peers are told per event; one refused send does not stop the rest.
-The notices are automatic and need no reply; they replace hand-written
+session. The release notice rings such a session, subject to the wake path
+and caps: for 60 seconds after a hold ends, the daemon counts its last holder
+as the clearer the lease name stands for (taking a lease clears nothing, so
+the acquire notice waits in the queue). Both leases go to both status groups
+on purpose: a GPU server beside a full suite is the contention. At most 20
+peers are told per event; one refused send does not stop the rest. The
+notices are automatic and need no reply; they replace hand-written
 SUITE-START/SUITE-END notes.
->>>>>>> origin/fix/lease-notice-rings-lease-park
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
