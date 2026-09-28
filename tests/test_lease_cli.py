@@ -258,14 +258,18 @@ def lease_env(tmp_path, monkeypatch):
     return tmp_path / "locks"
 
 
-def _command(tmp_path, *, exit_code=0, sleep=0.0, ready=None):
+def _command(tmp_path, *, exit_code=0, sleep=0.0, ready=None, wait_for=None):
     """A child that records when it ran and what PSEUDOLIFE_LEASES_HELD it
     saw, then exits with ``exit_code``. With ``ready`` it first creates that
-    file, to say it is up."""
+    file, to say it is up; with ``wait_for`` it does not exit until that
+    file exists (or START_TIMEOUT has passed)."""
     marker = tmp_path / "ran.json"
     code = (
         "import json, os, sys, time\n"
         + (f"open({str(ready)!r}, 'w').close()\n" if ready else "")
+        + (f"deadline = time.monotonic() + {START_TIMEOUT!r}\n"
+           f"while not os.path.exists({str(wait_for)!r}) and time.monotonic() < deadline:\n"
+           "    time.sleep(0.01)\n" if wait_for else "")
         + f"time.sleep({sleep!r})\n"
         f"with open({str(marker)!r}, 'w', encoding='utf-8') as f:\n"
         "    json.dump({'held': os.environ.get('PSEUDOLIFE_LEASES_HELD'),"
@@ -672,10 +676,17 @@ def test_the_local_lock_is_freed_as_soon_as_the_command_ends(lease_env, tmp_path
     """A renewal stuck on a slow daemon must not keep the resource locked
     after the work is done: the OS lock goes first, the board after."""
     path = lease_env / "lease-gpu.lock"
-    command, marker = _command(tmp_path, sleep=0.1)
+    # The command exits only once the renewal below is on the wire, so it is
+    # in flight, not merely due, when the cleanup starts. Left to a timer, the
+    # first renewal (0.05 s after the lease is held) raced the command's
+    # lifetime, and a slow runner (macOS CI, 2026-09-28) ended the command
+    # first: no renewal ever ran and ``seen`` stayed empty.
+    renewing = tmp_path / "renewing"
+    command, marker = _command(tmp_path, wait_for=renewing)
     seen = []
 
     def slow_renewal(request):
+        renewing.touch()
         deadline = time.monotonic() + START_TIMEOUT
         while not marker.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -1223,12 +1234,15 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
         peer("a" * 32, "suite-runner", "SUITE-START 8f3d; suite=running",
              project="pseudolife-mcp"),  # the project matches whatever its case
         peer("b" * 32, "gpu-brief", "gpu=waiting for the bench server"),
-        peer("c" * 32, "parked", "parked until the GPU frees", park_clear_by="gpu"),
-        peer("d" * 32, "parked-list", "parked", park_clear_by=["maintainer", "gpu"]),
+        peer("c" * 32, "parked", "parked until the GPU frees", park_reason="needs_resource",
+             park_clear_by="gpu"),
+        peer("d" * 32, "parked-list", "parked", park_reason="needs_resource",
+             park_clear_by=["maintainer", "gpu"]),
         peer("e" * 32, "unrelated", "reviewing PR #431"),
         peer("f" * 32, "gone", "suite=queued", lifecycle="detached"),
         peer("g" * 32, "elsewhere", "suite=running", project="another-repo"),
-        peer("h" * 32, "other-lease", "parked", park_clear_by="full-suite"),
+        peer("h" * 32, "other-lease", "parked", park_reason="needs_resource",
+             park_clear_by="full-suite"),
         peer(AGENT, "lease-hold", "lease:gpu held"),  # this run's own address
     ]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
@@ -1481,13 +1495,63 @@ def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
 
 
 def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper):
-    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached", park_clear_by="gpu"),
+    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached",
+                  park_reason="needs_resource", park_clear_by="gpu"),
              peer("b" * 32, "gone", "suite=running", lifecycle="detached"),
-             peer("c" * 32, "revoked", "parked", lifecycle="revoked", park_clear_by="gpu")]
+             peer("c" * 32, "revoked", "parked", lifecycle="revoked",
+                  park_reason="needs_resource", park_clear_by="gpu")]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
     child = sleeper(0.5)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     assert {body["to"] for body in daemon.bodies("send")} == {"a" * 32}
+
+
+def test_only_a_standing_park_is_told(lease_env, sleeper):
+    # The daemon's rule (CoordinationStore._live_park): a park stands while
+    # its reason is set and its park_expires is unset or still ahead. The
+    # peer list returns a lapsed park's fields as they were stored.
+    now = time.time()
+    parked = {"park_reason": "needs_resource", "park_clear_by": "gpu"}
+    peers = [peer("a" * 32, "standing", "parked", park_expires=now + 3600, **parked),
+             peer("b" * 32, "no-expiry", "parked", park_expires=None, **parked),
+             peer("c" * 32, "lapsed", "parked", park_expires=now - 1, **parked),
+             peer("d" * 32, "no-reason", "parked", park_reason=None, park_clear_by="gpu",
+                  park_expires=now + 3600),
+             # A lapsed park still counts its status like any live peer.
+             peer("e" * 32, "lapsed-running", "suite=running", park_expires=now - 1,
+                  **parked)]
+    daemon = FakeDaemon(agents=[AGENTS(*peers)])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
+    assert told == {"a" * 32, "b" * 32, "e" * 32}
+
+
+@pytest.mark.parametrize("reason, expires, stands", [
+    (None, None, False),               # no park
+    ("needs_resource", 1060.0, True),  # live
+    ("needs_resource", None, True),    # no expiry
+    ("needs_resource", 940.0, False),  # lapsed
+    ("needs_resource", 1000.0, False),  # expires == now has lapsed
+    (None, 1060.0, False),             # an expiry without a reason
+])
+def test_a_standing_park_is_the_daemons_live_park(reason, expires, stands):
+    # _clear_by copies CoordinationStore._live_park's rule rather than
+    # importing it (the lease CLI stays stdlib-only; the store imports
+    # psycopg), so both run over the same table and must agree.
+    from pseudolife_memory.storage.coordination import CoordinationStore
+    now = 1000.0
+    row = {"park_reason": reason, "park_clear_by": "gpu", "park_expires": expires}
+    assert (CoordinationStore._live_park(None, row, now) is not None) is stands
+    assert lease_cli._clear_by(row, now) == (["gpu"] if stands else [])
+
+
+def test_a_park_with_an_unreadable_expiry_is_told():
+    # The daemon stores park_expires only as a positive finite number, so
+    # the list never carries anything else; should one arrive, the notice
+    # goes out (one extra message) rather than raising in the mirror.
+    row = {"park_reason": "needs_resource", "park_clear_by": "gpu", "park_expires": "soon"}
+    assert lease_cli._clear_by(row, 1000.0) == ["gpu"]
 
 
 def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):

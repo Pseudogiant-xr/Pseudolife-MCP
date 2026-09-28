@@ -165,6 +165,8 @@ def wake_precision(wakes, events, *, since, until):
         if decision not in rows or not _in_window(created, since, until):
             continue
         served = _seconds(wake.get("served_at"))
+        if served is not None and served >= until:
+            served = None  # served after the window: as of `until`, never served
         agent = wake.get("recipient_agent_id")
         woke = first_woke(agent, served) if served is not None else None
         rows[decision].append({
@@ -203,19 +205,42 @@ def park_outcomes(events, *, since, until):
     ``park_expires`` passed before any clearing and before ``until``, and
     ``open`` when it still stood at ``until``.
 
-    Read as the daemon applies ``update`` (storage ``CoordinationStore.update``):
-    a park is an update setting ``park_reason`` while no park stands; one
-    setting it, or any other park field, while a park stands refines that
-    park (its expiry moves only when the update names one). A lapsed park
-    stays on the row, so the next park's ``before`` still names a reason: it
-    is a new park all the same, and the lapsed one ended at its expiry. A
-    new park that names no expiry carries the standing (lapsed) one, as the
-    daemon does. ``events`` should reach PARK_LOOKBACK before ``since`` so
-    parks standing or lapsed at ``since`` are known; a row that names a park
-    the events never showed is left alone."""
+    Read as the daemon applies ``update`` (storage ``CoordinationStore.update``,
+    the live-park rule since #442): a park stands until its ``park_expires``
+    passes or a clearing update (a null reason, or a plain status, which the
+    daemon logs as one). An update setting ``park_reason`` while no park
+    stands starts a park; one setting it, or any other park field, while a
+    park stands refines that park: the daemon overwrites the reason, so the
+    park counts under its latest one, and its expiry moves only when the
+    update names one. A lapsed park's fields stay on the row, so the next
+    park's ``before`` still names a reason: that park is new, and the lapsed
+    one ended at its expiry.
+
+    Logs written before #442 are read as that daemon applied them: a park
+    field alone on a lapsed park was accepted (a future ``park_expires``
+    revives the park, counted as a new one from then) and a new reason over
+    a lapsed park with no expiry of its own carried the dead one (a park
+    that ends as it starts).
+
+    ``events`` should reach PARK_LOOKBACK before ``since`` so parks standing
+    or lapsed at ``since`` are known. For a row whose park the events never
+    showed: a park field alone means one stood (the daemon refuses it
+    otherwise), and a reason over a row whose old ``park_expires`` had
+    passed, or that had none recorded, starts a new park; such unseen parks
+    are never counted."""
     standing = {}
+    lapsed = {}
     parks = []
     rings = defaultdict(list)
+
+    def begin(agent, reason, moment, expires, *, counted=True):
+        park = {"reason": reason, "set": moment, "agent": agent, "expires": expires,
+                "ended": None, "how": None}
+        standing[agent] = park
+        lapsed.pop(agent, None)
+        if counted and _in_window(moment, since, until):
+            parks.append(park)
+
     for event in events:
         moment = event["created_at"]
         if event["event"] == "send" and (event.get("payload") or {}).get("wake") == "rung":
@@ -228,35 +253,45 @@ def park_outcomes(events, *, since, until):
             continue
         agent = event.get("agent_id")
         park = standing.get(agent)
-        carried = None
         if park is not None and park["expires"] is not None and park["expires"] <= moment:
             # It lapsed before this update: it ended at its expiry.
-            park["ended"], park["how"] = park["expires"], "expiry"
-            carried = standing.pop(agent)["expires"]
+            park["ended"], park["how"] = max(park["expires"], park["set"]), "expiry"
+            lapsed[agent] = (park["reason"], park["expires"])
+            del standing[agent]
             park = None
         if "park_reason" in fields and fields["park_reason"] is None:
             if park is not None:
                 park["ended"], park["how"] = moment, None  # send or owner_update, below
-                standing.pop(agent)
+                del standing[agent]
+            lapsed.pop(agent, None)
             continue
+        reason = fields.get("park_reason")
+        named = _seconds(fields.get("park_expires"))
         if park is not None:
+            if reason is not None:
+                park["reason"] = reason
             if "park_expires" in fields:
-                park["expires"] = _seconds(fields["park_expires"])
+                park["expires"] = named
             continue
-        if "park_reason" not in fields:
-            continue  # a refinement of a park the events never showed
-        if carried is None and before.get("park_reason") is not None:
-            continue  # the row names a park the events never showed
-        expires = (_seconds(fields["park_expires"]) if "park_expires" in fields else carried)
-        park = {"reason": fields["park_reason"], "set": moment, "agent": agent,
-                "expires": expires, "ended": None, "how": None}
-        standing[agent] = park
-        if _in_window(moment, since, until):
-            parks.append(park)
+        if agent in lapsed:
+            old_reason, old_expires = lapsed[agent]
+            if reason is not None:
+                begin(agent, reason, moment, named if "park_expires" in fields else old_expires)
+            elif named is not None and named > moment:
+                begin(agent, old_reason, moment, named)
+            continue
+        # A row whose park the events never showed.
+        old = _seconds(before.get("park_expires"))
+        if reason is None:
+            begin(agent, "unknown", moment, named, counted=False)
+        elif before.get("park_reason") is None or (old is not None and old <= moment):
+            begin(agent, reason, moment, named)
+        else:
+            begin(agent, reason, moment, named if named is not None else old, counted=False)
     for park in parks:
         if park["ended"] is None:
-            if park["expires"] is not None and park["expires"] < until:
-                park["ended"], park["how"] = park["expires"], "expiry"
+            if park["expires"] is not None and park["expires"] <= until:
+                park["ended"], park["how"] = max(park["expires"], park["set"]), "expiry"
             else:
                 park["how"] = "open"
         elif park["how"] is None:

@@ -220,8 +220,10 @@ This is runtime support, not a model capability or a promise about ordinary
 ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 The Docker installer defaults to automatic hook-source detection. One setup
-choice enables automatic memory briefings, reminders, and session cleanup,
-uses standing instructions only, or skips this integration. The automatic
+choice enables automatic memory briefings, reminders, and session cleanup
+(plus, where the agent board is on, a board check-in at session start and a
+new-mail hint when a peer's message is waiting), uses standing instructions
+only, or skips this integration. The automatic
 choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.
@@ -243,15 +245,15 @@ policy restrictions remain in place.
 
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
-fourth PseudoLife hook (earlier releases skip async hooks there). On Windows,
-where Codex runs the native command, it runs only the
+fourth PseudoLife hook (earlier releases skip async hooks there). In Codex
+it runs only the
 [Stop-hook park gate](configuration.md#waking-an-idle-claude-code-session-the-stop-hook):
 one request asking the daemon whether the thread parked, answered with
 Codex's documented `{"decision": "block", "reason": ...}` when it did not,
 and nothing otherwise (an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK=0` turns it
-off). Elsewhere Codex runs the bash command, whose script exits unless
-Claude Code started it, so there is no gate; the wake itself is Claude
-Code's. Codex's own wake path is the
+off). On Windows the native command runs it; on macOS and Linux the bash
+script does, in Codex context, through the managed connection file. The
+wake itself is Claude Code's. Codex's own wake path is the
 [doorbell](configuration.md#codex-doorbell), also on by default when a
 `codex` CLI is found; a woken task needs `memory_message` approved, or it
 stalls on a prompt. Setup approves it with the other three, and disabling it in
@@ -370,13 +372,18 @@ new installation. For an existing bare command, a reported path mismatch
 needs to be resolved before the installer can confirm the upgrade.
 
 For an update, use the intended checkout and rerun its installer with the
-same client selection. `ops/update.ps1` / `ops/update.sh` update the daemon;
-they do not upgrade host shims or client plugin caches. Existing custom MCP
+same client selection when migrating an installation from before the agent
+board. `ops/update.ps1` / `ops/update.sh` update the daemon only by default;
+`-All` / `--all` also refresh host shims and client plugin caches, followed
+by a client restart. Follow the [README update recipe](../../README.md#updating)
+for the installer migration and Windows prerequisites. Existing custom MCP
 registrations are preserved. If one points at a separate virtual environment,
-upgrade that exact environment as described below. Update the Pseudolife
-plugin through the client's plugin manager when its scripts differ from the
-checkout, then rerun hook setup and approve the changed scripts. Editing a
-plugin cache directly does not survive plugin updates.
+upgrade that exact environment as described below. For a versioned plugin release,
+update the Pseudolife plugin through the client's plugin manager. For changed
+hooks within the same version, the manager reports "already latest"; use
+`-All` / `--all` to refresh the cache instead. Then rerun hook setup and
+approve the changed scripts. Editing a plugin cache directly does not
+survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a
 client waits for the Docker daemon instead of starting a fallback over a

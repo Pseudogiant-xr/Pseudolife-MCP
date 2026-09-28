@@ -48,11 +48,11 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
                 "userPromptSubmit": ("UserPromptSubmit", "CoordinationPrompt"),
                 "sessionEnd": ("SessionEnd",)}
 # The plugin's hooks.json also carries Claude Code's Stop wake hook (on by
-# default since 2026-09-28), which Codex lists too. In Codex it is a no-op
-# (lifecycle.ps1 -Event Stop exits at once; stop-wake.sh exits unless Claude
-# Code started it), approved with the three lifecycle hooks. Optional: Codex
-# before 0.148 skips async hooks outside SessionEnd and lists three. Manual
-# installs keep EVENTS.
+# default since 2026-09-28), which Codex lists too. In Codex it runs only the
+# park gate (v49; lifecycle.ps1 -Event Stop on Windows, stop-wake.sh in Codex
+# context elsewhere), never the wake, approved with the three lifecycle
+# hooks. Optional: Codex before 0.148 skips async hooks outside SessionEnd
+# and lists three. Manual installs keep EVENTS.
 PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
 # A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
@@ -892,7 +892,7 @@ def verify(executable, home, cwd, config, hooks, selected):
                 "memory_agents(action=list)" in entry.get("text", "")
                 for run in completed if run.get("eventName") == "sessionStart"
                 for entry in run.get("entries", [])):
-            raise SetupError("CoordinationStart did not return board setup guidance. Check /hooks.")
+            raise SetupError("The agent-board check-in hook (CoordinationStart) returned no guidance. Check /hooks.")
         if not episode_open(thread):
             raise SetupError("SessionStart did not open a verifiable memory episode. Check daemon access.")
     if episode_open(thread):
@@ -933,12 +933,15 @@ def consent(args):
     if args.trust == "no" or args.non_interactive or not sys.stdin.isatty():
         return False, args.instructions == "append"
     if args.instructions != "auto":
-        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup) "
-              "to run outside the sandbox? [y/N] ", end="", file=sys.stderr, flush=True)
+        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup, "
+              "agent-board check-in, new-mail hint) to run outside the sandbox? [y/N] ",
+              end="", file=sys.stderr, flush=True)
         approved = sys.stdin.readline().strip().lower() in ("y", "yes")
         return approved, args.instructions == "append"
     print("PseudoLife memory setup:\n"
           "  1. Enable automatic briefings, reminders, and session cleanup (recommended).\n"
+          "     Where the agent board is on, also an agent-board check-in at session start\n"
+          "     and a new-mail hint when a peer's message is waiting.\n"
           "     Approves only PseudoLife's current hook scripts to run outside the sandbox;\n"
           "     adds standing memory instructions if verification fails.\n"
           "  2. Standing memory instructions only.\n"
@@ -1026,6 +1029,12 @@ def setup(args):
                             report["verified"] = verify(
                                 executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"
+                        report["mailbox_approval_notice"] = (
+                            'Hooks ready; setup leaves tool approvals unchanged. '
+                            'For unattended receive, ack and send, choose approval_mode = "approve" '
+                            'under [mcp_servers.pseudolife-memory.tools.memory_message] in Codex config.toml. '
+                            'Without that approval, a woken thread can stall on an approval prompt.\n'
+                            'See docs/guide/configuration.md (Experimental agent coordination).')
         except SetupError as exc:
             report.update(status="unavailable", recovery=str(exc))
         except Exception as exc:
@@ -1050,6 +1059,8 @@ def main():
         report = {"source": "skip" if args.source == "auto" else args.source, "status": "unavailable", "instructions": "skipped",
                   "recovery": f"Setup could not write fallback instructions ({type(exc).__name__}); check file permissions."}
     print(json.dumps(report, indent=2))
+    if report["status"] == "ready":
+        print(report.get("mailbox_approval_notice", ""), file=sys.stderr)
     return 0 if report["status"] == "ready" or report["instructions"] in ("present", "appended") else 1
 
 

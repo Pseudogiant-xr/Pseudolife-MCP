@@ -35,12 +35,25 @@ def _event(seq, event, agent, created_at, *, principal="claude-code", recipient=
             "hlc": "", "prev_hash": "0" * 64, "hash": "1" * 64, "body": body, "body_salt": None}
 
 
-def _park(agent, created_at, reason, *, expires=None, before=None):
+def _park(agent, created_at, reason, *, expires=None, before=None, before_expires=None):
+    """A new park's update payload as the daemon logs it: the daemon names
+    an expiry for every new park (the caller's, or 12 h from now), and
+    ``before`` holds the row's old value of every key in ``fields``."""
     fields = {"status": "parked", "park_reason": reason, "park_needs": "the thing",
-              "park_clear_by": "anyone", "park_resume": "carry on", "park_set_at": created_at}
+              "park_clear_by": "anyone", "park_resume": "carry on", "park_set_at": created_at,
+              "park_expires": created_at + 43200 if expires is None else expires}
+    return {"fields": fields, "before": {"park_reason": before, "status": "working",
+                                         "park_expires": before_expires}}
+
+
+def _refine(created_at, *, expires=None, before_expires=None, **fields):
+    """A park-field update without a reason, as the daemon logs it."""
+    fields = {**fields, "park_set_at": created_at}
+    before = {key: "old" for key in fields if key != "park_set_at"}
     if expires is not None:
         fields["park_expires"] = expires
-    return {"fields": fields, "before": {"park_reason": before, "status": "working"}}
+        before["park_expires"] = before_expires
+    return {"fields": fields, "before": before}
 
 
 def _clear(created_at, before):
@@ -216,49 +229,49 @@ def test_a_park_refined_or_set_before_the_window_is_not_a_new_park():
     events = [
         # Set before the window, refined and cleared inside it: not counted.
         _event(1, "update", A, 900.0, payload=_park(A, 900.0, "blocked")),
-        _event(2, "update", A, 1100.0, payload={"fields": {"park_needs": "more", "park_set_at": 1100.0},
-                                                 "before": {"park_needs": "the thing"}}),
+        _event(2, "update", A, 1100.0, payload=_refine(1100.0, park_needs="more")),
         _event(3, "update", A, 1200.0, payload=_clear(1200.0, "blocked")),
-        # Set inside it, then re-parked with another reason: one park, which
-        # the later expiry refinement ends.
+        # Set inside it, then given another reason while it stands: one park
+        # (the daemon overwrites the reason, so the park counts under the
+        # newer one), which the refinement's expiry ends.
         _event(4, "update", B, 2000.0, payload=_park(B, 2000.0, "needs_info")),
         _event(5, "update", B, 2100.0, payload=_park(B, 2100.0, "blocked", expires=2400.0,
-                                                    before="needs_info")),
+                                                    before="needs_info",
+                                                    before_expires=2000.0 + 43200)),
     ]
     report = compute_stats(events, [], [], since=SINCE, until=UNTIL)
     assert report["park_outcomes"] == {
         "parks": 1, "cleared": {"send": 0, "owner_update": 0, "expiry": 1, "open": 0},
         "seconds_to_clear": {"n": 0, "p50": None, "p95": None},
-        "by_reason": {"needs_info": {
+        "by_reason": {"blocked": {
             "parks": 1, "cleared": {"send": 0, "owner_update": 0, "expiry": 1, "open": 0},
             "seconds_to_clear": {"n": 0, "p50": None, "p95": None}}}}
 
 
 def test_a_park_that_lapsed_is_ended_by_its_expiry_and_the_next_park_counts():
-    """The daemon leaves a lapsed park's reason on the row (it only stops
-    honouring it), so the next park's ``before`` still names a reason. That
-    park is new, not a refinement: the lapsed one ended at its expiry. A
-    park set again without ``park_expires`` carries the standing (lapsed)
-    expiry, as the daemon does. A park lapsed before the window, seen through
-    the lookback, does not hide one set inside it."""
+    """A lapsed park's fields stay on the row, so the next park's ``before``
+    still names a reason. Under the daemon's live-park rule (#442) that park
+    is new, starting empty with its own expiry, and the lapsed one ended at
+    its expiry. A park lapsed before the window, seen through the lookback,
+    does not hide one set inside it."""
     events = [
         # Before the window: A parks, and the park lapses at 950.
         _event(1, "update", A, 800.0, payload=_park(A, 800.0, "blocked", expires=950.0)),
         # Inside it: A parks again (the row still says "blocked"), then is
         # cleared by its own status 100 s later.
         _event(2, "update", A, 1100.0, payload=_park(A, 1100.0, "needs_info", expires=9000.0,
-                                                    before="blocked")),
+                                                    before="blocked", before_expires=950.0)),
         _event(3, "update", A, 1200.0, payload=_clear(1200.0, "needs_info")),
-        # B parks, lapses at 2100, and parks again at 2500 with a new reason.
+        # B parks, lapses at 2100, and parks again at 2500 with a new reason
+        # and the daemon's default expiry.
         _event(4, "update", B, 2000.0, payload=_park(B, 2000.0, "blocked", expires=2100.0)),
-        _event(5, "update", B, 2500.0, payload=_park(B, 2500.0, "waiting_peer", expires=9000.0,
-                                                    before="blocked")),
+        _event(5, "update", B, 2500.0, payload=_park(B, 2500.0, "waiting_peer",
+                                                    before="blocked", before_expires=2100.0)),
         # C parks with an expiry, refines it with a park field alone (no
         # reason), and the refinement's later expiry is the one that counts.
         _event(6, "update", C, 3000.0, payload=_park(C, 3000.0, "needs_resource", expires=3100.0)),
-        _event(7, "update", C, 3050.0, payload={"fields": {"park_expires": 9000.0,
-                                                           "park_set_at": 3050.0},
-                                                "before": {"park_expires": 3100.0}}),
+        _event(7, "update", C, 3050.0, payload=_refine(3050.0, expires=9000.0,
+                                                       before_expires=3100.0)),
     ]
     report = compute_stats(events, [], [], since=SINCE, until=UNTIL)["park_outcomes"]
     assert (report["parks"], report["cleared"]) == (
@@ -269,6 +282,64 @@ def test_a_park_that_lapsed_is_ended_by_its_expiry_and_the_next_park_counts():
         "needs_resource": {"send": 0, "owner_update": 0, "expiry": 0, "open": 1},
         "waiting_peer": {"send": 0, "owner_update": 0, "expiry": 0, "open": 1}}
     assert report["seconds_to_clear"] == _pct(1, 100.0, 100.0)
+
+
+def test_logs_written_before_the_live_park_rule_still_count_every_park():
+    """Before #442 the daemon accepted a park field alone on a lapsed park,
+    and a new reason over one carried its dead expiry; the audit log keeps
+    those rows. The review's sequences (orchestrator, 2026-09-28): a lapsed
+    park touched by a field-only update, then parked again, is two parks;
+    a lapsed park revived by a field-only future expiry is a new park from
+    then."""
+    events = [
+        # A: blocked lapses at 1500, a field-only update at 2000 leaves it
+        # lapsed, and needs_info at 3000 is a new park.
+        _event(1, "update", A, 1000.0, payload=_park(A, 1000.0, "blocked", expires=1500.0)),
+        _event(2, "update", A, 2000.0, payload=_refine(2000.0, park_needs="still the thing")),
+        _event(3, "update", A, 3000.0, payload=_park(A, 3000.0, "needs_info", expires=9000.0,
+                                                    before="blocked", before_expires=1500.0)),
+        # B: blocked lapses at 1500; a field-only update at 2000 names a
+        # future expiry, which the old daemon took, so a park stands again.
+        _event(4, "update", B, 1000.0, payload=_park(B, 1000.0, "blocked", expires=1500.0)),
+        _event(5, "update", B, 2000.0, payload=_refine(2000.0, expires=9000.0,
+                                                       before_expires=1500.0)),
+        # C: blocked lapses at 1500; a new reason at 2000 with no expiry of
+        # its own carried the dead one, so it stood for no time at all.
+        _event(6, "update", C, 1000.0, payload=_park(C, 1000.0, "blocked", expires=1500.0)),
+        _event(7, "update", C, 2000.0, payload={
+            "fields": {"park_reason": "needs_info", "park_set_at": 2000.0},
+            "before": {"park_reason": "blocked"}}),
+    ]
+    report = compute_stats(events, [], [], since=SINCE, until=UNTIL)["park_outcomes"]
+    assert {reason: summary["cleared"] for reason, summary in report["by_reason"].items()} == {
+        "blocked": {"send": 0, "owner_update": 0, "expiry": 3, "open": 1},
+        "needs_info": {"send": 0, "owner_update": 0, "expiry": 1, "open": 1}}
+    assert report["parks"] == 6
+
+
+def test_a_park_set_before_the_lookback_is_never_counted_or_mistaken():
+    """An address whose park the events never showed: a field-only update
+    shows the daemon still honoured one (it refuses them otherwise), so a
+    later reason without an expiry of its own refines that park; a reason
+    over a row whose old expiry had passed starts a new one."""
+    events = [
+        _event(1, "update", A, 2000.0, payload=_refine(2000.0, park_needs="more")),
+        _event(2, "update", A, 2100.0, payload={
+            "fields": {"park_reason": "needs_info", "park_set_at": 2100.0},
+            "before": {"park_reason": "blocked"}}),
+        _event(3, "update", B, 2000.0, payload=_park(B, 2000.0, "needs_info",
+                                                    before="blocked", before_expires=1000.0)),
+        _event(4, "update", C, 2000.0, payload=_park(C, 2000.0, "needs_info", expires=9000.0,
+                                                    before="blocked", before_expires=8000.0)),
+    ]
+    report = compute_stats(events, [], [], since=SINCE, until=UNTIL)["park_outcomes"]
+    assert (report["parks"], report["cleared"]["open"]) == (1, 1)
+
+
+def test_a_ring_served_after_the_window_counts_as_never_served():
+    wakes = [_wake(B, A, "m1", "rung", 1000.0, 5500.0)]
+    report = compute_stats([], wakes, [], since=SINCE, until=UNTIL)["wake_precision"]
+    assert (report["rings"], report["served"], report["never_served"]) == (1, 0, 1)
 
 
 def test_the_adapters_own_delivery_read_is_not_the_recipient_acting():

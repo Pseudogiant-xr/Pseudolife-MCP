@@ -240,6 +240,8 @@ def test_plugin_hooks_get_the_token_file_through_claude_settings(tmp_path):
     settings.write_text(json.dumps({"enabledPlugins": {"x": True}}), encoding="utf-8")
     proc = _client_files(ps, env_file, ["claude"], hook="plugin")
     assert proc.returncode == 0, _output(proc)
+    assert "Claude Code plugin hook settings:" in proc.stdout
+    assert "hook authentication not verified" in proc.stdout
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert data["enabledPlugins"] == {"x": True}
     assert Path(data["env"]["PSEUDOLIFE_MCP_TOKEN_FILE"]) == (

@@ -1358,7 +1358,8 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
         suite_lock.record_duration(tmp_path, seconds, worktree="earlier")
     peers = [peer("a" * 32, "queued-run", "suite=queued behind pid 4"),
              peer("b" * 32, "gpu-brief", "gpu=idle; waiting for a quiet host"),
-             peer("c" * 32, "parked", "parked", park_clear_by="full-suite"),
+             peer("c" * 32, "parked", "parked", park_reason="needs_resource",
+                  park_clear_by="full-suite"),
              peer("d" * 32, "unrelated", "writing docs"),
              peer(AGENT, "lease-hold", "lease:full-suite held")]
     daemon = FakeDaemon(lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
