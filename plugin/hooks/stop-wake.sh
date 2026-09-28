@@ -157,6 +157,8 @@ private_regular() {
     case "$OSTYPE" in msys*|mingw*|cygwin*)
         [ "${3:-0}" = 1 ] || return 1
         [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        # Three Windows runs (2026-09-28), including Git Bash launch:
+        # 0.344-0.375 s each; native ACL parity justifies this cost.
         PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
             $ErrorActionPreference = "Stop"
             try {
@@ -206,7 +208,11 @@ gate_answer() {
     rest=${url#*://}
     case "$rest" in ''|*/*) return 1 ;; esac
     if [ -n "$file" ]; then
-        private_regular "$file" 4096 || return 1
+        if ! private_regular "$file" 4096; then
+            printf '%s\ttoken\t%s\t0\t0\trejected\n' "$(date +%s)" "${KEY:0:8}" \
+                2>/dev/null >> "$DIGEST_DIR/ledger.log"
+            return 1
+        fi
         token=$(cat "$file")
         token=${token//[$'\r\n']/}
         case "$token" in ''|*[[:space:]]*) return 1 ;; esac

@@ -1418,9 +1418,15 @@ also capped (below, and by the daemon's `wake` caps under
   is down, a bearer it refuses, no address) is allow: the gate never holds
   a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
   private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
-  as the other hooks; Git Bash cannot show an NTFS file is owner-only, so
-  on Windows use the variable), the URL from
-  `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other hooks.
+  as the other hooks), the URL from `PSEUDOLIFE_MCP_DAEMON_URL`. On Windows,
+  Git Bash uses the native ACL rules: current-user ownership, a protected
+  DACL, and allow rules only for the owner or OWNER RIGHTS; reparse points
+  in the file or its parents are rejected. A token file rejected by the
+  Stop gate or coordination-start hook leaves a `token` line with value
+  `rejected` in the digest directory's `ledger.log`, without a path or
+  token. OneDrive-redirected profiles using reparse points are rejected:
+  move the token file outside the redirected folder and update
+  `PSEUDOLIFE_MCP_TOKEN_FILE`.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
   the watch starts is waited for; one that vanishes during it (the shim

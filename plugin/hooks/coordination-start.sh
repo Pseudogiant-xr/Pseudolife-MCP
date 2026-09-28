@@ -230,6 +230,8 @@ private_regular() {
     case "$OSTYPE" in msys*|mingw*|cygwin*)
         [ "${3:-0}" = 1 ] || return 1
         [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        # Three Windows runs (2026-09-28), including Git Bash launch:
+        # 0.344-0.375 s each; native ACL parity justifies this cost.
         PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
             $ErrorActionPreference = "Stop"
             try {
@@ -337,6 +339,11 @@ if [ -z "$MANAGED_TOKENLESS" ]; then TOKEN="${PSEUDOLIFE_MCP_TOKEN:-}"; fi
 if [ -n "$TOKEN_FILE" ]; then
     TOKEN=""
     if ! private_regular "$TOKEN_FILE" 4096; then
+        # A rejected fresh connection may not have a shim digest yet.
+        mkdir -p "$DIGEST_DIR" 2>/dev/null
+        REJECTED_KEY="${KEY:-$(sha256_of "$SID")}"
+        printf '%s\ttoken\t%s\t0\t0\trejected\n' "$(date +%s)" "${REJECTED_KEY:0:8}" \
+            2>/dev/null >> "$DIGEST_DIR/ledger.log"
         CONNECTION_ERROR=1
     else
         TOKEN=$(cat "$TOKEN_FILE")

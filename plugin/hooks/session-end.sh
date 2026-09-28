@@ -22,6 +22,8 @@ private_regular() {
     case "$OSTYPE" in msys*|mingw*|cygwin*)
         [ "${3:-0}" = 1 ] || return 1
         [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        # Three Windows runs (2026-09-28), including Git Bash launch:
+        # 0.344-0.375 s each; native ACL parity justifies this cost.
         PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
             $ErrorActionPreference = "Stop"
             try {

@@ -1342,6 +1342,36 @@ def test_windows_start_hook_validates_the_installer_token_file(private, checkin_
         [("/api/hook/coordination-start", "Bearer fixture-token")] if private else [])
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("digest_exists", [True, False])
+def test_windows_start_records_a_rejected_junction_token_without_a_request(checkin_daemon, tmp_path, digest_exists):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _write_token_file(directory / "token", "fixture-token")
+    junction = tmp_path / "junction"
+    env, key = _digest_env(tmp_path)
+    if digest_exists:
+        (tmp_path / "digests").mkdir()
+    env.update(PSEUDOLIFE_MCP_DAEMON_URL=checkin_daemon.url,
+               PSEUDOLIFE_MCP_TOKEN="fixture-token",
+               PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"),
+               PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory))
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    try:
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        assert _run_start_hook("bash", env) == ""
+        assert checkin_daemon.requests == []
+        lines = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert len(lines) == 1
+        stamp, *fields = lines[0].split("\t")
+        assert stamp.isdigit() and fields == ["token", key[:8], "0", "0", "rejected"]
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove only the junction, preserving its target.
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 def test_start_hook_prints_nothing_when_the_board_is_unavailable(shell, checkin_daemon, tmp_path):
     """No bearer here, so the daemon serves an empty body: no check-in."""

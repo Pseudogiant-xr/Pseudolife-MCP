@@ -878,10 +878,6 @@ def test_windows_private_file_guards_are_load_bearing(tmp_path, guard):
     _write_token_file(token_file, "fixture-token")
     function = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
                          HOOK.read_text(encoding="utf-8"))[0]
-    for name in ("coordination-start.sh", "session-start.sh", "session-end.sh"):
-        sibling = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
-                            (HOOK.parent / name).read_text(encoding="utf-8"))[0]
-        assert sibling == function
     edits = {
         "owner": ("$owner -ne $current", "$false"),
         "protected": ("-not $acl.AreAccessRulesProtected", "$false"),
@@ -930,6 +926,42 @@ def test_windows_private_file_guards_are_load_bearing(tmp_path, guard):
             assert result.returncode == expected, (guard, mutated, result.stderr)
     finally:
         _secure_windows_file(token_file)
+
+
+def test_windows_acl_blocks_are_byte_identical():
+    pattern = rb"(?ms)^        PSEUDOLIFE_PRIVATE_FILE=.*?^        return \$\?"
+    expected = re.search(pattern, HOOK.read_bytes())[0]
+    for name in ("coordination-start.sh", "session-start.sh", "session-end.sh"):
+        assert re.search(pattern, (HOOK.parent / name).read_bytes())[0] == expected, name
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_path):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _write_token_file(directory / "token", "fixture-token")
+    junction = tmp_path / "junction"
+    server, requests = _gate_daemon("allow\n")
+    env = _gate_env(tmp_path, server, PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"))
+    env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
+               PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0")
+    try:
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+        lines = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert len(lines) == 1
+        stamp, *fields = lines[0].split("\t")
+        assert stamp.isdigit() and fields == ["token", _key()[:8], "0", "0", "rejected"]
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove only the junction, preserving its target.
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")

@@ -16,6 +16,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file, so a fresh install's hooks could silently skip their requests.
   POSIX hosts retain the existing permission check. The installer summary
   distinguishes saving the setting from verifying hook authentication.
+  A token file rejected by the Stop gate or coordination-start hook leaves
+  a `token` / `rejected` digest-ledger line without a path or credential,
+  so a refused file can be diagnosed while its daemon request stays suppressed.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
