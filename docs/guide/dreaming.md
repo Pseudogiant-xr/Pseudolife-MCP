@@ -516,11 +516,18 @@ nothing is lost, but nothing is consolidated either. The daemon keeps a
 stall record and reports it:
 
 - **When it opens.** On the second consecutive failed extraction (one is
-  noise), or when the backlog is due (`backlog ≥ min_batch` and the sweep
-  would fire) and no dream has succeeded for three sweep intervals (30 min
-  at the default 600 s). A dream the primary serves closes it and records
-  `recovered_at`. The record lives in the daemon process: a restart forgets
-  it, and two failed sweeps open it again.
+  noise; a run whose per-memory retry set aside every memory it pulled
+  counts as a failure too), or when the backlog is due (`backlog ≥
+  min_batch` and the sweep would fire) and no dream has succeeded for three
+  sweep intervals. That rule is checked at each sweep, so it fires at the
+  first sweep past three intervals: 30 to about 40 minutes at the default
+  600 s. A claim write that fails holds the cursor too, but it is the
+  database, not the extractor, and never opens a stall.
+- **When it closes.** At the next dream the primary serves that pulled at
+  least one memory and extracted any of them, which records `recovered_at`.
+  An empty pull says nothing about the extractor and closes nothing. The
+  record lives in the daemon process: a restart forgets it, and two failed
+  sweeps open it again.
 - **Why.** `login_expired` (the endpoint answered 401/403, or its error
   named a failed login, as the CLI shims do when `claude -p` or `codex exec`
   loses its session), `extractor_unreachable` (refused, timed out),
@@ -538,10 +545,17 @@ stall record and reports it:
   Pseudolife-MCP: dreams stalled since 2026-09-28 09:10+00:00 (login_expired): the extractor CLI's login expired; re-run `claude auth login` (or `codex login`) on the daemon host.
   ```
 - **On the board.** The daemon posts, as the reserved sender `daemon`, one
-  message to every attached, non-idle session when a stall begins, at most
-  one repeat every `memory.dream.stall_repeat_hours` (6) while it lasts,
-  and one when it clears. The notices are context (wake decision `hinted`):
-  they never ring a parked session. No client can send as `daemon`. Set
+  message to every attached, non-idle session when a stall begins and one
+  when it clears. A begin or repeat goes out at most once every
+  `memory.dream.stall_repeat_hours` (6), counted across incidents, so an
+  extractor that fails and recovers every few dreams is announced once per
+  window rather than every cycle; an incident that was never announced
+  gets no recovery notice. A fallback warning that turns into a hard stall
+  (the fallback fails too) is announced at once. A notice that reached
+  nobody stays owed and is retried at the next sweep. The notices are
+  context (wake decision `hinted`): they never ring a parked session. No
+  client can send as `daemon` or take the label `daemon`, and the per-turn
+  digest names a sender "daemon" only for the daemon's own mail. Set
   `memory.dream.stall_notice: false` to turn them off; with the board off
   or without Postgres they are skipped.
 

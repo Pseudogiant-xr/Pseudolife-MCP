@@ -50,8 +50,10 @@ class DreamStallTracker:
     This keeps the evidence ``dream_status``, ``/health``, the session-start
     line and the board notices read.
 
-    A failed extraction (``extractor_failed`` from ``dream_run``) or a dream
-    the fallback served in ``auto`` mode is a primary failure; the second in
+    A failed extraction (``extractor_failed`` from ``dream_run``, except a
+    write-phase hold, which is the database), a run whose per-memory retry
+    set aside every memory it pulled, or a dream the fallback served in
+    ``auto`` mode is a primary failure; the second in
     a row opens the stall (one is noise: the first probe after a restart
     fails spuriously, see ``_probe_primary``). A dream the primary served
     that pulled entries is a success and closes it, keeping the closed
@@ -86,12 +88,26 @@ class DreamStallTracker:
         self.sweep_interval: float | None = None
         self.stall: dict | None = None
         self.last_stall: dict | None = None
-        # When the open incident's last notice was delivered, and a closed
-        # incident whose recovery notice is still owed.
+        # When the open incident's last notice was delivered (None: not
+        # announced), and a closed announced incident whose recovery notice
+        # is still owed.
         self.notice_at: float | None = None
         self.clear_owed: dict | None = None
+        # Across incidents: when the last begin/repeat/escalate went out and
+        # whether it named a hard stall, so a flapping extractor announces
+        # at most once per repeat window (PR #456 review) while a warning
+        # that turns into a hard stall is still announced at once.
+        self.last_notice_at: float | None = None
+        self.announced_hard: bool | None = None
+
+    @staticmethod
+    def _hard(record: dict) -> bool:
+        return record.get("reason") != "served_by_fallback"
 
     def _open(self, since: float) -> None:
+        if self.stall is None:
+            # A new incident: a recovery nobody received is stale now.
+            self.clear_owed = None
         self.stall = {"since": since, "reason": self.reason,
                       "consecutive_failures": self.failures,
                       "last_error": self.last_error,
@@ -101,15 +117,24 @@ class DreamStallTracker:
         """Account one ``dream_run_auto`` result."""
         if result.get("skipped") or result.get("error"):
             return
+        pulled = result.get("pulled") or 0
         with self._lock:
             now = self.clock()
+            err = result.get("extractor_error") or {}
             if result.get("extractor_failed"):
-                err = result.get("extractor_error") or {}
+                if result.get("hold_phase") == "write":
+                    return              # the database, not the extractor
                 reason = err.get("reason") or "extractor_error"
                 error = err.get("error") or "extraction failed"
+            elif pulled > 0 and (result.get("quarantined") or 0) >= pulled:
+                # Every pulled memory was set aside by the per-memory retry:
+                # the extractor failed again, whatever ``extractor_failed``
+                # says (a one-memory backlog otherwise read as a recovery).
+                reason = err.get("reason") or "extractor_error"
+                error = err.get("error") or "every pulled memory failed extraction"
             elif served_by_fallback:
                 reason, error = "served_by_fallback", "primary health probe failed"
-            elif (result.get("pulled") or 0) > 0:
+            elif pulled > 0:
                 self._succeed(now)
                 return
             else:
@@ -155,17 +180,27 @@ class DreamStallTracker:
                     "last_stall": dict(self.last_stall) if self.last_stall else None}
 
     def take_notice(self, repeat_seconds: float) -> tuple[str, dict] | None:
-        """The notice due now, if any: ``begin`` once per incident,
-        ``repeat`` at most every ``repeat_seconds`` while it lasts, ``clear``
-        once after an incident whose notice was delivered. Nothing is marked
-        until :meth:`mark_noticed`, so an undelivered notice stays owed."""
+        """The notice due now, if any. While a stall is open: ``begin`` for
+        an incident not yet announced, ``repeat`` while an announced one
+        lasts, each at most once per ``repeat_seconds`` counted across
+        incidents; ``escalate`` at once when a fallback warning becomes a
+        hard stall (an unannounced incident after an announced warning
+        begins at once too). After it: ``clear``, only for an announced
+        incident. Nothing is marked until :meth:`mark_noticed`, so an
+        undelivered notice stays owed."""
         with self._lock:
             now = self.clock()
             if self.stall is not None:
-                if self.notice_at is None:
+                hard = self._hard(self.stall)
+                window_open = (self.last_notice_at is None
+                               or now - self.last_notice_at >= repeat_seconds)
+                escalating = hard and self.announced_hard is False
+                if self.notice_at is not None:
+                    if escalating:
+                        return "escalate", dict(self.stall)
+                    return ("repeat", dict(self.stall)) if window_open else None
+                if window_open or escalating:
                     return "begin", dict(self.stall)
-                if now - self.notice_at >= repeat_seconds:
-                    return "repeat", dict(self.stall)
                 return None
             if self.clear_owed is not None:
                 return "clear", dict(self.clear_owed)
@@ -176,7 +211,8 @@ class DreamStallTracker:
             if kind == "clear":
                 self.clear_owed = None
             elif self.stall is not None:
-                self.notice_at = self.clock()
+                self.notice_at = self.last_notice_at = self.clock()
+                self.announced_hard = self._hard(self.stall)
 
 
 def _stall_tracker(service) -> DreamStallTracker:
@@ -1345,18 +1381,28 @@ class DreamOps:
         constraint_idx: dict[int, dict] = {}
         carried: set[int] = set()
         constraint_misses: list[dict] = []
+        # Set when the isolation pass set aside every memory it pulled.
+        isolation_error: dict | None = None
 
-        def _held(reason: str, exc: Exception) -> dict[str, Any]:
+        def _held(reason: str, exc: Exception, *,
+                  phase: str = "extract") -> dict[str, Any]:
             from pseudolife_memory.memory.dream import classify_extractor_error
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
                            "next sweep", reason, exc)
-            why, error = classify_extractor_error(exc)
+            # Only an extraction-phase hold describes the extractor. A write
+            # hold is the database (a psycopg password error once read as an
+            # expired CLI login, PR #456 review): no extractor_error, and the
+            # dream-stall record ignores it.
+            extractor_error = {}
+            if phase == "extract":
+                why, error = classify_extractor_error(exc)
+                # Sanitized: a reason and a fixed-vocabulary error, never
+                # the exception text.
+                extractor_error = {"extractor_error": {"reason": why, "error": error}}
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
                     "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
-                    # Sanitized: a reason and a fixed-vocabulary error, never
-                    # the exception text (the dream-stall record reads it).
-                    "extractor_error": {"reason": why, "error": error},
+                    "hold_phase": phase, **extractor_error,
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
                     "span_flagged": span_flagged,
@@ -1432,6 +1478,7 @@ class DreamOps:
             # outage, not a poison pill: hold the cursor and retry next sweep.
             succeeded = 0
             failed_keys: list[Any] = []
+            last_isolated: Exception = exc
             for e, key in zip(entries, batch_key):
                 try:
                     e_vocab, e_kf = self._dream_hints([e["text"]],
@@ -1444,12 +1491,20 @@ class DreamOps:
                     logger.warning("dream: entry %s failed isolated "
                                    "extraction (%s)", key, exc2)
                     failed_keys.append(key)
+                    last_isolated = exc2
                     continue
                 succeeded += 1
                 pairs.extend((c, e.get("db_id"), e) for c in e_claims)
             if succeeded == 0 and len(entries) > 1:
                 return _held("all entries failed the isolation pass "
                              "(outage, not poison)", exc)
+            if succeeded == 0:
+                # A lone memory set aside: the run returns as if served, but
+                # the extractor failed again. The dream-stall record counts
+                # it as a failure and reads why from here (PR #456 review).
+                from pseudolife_memory.memory.dream import classify_extractor_error
+                why, error = classify_extractor_error(last_isolated)
+                isolation_error = {"reason": why, "error": error}
             quarantined = len(failed_keys)
             for key in failed_keys:
                 logger.warning("dream: quarantining entry %s (fails alone "
@@ -1985,8 +2040,8 @@ class DreamOps:
             healed = self._dream_reflush_stale(entries)
             if healed:
                 return _held(f"claim write failed ({healed} stale entry id(s) "
-                             "re-flushed; mapping repaired)", exc)
-            return _held("claim write failed", exc)
+                             "re-flushed; mapping repaired)", exc, phase="write")
+            return _held("claim write failed", exc, phase="write")
         acknowledgement = self.dream_commit(pulled["commit_token"])
         if acknowledgement.get("error"):
             _finish_run("failed", None)
@@ -2063,7 +2118,8 @@ class DreamOps:
                 "constraint_verbatim": len(carried),
                 "constraint_misses": constraint_misses,
                 "traces": traces_n, "sources_attributed": sources_attributed,
-                "quarantined": quarantined, "retyped": retyped}
+                "quarantined": quarantined, "retyped": retyped,
+                **({"extractor_error": isolation_error} if isolation_error else {})}
 
     def _carrier_slot_eligible(self, entity: str, attribute: str) -> bool:
         """A carrier may land only on a slot that is EMPTY or already holds a
@@ -2505,8 +2561,10 @@ class DreamOps:
 
     def dream_stall_notify(self) -> dict | None:
         """Post the board notice a stall owes (``memory.dream.stall_notice``),
-        rate-limited by the tracker: one when it begins, at most one per
-        ``stall_repeat_hours`` while it lasts, one when it clears. Skips
+        rate-limited by the tracker: a begin or repeat at most once per
+        ``stall_repeat_hours`` across incidents, an escalation at once when
+        a fallback warning turns into a hard stall, one clear for an
+        announced incident. A notice nobody received stays owed. Skips
         silently where the board cannot carry it (disabled, no Postgres).
         Must be called without the service lock held. Never raises."""
         try:
@@ -2527,7 +2585,10 @@ class DreamOps:
                 from pseudolife_memory.memory.dream import dream_stall_notice_text
                 sent = coordination.daemon_notice(
                     self, dream_stall_notice_text(kind, record))
-                if sent is not None:
+                # Delivered means someone received it: a notice sent to
+                # nobody stays owed for whoever attaches before the next
+                # sweep (PR #456 review).
+                if sent is not None and sent.get("recipients", 0) > 0:
                     tracker.mark_noticed(kind)
                 return sent
             finally:

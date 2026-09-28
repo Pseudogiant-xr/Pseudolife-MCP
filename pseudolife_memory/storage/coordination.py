@@ -1087,9 +1087,20 @@ class CoordinationStore:
                                            (row["lease_until"] or 0) > self.clock())
         return result
 
+    @staticmethod
+    def _check_label(principal, fields):
+        """The label ``daemon`` names the daemon's own sender: the per-turn
+        digest shows a sender's label, so a session could otherwise post as
+        "from daemon" (PR #456 review)."""
+        label = fields.get("label")
+        if (principal != DAEMON_PRINCIPAL and isinstance(label, str)
+                and label.strip().casefold() == DAEMON_PRINCIPAL):
+            raise CoordinationError("invalid_label")
+
     def register(self, principal, *, label="", project="", task="", episode="", status="",
                  capabilities=None, wake_enabled=False):
         _string(principal, 256, "principal", empty=False)
+        self._check_label(principal, {"label": label})
         fields = self._fields(label=label, project=project, task=task, episode=episode, status=status,
                               capabilities={} if capabilities is None else capabilities,
                               wake_enabled=wake_enabled)
@@ -1174,6 +1185,7 @@ class CoordinationStore:
         ``status_overdue``. A new status without one clears the old
         expectation; ``expect`` alone re-times the current status."""
         fields = self._fields(**fields)
+        self._check_label(principal, fields)
         if expect is not None and (type(expect) is not int
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
             raise CoordinationError("invalid_expect")
@@ -1617,13 +1629,25 @@ class CoordinationStore:
         beside it says how much the preview omits. Reading is not delivery:
         nothing here touches attempts or acknowledgements."""
         rows = self._all(
-            "SELECT m.message_id,m.sender_agent_id,m.created_at,m.text,a.label AS sender_label "
+            "SELECT m.message_id,m.sender_agent_id,m.sender_principal,m.created_at,m.text,"
+            "a.label AS sender_label "
             "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
             "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
             "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
         return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
-                 "sender_label": r["sender_label"] or "", "created_at": r["created_at"],
+                 "sender_principal": r["sender_principal"],
+                 "sender_label": self._preview_label(r), "created_at": r["created_at"],
                  "excerpt": _excerpt(r["text"])} for r in rows]
+
+    @staticmethod
+    def _preview_label(row):
+        """The digest's sender name: ``daemon`` only for the daemon's own
+        mail, whatever label a row carries (one registered before the label
+        was refused renders as a plain peer)."""
+        if row["sender_principal"] == DAEMON_PRINCIPAL:
+            return DAEMON_PRINCIPAL
+        label = row["sender_label"] or ""
+        return "" if label.strip().casefold() == DAEMON_PRINCIPAL else label
 
     def _mailbox_state(self, agent_id):
         return {"pending_count": self._pending_count(agent_id),

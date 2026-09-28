@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -491,6 +492,14 @@ class DreamConfig:
     # reviewed clean (188 events, 0 incorrect dates, negligible volume).
     # Requires PG; an events-pass failure is non-fatal to claims.
     chronicle: bool = True
+
+    def __post_init__(self) -> None:
+        # Zero or a negative window would post a stall notice on every dream.
+        hours = self.stall_repeat_hours
+        if (isinstance(hours, bool) or not isinstance(hours, (int, float))
+                or not math.isfinite(hours) or hours <= 0):
+            raise ValueError("memory.dream.stall_repeat_hours must be a number of "
+                             "hours greater than 0")
 
 
 @dataclass

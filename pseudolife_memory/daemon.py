@@ -137,6 +137,24 @@ def _extractor_status(svc) -> str | None:
     return "configured"
 
 
+def reserved_principal_warnings(allowed_principals, token_map) -> list[str]:
+    """Startup warnings for a configured principal named ``daemon``: the
+    board reserves that name for the daemon's own notices, so such a caller
+    silently loses the board. Names the principal, never a token."""
+    from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
+
+    out = []
+    if DAEMON_PRINCIPAL in (allowed_principals or []):
+        out.append(f"coordination.allowed_principals lists {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; no client can use the "
+                   "board as it. Rename the principal.")
+    if DAEMON_PRINCIPAL in (token_map or {}).values():
+        out.append(f"PSEUDOLIFE_MCP_TOKENS maps a token to {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; that caller cannot use "
+                   "the board. Rename the principal.")
+    return out
+
+
 def _dream_stall(svc) -> dict | None:
     """The service's open dream-stall record, or ``None`` (none open, or a
     stand-in without a tracker). Lock-free; never raises."""
@@ -396,6 +414,12 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
             "\"token:principal,...\") — continuing with the singular "
             "PSEUDOLIFE_MCP_TOKEN only; no named principals are active.")
+    try:
+        allowed = mcp_server.service.config.coordination.allowed_principals
+    except AttributeError:
+        allowed = []
+    for warning in reserved_principal_warnings(allowed, token_map):
+        logger.warning("%s", warning)
     auth_configured = token is not None or bool(token_map)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",

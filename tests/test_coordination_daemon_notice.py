@@ -156,3 +156,58 @@ def test_a_bearer_named_daemon_is_told_the_board_is_not_its_to_use(monkeypatch):
     reason = coordination.unavailable_reason(
         _service([DAEMON_PRINCIPAL]), {"authorization": "Bearer fixture-secret"})
     assert reason == "principal_not_allowed"
+
+
+def test_the_peer_roster_refuses_the_daemon_principal_too():
+    from types import SimpleNamespace
+
+    from pseudolife_memory.service import MemoryService
+    stand_in = SimpleNamespace(config=SimpleNamespace(coordination=SimpleNamespace(
+        enabled=True, allowed_principals=[DAEMON_PRINCIPAL], awareness_limit=5)))
+    out = MemoryService.coordination_awareness(stand_in, principal=DAEMON_PRINCIPAL)
+    assert out["reason"] == "principal_not_allowed" and out["peers"] == []
+
+
+@pytest.mark.parametrize("allowed, tokens, warned", [
+    (["default", "daemon"], {}, True),
+    (["default"], {"fixture-secret": "daemon"}, True),
+    (["default", "editor"], {"fixture-secret": "editor"}, False),
+])
+def test_startup_warns_when_a_configured_principal_is_named_daemon(allowed, tokens, warned):
+    from pseudolife_memory.daemon import reserved_principal_warnings
+    out = reserved_principal_warnings(allowed, tokens)
+    assert bool(out) is warned
+    assert all("daemon" in line and "board" in line for line in out)
+    assert all("fixture-secret" not in line for line in out)
+
+
+# ── the label "daemon" belongs to the daemon ──────────────────────────────
+
+@pytest.mark.parametrize("label", ["daemon", "Daemon", " DAEMON "])
+def test_a_session_cannot_register_or_rename_itself_daemon(coordinating, label):
+    from pseudolife_memory.storage.coordination import CoordinationError
+    store = _store(coordinating)
+    with pytest.raises(CoordinationError, match="invalid_label"):
+        store.register(PRINCIPAL, label=label)
+    agent = store.register(PRINCIPAL, label="worker")
+    with pytest.raises(CoordinationError, match="invalid_label"):
+        store.update(PRINCIPAL, agent["agent_id"], agent["credential"], label=label)
+    assert store.register(PRINCIPAL, label="daemon-watcher")["label"] == "daemon-watcher"
+
+
+def test_the_digest_names_daemon_only_for_the_daemons_own_mail(coordinating):
+    recipient = _peer(coordinating)
+    store = _store(coordinating)
+    spoof = _peer(coordinating)
+    # A row labelled "daemon" before the refusal existed.
+    store.storage.conn.execute("UPDATE coordination_agents SET label='daemon' "
+                               "WHERE agent_id=%s", (spoof["agent_id"],))
+    store.send(PRINCIPAL, spoof["agent_id"], spoof["credential"],
+               to=recipient["agent_id"], text="pretend notice", request_id="r1")
+    daemon_notice(coordinating, "real notice")
+    preview = {p["excerpt"]: p for p in _store(coordinating)._pending_preview(
+        recipient["agent_id"])}
+    assert preview["real notice"]["sender_label"] == "daemon"
+    assert preview["real notice"]["sender_principal"] == DAEMON_PRINCIPAL
+    assert preview["pretend notice"]["sender_label"] == ""
+    assert preview["pretend notice"]["sender_principal"] == PRINCIPAL

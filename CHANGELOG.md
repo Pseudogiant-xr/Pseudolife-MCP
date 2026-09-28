@@ -12,16 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dream runs served silently from the fallback; with no fallback the dream
   holds its cursor and stops, and nothing told anyone. The service keeps a
   stall record: opened on the second consecutive failed extraction (one is
-  noise), or when a due backlog (`backlog >= min_batch`, `would_fire`) has
-  had no successful dream for three sweep intervals (a primary that never
-  answers); closed by the next dream the primary serves, which records
-  `recovered_at`. Its reason is `login_expired` (HTTP 401/403, or an error
-  naming a failed login, such as the CLI shims' "OAuth session expired"),
-  `extractor_unreachable` (refused, timed out), `extractor_error` (anything
-  else) or `served_by_fallback` (auto mode chose the fallback: a warning,
-  not a stall). `last_error` is an HTTP status or an exception type name,
-  never exception text or a response body. Process-local: a restart forgets
-  it and two failed sweeps re-open it.
+  noise; a run whose per-memory retry set aside every memory it pulled
+  counts as a failure), or when a due backlog (`backlog >= min_batch`,
+  `would_fire`) has had no successful dream for three sweep intervals (a
+  primary that never answers; checked each sweep, so it fires at the first
+  sweep past that, up to about one interval later); closed by the next
+  dream the primary serves that pulled at least one memory and extracted
+  any of them, which records `recovered_at`. A claim-write hold is the
+  database, not the extractor, and opens nothing. Its reason is
+  `login_expired` (HTTP 401/403, or an error naming a failed login in whole
+  words, such as the CLI shims' "OAuth session expired" or "not logged
+  in"), `extractor_unreachable` (refused, timed out), `extractor_error`
+  (anything else) or `served_by_fallback` (auto mode chose the fallback: a
+  warning, not a stall). `last_error` is an HTTP status or an exception
+  type name, never exception text or a response body. Process-local: a
+  restart forgets it and two failed sweeps re-open it.
+  `memory.dream.stall_repeat_hours` must be greater than 0.
 - Surfaces: `memory_dream(action="status")` gains `stall` (null or the
   record) and `last_stall`; `/health` reports `extractor: "stalled"` with a
   `stall` sub-object (reason and times only; the probe is unauthenticated)
@@ -34,13 +40,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Board notices from the daemon itself: a reserved sender principal
   `daemon`, which no bearer can use (dispatch refuses it with
   `principal_not_allowed` whatever the token map or `allowed_principals`
-  say), posts one message to every attached, non-idle session when a stall
-  begins, at most one repeat per `memory.dream.stall_repeat_hours` (default
-  6) while it lasts, and one when it clears. The wake decision is `hinted`
-  (reason `daemon_notice`): the notice is context for the next turn, never
-  rings a parked session and is not a live-channel turn. Skipped silently
-  where the board is off or has no Postgres, and retried at the next sweep.
-  `memory.dream.stall_notice: false` turns the notices off. No DDL.
+  say, and the peer roster refuses it the same way; the daemon warns at
+  startup when a configured principal is named `daemon`), posts one message
+  to every attached, non-idle session when a stall begins and one when it
+  clears. A begin or repeat goes out at most once per
+  `memory.dream.stall_repeat_hours` (default 6) counted across incidents,
+  so a flapping extractor is announced once per window, and an incident
+  never announced owes no recovery notice; a fallback warning that becomes
+  a hard stall is announced at once. A notice that reached nobody stays
+  owed. The wake decision is `hinted` (reason `daemon_notice`): the notice
+  is context for the next turn, never rings a parked session and is not a
+  live-channel turn. No session may register or rename itself with the
+  label `daemon`, and the per-turn digest names a sender "daemon" only for
+  mail whose sender principal is `daemon` (its preview entries now carry
+  `sender_principal`). Skipped silently where the board is off or has no
+  Postgres, and retried at the next sweep. `memory.dream.stall_notice:
+  false` turns the notices off. No DDL.
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls)
 
 ### Changed (2026-09-28 — merge gate trial: CI gates ordinary code; the local full suite is reserved for schema, test-infrastructure and process-model changes)

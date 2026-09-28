@@ -1164,8 +1164,12 @@ class ExtractorError(Exception):
 
 # Words that mark an authentication failure in an extractor's error: the
 # CLI shims answer a failed call with HTTP 500 and the CLI's own error text
-# (2026-08-11: "OAuth session expired and could not be refreshed").
-_AUTH_WORDS_RE = re.compile(r"auth|log ?in", re.IGNORECASE)
+# (2026-08-11: "OAuth session expired and could not be refreshed"). Whole
+# words only: a bare "auth" matched "author" and psycopg's "password
+# authentication failed", and "log ?in" matched "catalog in" (PR #456 review).
+_AUTH_WORDS_RE = re.compile(
+    r"\b(?:oauth|session expired|not logged in|log ?in|unauthori[sz]ed|401)\b",
+    re.IGNORECASE)
 # How much of an HTTP error body is read to look for those words.
 _AUTH_BODY_PEEK = 4096
 

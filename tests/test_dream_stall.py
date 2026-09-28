@@ -463,3 +463,212 @@ def test_run_sweep_once_runs_the_stall_tick():
     out = run_sweep_once(_Sweep())
     assert out["reason"] == "below_threshold"
     assert seen == [{"backlog": 0, "would_fire": False}]
+
+
+# ── review of PR #456 (2026-09-29) ────────────────────────────────────────
+
+@pytest.mark.parametrize("text", ["password authentication failed for user x",
+                                  "the author field is missing",
+                                  "catalog in an odd state"])
+def test_auth_words_are_whole_words_not_substrings(text):
+    from pseudolife_memory.memory.dream import classify_extractor_error
+    assert classify_extractor_error(RuntimeError(text))[0] == "extractor_error"
+
+
+@pytest.mark.parametrize("text", ["OAuth session expired", "Not logged in",
+                                  "session expired, log in again", "401 Unauthorized",
+                                  "please login"])
+def test_login_failures_still_classify_as_login_expired(text):
+    from pseudolife_memory.memory.dream import classify_extractor_error
+    assert classify_extractor_error(RuntimeError(text))[0] == "login_expired"
+
+
+def test_a_run_whose_every_memory_was_set_aside_is_a_failure_not_a_recovery():
+    """After three failures of the same batch the per-memory retry sets a
+    lone failing memory aside and returns ``pulled: 1`` without
+    ``extractor_failed``; that is the extractor failing again."""
+    t, _ = _tracker()
+    t.record(_failed(), served_by_fallback=False)
+    t.record(_failed(), served_by_fallback=False)
+    t.record({"pulled": 1, "claims": 0, "quarantined": 1,
+              "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}},
+             served_by_fallback=False)
+    snap = t.snapshot()
+    assert snap["last_stall"] is None
+    assert snap["stall"]["consecutive_failures"] == 3
+    assert snap["stall"]["reason"] == "login_expired"
+    # A partial set-aside (siblings extracted) is still a success.
+    t.record({"pulled": 3, "claims": 2, "quarantined": 1}, served_by_fallback=False)
+    assert t.snapshot()["stall"] is None
+
+
+def test_a_write_phase_hold_is_not_an_extractor_failure():
+    t, _ = _tracker()
+    for _ in range(3):
+        t.record({"pulled": 2, "claims": 0, "extractor_failed": True,
+                  "hold_phase": "write"}, served_by_fallback=False)
+    assert t.snapshot()["stall"] is None
+
+
+def _drain(t, repeat, sent):
+    due = t.take_notice(repeat)
+    if due is not None:
+        sent.append(due[0])
+        t.mark_noticed(due[0])
+
+
+def test_a_flapping_extractor_begins_at_most_once_per_repeat_window():
+    t, clock = _tracker()
+    repeat = 6 * 3600
+    sent = []
+    for _ in range(20):                     # 20 cycles x 30 min = 10 h
+        for result in (_failed(), _failed(), OK):
+            clock.t += 600
+            t.record(result, served_by_fallback=False)
+            _drain(t, repeat, sent)
+    assert sent.count("begin") == 2         # the first, and once past 6 h
+    assert sent.count("clear") == 2         # only an announced incident clears
+    assert "repeat" not in sent
+
+
+def test_a_fallback_warning_escalates_at_once_when_the_fallback_fails_too():
+    t, clock = _tracker()
+    repeat = 6 * 3600
+    sent = []
+    t.record(OK, served_by_fallback=True)
+    t.record(OK, served_by_fallback=True)
+    _drain(t, repeat, sent)
+    clock.t += 60
+    t.record(_failed("extractor_unreachable", "connection refused"),
+             served_by_fallback=True)
+    _drain(t, repeat, sent)
+    _drain(t, repeat, sent)
+    assert sent == ["begin", "escalate"]
+
+
+def test_escalation_crosses_incidents_but_the_same_reason_again_waits():
+    t, clock = _tracker()
+    repeat = 6 * 3600
+    sent = []
+    t.record(OK, served_by_fallback=True)
+    t.record(OK, served_by_fallback=True)
+    _drain(t, repeat, sent)                 # the warning is announced
+    t.record(OK, served_by_fallback=False)
+    _drain(t, repeat, sent)                 # and its recovery
+    clock.t += 600
+    t.record(OK, served_by_fallback=True)
+    t.record(OK, served_by_fallback=True)
+    _drain(t, repeat, sent)                 # the same warning again: waits
+    t.record(OK, served_by_fallback=False)
+    _drain(t, repeat, sent)                 # unannounced, so no recovery
+    clock.t += 600
+    t.record(_failed(), served_by_fallback=False)
+    t.record(_failed(), served_by_fallback=False)
+    _drain(t, repeat, sent)                 # a hard stall after a warning: at once
+    assert sent == ["begin", "clear", "begin"]
+
+
+def test_a_notice_nobody_received_stays_owed(monkeypatch):
+    from pseudolife_memory import coordination
+    answers = [{"recipients": 0}, {"recipients": 1}]
+    sent = []
+
+    def notice(service, text):
+        sent.append(text)
+        return answers.pop(0)
+
+    monkeypatch.setattr(coordination, "daemon_notice", notice)
+    svc = _NoticeService()
+    _stall(svc)
+    svc.dream_stall_notify()
+    svc.dream_stall_notify()
+    svc.dream_stall_notify()
+    assert len(sent) == 2
+    assert all(t.startswith("Dream extraction stalled") for t in sent)
+
+
+@pytest.mark.parametrize("bad", [0, -1, 0.0, True, float("nan"), "6"])
+def test_stall_repeat_hours_must_be_positive(bad):
+    from pseudolife_memory.utils.config import DreamConfig
+    with pytest.raises(ValueError, match="stall_repeat_hours"):
+        DreamConfig(stall_repeat_hours=bad)
+
+
+def _fallback_service(mode):
+    from types import MethodType, SimpleNamespace
+
+    from pseudolife_memory.service import MemoryService
+    from pseudolife_memory.utils.config import DreamConfig
+
+    class _Svc:
+        def __init__(self):
+            self.config = SimpleNamespace(memory=SimpleNamespace(dream=DreamConfig(
+                extractor_source="config", extractor_mode=mode,
+                extractor_base_url="http://127.0.0.1:1/v1", extractor_model="p",
+                fallback_base_url="http://127.0.0.1:2/v1", fallback_model="f")))
+            self._last_dream_extractor = None
+            self.dream_run_auto = MethodType(MemoryService.dream_run_auto, self)
+            self.dream_stall_state = MethodType(MemoryService.dream_stall_state, self)
+
+        def dream_run(self, extractor, *, limit=None):
+            return {"pulled": 3, "claims": 2}
+
+    return _Svc()
+
+
+@pytest.mark.parametrize("mode, stalled", [("auto", True), ("fallback", False)])
+def test_a_fallback_dream_warns_only_when_the_probe_chose_it(monkeypatch, mode, stalled):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "build_extractor_with_fallback",
+                        lambda cfg: (StubExtractor([]), "fallback"))
+    svc = _fallback_service(mode)
+    svc.dream_run_auto()
+    svc.dream_run_auto()
+    stall = svc.dream_stall_state()["stall"]
+    if stalled:
+        assert stall["reason"] == "served_by_fallback"
+    else:
+        assert stall is None
+
+
+class _AlwaysFails:
+    def extract(self, texts, vocab, known_facts=None):
+        raise ExtractorError(f"extract failed: {LOGIN_TEXT}")
+
+
+def test_a_one_memory_outage_never_announces_a_false_recovery(svc, monkeypatch):
+    from pseudolife_memory import coordination
+    from pseudolife_memory.memory import dream as d
+
+    sent = []
+    monkeypatch.setattr(coordination, "daemon_notice",
+                        lambda service, text: sent.append(text) or {"recipients": 1})
+    monkeypatch.setattr(d, "build_extractor_with_fallback",
+                        lambda cfg: (_AlwaysFails(), "primary"))
+    svc.store("the relay port is 4001", source="notes")
+    for _ in range(3):
+        svc.dream_run_auto()
+    status = svc.dream_status()
+    assert status["stall"] is not None and status["last_stall"] is None
+    assert [t.split(" since")[0] for t in sent] == ["Dream extraction stalled"]
+
+
+def test_database_write_failures_are_not_an_extractor_stall(svc, monkeypatch):
+    """A claim write that fails holds the cursor like an extraction failure,
+    but it is the database, not the extractor, and a psycopg password error
+    must never read as an expired CLI login."""
+    from pseudolife_memory.memory import dream as d
+
+    monkeypatch.setattr(d, "build_extractor_with_fallback", lambda cfg: (
+        StubExtractor([{"entity": "relay", "attribute": "port", "value": "4001"}]),
+        "primary"))
+
+    def refused(*a, **kw):
+        raise RuntimeError("password authentication failed for user fixture")
+
+    monkeypatch.setattr(svc, "cortex_write", refused)
+    svc.store("the relay port is 4001", source="notes")
+    results = [svc.dream_run_auto() for _ in range(2)]
+    assert all(r.get("extractor_failed") and r["hold_phase"] == "write" for r in results)
+    assert all("extractor_error" not in r for r in results)
+    assert svc.dream_status()["stall"] is None
