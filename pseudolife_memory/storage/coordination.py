@@ -1169,7 +1169,12 @@ class CoordinationStore:
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
-            parked = row.get("park_reason") is not None
+            # A lapsed park (past its ``park_expires``) still carries its
+            # fields but no longer stands: it cannot be refined, and a new
+            # park over it starts fresh, with the default expiry from now
+            # (review of PR #441, 2026-09-28). A status clears either.
+            recorded = row.get("park_reason") is not None
+            parked = self._live_park(row, now) is not None
             # The park record (v49). A null reason clears the whole record;
             # any other park field re-stamps it, and needs a reason unless
             # the row is already parked; a status without park fields is a
@@ -1189,7 +1194,7 @@ class CoordinationStore:
                     expires = fields.get("park_expires")
                     if expires is not None and expires > now + PARK_MAX_TTL:
                         raise CoordinationError("invalid_park")
-            elif "status" in fields and parked:
+            elif "status" in fields and recorded:
                 fields.update(_PARK_CLEARED)
             # Only a real change reaches the row and the log, so a status
             # update that never used an expectation logs what it always did.

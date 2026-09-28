@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-28 — a park set after a lapsed one stands again)
+- A session that parked again after its park had lapsed (past its
+  `park_expires`), without naming a new expiry, kept the lapsed one, so the
+  new park was expired the moment it was set: mail that cleared its need
+  did not ring it, and the Stop-hook park gate answered `no_park` and asked
+  it to park again. `memory_agents(action="update")` now treats only a live
+  park as standing: a new `park_reason` over a lapsed park is a new park,
+  with the 12-hour default counted from then and `park_set_at` restamped,
+  and a park field on its own (including `park_expires` alone) is refused
+  with `invalid_park` on a lapsed park as on an unparked row, since its need
+  may be stale and the session restates it with a reason. A plain status
+  update still clears a lapsed record as it clears a live one. Found by the
+  review of the `board-audit stats` PR (#441), whose `park_outcomes`
+  mirrors the old rule.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
