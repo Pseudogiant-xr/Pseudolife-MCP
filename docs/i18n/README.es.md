@@ -1,8 +1,8 @@
-<!-- i18n-sync: v12 -->
+<!-- i18n-sync: v13 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v12 (2026-09-25)
+> Traducción del [README](../../README.md) canónico — sincronizado: v13 (2026-09-28)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -146,6 +146,7 @@ La documentación canónica y siempre actualizada está en inglés:
 
 - [README](../../README.md) — instalación completa, integración,
   herramientas, solución de problemas
+- [Actualización](../../README.md#updating) — incluye la migración del instalador, la actualización de clientes y el reinicio de sesiones
 - [Configuración](../guide/configuration.md) · [Recuperación](../guide/retrieval.md)
   · [Sueños](../guide/dreaming.md) · [Episodios](../guide/episodes.md)
   · [Modelo de memoria](../guide/memory-model.md) · [Puntos de referencia](../guide/benchmarks.md)

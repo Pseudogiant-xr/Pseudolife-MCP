@@ -1,8 +1,8 @@
-<!-- i18n-sync: v12 -->
+<!-- i18n-sync: v13 -->
 
 # Pseudolife-MCP
 
-[英語版 README(正典)](../../README.md) — 同期バージョン: v12 (2026-09-25)
+[英語版 README(正典)](../../README.md) — 同期バージョン: v13 (2026-09-28)
 
 **Claude Code、Codex、その他の MCP クライアントに永続的な長期メモリを提供します。**
 
@@ -71,6 +71,7 @@ Codex — インストーラーのデフォルト(シムモード)は、Claude �
 正典であり常に最新のドキュメントは英語版です:
 
 - [README](../../README.md) — インストール、接続、ツール、トラブルシューティングの全詳細
+- [更新](../../README.md#updating) — インストーラーの移行、クライアントの更新、セッションの再起動について説明します
 - [設定](../guide/configuration.md) · [リトリーバル](../guide/retrieval.md)
   · [ドリーミング](../guide/dreaming.md) · [エピソード](../guide/episodes.md)
   · [メモリモデル](../guide/memory-model.md) · [ベンチマーク](../guide/benchmarks.md)

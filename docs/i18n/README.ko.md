@@ -1,8 +1,8 @@
-<!-- i18n-sync: v12 -->
+<!-- i18n-sync: v13 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화된 버전: v12 (2026-09-25)
+[영어 원본 README](../../README.md)와 동기화된 버전: v13 (2026-09-28)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -130,6 +130,7 @@ Codex 훅)에서는 매 세션 시작 시 브리핑이 메모리가 확신하지
 정본이자 항상 최신 상태로 유지되는 문서는 영어로 제공됩니다:
 
 - [README](../../README.md) — 전체 설치, 연결 방법, 도구, 문제 해결
+- [업데이트](../../README.md#updating) — 설치 프로그램 마이그레이션, 클라이언트 새로 고침, 세션 재시작을 다룹니다
 - [설정](../guide/configuration.md) · [검색](../guide/retrieval.md)
   · [드리밍](../guide/dreaming.md) · [에피소드](../guide/episodes.md)
   · [메모리 모델](../guide/memory-model.md) · [벤치마크](../guide/benchmarks.md)
