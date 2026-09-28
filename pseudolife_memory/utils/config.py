@@ -1432,14 +1432,24 @@ class UpdatesConfig:
     --clients-only``); running sessions keep their runtime, the next
     session starts on the new one. The daemon recreate, with its backup
     and rollback tag, is never taken unattended by this knob.
+
+    ``unattended_daemon`` (off by default): the scheduled
+    ``pseudolife-mcp update --unattended`` run (a Windows task or a
+    systemd timer, installed with ``update --schedule HH:MM``) may recreate
+    the daemon on a new release, with the same backup and rollback tag as
+    an attended update, when the agent board lists no active session; it
+    posts a board notice from the daemon's principal when it updated or
+    held off. The run reads this through ``/health``, so installing the
+    timer alone changes nothing.
     """
 
     check_releases: bool = True
     check_interval_seconds: int = 6 * 3600
     unattended_clients: bool = False
+    unattended_daemon: bool = False
 
     def __post_init__(self) -> None:
-        for name in ("check_releases", "unattended_clients"):
+        for name in ("check_releases", "unattended_clients", "unattended_daemon"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"updates.{name} must be a boolean")
         if type(self.check_interval_seconds) is not int or self.check_interval_seconds < 60:

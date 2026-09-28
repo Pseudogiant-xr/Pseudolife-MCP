@@ -249,12 +249,32 @@ class ConsoleRoutes:
         p("/api/supersede", lambda q, b: svc.supersede(
             old_text=b.get("old_text"), entry_id=b.get("entry_id"), new_text=b["new_text"]))
 
+        # ---- the daemon's own board notice (the unattended updater) ----
+        p("/api/daemon-notice", lambda q, b: self._daemon_notice(b))
+
         # ---- config ----
         g("/api/config", lambda q, b: config_io.read_config(svc))
         p("/api/config", lambda q, b: config_io.write_config(
             svc, b.get("patch") or b))
 
     # -- composed / guarded handlers ----------------------------------------
+
+    def _daemon_notice(self, body: dict) -> dict:
+        """Post ``text`` to every attached session as the daemon's reserved
+        principal (``coordination.daemon_notice``): what the unattended
+        updater says when it updated or held off. Bearer-gated like every
+        ``/api`` route; ``recipients`` is ``None`` when the board cannot
+        carry it (off, no Postgres), which the caller reports as not said."""
+        from pseudolife_memory import coordination
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text is required")
+        if len(text) > 4000 or any(ord(ch) < 32 and ch not in "\n\t" for ch in text):
+            raise ValueError("text must be at most 4000 characters of printable text")
+        result = coordination.daemon_notice(self.svc, text.strip())
+        if result is None:
+            return {"recipients": None, "reason": "board_unavailable"}
+        return {"recipients": result.get("recipients", 0)}
 
     def _health(self) -> dict:
         from pseudolife_memory.storage.schema import SCHEMA_META_VERSION

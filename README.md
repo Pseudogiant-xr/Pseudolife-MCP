@@ -608,6 +608,13 @@ pseudolife-mcp update`. With `updates.unattended_clients: true` in
 installs the daemon's release as its own new runtime and refreshes the
 plugin cache by itself whenever the daemon is newer than it; the daemon
 recreate stays a deliberate command.
+On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
+daily task or timer that applies a new release only while
+`updates.unattended_daemon: true` is set and no session is active on the
+agent board, with the same backup and rollback tag, and posts a board
+notice either way. When Codex's hook copy differs from the scripts just
+deployed, every update path prints the complete re-approval steps, and
+nothing otherwise.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:

@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-29 — opt-in unattended daemon updates for headless hosts; the Codex re-approval steps, complete and only when the hooks changed)
+- `pseudolife-mcp update --schedule HH:MM` installs a daily scheduled
+  task (Windows, `schtasks`) or systemd `--user` timer (Linux) that runs
+  `pseudolife-mcp update --unattended`; `--unschedule` removes it. The
+  run applies a new release only while `config.yaml`
+  `updates.unattended_daemon: true` (default false, read from `/health`,
+  so the timer alone changes nothing) and the agent board lists no active
+  session, with the same backup and rollback tag as an attended update,
+  and posts a board notice from the daemon's reserved principal saying it
+  updated (rollback tag, client states, the Codex steps when the hooks
+  changed) or held off and why (active sessions, the knob off, the board
+  unreadable); a failed update posts the rollback line. Exit 0 updated,
+  3 current, 4 held off. The log is
+  `~/.pseudolife-mcp/unattended-update.log`. New route
+  `POST /api/daemon-notice` (bearer-gated) carries the notice.
+  [Configuration](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- Every update path (`pseudolife-mcp update`, `ops/update.*`,
+  `ops/update_clients.py`, the unattended notice) prints the complete
+  Codex re-approval steps when and only when Codex's hook copy differs
+  from the scripts just deployed: the changed files (from Codex's
+  marketplace clone against the checkout or the Claude plugin cache), the
+  refresh, the `/hooks` approval or `--trust yes` for unattended installs,
+  what is off until then, and the check `pseudolife-mcp doctor` now
+  reports as `codex_hooks`. An update whose hooks did not change says
+  nothing about Codex; until now one generic line fired for any
+  non-current state.
+
 ### Added (2026-09-29 — sessions are told when a release is out, and the shim can take the client half of an update by itself)
 - The daemon reads the newest release from PyPI on a background thread
   once per `updates.check_interval_seconds` (six hours; `config.yaml`

@@ -62,7 +62,7 @@ from pathlib import Path
 
 from pseudolife_memory import __version__
 from pseudolife_memory import runtimes as _runtimes
-from pseudolife_memory.plugin_hooks import hooks_digest
+from pseudolife_memory.plugin_hooks import HOOK_SCRIPTS, hooks_digest
 
 # The checkout this module runs from, when it does (the package sits at its
 # root); an installed package has no checkout and ``checkout_root()`` is None.
@@ -629,6 +629,78 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
     return missing
 
 
+# What Codex loses while its hook copy is unapproved, and the steps back.
+# Printed by every update path (pseudolife-mcp update, ops/update.*,
+# ops/update_clients.py, the unattended updater's board notice) when and only
+# when Codex's copy differs from the current scripts: Codex trusts hooks by
+# hash and asks again when a script changes, so no update can finish this.
+CODEX_HOOK_NAMES = HOOK_SCRIPTS + ("hooks.json",)
+CODEX_REAPPROVAL_VERIFY = "pseudolife-mcp doctor reports codex_hooks = current"
+
+
+def changed_hook_files(installed: Path, reference: Path) -> list[str] | None:
+    """The hook files whose content differs between Codex's copy and the
+    reference scripts (CRLF-insensitive; a file missing on one side counts),
+    or ``None`` when either directory cannot be read."""
+    installed, reference = Path(installed), Path(reference)
+    if not installed.is_dir() or not reference.is_dir():
+        return None
+    changed = []
+    for name in CODEX_HOOK_NAMES:
+        sides = []
+        for directory in (installed, reference):
+            try:
+                sides.append(_normalised(directory / name))
+            except OSError:
+                sides.append(None)
+        if sides[0] != sides[1]:
+            changed.append(name)
+    return changed
+
+
+def codex_reapproval_text(codex: dict | None) -> str:
+    """The complete, copy-pasteable steps when Codex's hook copy is not the
+    current scripts (``check_codex_hooks`` state ``stale``,
+    ``needs-approval`` or ``plugin-managed``); '' for every other state, so
+    an update whose hooks did not change prints nothing about Codex."""
+    state = (codex or {}).get("state")
+    if state not in ("stale", "needs-approval", "plugin-managed"):
+        return ""
+    changed = (codex or {}).get("changed_files")
+    if changed:
+        which = f"changed: {', '.join(changed)}"
+    elif state == "needs-approval":
+        which = "new handler positions Codex has not approved"
+    elif state == "plugin-managed":
+        which = "Codex has no marketplace clone of the plugin yet"
+    else:
+        which = "Codex's copy differs from the current scripts"
+    return "\n".join([
+        f"Codex: its hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
+        f"approved handlers, so until this is done Codex sessions start without the memory briefing, "
+        f"the per-turn memory and mail notes and the Stop wake.",
+        "  1. Refresh Codex's copy of the plugin: through Codex's plugin manager, or from a checkout: "
+        "python ops/setup-codex-hooks.py --source plugin --trust ask",
+        "  2. Approve the handlers: in a Codex session run /hooks and approve every pseudolife-memory "
+        "handler; unattended: python ops/setup-codex-hooks.py --source plugin --trust yes, or the "
+        "installer's --codex-hook-trust yes (-CodexHookTrust yes on Windows)",
+        f"  3. Verify: {CODEX_REAPPROVAL_VERIFY}.",
+    ])
+
+
+def _daemon_scripts_dir(daemon_digest: str | None) -> Path | None:
+    """Where the daemon's own hook scripts can be read on this host without
+    a checkout: the Claude plugin cache, when its scripts digest to what the
+    daemon reports. ``None`` otherwise (the files cannot be named then)."""
+    if not daemon_digest:
+        return None
+    record = _plugin_record(home() / ".claude" / "plugins")
+    if not record:
+        return None
+    hooks = Path(str(record.get("installPath", ""))) / "hooks"
+    return hooks if hooks.is_dir() and hooks_digest(hooks) == daemon_digest else None
+
+
 def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None) -> dict:
     """Codex hooks come either as content-addressed manual copies under
     ``<codex home>/pseudolife/hooks/<digest>`` (``setup-codex-hooks.py``) or
@@ -667,18 +739,30 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current:
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing:
-            return {"state": "needs-approval",
+            return {"state": "needs-approval", "changed_files": [],
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
                               "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
                               "(or /hooks in the Codex terminal app)"}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its marketplace clone matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
-    return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed",
+    # Name the files that differ when the current scripts can be read here:
+    # the checkout's, or the daemon's through the plugin cache.
+    reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
+    changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
+    return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "
                       "python ops/setup-codex-hooks.py --source plugin --trust ask"}
 
 
 # ── the command ─────────────────────────────────────────────────────────────
+
+def print_codex_reapproval(report: dict) -> None:
+    """After the ladder: the complete re-approval steps, when Codex's copy
+    differs from the current scripts."""
+    text = codex_reapproval_text(report.get("codex"))
+    if text:
+        print(text)
+
 
 def _marker(state: str) -> str:
     if state == "failed":
@@ -732,6 +816,7 @@ def main(argv=None) -> int:
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 1
     print_ladder(report)
+    print_codex_reapproval(report)
     return 0 if report["ok"] else 1
 
 

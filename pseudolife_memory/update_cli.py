@@ -12,6 +12,8 @@ Docker tier, release mode (no checkout)::
     pseudolife-mcp update                # the newest release on PyPI
     pseudolife-mcp update --tag 0.15.1   # a pinned release
     pseudolife-mcp update --check        # report whether a newer release exists (exit 0) or not (exit 3)
+    pseudolife-mcp update --schedule 03:30   # a daily unattended run (applies only with updates.unattended_daemon on)
+    pseudolife-mcp update --unattended   # what that run does (pseudolife_memory.unattended_update)
 
 pulls the pinned GHCR daemon image, backs the bank up (the checkout's
 backup script when the container's compose project still has one, else
@@ -139,6 +141,9 @@ class Options:
     env_file: Path | None = None       # release mode: the compose env file when the labelled one is gone
     check: bool = False
     result_file: Path | None = None    # the exit code is written here at the end (an unattended caller reads it)
+    unattended: bool = False           # the scheduled run: apply only when the knob is on and the board is idle
+    schedule: str | None = None        # install the daily task / timer at HH:MM
+    unschedule: bool = False           # remove it
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
 
@@ -152,6 +157,7 @@ class Report:
     steps: list = field(default_factory=list)
     rollback: dict = field(default_factory=dict)
     clients: dict | None = None
+    codex_reapproval: str = ""         # the re-approval steps, when Codex's hook copy differs
     ok: bool = True
     exit_code: int = 0
 
@@ -296,6 +302,18 @@ class Update:
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
+        if self.o.schedule or self.o.unschedule:
+            from pseudolife_memory import unattended_update
+            if self.o.unschedule:
+                unattended_update.unschedule(self)
+            else:
+                unattended_update.schedule(self, self.o.schedule)
+            return
+        if self.o.unattended:
+            from pseudolife_memory import unattended_update
+            self.report.mode = "unattended"
+            self.report.exit_code = unattended_update.run_unattended(self)
+            return
         tier = self.detect_tier()
         self.report.tier = tier
         if self.o.check:
@@ -649,12 +667,14 @@ class Update:
 
     def codex_step(self, codex: dict | None) -> None:
         """What only the user can do: Codex trusts hooks by hash and asks
-        again when a script changes."""
-        if not codex or codex.get("state") in ("current", "not-configured", "bundle-present", None):
-            return
-        self.step("Codex: its hook copy needs re-approval (hooks are trusted by hash). In Codex run /hooks and "
-                  "approve the pseudolife-memory handlers, or from a checkout: python ops/setup-codex-hooks.py "
-                  "--source plugin --trust ask. Until then Codex sessions start without the memory briefing.")
+        again when a script changes. The complete steps, printed when and
+        only when Codex's copy differs from the scripts just deployed
+        (``client_updates.codex_reapproval_text``)."""
+        from pseudolife_memory import client_updates
+        text = client_updates.codex_reapproval_text(codex)
+        if text:
+            self.report.codex_reapproval = text
+            self.step(text)
 
     # -- docker: checkout mode ---------------------------------------------
     def deploy_checkout(self) -> None:
@@ -715,10 +735,13 @@ class Update:
         self.prune_cache(repo)
 
     # -- docker: release mode ----------------------------------------------
-    def deploy_release(self) -> None:
+    def deploy_release(self, current: str | None = None) -> None:
+        """``current`` is the daemon's version when the caller has just read
+        it (the unattended run), else it is read here."""
         target = self.target_version()
         self.report.target = target
-        current = self.current_version("docker")
+        if current is None:
+            current = self.current_version("docker")
         self.report.current = current
         if current is None:
             # /health silent (the daemon crashed, say): the image the container
@@ -956,6 +979,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tag", default=None, help="release version to install (default: the newest on PyPI)")
     parser.add_argument("--result-file", default=None,
                         help="write the exit code to this file at the end (the shim's unattended client update reads it)")
+    parser.add_argument("--unattended", action="store_true",
+                        help="the scheduled run: apply a new release only while updates.unattended_daemon is on and "
+                             "no session is active on the board; post a board notice either way (exit 0 updated, "
+                             "3 current, 4 held off)")
+    parser.add_argument("--schedule", metavar="HH:MM", default=None,
+                        help="install a daily scheduled task (Windows) or systemd --user timer (Linux) that runs "
+                             "`update --unattended` at this time")
+    parser.add_argument("--unschedule", action="store_true", help="remove that task or timer")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
     parser.add_argument("--checkout", default=None,
@@ -993,7 +1024,8 @@ def options_from_args(args) -> Options:
                    reinstall=args.reinstall, allow_downgrade=args.allow_downgrade,
                    env_file=Path(args.env_file) if args.env_file else None,
                    check=args.check, as_json=args.json, daemon_url=args.daemon_url,
-                   result_file=Path(args.result_file) if args.result_file else None)
+                   result_file=Path(args.result_file) if args.result_file else None,
+                   unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule)
 
 
 def main(argv: list[str] | None = None) -> int:

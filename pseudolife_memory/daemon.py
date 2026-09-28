@@ -232,7 +232,8 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         payload["updates"] = {"check_releases": bool(known["enabled"]),
                               "latest_release": known["latest_release"],
                               "checked_at": known["checked_at"],
-                              "unattended_clients": bool(updates.unattended_clients)}
+                              "unattended_clients": bool(updates.unattended_clients),
+                              "unattended_daemon": bool(updates.unattended_daemon)}
     # Deliberately does NOT touch `status`: a bank with no extractor is
     # serving correctly, and web/api.py turns any non-ok payload into a
     # 503 that the Docker healthcheck and ops/update.* treat as fatal.

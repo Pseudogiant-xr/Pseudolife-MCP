@@ -614,6 +614,13 @@ pseudolife-mcp update`. With `updates.unattended_clients: true` in
 installs the daemon's release as its own new runtime and refreshes the
 plugin cache by itself whenever the daemon is newer than it; the daemon
 recreate stays a deliberate command.
+On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
+daily task or timer that applies a new release only while
+`updates.unattended_daemon: true` is set and no session is active on the
+agent board, with the same backup and rollback tag, and posts a board
+notice either way. When Codex's hook copy differs from the scripts just
+deployed, every update path prints the complete re-approval steps, and
+nothing otherwise.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:
@@ -6679,6 +6686,71 @@ the daemon's `config.yaml` and reaches the shim through `/health`, so one
 setting governs every client of that daemon.) `PSEUDOLIFE_RELEASE_CHECK=0`
 in the daemon's environment makes no release request whatever the file
 says; the test daemons run with it.
+
+### Unattended daemon updates on headless hosts (`updates.unattended_daemon`)
+
+```bash
+pseudolife-mcp update --schedule 03:30   # once: a daily task (Windows) or systemd --user timer (Linux)
+pseudolife-mcp update --unattended       # what that run does; exit 0 updated, 3 current, 4 held off
+pseudolife-mcp update --unschedule
+```
+
+```yaml
+updates:
+  unattended_daemon: true   # default false: the scheduled run then only reports
+```
+
+The scheduled run applies a new release only when BOTH hold: the daemon's
+`config.yaml` has `updates.unattended_daemon: true` (the run reads it from
+`/health`, so installing the timer alone changes nothing), and the agent
+board lists no active session. It then takes the same path as an attended
+`pseudolife-mcp update`: backup (the checkout's script or the built-in
+`pg_dump` + state tar), the rollback tag, recreate only the daemon, wait
+for `/health` at the new version, then the client side. Either way it
+posts a board notice from the daemon's reserved principal to every
+attached session: updated (with the rollback tag, the client states and,
+when the hook scripts changed, the Codex re-approval steps), or held off
+and why (which sessions are active; the knob off; the board unreadable),
+and appends the same to `~/.pseudolife-mcp/unattended-update.log`. A
+failed update posts the rollback line. Idle sessions do not hold it off:
+a session with no activity in the board's active window keeps its shim
+runtime and reconnects to the recreated daemon on its next call; the
+notice says how many were idle.
+
+What the run needs: a Docker-tier daemon on this host and the bearer
+(`PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN` in the run's
+environment) whose principal is admitted to the board, since the idle
+check registers a throwaway board address. `--schedule` on Linux writes
+`~/.config/systemd/user/pseudolife-update.{service,timer}` with the
+daemon URL and the token file as `Environment=` lines (a token given only
+as `PSEUDOLIFE_MCP_TOKEN` is written to a private
+`~/.pseudolife-mcp/unattended-update.token` first; the token itself never
+lands in the unit) and enables the timer; on Windows it registers the
+task `Pseudolife Unattended Update` through `schtasks`, which on an
+administrator account needs an elevated PowerShell opened from the Start
+menu (the refusal says so). The task or timer runs the shim launcher
+(`pseudolife-mcp update --unattended`), so it follows the side-by-side
+runtimes. A tokenless install cannot read the board and therefore never
+updates unattended; nor does macOS get a scheduler here (run
+`--unattended` from your own). The bank backup is taken every time and
+is never skipped by this path.
+
+### Codex hook re-approval, on every update path
+
+Codex trusts hooks by hash and runs only handlers it has approved, so no
+update can finish this for you. Whenever Codex's copy of the plugin hooks
+differs from the scripts just deployed, and only then, every update path
+(`pseudolife-mcp update`, `ops/update.ps1` / `update.sh`,
+`ops/update_clients.py`, the unattended run's board notice) prints the
+complete steps: which hook files changed (read from Codex's marketplace
+clone against the checkout, or against the Claude plugin cache when that
+holds the daemon's scripts), the refresh (Codex's plugin manager, or
+`python ops/setup-codex-hooks.py --source plugin --trust ask`), the
+approval (`/hooks` in a Codex session, or `--trust yes` /
+`--codex-hook-trust yes` for an unattended install), what is off until
+then (the memory briefing, the per-turn memory and mail notes, the Stop
+wake), and the check: `pseudolife-mcp doctor` reports `codex_hooks =
+current`. An update whose hooks did not change says nothing about Codex.
 
 ## Schema version history
 
