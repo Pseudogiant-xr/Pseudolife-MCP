@@ -41,6 +41,19 @@ the -Fast path goes through run-server-qwen38.bat, whose knobs are batch
 variables (CACHE_RAM / CTX_CHECKPOINTS / MTP) that this helper sets in the
 environment — the LLAMA_ARG_* env vars alone are NOT enough for the .bat
 path because its explicit command-line flags would override them.
+
+GPU LEASE (2026-09-28)
+----------------------
+The gpu lease is process-held for cooperating launchers (Coordination v2,
+26 Sep): Start-Qwen refuses to launch while `pseudolife-mcp lease check gpu`
+says the lease is held (an OS lock in ~/.pseudolife-mcp/locks, mirrored on
+the agent board), and right after it launches its server it starts
+`pseudolife-mcp lease hold gpu --while-pid <server pid>`, a small process
+that holds the lock and the board lease, tells the peers concerned, and
+releases both when the server exits. Stop-Qwen ends the hold with the
+server. The VRAM busy-check stays as the guard against anything that takes
+no lease (ComfyUI, games, a foreign llama-server). Without the CLI on this
+host the lease steps warn once and the server runs unleased, as before.
 #>
 
 # Directory renamed llama.ccp -> llama.cpp on 2026-08-21 (typo fix).
@@ -50,6 +63,133 @@ $script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.cpp"
 $script:QwenEngine = "$script:QwenDir\engine-b10488"
 $script:QwenUrl    = "http://127.0.0.1:1234/v1/models"
 $script:OwnedQwenProcess = $null
+$script:GpuLeaseProcess  = $null   # the `lease hold gpu` started for this session's server
+$script:RepoRoot         = Split-Path $PSScriptRoot -Parent
+
+function Get-LeaseCli {
+    <# How to run `pseudolife-mcp lease ...` here, as an object with File
+       (the program) and Lead (its leading arguments), or $null when there
+       is none. The checkout's own code first, since that is what this file
+       ships with: $env:PSEUDOLIFE_LEASE_PYTHON, else the checkout's .venv
+       python, else `python` on PATH, each run as `-m pseudolife_memory.cli`
+       from the checkout; only then a `pseudolife-mcp` on PATH, which may be
+       an older install without `lease check` (it exits 2, read as a warning).
+       An object, not an array: PowerShell unrolls a returned array, and a
+       caller's @() wraps it again (2026-09-28 review). #>
+    $module = Join-Path $script:RepoRoot 'pseudolife_memory\cli.py'
+    $lead = @('-m', 'pseudolife_memory.cli')
+    if (Test-Path $module) {
+        foreach ($candidate in @($env:PSEUDOLIFE_LEASE_PYTHON,
+                                 (Join-Path $script:RepoRoot '.venv\Scripts\python.exe'))) {
+            if ($candidate -and (Test-Path $candidate)) {
+                return [pscustomobject]@{ File = $candidate; Lead = $lead }
+            }
+        }
+        $py = Get-Command python -ErrorAction SilentlyContinue
+        if ($py) { return [pscustomobject]@{ File = $py.Source; Lead = $lead } }
+    }
+    $exe = Get-Command pseudolife-mcp -ErrorAction SilentlyContinue
+    if ($exe) { return [pscustomobject]@{ File = $exe.Source; Lead = @() } }
+    return $null
+}
+
+function ConvertTo-CommandLine([string[]]$Arguments) {
+    # One string for Start-Process -ArgumentList: an array is space-joined
+    # without quoting, so a value with spaces would split in the child.
+    return ($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }) -join ' '
+}
+
+function Test-GpuLeaseHeld {
+    <# The holder text when `pseudolife-mcp lease check gpu` exits 1 (held),
+       $null when it exits 0 (free). Fails OPEN with one warning on anything
+       else (no CLI, an old CLI without `check` exiting 2, a failed check
+       exiting 70): a host without the package must not be blocked, and the
+       VRAM busy-check still stands behind it. #>
+    $cli = Get-LeaseCli
+    if ($null -eq $cli) {
+        Write-Warning "no pseudolife-mcp CLI found: the gpu lease is not checked"
+        return $null
+    }
+    $lead = $cli.Lead
+    Push-Location $script:RepoRoot
+    try {
+        $out = (& $cli.File @lead lease check gpu 2>&1 | Out-String).Trim()
+        $code = $LASTEXITCODE
+    } catch {
+        Write-Warning "lease check gpu failed ($_); treating the lease as free"
+        return $null
+    } finally { Pop-Location }
+    if ($code -eq 1) { return $out }
+    if ($code -ne 0) { Write-Warning "lease check gpu exited ${code}; treating the lease as free: $out" }
+    return $null
+}
+
+function Start-GpuLease {
+    <# Hold the gpu lease for as long as the server process lives: a detached
+       `lease hold gpu --while-pid` that takes the OS lock, mirrors it on the
+       board, tells the peers, and releases both when the server exits.
+       Started right after the launch, not once the model has loaded, so the
+       lease covers the load. --timeout 0: a lock someone else took since the
+       check is reported, never waited for; the hold is checked alive after
+       a moment, so a hold that could not take the lock (exit 75) or could
+       not run at all is said, not assumed. #>
+    param([Parameter(Mandatory)][int]$ServerPid, [string]$Purpose = 'qwen-bench-server',
+          [int]$ExpectMinutes = 0)
+    $cli = Get-LeaseCli
+    if ($null -eq $cli) {
+        Write-Warning "no pseudolife-mcp CLI found: the Qwen server runs without a gpu lease"
+        return
+    }
+    $arguments = @($cli.Lead) + @(
+        'lease', 'hold', 'gpu', '--while-pid', "$ServerPid", '--purpose', $Purpose,
+        '--worktree', (Split-Path $script:RepoRoot -Leaf), '--timeout', '0')
+    if ($ExpectMinutes -gt 0) { $arguments += @('--expect', "${ExpectMinutes}m") }
+    # -WindowStyle exists only on Windows; PowerShell elsewhere refuses it
+    # (CI's Linux and macOS lanes, 2026-09-28).
+    $hidden = @{}
+    if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { $hidden.WindowStyle = 'Hidden' }
+    try {
+        $hold = Start-Process -FilePath $cli.File `
+            -ArgumentList (ConvertTo-CommandLine $arguments) `
+            -WorkingDirectory $script:RepoRoot @hidden -PassThru -ErrorAction Stop
+    } catch {
+        Write-Warning "could not start the gpu lease hold: $_"
+        $script:GpuLeaseProcess = $null
+        return
+    }
+    Start-Sleep -Milliseconds 1500
+    if ($hold.HasExited) {
+        $code = try { $hold.ExitCode } catch { '?' }
+        $why = if ($code -eq 75) { 'another process holds the gpu lock' }
+               else { 'the hold exited at once (an old CLI without `lease hold`?)' }
+        Write-Host ("$(Get-Date -Format 'HH:mm:ss') could not take the gpu lease for " +
+                    "server pid ${ServerPid}: $why (exit $code); the server runs unleased")
+        $script:GpuLeaseProcess = $null
+        return
+    }
+    $script:GpuLeaseProcess = $hold
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') gpu lease hold started (pid $($hold.Id)) for server pid $ServerPid"
+}
+
+function Stop-GpuLease {
+    <# The hold ends on its own once the server is gone (it polls the pid
+       every 0.5 s, frees the OS lock, then tells the board); give it that
+       long, then stop it. A hold killed outright has already freed the OS
+       lock or drops it at once, and leaves the board record to lapse at its
+       ttl, which `lease check` reads as stale beside a free lock. #>
+    param([int]$WaitSeconds = 30)
+    $hold = $script:GpuLeaseProcess
+    $script:GpuLeaseProcess = $null
+    if ($null -eq $hold) { return }
+    try {
+        if (-not $hold.HasExited -and -not $hold.WaitForExit($WaitSeconds * 1000)) {
+            $hold.Kill()
+            $hold.WaitForExit(5000) | Out-Null
+        }
+    } catch { Write-Warning "could not stop the gpu lease hold: $_" }
+}
 
 function Get-QwenModelPath {
     # Qwen3.8 GGUFs embed the MTP head in the main file — one model for both
@@ -107,11 +247,13 @@ function Stop-Qwen {
         } catch {
             Write-Warning "Could not stop the Qwen process started by this run: $_"
         }
+        Stop-GpuLease
         return
     }
     Get-Process llama-server -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
+    Stop-GpuLease
 }
 
 function Test-GpuBusy {
@@ -151,8 +293,15 @@ function Start-Qwen {
        -Owned (the regression gate) never replaces anything: a server
        already serving the requested config is reused without being owned,
        any other running server is refused, and only a server this call
-       launches is recorded, so Stop-Qwen -Owned stops exactly that one. #>
-    param([switch]$Fast, [switch]$Force, [switch]$Owned, [int]$Ctx = 100000)
+       launches is recorded, so Stop-Qwen -Owned stops exactly that one.
+
+       gpu lease (2026-09-28): beside the busy check, a launch is refused
+       while `pseudolife-mcp lease check gpu` says another launcher holds
+       the lease; -Force overrides both. A server this call launches gets a
+       `lease hold gpu --while-pid` for its lifetime (Start-GpuLease), with
+       -ExpectMinutes as the expected end shown on the board. #>
+    param([switch]$Fast, [switch]$Force, [switch]$Owned, [int]$Ctx = 100000,
+          [int]$ExpectMinutes = 0)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
     if ($Owned -and ($Fast -or $Force -or $null -ne $script:OwnedQwenProcess)) {
@@ -227,6 +376,15 @@ function Start-Qwen {
             Start-Sleep -Seconds 30
             return $false
         }
+        $leased = Test-GpuLeaseHeld
+        if ($null -ne $leased) {
+            Write-Host ("$(Get-Date -Format 'HH:mm:ss') GPU LEASED — another " +
+                        "launcher holds the gpu lease; holding, not launching " +
+                        "(pass -Force to override deliberately). " +
+                        ($leased -replace '\s+', ' '))
+            Start-Sleep -Seconds 30   # same retry-loop pacing as the busy refusal
+            return $false
+        }
     }
     if ($running -and $running -ne $want) {
         Write-Host ("$(Get-Date -Format 'HH:mm:ss') qwen server running as " +
@@ -279,9 +437,14 @@ function Start-Qwen {
         # `set MTP=0` for stock mode, and a leftover MTP=0 in this session
         # would otherwise launch a stock server under the -Fast label.
         $env:MTP = "1"
-        Start-Process -FilePath cmd.exe -WorkingDirectory $script:QwenDir `
-            -WindowStyle Hidden `
+        # The cmd.exe wrapper runs the .bat, which runs llama-server in the
+        # foreground: it lives exactly as long as the server, so the lease
+        # follows it, from the launch on.
+        $wrapper = Start-Process -FilePath cmd.exe -WorkingDirectory $script:QwenDir `
+            -WindowStyle Hidden -PassThru `
             -ArgumentList '/c', "`"$script:QwenDir\run-server-qwen38.bat`" > qwen-server.log 2>&1"
+        Start-GpuLease -ServerPid $wrapper.Id -Purpose 'qwen-bench-server-fast-port-1234' `
+            -ExpectMinutes $ExpectMinutes
         return (Wait-QwenEndpoint -Seconds 300)
     }
 
@@ -335,6 +498,9 @@ function Start-Qwen {
         return $false
     }
     if ($Owned) { $script:OwnedQwenProcess = $process }
+    # Held from the launch, so the lease covers the model load too.
+    Start-GpuLease -ServerPid $process.Id -Purpose 'qwen-bench-server-reproducible-port-1234' `
+        -ExpectMinutes $ExpectMinutes
     $ready = Wait-QwenEndpoint -Seconds 300
     if (-not $Owned -or -not $ready) { return $ready }
     try {
