@@ -254,7 +254,9 @@ stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
 support. Codex setup offers one choice to enable automatic memory briefings,
-reminders, and session cleanup, use standing instructions only, or skip.
+reminders, and session cleanup (plus, where the agent board is on, a board
+check-in at session start and a new-mail hint per prompt), use standing
+instructions only, or skip.
 Automatic setup reuses an enabled PseudoLife plugin or installs the three
 lifecycle hooks, backs up configuration, approves only their exact current
 definitions, and verifies execution. If verification fails, the same approval
@@ -939,7 +941,8 @@ start).
 For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
 The helper asks once, detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
-reminder, and session cleanup. The Docker installer runs this step for you.
+reminder, and session cleanup, plus the agent-board check-in where the board
+is on. The Docker installer runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy
@@ -6622,8 +6625,10 @@ This is runtime support, not a model capability or a promise about ordinary
 ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 The Docker installer defaults to automatic hook-source detection. One setup
-choice enables automatic memory briefings, reminders, and session cleanup,
-uses standing instructions only, or skips this integration. The automatic
+choice enables automatic memory briefings, reminders, and session cleanup
+(plus, where the agent board is on, a board check-in at session start and a
+new-mail hint when a peer's message is waiting), uses standing instructions
+only, or skips this integration. The automatic
 choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.

@@ -892,7 +892,7 @@ def verify(executable, home, cwd, config, hooks, selected):
                 "memory_agents(action=list)" in entry.get("text", "")
                 for run in completed if run.get("eventName") == "sessionStart"
                 for entry in run.get("entries", [])):
-            raise SetupError("CoordinationStart did not return board setup guidance. Check /hooks.")
+            raise SetupError("The agent-board check-in hook (CoordinationStart) returned no guidance. Check /hooks.")
         if not episode_open(thread):
             raise SetupError("SessionStart did not open a verifiable memory episode. Check daemon access.")
     if episode_open(thread):
@@ -933,12 +933,15 @@ def consent(args):
     if args.trust == "no" or args.non_interactive or not sys.stdin.isatty():
         return False, args.instructions == "append"
     if args.instructions != "auto":
-        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup) "
-              "to run outside the sandbox? [y/N] ", end="", file=sys.stderr, flush=True)
+        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup, "
+              "agent-board check-in, new-mail hint) to run outside the sandbox? [y/N] ",
+              end="", file=sys.stderr, flush=True)
         approved = sys.stdin.readline().strip().lower() in ("y", "yes")
         return approved, args.instructions == "append"
     print("PseudoLife memory setup:\n"
           "  1. Enable automatic briefings, reminders, and session cleanup (recommended).\n"
+          "     Where the agent board is on, also an agent-board check-in at session start\n"
+          "     and a new-mail hint when a peer's message is waiting.\n"
           "     Approves only PseudoLife's current hook scripts to run outside the sandbox;\n"
           "     adds standing memory instructions if verification fails.\n"
           "  2. Standing memory instructions only.\n"
