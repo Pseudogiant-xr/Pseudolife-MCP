@@ -13,6 +13,7 @@ import collections
 import errno
 import importlib.util
 import io
+import json
 import os
 import queue
 import shutil
@@ -25,6 +26,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from tests import suite_lock
@@ -1241,3 +1243,419 @@ def test_the_scan_finds_the_modules_conftest_imports_at_load():
                for path in suite_lock.imported_sources(ROOT)}
     assert {"tests/conftest.py", "tests/suite_lock.py", "tests/fake_embedder.py",
             "pseudolife_memory/utils/config.py"} <= sources
+
+
+# --- the board mirror -----------------------------------------------------------
+#
+# 2026-09-27, overnight: two full suites and three GPU cells ran while the
+# board's lease list stayed empty, and SUITE-START/END were status overwrites
+# nobody was sent. A full run now mirrors its OS lock on the board as the
+# lease ``full-suite`` (holder, queue, expected end) and tells the peers the
+# lease concerns. The OS lock stays the truth: a board that is down, refuses,
+# or shows someone else holding never stops the run.
+
+from tests.fake_board import (  # noqa: E402
+    AGENT, AGENTS, HELD, QUEUED, TOKEN, FakeDaemon, holder_record, peer, released_last,
+)
+
+BOARD_ENV = {"PSEUDOLIFE_MCP_TOKEN": TOKEN, "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1"}
+
+
+@pytest.fixture
+def quick_board(monkeypatch):
+    from pseudolife_memory import lease_cli
+    monkeypatch.setattr(lease_cli, "BOARD_POLL", 0.0)
+    monkeypatch.setattr(lease_cli, "_renew_interval", lambda ttl: 0.05)
+    return lease_cli
+
+
+def _mirror(directory, daemon, environ=BOARD_ENV, worktree=ROOT):
+    return suite_lock.board_mirror(directory, worktree, environ, transport=daemon.transport)
+
+
+def _stderr_until(capsys, text, timeout=START_TIMEOUT):
+    """The stderr seen until ``text`` appears in it: the mirror talks to the
+    board on its own thread, so its lines arrive after the lock is taken."""
+    seen = ""
+    deadline = time.monotonic() + timeout
+    while text not in seen and time.monotonic() < deadline:
+        seen += capsys.readouterr().err
+        time.sleep(0.02)
+    return seen
+
+
+def test_board_environment_keeps_only_what_the_mirror_needs():
+    # conftest snapshots these before tests/client_environment.py strips the
+    # token and points the daemon URL at an unroutable port.
+    environ = {"PSEUDOLIFE_MCP_TOKEN": "t", "PSEUDOLIFE_MCP_TOKEN_FILE": "f",
+               "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
+               "PSEUDOLIFE_AGENT_PROJECT": "p", "PSEUDOLIFE_MCP_DATABASE_URL": "secret",
+               "PATH": "x"}
+    assert suite_lock.board_environment(environ) == {
+        "PSEUDOLIFE_MCP_TOKEN": "t", "PSEUDOLIFE_MCP_TOKEN_FILE": "f",
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765", "PSEUDOLIFE_AGENT_PROJECT": "p"}
+    assert suite_lock.board_environment({}) == {}
+    source = (TESTS / "conftest.py").read_text(encoding="utf-8")
+    assert source.index("suite_lock.board_environment(") < source.index(
+        "isolate_client_environment(os.environ")
+
+
+def test_expected_seconds_is_the_median_of_recent_runs_or_the_default(tmp_path):
+    assert suite_lock.expected_seconds(tmp_path) == suite_lock.DEFAULT_EXPECT_SECONDS == 1500
+    for seconds in (900, 1100, 1300, 5000, 1000, 1200):
+        suite_lock.record_duration(tmp_path, seconds, worktree="wt")
+    with (tmp_path / suite_lock.DURATIONS_FILE).open("a", encoding="utf-8") as f:
+        f.write("not json\n{\"seconds\": \"nine\"}\n")
+    # The last EXPECT_SAMPLE runs: 1100, 1300, 5000, 1000, 1200 -> 1200.
+    assert suite_lock.EXPECT_SAMPLE == 5
+    assert suite_lock.expected_seconds(tmp_path) == 1200
+    assert suite_lock.expected_seconds(tmp_path / "absent") == 1500
+
+
+def test_release_records_how_long_the_run_held_the_lock(tmp_path):
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="wt-x")
+    suite_lock.release(held_lock)
+    [line] = (tmp_path / suite_lock.DURATIONS_FILE).read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+    assert record["worktree"] == "wt-x" and 0 <= record["seconds"] < 60
+    assert "ended" in record
+    for _ in range(60):
+        suite_lock.release(suite_lock.acquire(tmp_path, "fail", worktree="wt-x"))
+    lines = (tmp_path / suite_lock.DURATIONS_FILE).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == suite_lock.DURATIONS_KEEP == 50
+
+
+def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
+        tmp_path, quick_board, capsys):
+    for seconds in (600, 700, 800):
+        suite_lock.record_duration(tmp_path, seconds, worktree="earlier")
+    peers = [peer("a" * 32, "queued-run", "suite=queued behind pid 4"),
+             peer("b" * 32, "gpu-brief", "gpu=idle; waiting for a quiet host"),
+             peer("c" * 32, "parked", "parked", park_clear_by="full-suite"),
+             peer("d" * 32, "unrelated", "writing docs"),
+             peer(AGENT, "lease-hold", "lease:full-suite held")]
+    daemon = FakeDaemon(lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
+
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                            mirror=_mirror(tmp_path, daemon))
+    try:
+        assert held_lock is not None
+        # The board hears on the mirror's thread, after the lock is taken.
+        assert _wait_for(lambda: sum("acquired" in b["text"]
+                                     for b in daemon.bodies("send")) == 3)
+        assert daemon.actions()[:2] == ["register", "lease"]
+        from pseudolife_memory import lease_cli
+        assert daemon.bodies("register")[0]["label"] == (
+            f"lease-hold@{lease_cli.instance_id(tmp_path)}")  # the suite lock's directory
+        body = daemon.bodies("lease")[0]
+        assert body["name"] == "full-suite" and body["expect"] == 700
+        assert ROOT.name in body["purpose"] and "pytest" in body["purpose"]
+        # A worktree's name only: its path names the OS user, and board rows
+        # reach audit exports (orchestrator review, 2026-09-28).
+        assert str(ROOT) not in body["purpose"]
+        assert str(ROOT) not in daemon.bodies("register")[0]["status"]
+        acquired = [b for b in daemon.bodies("send") if "acquired" in b["text"]]
+        assert sorted(b["to"] for b in acquired) == sorted(p * 32 for p in "abc")
+        text = acquired[0]["text"]
+        assert text.startswith("LEASE full-suite acquired")
+        assert f"pid {os.getpid()}" in text and ROOT.name in text and "expected end" in text
+        assert str(ROOT) not in text
+    finally:
+        suite_lock.release(held_lock)
+    assert released_last(daemon)
+    released = [b for b in daemon.bodies("send") if "released" in b["text"]]
+    assert sorted(b["to"] for b in released) == sorted(p * 32 for p in "abc")
+    assert suite_lock.read_holder(tmp_path) is None
+    assert "board skipped" not in capsys.readouterr().err
+
+
+def test_a_queued_run_is_a_board_waiter_until_it_takes_the_lock(held, quick_board):
+    daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
+                                      holder=holder_record(label="holder-run")),
+                               HELD("full-suite")])
+    result: dict = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.05,
+                                            notice_every=0.2, out=io.StringIO(),
+                                            mirror=_mirror(held.dir, daemon))
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        # Queued on the board while it waits for the OS lock: the holder sees
+        # a waiter, and the queue tickets are no longer invisible.
+        deadline = time.monotonic() + START_TIMEOUT
+        while "lease" not in daemon.actions() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert daemon.bodies("lease")[0]["name"] == "full-suite"
+        assert "held" not in result
+        held.holder.send_release()
+        held.holder.expect("RELEASED")
+        thread.join(START_TIMEOUT)
+        assert "held" in result
+    finally:
+        thread.join(1)
+    # Once it holds the OS lock it asks again, and the board grants it.
+    assert daemon.actions().count("lease") >= 2
+    suite_lock.release(result["held"])
+    assert released_last(daemon)
+
+
+def test_an_unreachable_board_never_stops_the_run(tmp_path, quick_board, capsys):
+    daemon = FakeDaemon(register=[httpx.ConnectError("refused")])
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                            mirror=_mirror(tmp_path, daemon))
+    try:
+        assert held_lock is not None
+        err = _stderr_until(capsys, "board skipped")
+        assert err.count("board skipped") == 1 and "unreachable" in err
+    finally:
+        suite_lock.release(held_lock)
+    assert daemon.actions() == ["register"]  # nothing to release, nothing retried
+
+
+def test_a_board_that_shows_another_holder_does_not_stop_the_run(tmp_path, quick_board,
+                                                                  capsys):
+    daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
+                                      holder=holder_record(label="stale-run"))])
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                            mirror=_mirror(tmp_path, daemon))
+    try:
+        assert held_lock is not None
+        err = _stderr_until(capsys, "stale-run")
+        assert "stale-run" in err and "OS lock" in err
+        assert err.count("full-suite") >= 1
+    finally:
+        suite_lock.release(held_lock)
+    assert released_last(daemon)  # leaves the board queue too
+
+
+def test_without_a_token_the_mirror_is_skipped_in_one_line(tmp_path, quick_board, capsys):
+    daemon = FakeDaemon()
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                            mirror=_mirror(tmp_path, daemon, environ={}))
+    try:
+        assert held_lock is not None
+        err = _stderr_until(capsys, "board skipped")
+        assert err.count("board skipped") == 1 and "PSEUDOLIFE_MCP_TOKEN" in err
+    finally:
+        suite_lock.release(held_lock)
+    assert daemon.calls == []
+
+
+def test_the_mirror_is_optional_and_off_by_default(tmp_path):
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path)}
+    held_lock = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
+    try:
+        assert held_lock is not None and held_lock.mirror is None
+    finally:
+        suite_lock.release(held_lock)
+
+
+# --- review findings (2026-09-28): the board never delays, never outlives ------
+#
+# A slow board must cost the run nothing: the mirror's board traffic runs on
+# its own thread, and the OS lock is released before the board is told.
+
+
+class _SlowDaemon(FakeDaemon):
+    """Every board call takes ``delay`` seconds."""
+
+    def __init__(self, delay, **kwargs):
+        super().__init__(**kwargs)
+        self.delay = delay
+
+    def handler(self, request):
+        time.sleep(self.delay)
+        return super().handler(request)
+
+
+def _wait_for(predicate, timeout=START_TIMEOUT):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+def test_a_slow_board_delays_neither_taking_nor_freeing_the_lock(tmp_path, quick_board):
+    peers = [peer(p * 32, f"runner-{p}", "suite=queued") for p in "abcd"]
+    daemon = _SlowDaemon(1.0, lease=[HELD("full-suite")], agents=[AGENTS(*peers)])
+    started = time.monotonic()
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w",
+                                   mirror=_mirror(tmp_path, daemon))
+    assert time.monotonic() - started < 0.9  # not one board call on the way in
+    freed = {}
+
+    class _Watch:
+        """Wraps the mirror's release to see whether the OS lock is still held."""
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def release(self, *args, **kwargs):
+            freed.setdefault("at_release", suite_lock_is_free(tmp_path))  # the first call
+            return self.inner.release(*args, **kwargs)
+
+    held_lock.mirror = _Watch(held_lock.mirror)
+    suite_lock.release(held_lock)
+    assert freed["at_release"] is True  # the lock went first, then the board
+
+
+def suite_lock_is_free(directory):
+    from pseudolife_memory import os_lock
+    return os_lock.probe(directory / suite_lock.LOCK_FILE) is False
+
+
+@pytest.mark.parametrize("abort", [suite_lock.TreeChanged("changed"), KeyboardInterrupt()],
+                         ids=["tree-changed", "ctrl-c"])
+def test_a_run_that_leaves_the_queue_frees_its_board_place(held, quick_board, abort):
+    # A queued run that leaves the queue (TreeChanged, Ctrl-C, fail mode)
+    # must not leave its board waiter behind for peers to see. The board
+    # answers queued, not held: a grant would be handed back on its own, and
+    # the release it sends would pass this test without the abort path
+    # (orchestrator re-review, 2026-09-28).
+    daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
+                                      holder=holder_record(label="holder-run"))])
+    mirror = _mirror(held.dir, daemon)
+    fired = {}
+
+    def refuse():
+        if daemon.actions().count("lease") >= 1:
+            fired["at"] = len(daemon.calls)
+            raise abort
+
+    with pytest.raises(type(abort)):
+        suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02, notice_every=60,
+                           out=io.StringIO(), check=refuse, mirror=mirror)
+    assert "release" not in daemon.actions()[:fired["at"]]
+    assert _wait_for(lambda: "release" in daemon.actions())
+    assert released_last(daemon)
+
+
+def test_a_corrupt_durations_file_falls_back_to_the_default(tmp_path):
+    (tmp_path / suite_lock.DURATIONS_FILE).write_text(
+        '{"seconds": Infinity}\n{"seconds": NaN}\n{"seconds": 1e400}\n', encoding="utf-8")
+    assert suite_lock.expected_seconds(tmp_path) == suite_lock.DEFAULT_EXPECT_SECONDS
+    (tmp_path / suite_lock.DURATIONS_FILE).write_bytes(b"\xff\xfe\x00garbage")
+    assert suite_lock.expected_seconds(tmp_path) == suite_lock.DEFAULT_EXPECT_SECONDS
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w")
+    suite_lock.release(held_lock)  # an unreadable file never stops the unlock
+    assert suite_lock_is_free(tmp_path)
+
+
+def test_only_runs_that_ran_their_tests_are_timed(tmp_path):
+    held_lock = suite_lock.acquire(tmp_path, "fail", worktree="w")
+    suite_lock.release(held_lock, record=False)  # interrupted, collection error...
+    assert not (tmp_path / suite_lock.DURATIONS_FILE).exists()
+    source = (TESTS / "conftest.py").read_text(encoding="utf-8")
+    assert "record=" in source and "exitstatus" in source
+
+
+def test_the_mirror_is_built_only_for_a_run_that_takes_the_lock(held):
+    environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(held.dir), "PSEUDOLIFE_SUITE_LOCK": "fail"}
+
+    def factory():
+        raise AssertionError("a targeted run built the board mirror")
+
+    assert suite_lock.take_for_session(_config(["tests/test_bm25.py"]), environ, TESTS,
+                                       mirror=factory) is None
+    built = []
+    with pytest.raises(pytest.UsageError):  # full, and refused: the factory ran first
+        suite_lock.take_for_session(_config(["tests"]), environ, TESTS,
+                                    mirror=lambda: built.append(1))
+    assert built == [1]
+
+
+def test_the_board_environment_never_shows_its_token():
+    env = suite_lock.board_environment({"PSEUDOLIFE_MCP_TOKEN": "tok-SECRET-x",
+                                        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765"})
+    assert env["PSEUDOLIFE_MCP_TOKEN"] == "tok-SECRET-x"
+    assert "tok-SECRET" not in repr(env) and "tok-SECRET" not in str(env)
+
+
+def test_a_waiter_hands_back_a_board_grant_it_has_no_lock_for(held, quick_board):
+    # The OS lock's holder is a run the board does not show (older code, or
+    # no bearer), so the board grants the lease to the first waiter. Kept,
+    # the board would name a run that is still queued as the holder: the
+    # waiter gives it back and asks no more until it has the lock.
+    daemon = FakeDaemon(lease=[HELD("full-suite")])
+    err = io.StringIO()
+    mirror = _mirror(held.dir, daemon)
+    result = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02,
+                                            notice_every=60, out=err, mirror=mirror)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert _wait_for(lambda: "release" in daemon.actions())
+        time.sleep(0.3)  # several polls: no second grant is asked for while queued
+        assert daemon.actions() == ["register", "lease", "release"]
+    finally:
+        held.holder.send_release()
+        thread.join(START_TIMEOUT)
+    assert _wait_for(lambda: daemon.actions().count("lease") == 2)  # taken with the lock
+    suite_lock.release(result["held"])
+
+
+def test_a_waiter_whose_board_address_expired_registers_again_at_hold(held, quick_board,
+                                                                       capsys):
+    # Seen live 2026-09-28 06:17: a run queued 135 min after handing back an
+    # early grant made no board calls meanwhile, the daemon retired its
+    # ephemeral address (one hour idle), and hold() got instance_not_found
+    # and skipped the board. It registers once more and holds.
+    renewed = {"agent_id": "9" * 32, "credential": "cred-SECRET-second", "label": "lease-hold"}
+    daemon = FakeDaemon(
+        register=[(200, {"agent_id": AGENT, "credential": "cred-SECRET-first",
+                         "label": "lease-hold"}), (200, renewed)],
+        lease=[HELD("full-suite"), (404, {"error": "instance_not_found"}), HELD("full-suite")])
+    result = {}
+
+    def run():
+        result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02,
+                                            notice_every=60, out=io.StringIO(),
+                                            mirror=_mirror(held.dir, daemon))
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert _wait_for(lambda: "release" in daemon.actions())  # the hand-back
+    finally:
+        held.holder.send_release()
+        thread.join(START_TIMEOUT)
+    try:
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 3)
+        assert daemon.actions().count("register") == 2
+        err = _stderr_until(capsys, "never-printed", timeout=0.5)
+        assert "board skipped" not in err
+        held_calls = [call for call in daemon.calls if call[0] == "lease"]
+        assert held_calls[-1][1]["x-pl-agent"] == "9" * 32  # the new address
+    finally:
+        suite_lock.release(result["held"])
+    assert released_last(daemon)
+
+
+def test_a_hand_back_that_keeps_failing_is_retried_at_the_poll_pace(held, quick_board,
+                                                                     monkeypatch):
+    # A board that grants but will not take the grant back must not turn the
+    # waiter into a lease/release loop with no pause (orchestrator re-check).
+    monkeypatch.setattr(quick_board, "BOARD_POLL", 0.2)
+    daemon = FakeDaemon(lease=[HELD("full-suite")],
+                        release=[(503, {"error": "coordination_unavailable"})])
+    mirror = _mirror(held.dir, daemon)
+    mirror.waiting()
+    time.sleep(1.0)
+    mirror.release(0.5)
+    assert 2 <= daemon.actions().count("lease") <= 8

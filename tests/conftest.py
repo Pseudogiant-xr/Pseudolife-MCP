@@ -77,6 +77,12 @@ else:
 
     psycopg.connect = retry_local_port_exhaustion(psycopg.connect)
 
+# The board mirror of the full-suite lock (tests/suite_lock.py) speaks for
+# this session with its bearer and daemon URL, which the isolation just below
+# strips from the environment; keep a copy first. Only pytest_configure reads
+# it, and only for a full run under the lock.
+_BOARD_ENV = suite_lock.board_environment(os.environ)
+
 # Isolate client configuration before test-module imports can snapshot it.
 # Model caches and ordinary home-directory lookup stay intact; only the Codex
 # connection and its credentials/state are redirected to this owned temp home.
@@ -367,13 +373,20 @@ def pytest_configure(config: pytest.Config) -> None:
     # copy, such a run went to the end with 1,424 PG-backed setup errors
     # (2026-09-27, twice), holding the machine's one slot for a gate that
     # gated nothing. A targeted run gets one line and goes on, as it did.
+    #
+    # The board mirrors the lock as the lease `full-suite` (holder, queue,
+    # expected end, a notice to the peers concerned), built only for a full
+    # run past that preflight, before the fingerprint, so its module is part
+    # of it.
     def preflight(kind: str) -> None:
         refusal = full_run_password_preflight(kind)
         if refusal:
             raise pytest.UsageError(refusal)
 
-    held = suite_lock.take_for_session(config, os.environ, ROOT / "tests",
-                                       read_files=(ENV_FILE,), preflight=preflight)
+    held = suite_lock.take_for_session(
+        config, os.environ, ROOT / "tests", read_files=(ENV_FILE,), preflight=preflight,
+        mirror=lambda: suite_lock.board_mirror(
+            suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV))
     if held is not None:
         config.stash[_SUITE_LOCK] = held
 
@@ -451,10 +464,22 @@ def _match_embedder_to_test(svc: MemoryService) -> None:
         svc._embedder = EmbeddingPipeline(config)  # noqa: SLF001
 
 
+_SESSION_EXIT = pytest.StashKey[int]()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    session.config.stash[_SESSION_EXIT] = int(exitstatus)
+
+
 def pytest_unconfigure(config: pytest.Config) -> None:
     held = config.stash.get(_SUITE_LOCK, None)
     if held is not None:
-        suite_lock.release(held)
+        # Only a run that ran its tests (passed or failed) times the next
+        # one's expected end; an interrupted run or a collection error would
+        # drag the median down.
+        exitstatus = config.stash.get(_SESSION_EXIT, None)
+        suite_lock.release(held, record=exitstatus in (pytest.ExitCode.OK,
+                                                       pytest.ExitCode.TESTS_FAILED))
 
 
 @pytest.fixture(scope="module")

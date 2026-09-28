@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — the full-suite lock and the bench server's GPU show on the board as leases, and tell the peers concerned)
+- On the night of 2026-09-27 two full suites and three GPU cells ran while
+  the agent board's lease list stayed empty: `tests/suite_lock.py` took its
+  OS lock and `evals/qwen_server.ps1` launched the server, and neither
+  touched the board; the `SUITE-START`/`SUITE-END` notes the rule asked for
+  were status overwrites nobody was sent. A full `pytest` run now mirrors
+  its lock as the board lease `full-suite` (`BoardMirror` in
+  `pseudolife_memory/lease_cli.py`): a queued run is a board waiter, a
+  running one the holder, with its pid and worktree name (never its path) as the purpose and an
+  expected end from the median of the last five timed runs
+  (`full-suite.durations.jsonl` beside the lock; 25 minutes until five are
+  on record; only runs that ran their tests are timed). The OS lock stays the
+  truth: all board traffic runs on the mirror's own thread, the lock is
+  freed before the board hears, a run that leaves the queue gives its board
+  place back, a waiter hands back a grant it has no lock for (and
+  registers a new board address if the daemon retired its old one during a
+  long wait), and a board that is unreachable, slow, refuses, or shows
+  another holder costs one line on stderr and never delays or stops the run;
+  `PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. conftest reads the bearer
+  and daemon URL at import, before the suite's client isolation strips them,
+  and builds the mirror only for a run that takes the lock.
+- `pseudolife-mcp lease hold NAME --while-pid PID` holds a lease for a
+  process the command did not start: the OS lock first (the process already
+  owns the resource; `--timeout 0` gives up at once, exit 75), the board
+  second, the lock freed before the board is told when PID exits or the hold
+  is stopped. `Start-Qwen` refuses to launch while `lease check gpu` says the
+  lease is held (the VRAM busy-check stays as the guard against anything that
+  takes no lease), holds `gpu` for its server from the launch on, so the lease
+  covers the model load, and says so when the hold could not take the lock;
+  `Stop-Qwen` ends the hold with the server. It runs the CLI from the
+  checkout (`PSEUDOLIFE_LEASE_PYTHON`, the checkout's `.venv`, or `python -m`),
+  and a `pseudolife-mcp` on PATH only after that. Without any, the lease
+  steps warn once and the server runs unleased, as before.
+- `pseudolife-mcp lease check NAME [--json]` is the launch gate for
+  orchestrators: exit 0 when free, 1 when held, 70 when the check itself
+  failed, with the holder and expected end. It is held when the local lock
+  or the board says so, except that a hold stamped with this lock
+  directory's random instance id (`lease-hold@<id>`) beside a free local lock
+  is shown as stale; a session's claim, a `lease run`, or a hold from another
+  machine or account counts as held. For
+  `full-suite` it probes the suite's own lock and its slots, with the holder
+  record's pid, worktree and start.
+- Acquiring and releasing (`hold`, and the suite's mirror) send one board
+  message each to the peers of the same project that it concerns: live
+  agents (attached, or registered without an adapter) whose status says
+  `suite=running`, `suite=queued` or `gpu=`, and agents parked with
+  `park_clear_by` naming the lease, attached or not (read where present; a
+  sibling change defines it). At most 20 per event, with pid, worktree and
+  expected end. `CLAUDE.md`'s full-suite rule and
+  `docs/guide/configuration.md` now say to read `lease check` instead of
+  hand-announcing.
+
 ### Changed (2026-09-28 — a full test suite the bench Postgres rejects refuses to start)
 - The PG-backed tests take the dev server's password from
   `PSEUDOLIFE_TEST_PG_PASSWORD`, else `ops/.env`, else the compose default.

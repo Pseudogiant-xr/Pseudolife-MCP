@@ -332,6 +332,8 @@ expiring hold on a shared resource, taken around any command.
 
 ```sh
 pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
+pseudolife-mcp lease check NAME [--json]
 pseudolife-mcp lease list [NAME] [--json]
 ```
 
@@ -376,6 +378,77 @@ the lock, not the command: kill it outright (SIGKILL, Task Manager) and the
 lock goes while the command may run on. On a case-insensitive filesystem,
 names that differ only in case share one lock file, which can only make one
 wait for the other.
+
+`lease hold NAME --while-pid PID` is the lease for a process the command did
+not start and cannot wrap: a launcher starts a detached server, then starts a
+hold that lasts as long as the server's pid does. The order is the reverse of
+`run`, because the process already owns the resource: the OS lock first (a
+lock another process holds is waited for, or given up on at once with
+`--timeout 0`, exit `75`), the board second, and both are released when PID
+exits, or when the hold is stopped (`128+N`), which leaves PID running.
+`--worktree` names the checkout in the notices below, by its name, never its path (a path names the OS user); `--expect` is the
+expected end the board shows. All board traffic (the lease, its renewals, the
+notices below, the release) runs on a thread of its own after the OS lock has
+moved, so a slow or failing daemon never delays the lock; the release side gets
+20 seconds, after which the board record is left to lapse at its ttl.
+`evals/qwen_server.ps1` uses it around the bench server: `Start-Qwen` refuses to
+launch while `lease check gpu` says the lease is held (beside its VRAM
+busy-check, which stays the guard against anything that takes no lease), and
+right after it launches a server it holds `gpu` for that server's pid, so the
+lease covers the model load. It checks the hold a moment later and says so if
+the hold could not take the lock (another process got it since the check) or
+could not run. It runs the CLI from the checkout (`$env:PSEUDOLIFE_LEASE_PYTHON`,
+else the checkout's `.venv`, else `python` on PATH, each as
+`-m pseudolife_memory.cli`), and only then a `pseudolife-mcp` on PATH.
+
+`lease check NAME` is the launch gate for an orchestrator, in place of watching
+process CPU: it prints the local lock's state and the board's holder with the
+expected end, and exits `0` when the lease is free, `1` when it is held, and
+`70` when the check itself failed, which a gate must not read as held
+(`--json` for one report). It is held when the local lock is held, or when the
+board shows a holder. The one exception: a `lease hold` or suite mirror whose
+board label carries this lock directory's instance id (`lease-hold@<id>`; the
+id is 12 random hex digits in `instance.id` beside the locks, so no host or
+user name reaches the board) beside a free local lock outlived its process
+(killed outright), is shown as stale, and lapses at its ttl. Any other board
+holder, such as a session that claimed the lease with `memory_agents`, a
+`lease run`, or a hold from WSL or another machine or account, counts as held
+until it is released or lapses, since no local lock can speak for it.
+For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
+slots, with the holder record's pid, worktree and start time), since that file,
+not `lease-full-suite.lock`, is the truth for a full run. A run with
+`PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
+
+The test suite's lock is mirrored the same way. A full `pytest` run
+(`tests/conftest.py`, `tests/suite_lock.py`) holds the board lease `full-suite`
+behind its OS lock: while it queues it is a board waiter, once it holds the lock
+it holds the lease, with the run's pid and worktree as its purpose and an
+expected end from the median of the last five timed runs
+(`~/.pseudolife-mcp/locks/full-suite.durations.jsonl`; 25 minutes until five
+are on record). Only a run that ran its tests, passed or failed, is timed: an
+interrupted run or a collection error would drag the median down. The lock is
+freed first and the board told after, and a run that leaves the queue without
+the lock (refused, a changed tree, Ctrl-C) gives its board place back. When the
+lock's holder is a run the board does not show (older code, no bearer), the
+board grants the lease to the first waiter; that waiter hands it back and asks
+no more until it holds the lock, so the board never names a queued run as the
+holder. The OS lock stays the truth: a board that is unreachable, refuses, or shows another
+holder costs one line and never delays or stops the run, and
+`PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
+are read when conftest is imported, before the suite's own client isolation
+strips them, and the mirror is built only for a run that takes the lock.
+
+Acquiring and releasing `hold` and the suite's mirror send one notice each
+(`LEASE NAME acquired: pid, worktree, expected end` / `LEASE NAME released:
+pid, worktree, held for`) by board mail to the peers the lease concerns, in
+the same project (compared without case; every project when the sender has
+none set): live agents (attached, or registered without an adapter) whose
+status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
+with `park_clear_by` naming the lease, attached or not, since mail waits for a
+parked session. Both leases go to both status groups on purpose: a GPU server
+beside a full suite is the contention. At most 20 peers are told per event; one
+refused send does not stop the rest. The notices are automatic and need no
+reply; they replace hand-written SUITE-START/SUITE-END notes.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the

@@ -48,8 +48,11 @@ modes:
                  exit 0 mail, 3 timeout, 2 setup; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
-                 (FIFO queue, holder, expected end); `lease list` shows them;
-                 `lease break NAME` (operator) frees a stuck one
+                 (FIFO queue, holder, expected end); `lease hold NAME
+                 --while-pid PID` holds one for a process already running;
+                 `lease check NAME` exits 1 while it is held (a launch gate);
+                 `lease list` shows them; `lease break NAME` (operator)
+                 frees a stuck one
   help          show this message (also -h / --help)
 
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or

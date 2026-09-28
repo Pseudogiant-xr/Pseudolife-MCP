@@ -17,6 +17,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -227,74 +228,13 @@ def test_exit_status_follows_shell_conventions():
 
 
 # --- a fake board ------------------------------------------------------------
+#
+# tests/fake_board.py: the scripted daemon, shared with the suite lock's tests.
 
-TOKEN = "tok-SECRET-bearer-5b1c"
-CREDENTIAL = "cred-SECRET-instance-9f3e"
-AGENT = "0123456789abcdef0123456789abcdef"
-
-
-def _holder(label="other-run", purpose="nightly eval", age=240.0, expected=600.0):
-    now = time.time()
-    return {"agent_id": "f" * 32, "label": label, "principal": "reviewer",
-            "purpose": purpose, "acquired_at": now - age, "expires_at": now + 100,
-            "expected_end": None if expected is None else now + expected}
-
-
-def HELD(name="gpu"):
-    now = time.time()
-    return 200, {"name": name, "state": "held", "fence": 7, "expires_at": now + 120,
-                 "expected_end": None, "position": None, "queued": 0,
-                 "holder": {"agent_id": AGENT, "label": "lease-run", "principal": "default",
-                            "purpose": "", "acquired_at": now, "expires_at": now + 120,
-                            "expected_end": None}}
-
-
-def QUEUED(position=2, queued=2, holder="default", name="gpu"):
-    return 200, {"name": name, "state": "queued", "fence": None, "expires_at": None,
-                 "expected_end": None, "position": position, "queued": queued,
-                 "holder": _holder() if holder == "default" else holder}
-
-
-class FakeDaemon:
-    """The coordination REST actions the lease CLI calls, each scripted as a
-    list of replies: ``(status, json)``, an exception to raise, or a callable
-    taking the request. The last reply of a script repeats."""
-
-    def __init__(self, *, register=None, lease=None, release=None, leases=None):
-        self.calls: list[tuple[str, httpx.Headers, dict, float]] = []
-        self.scripts = {
-            "register": list(register or [(200, {"agent_id": AGENT, "credential": CREDENTIAL,
-                                                 "label": "lease-run"})]),
-            "lease": list(lease or [HELD()]),
-            "release": list(release or [(200, {"name": "gpu", "released": True,
-                                               "dequeued": False})]),
-            "leases": list(leases or [(200, {"leases": [], "truncated": False})]),
-        }
-
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert request.url.path.startswith("/api/coordination/")
-        action = request.url.path.rsplit("/", 1)[-1]
-        body = json.loads(request.content) if request.content else {}
-        self.calls.append((action, request.headers, body, time.time()))
-        script = self.scripts[action]
-        reply = script.pop(0) if len(script) > 1 else script[0]
-        if isinstance(reply, BaseException):
-            raise reply
-        if callable(reply):
-            reply = reply(request)
-        status, payload = reply
-        return httpx.Response(status, json=payload)
-
-    @property
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self.handler)
-
-    def actions(self) -> list[str]:
-        return [call[0] for call in self.calls]
-
-    def bodies(self, action: str) -> list[dict]:
-        return [call[2] for call in self.calls if call[0] == action]
+from tests.fake_board import (  # noqa: E402
+    AGENT, AGENTS, CREDENTIAL, HELD, QUEUED, SENT, TOKEN, FakeDaemon, peer, released_last,
+)
+from tests.fake_board import holder_record as _holder  # noqa: E402
 
 
 @pytest.fixture
@@ -383,7 +323,7 @@ def test_a_held_lease_runs_the_command_then_releases(lease_env, tmp_path, monkey
     assert code == 0
     assert _ran(marker)["held"] == "suite,gpu"  # appended to the inherited value
     assert daemon.actions()[0] == "register"
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert daemon.bodies("register") == [{
         "label": "lease-run", "project": "pseudolife",
         "task": f"gpu: {os.path.basename(sys.executable)}", "status": "",
@@ -425,7 +365,7 @@ def test_a_queued_run_reports_its_place_then_runs_once_held(lease_env, tmp_path,
     assert "position 2 of 2" in err and "position 1 of 1" in err
     assert "other-run" in err and "reviewer" in err and "nightly eval" in err
     assert daemon.actions().count("lease") >= 3
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_every_lease_call_repeats_the_same_expect(lease_env, tmp_path):
@@ -471,7 +411,7 @@ def test_a_holder_without_a_board_lease_delays_the_run_while_renewing(
                 if action == "lease" and at < started]
     assert len(renewals) >= 3  # the board lease was kept alive during the wait
     assert all(body.get("expect") == 300 for body in daemon.bodies("lease"))
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_the_exit_code_propagates_and_release_follows_a_failure(lease_env, tmp_path):
@@ -479,7 +419,7 @@ def test_the_exit_code_propagates_and_release_follows_a_failure(lease_env, tmp_p
     command, marker = _command(tmp_path, exit_code=7)
     assert _run(["run", "gpu", "--", *command], daemon) == 7
     assert marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -488,7 +428,7 @@ def test_a_missing_command_exits_127_and_releases(lease_env, tmp_path, capsys):
     code = _run(["run", "gpu", "--", str(tmp_path / "no-such-program")], daemon)
     assert code == 127
     assert "not found" in capsys.readouterr().err
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -502,7 +442,7 @@ def test_timeout_while_queued_exits_75_without_running(lease_env, tmp_path, caps
     assert time.monotonic() - started >= 0.9
     assert not marker.exists()
     assert "gave up" in capsys.readouterr().err
-    assert daemon.actions()[-1] == "release"  # leaves the queue
+    assert released_last(daemon)  # leaves the queue
     assert os_lock.probe(lease_env / "lease-gpu.lock") in (None, False)
 
 
@@ -515,7 +455,7 @@ def test_timeout_on_the_local_lock_exits_75_without_running(lease_env, tmp_path)
     finally:
         blocker.release()
     assert not marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_transient_board_errors_while_acquiring_are_retried(lease_env, tmp_path, capsys):
@@ -645,7 +585,7 @@ def test_renewal_survives_a_transient_error_and_warns_once_when_lost(
     # Renewals go on after the loss: the same call is what takes the lease
     # back when the board grants it again.
     assert daemon.actions().count("lease") >= 6
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, capsys):
@@ -657,7 +597,7 @@ def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, ca
     assert marker.exists()
     assert capsys.readouterr().err.count("no longer shows") == 1
     assert daemon.actions().count("lease") == 2
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 @pytest.fixture
@@ -768,7 +708,7 @@ def test_ctrl_c_lets_the_command_finish_its_own_cleanup(lease_env, tmp_path, sig
 
     assert code == 130
     assert marker.exists()  # it finished on its own; nothing terminated it
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -786,7 +726,7 @@ def test_ctrl_c_stops_a_command_that_keeps_running_then_exits_130(
 
     assert code == 130
     assert children and not orphaned  # stopped by main, not left running
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -836,7 +776,7 @@ def test_ctrl_c_while_waiting_releases_and_exits_130(lease_env, tmp_path, signal
     code = _run(["run", "gpu", "--", *command], daemon)
     assert code == 130
     assert not marker.exists()
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
 
 
 @pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
@@ -871,7 +811,7 @@ def test_a_stop_signal_stops_the_command_releases_and_exits_128_plus_n(
     assert code == 128 + signum
     assert children and not orphaned
     assert restored is unhandled  # main put the previous handler back
-    assert daemon.actions()[-1] == "release"
+    assert released_last(daemon)
     assert os_lock.probe(lease_env / "lease-gpu.lock") is False
 
 
@@ -1128,3 +1068,490 @@ def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as stop:
         console.main()
     assert stop.value.code == 5
+
+
+# --- lease check: the launch gate ------------------------------------------------
+#
+# An orchestrator (an overnight GPU brief, a stress repro) gates on the lease
+# instead of sampling process CPU: exit 0 when free, 1 when the OS lock or the
+# board says held, with the holder and its expected end on stdout.
+
+def test_check_says_free_and_exits_0_without_a_board(lease_env, monkeypatch, capsys):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+    daemon = FakeDaemon()
+    assert _run(["check", "gpu"], daemon) == 0
+    assert "lease gpu: free" in capsys.readouterr().out
+    assert daemon.calls == []
+
+
+def test_check_exits_1_while_the_local_lock_is_held(lease_env, capsys):
+    daemon = FakeDaemon()
+    gpu = _hold(lease_env, "gpu")
+    try:
+        assert _run(["check", "gpu"], daemon) == 1
+    finally:
+        gpu.release()
+    out = capsys.readouterr().out
+    assert "lease gpu: held" in out and "local lock" in out
+    assert _run(["check", "gpu"], daemon) == 0
+
+
+def test_check_of_the_full_suite_probes_the_suite_lock_and_names_its_holder(
+        lease_env, monkeypatch, capsys):
+    # The suite's own lock (tests/suite_lock.py) is the truth for full-suite:
+    # its file is full-suite.lock, not lease-full-suite.lock, and its holder
+    # record names the pid and worktree.
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    lease_env.mkdir(parents=True, exist_ok=True)
+    suite = os_lock.OsLock(lease_env / "full-suite.lock")
+    assert suite.acquire()
+    (lease_env / "full-suite.holder.json").write_text(json.dumps(
+        {"pid": 4242, "worktree": "wt-alpha", "started": "2026-09-28T02:30:00+10:00"}),
+        encoding="utf-8")
+    daemon = FakeDaemon()
+    try:
+        assert _run(["check", "full-suite"], daemon) == 1
+        text = capsys.readouterr().out
+        assert _run(["check", "full-suite", "--json"], daemon) == 1
+        report = json.loads(capsys.readouterr().out)
+    finally:
+        suite.release()
+    assert "pid 4242" in text and "wt-alpha" in text
+    assert report["held"] is True
+    assert report["local"]["state"] == "held" and report["local"]["pid"] == 4242
+    assert _run(["check", "full-suite"], daemon) == 0
+
+
+def test_check_exits_1_when_only_the_board_shows_a_holder(lease_env, capsys):
+    now = time.time()
+    daemon = FakeDaemon(leases=[(200, {"leases": [
+        {"name": "gpu", "holder": _holder(purpose="overnight brief", age=120, expected=1800),
+         "fence": 3, "expires_at": now + 90, "expected_end": now + 1800, "stale": False,
+         "queued": 0, "queue": []}], "truncated": False})])
+    assert _run(["check", "gpu"], daemon) == 1
+    out = capsys.readouterr().out
+    assert "other-run" in out and "overnight brief" in out and "expected end" in out
+    assert daemon.bodies("leases") == [{"name": "gpu"}]
+    for _action, headers, _body, _at in daemon.calls:
+        assert headers["authorization"] == f"Bearer {TOKEN}"
+        assert "x-pl-agent" not in headers  # bearer only, like list
+    assert _run(["check", "gpu", "--json"], daemon) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["held"] is True
+    assert report["board"]["holder"]["label"] == "other-run"
+    assert report["board"]["expected_end"] == pytest.approx(now + 1800, abs=5)
+    assert report["local"]["state"] is None  # no lock file yet
+
+
+def test_check_falls_back_to_the_local_lock_when_the_board_refuses(lease_env, capsys):
+    daemon = FakeDaemon(leases=[(403, {"error": "principal_not_allowed"})])
+    assert _run(["check", "gpu", "--json"], daemon) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["held"] is False and report["board"]["available"] is False
+    assert "principal" in report["board"]["reason"]
+
+
+# --- lease hold: a lease around a process this run did not start --------------
+#
+# Start-Qwen launches a detached server and returns; the lease must outlive
+# the launcher and end with the server. ``hold NAME --while-pid PID`` takes the
+# OS lock, mirrors it on the board, and releases both when PID exits.
+
+def _live_process(seconds=1.0):
+    return subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({seconds})"])
+
+
+@pytest.fixture
+def sleeper():
+    started = []
+
+    def start(seconds=1.0):
+        started.append(_live_process(seconds))
+        # Reaped as it exits: on POSIX an unreaped child is a zombie, which
+        # still answers signal 0 where there is no procfs to read its state.
+        threading.Thread(target=started[-1].wait, daemon=True).start()
+        return started[-1]
+
+    yield start
+    for proc in started:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=START_TIMEOUT)
+
+
+def _lock_seen_held(path, timeout=10.0):
+    """Wall time at which ``path`` was first probed held, or None."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if os_lock.probe(path) is True:
+            return time.time()
+        time.sleep(0.02)
+    return None
+
+
+def test_hold_keeps_the_lease_while_the_pid_lives_then_releases(lease_env, sleeper, capsys):
+    daemon = FakeDaemon()
+    child = sleeper(1.5)
+    seen = {}
+    watcher = threading.Thread(
+        target=lambda: seen.update(held_at=_lock_seen_held(lease_env / "lease-gpu.lock")))
+    watcher.start()
+
+    code = _run(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "30m",
+                 "--purpose", "bench server", "--worktree", "wt-bench"], daemon)
+
+    watcher.join(10)
+    assert code == 0
+    assert child.poll() is not None  # it waited for the process to end
+    assert seen.get("held_at") is not None
+    assert os_lock.probe(lease_env / "lease-gpu.lock") is False
+    assert daemon.actions()[0] == "register"
+    assert released_last(daemon)
+    assert daemon.bodies("register")[0]["label"] == (
+        f"lease-hold@{lease_cli.instance_id(lease_env)}")
+    assert daemon.bodies("lease")[0] == {"name": "gpu", "ttl": 120, "expect": 1800,
+                                         "purpose": "bench server"}
+    assert len(daemon.bodies("lease")) >= 3  # renewed while it held
+    assert daemon.bodies("release") == [{"name": "gpu"}]
+    assert capsys.readouterr().out == ""
+
+
+def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monkeypatch,
+                                                       tmp_path):
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_PROJECT", "Pseudolife-MCP")
+    peers = [
+        peer("a" * 32, "suite-runner", "SUITE-START 8f3d; suite=running",
+             project="pseudolife-mcp"),  # the project matches whatever its case
+        peer("b" * 32, "gpu-brief", "gpu=waiting for the bench server"),
+        peer("c" * 32, "parked", "parked until the GPU frees", park_clear_by="gpu"),
+        peer("d" * 32, "parked-list", "parked", park_clear_by=["maintainer", "gpu"]),
+        peer("e" * 32, "unrelated", "reviewing PR #431"),
+        peer("f" * 32, "gone", "suite=queued", lifecycle="detached"),
+        peer("g" * 32, "elsewhere", "suite=running", project="another-repo"),
+        peer("h" * 32, "other-lease", "parked", park_clear_by="full-suite"),
+        peer(AGENT, "lease-hold", "lease:gpu held"),  # this run's own address
+    ]
+    daemon = FakeDaemon(agents=[AGENTS(*peers)])
+    child = sleeper(0.5)
+
+    worktree = str(tmp_path / "checkouts" / "wt-bench")
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "20m",
+                 "--worktree", worktree], daemon) == 0
+
+    sends = daemon.bodies("send")
+    acquired = [body for body in sends if "acquired" in body["text"]]
+    released = [body for body in sends if "released" in body["text"]]
+    wanted = sorted(prefix * 32 for prefix in "abcd")
+    assert sorted(body["to"] for body in acquired) == wanted
+    assert sorted(body["to"] for body in released) == wanted
+    assert len({body["request_id"] for body in sends}) == len(sends)
+    text = acquired[0]["text"]
+    assert text.startswith("LEASE gpu acquired")
+    assert f"pid {child.pid}" in text and "wt-bench" in text and "expected end" in text
+    assert "SUITE-START" not in text
+    assert "released" in released[0]["text"] and "wt-bench" in released[0]["text"]
+    # The checkout's name, never its path (which names the OS user).
+    for body in sends:
+        assert worktree not in body["text"] and str(tmp_path) not in body["text"]
+    assert str(tmp_path) not in daemon.bodies("register")[0]["status"]
+    # The peer list was asked with this run's address; the acquired notices
+    # followed the lease call, and the released ones follow the board
+    # release, so a peer told "released" finds the lease free.
+    actions = daemon.actions()
+    assert actions.index("agents") > actions.index("lease")
+    release_at = len(actions) - 1 - actions[::-1].index("release")
+    texts = [call[2].get("text", "") for call in daemon.calls]
+    assert all(i > release_at for i, t in enumerate(texts) if "released" in t)
+    assert all(i < release_at for i, t in enumerate(texts) if "acquired" in t)
+    assert released_last(daemon)
+    for action, headers, _body, _at in daemon.calls:
+        if action in ("agents", "send"):
+            assert headers["x-pl-agent"] == AGENT
+
+
+def test_hold_without_a_board_holds_the_lock_alone(lease_env, sleeper, monkeypatch, capsys):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
+    daemon = FakeDaemon()
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    assert daemon.calls == []
+    err = capsys.readouterr().err
+    assert err.count("board skipped") == 1 and "PSEUDOLIFE_MCP_TOKEN" in err
+
+
+def test_hold_exits_75_at_once_when_the_lock_is_held_and_the_timeout_is_zero(
+        lease_env, sleeper, capsys):
+    daemon = FakeDaemon()
+    blocker = _hold(lease_env)
+    child = sleeper(5)
+    try:
+        code = _run(["hold", "gpu", "--while-pid", str(child.pid), "--timeout", "0"], daemon)
+    finally:
+        blocker.release()
+    assert code == 75
+    assert daemon.calls == []  # the OS lock comes first; nothing reached the board
+    assert "gave up" in capsys.readouterr().err
+
+
+def test_hold_waits_for_a_held_lock_then_takes_it(lease_env, sleeper, monkeypatch):
+    daemon = FakeDaemon()
+    blocker = _hold(lease_env)
+    state = _free_after_waiting(monkeypatch, blocker)
+    child = sleeper(2)
+    try:
+        code = _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon)
+    finally:
+        blocker.release()
+    assert code == 0 and "freed" in state
+    held_from = [at for action, _h, _b, at in daemon.calls if action == "lease"][0]
+    assert held_from >= state["freed"]
+
+
+def test_hold_of_a_pid_that_is_gone_releases_at_once(lease_env, capsys):
+    # 2**22 - 1: odd, so never a Windows pid; above any live pid elsewhere.
+    daemon = FakeDaemon()
+    started = time.monotonic()
+    assert _run(["hold", "gpu", "--while-pid", str(2**22 - 1)], daemon) == 0
+    assert time.monotonic() - started < 10
+    assert "already gone" in capsys.readouterr().err
+    assert daemon.calls == []  # nothing was taken, so nothing is announced
+    assert os_lock.probe(lease_env / "lease-gpu.lock") in (None, False)
+
+
+def test_hold_is_stopped_by_a_signal_and_releases(lease_env, sleeper, capsys):
+    daemon = FakeDaemon()
+    child = sleeper(20)
+    timer = threading.Timer(0.5, _thread.interrupt_main)
+    timer.start()
+    try:
+        code = _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon)
+    finally:
+        timer.cancel()
+    assert code == 130
+    assert child.poll() is None  # the process it followed is not its to stop
+    assert released_last(daemon)
+    assert os_lock.probe(lease_env / "lease-gpu.lock") is False
+    assert "interrupted" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [
+    ["hold", "gpu"],
+    ["hold", "gpu", "--while-pid", "abc"],
+    ["hold", "gpu", "--while-pid", "0"],
+    ["hold", "gpu", "--while-pid", "-4"],
+    ["hold", "gpu", "--while-pid", "12", "--", "x"],
+    ["check"],
+    ["check", "gpu", "--", "x"],
+    ["check", "a\tb"],
+])
+def test_hold_and_check_usage_errors_exit_2(lease_env, argv):
+    daemon = FakeDaemon()
+    assert _run(argv, daemon) == 2
+    assert daemon.calls == []
+
+
+def test_help_covers_hold_and_check(lease_env, capsys):
+    for argv in (["hold", "--help"], ["check", "--help"]):
+        assert _run(argv, FakeDaemon()) == 0
+        assert "pseudolife-mcp lease" in capsys.readouterr().out
+
+
+# --- Start-Qwen takes the gpu lease ------------------------------------------------
+
+def test_start_qwen_gates_on_and_holds_the_gpu_lease():
+    """evals/qwen_server.ps1 refuses to launch onto a held gpu lease and holds
+    one around the server it starts, through this CLI. Pinned as text: the
+    launcher itself needs a GPU and a 27B model."""
+    script = (ROOT / "evals" / "qwen_server.ps1").read_text(encoding="utf-8")
+    assert "lease check gpu" in script
+    assert "lease hold gpu" in script and "--while-pid" in script
+    assert "Stop-GpuLease" in script and "Start-GpuLease" in script
+
+
+def test_qwen_server_script_still_parses():
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("pwsh is not installed")
+    script = ROOT / "evals" / "qwen_server.ps1"
+    probe = ("$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+             f"'{script}', [ref]$null, [ref]$errors); $errors | ForEach-Object "
+             "{ $_.Message }; exit $errors.Count")
+    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", probe],
+                            capture_output=True, text=True, timeout=START_TIMEOUT)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- review findings (2026-09-28) ------------------------------------------------
+
+def _board_holding(label, name="gpu"):
+    now = time.time()
+    return FakeDaemon(leases=[(200, {"leases": [
+        {"name": name, "holder": _holder(label=label), "fence": 3,
+         "expires_at": now + 90, "expected_end": None, "stale": False,
+         "queued": 0, "queue": []}], "truncated": False})])
+
+
+def _free_lock_file(lease_env, name="gpu"):
+    lease_env.mkdir(parents=True, exist_ok=True)
+    free = os_lock.OsLock(lease_env / os_lock.lock_file_name(name))
+    assert free.acquire()
+    free.release()  # the file stays: a lock file is never deleted
+
+
+def test_check_trusts_a_free_local_lock_over_this_machines_leftover_hold(lease_env, capsys):
+    # A `lease hold` killed outright drops its OS lock at once while its board
+    # record lapses at the ttl. Its label carries this lock directory's
+    # instance id, so beside the free lock here the record is stale.
+    _free_lock_file(lease_env)
+    label = f"{lease_cli.HOLD_LABEL}@{lease_cli.instance_id(lease_env)}"
+    daemon = _board_holding(label)
+    assert _run(["check", "gpu"], daemon) == 0
+    out = capsys.readouterr().out
+    assert "lease gpu: free" in out and label in out and "stale" in out
+    assert _run(["check", "gpu", "--json"], daemon) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["held"] is False and report["board"]["holder"]["label"] == label
+
+
+@pytest.mark.parametrize("label", [
+    f"{lease_cli.HOLD_LABEL}@0123456789ab",  # a hold on another machine, WSL or account
+    lease_cli.HOLD_LABEL,                    # no instance id to vouch for it
+    lease_cli.LABEL,                         # `lease run`: its lock may be anywhere
+])
+def test_check_counts_a_hold_it_cannot_vouch_for_as_held(lease_env, capsys, label):
+    # The local lock file here says nothing about a lock in another home
+    # directory: only a hold stamped with this directory's id yields to it
+    # (orchestrator re-check of be50adf5, 2026-09-28).
+    _free_lock_file(lease_env)
+    lease_cli.instance_id(lease_env)  # this machine's id exists, and differs
+    daemon = _board_holding(label)
+    assert _run(["check", "gpu"], daemon) == 1
+    out = capsys.readouterr().out
+    assert "lease gpu: held" in out and "stale" not in out
+
+
+def test_the_instance_id_is_minted_once_per_lock_directory(tmp_path):
+    first = lease_cli.instance_id(tmp_path)
+    assert first and len(first) == 12 and int(first, 16) >= 0
+    assert lease_cli.instance_id(tmp_path) == first
+    assert lease_cli.instance_id(tmp_path / "elsewhere") != first
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / lease_cli.INSTANCE_FILE).write_text("not an id", encoding="ascii")
+    assert lease_cli.instance_id(tmp_path / "bad") is None  # never overwritten
+    from pseudolife_memory.storage.coordination import looks_like_secret
+    assert not looks_like_secret(f"{lease_cli.HOLD_LABEL}@{first}")
+
+
+def test_check_counts_a_session_claim_as_held_beside_a_free_lock(lease_env, capsys):
+    # A session that claimed gpu (memory_agents claim) before loading a model
+    # holds it on the board only; the lock file exists from an earlier run
+    # and is free. No local process can speak for that claim, so it counts
+    # until it is released or lapses (orchestrator re-review, 2026-09-28).
+    _free_lock_file(lease_env)
+    daemon = _board_holding("claude-code")
+    assert _run(["check", "gpu"], daemon) == 1
+    out = capsys.readouterr().out
+    assert "lease gpu: held" in out and "claude-code" in out and "stale" not in out
+
+
+def test_a_check_that_fails_is_never_mistaken_for_held(lease_env, monkeypatch, capsys):
+    def broken(name):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(lease_cli, "_local_state", broken)
+    code = _run(["check", "gpu"], FakeDaemon())
+    assert code not in (0, 1) and code == lease_cli.EXIT_SOFTWARE
+    assert "RuntimeError" in capsys.readouterr().err
+
+
+def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
+    peers = [peer(p * 32, f"runner-{p}", "suite=running") for p in "abc"]
+
+    def send(request):
+        body = json.loads(request.content)
+        if body["to"] == "a" * 32:
+            return 400, {"error": "recipient_not_found"}
+        return SENT()
+
+    daemon = FakeDaemon(agents=[AGENTS(*peers)], send=[send])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
+    assert told == {"a" * 32, "b" * 32, "c" * 32}
+
+
+def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper):
+    peers = [peer("a" * 32, "parked", "parked", lifecycle="detached", park_clear_by="gpu"),
+             peer("b" * 32, "gone", "suite=running", lifecycle="detached"),
+             peer("c" * 32, "revoked", "parked", lifecycle="revoked", park_clear_by="gpu")]
+    daemon = FakeDaemon(agents=[AGENTS(*peers)])
+    child = sleeper(0.5)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
+    assert {body["to"] for body in daemon.bodies("send")} == {"a" * 32}
+
+
+def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):
+    seen = {}
+    real = lease_cli.BoardMirror.release
+
+    def release(self, *args, **kwargs):
+        seen["lock"] = os_lock.probe(lease_env / "lease-gpu.lock")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "release", release)
+    child = sleeper(0.3)
+    assert _run(["hold", "gpu", "--while-pid", str(child.pid)], FakeDaemon()) == 0
+    assert seen["lock"] is False
+
+
+# --- the PowerShell launcher against the real CLI ----------------------------------
+#
+# The mocked harness in test_regression_gate_inputs.py cannot see how
+# qwen_server.ps1 finds and calls the CLI; this runs the real helpers against a
+# temp lock directory (no board: no token, unroutable daemon URL).
+
+def _pwsh_or_skip():
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("pwsh is not installed")
+    return pwsh
+
+
+def _pwsh(script, env):
+    return subprocess.run([_pwsh_or_skip(), "-NoProfile", "-NonInteractive", "-Command", script],
+                          capture_output=True, text=True, timeout=START_TIMEOUT * 2, env=env)
+
+
+def test_the_launcher_gate_sees_a_held_gpu_lease_and_holds_one(lease_env, tmp_path):
+    _pwsh_or_skip()
+    env = dict(os.environ)
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    env.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
+    env[os_lock.LOCK_DIR_ENV] = str(lease_env)
+    env["PSEUDOLIFE_LEASE_PYTHON"] = sys.executable
+    helper = (ROOT / "evals" / "qwen_server.ps1").as_posix()
+    script = f"""
+. '{helper}'
+$py = '{sys.executable}'
+$hidden = @{{}}
+if ($IsWindows) {{ $hidden.WindowStyle = 'Hidden' }}
+$server = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru @hidden
+$before = Test-GpuLeaseHeld
+Start-GpuLease -ServerPid $server.Id -Purpose 'probe'
+$during = Test-GpuLeaseHeld
+$second = Start-Process -FilePath $py -ArgumentList '-c "import time; time.sleep(30)"' -PassThru @hidden
+$keep = $script:GpuLeaseProcess
+Start-GpuLease -ServerPid $second.Id -Purpose 'probe-2'
+$secondHold = $script:GpuLeaseProcess
+$script:GpuLeaseProcess = $keep
+$server.Kill(); $server.WaitForExit()
+Stop-GpuLease -WaitSeconds 20
+$after = Test-GpuLeaseHeld
+$second.Kill()
+Write-Output ("RESULT=" + ($null -eq $before) + "," + ($null -ne $during) + "," + ($null -eq $secondHold) + "," + ($null -eq $after))
+"""
+    result = _pwsh(script, env)
+    line = next((l for l in result.stdout.splitlines() if l.startswith("RESULT=")), None)
+    assert line == "RESULT=True,True,True,True", result.stdout + result.stderr
+    # The second hold found the lock taken and said so, instead of "started".
+    assert "could not take the gpu lease" in result.stdout + result.stderr
