@@ -1,4 +1,5 @@
-"""The opt-in Stop hook that wakes an idle Claude Code session on board mail.
+"""The Stop hook that wakes an idle Claude Code session on board mail (on by
+default since 2026-09-28; ``PSEUDOLIFE_AGENT_WAKE_HOOK=0`` opts out).
 
 Registered with ``async`` + ``asyncRewake``: it waits in the background after
 each turn, and exit code 2 starts a new turn even when the session is idle
@@ -15,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -56,7 +58,7 @@ def _env(tmp_path, *, wait=60, **extra):
     # The suite itself may run inside a Claude Code session: drop the host's
     # identity so each test states the one it means.
     for name in ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_AGENT_WAKE_HOOK",
-                 "PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT"):
+                 "PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT", "PSEUDOLIFE_AGENT_COORDINATION"):
         env.pop(name, None)
     env.update({"PSEUDOLIFE_DIGEST_DIR": str(tmp_path / "digests"),
                 "CLAUDE_PLUGIN_ROOT": str(ROOT / "plugin"),
@@ -173,8 +175,19 @@ def _stop_hook():
 def test_hooks_json_binds_stop_as_an_async_rewake_command():
     hook = _stop_hook()
     assert hook["type"] == "command" and hook["async"] is True and hook["asyncRewake"] is True
-    assert hook["command"] == ('[ "$PSEUDOLIFE_AGENT_WAKE_HOOK" != 1 ] || '
-                               'bash "${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh"')
+    # On by default (2026-09-28): the command checks the opt-outs and refuses
+    # a script that does not parse before bash reads it.
+    # Both settings are trimmed and lower-cased as the shim and doctor read
+    # them, with a spawn only for a non-empty value.
+    assert hook["command"] == (
+        'w=$PSEUDOLIFE_AGENT_WAKE_HOOK; [ -z "$w" ] || '
+        "w=$(printf %s \"$w\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); "
+        'case "$w" in 0|false|no|off) exit 0 ;; esac; '
+        'c=$PSEUDOLIFE_AGENT_COORDINATION; [ -z "$c" ] || '
+        "c=$(printf %s \"$c\" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'); "
+        "case \"$c\" in ''|1|true|yes|on) ;; *) exit 0 ;; esac; "
+        'bash -n "${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh" 2>/dev/null || exit 0; '
+        'exec bash "${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh"')
     # Codex runs commandWindows on Windows; for Stop that is a silent no-op.
     assert hook["commandWindows"].endswith('lifecycle.ps1" -Event Stop')
     # Claude Code enforces the timeout on an asyncRewake hook; the script's own
@@ -182,11 +195,12 @@ def test_hooks_json_binds_stop_as_an_async_rewake_command():
     assert hook["timeout"] == 3600 and _constant("MAX_WAIT") < hook["timeout"]
 
 
-@pytest.mark.parametrize("flag,expected", [("", 0), ("1", 2)])
-def test_the_command_itself_holds_the_opt_in(tmp_path, flag, expected):
-    """Exit 2 is the wake, and bash also exits 2 on a syntax error: a broken
-    copy of the script must not wake every plugin user's session at every
-    turn end, so the flag is checked before bash ever reads the script."""
+@pytest.mark.parametrize("flag", ["", "1", "0"])
+def test_the_command_refuses_a_script_that_does_not_parse(tmp_path, flag):
+    """Exit 2 is the wake, and bash also exits 2 on a syntax error. With the
+    hook on by default the opt-in flag no longer stands between a broken copy
+    of the script and every plugin user's session waking at every turn end,
+    so the command syntax-checks the script before bash runs it."""
     plugin = tmp_path / "plugin"
     (plugin / "hooks").mkdir(parents=True)
     (plugin / "hooks/stop-wake.sh").write_bytes(b"if then fi\n")
@@ -194,20 +208,95 @@ def test_the_command_itself_holds_the_opt_in(tmp_path, flag, expected):
     env["PSEUDOLIFE_AGENT_WAKE_HOOK"] = flag
     result = subprocess.run([bash_exe(), "-c", _stop_hook()["command"]], input=_payload(), env=env,
                             capture_output=True, text=True, timeout=DEADLINE)
-    assert result.returncode == expected
-    if expected == 0:
-        assert (result.stdout, result.stderr) == ("", "")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "0 "}, 0),             # trimmed, as the shim and doctor read it
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "\tOff"}, 0),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "  "}, 2),              # blank is unset: on
+    ({"PSEUDOLIFE_AGENT_COORDINATION": " 1 "}, 2),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "NO"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": " "}, 2),
+])
+def test_the_command_and_script_trim_and_fold_case(tmp_path, change, expected):
+    """doctor and the shim strip and lower-case these settings; the hook
+    must read the same value the same way, in its command and again in the
+    script."""
+    # One digest directory each: a run that fires marks the mail seen.
+    for where, via_command in ((tmp_path / "command", True), (tmp_path / "script", False)):
+        where.mkdir()
+        env = _env(where, wait=3)
+        env.update(change)
+        _digest(where, 3, BODY)
+        if via_command:
+            result = subprocess.run([bash_exe(), "-c", _stop_hook()["command"]], input=_payload(),
+                                    env=env, capture_output=True, text=True, timeout=DEADLINE)
+        else:
+            result, _ = _run(env)
+        assert result.returncode == expected, (via_command, result.stderr)
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": None}, 2),              # unset: on by default
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "1"}, 2),               # the old opt-in still works
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "0"}, 0),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "Off"}, 0),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "false"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "0"}, 0),            # the master off switch
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "no"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "1"}, 2),
+])
+def test_the_command_holds_the_opt_outs(tmp_path, change, expected):
+    """The hooks.json command decides before bash reads the script, and the
+    script checks the same two settings again (test_on_unless_told_off)."""
+    env = _env(tmp_path)
+    for name, value in change.items():
+        env.pop(name, None) if value is None else env.__setitem__(name, value)
+    _digest(tmp_path, 3, BODY)
+    result = subprocess.run([bash_exe(), "-c", _stop_hook()["command"]], input=_payload(), env=env,
+                            capture_output=True, text=True, timeout=DEADLINE)
+    assert result.returncode == expected, result.stderr
+    assert (result.returncode == 2) == _woke(result.stderr)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Claude Code runs hook commands in Git Bash on Windows")
+@pytest.mark.parametrize("flag,expected", [("", 2), ("0", 0)])
+def test_the_command_runs_under_posix_sh(tmp_path, flag, expected):
+    """Claude Code runs a hook command with ``sh -c`` on Linux and macOS,
+    which is dash on Debian and Ubuntu: the command must be POSIX sh, not
+    bash, as well as honour the opt-out there."""
+    shell = shutil.which("dash") or shutil.which("sh")
+    if shell is None:
+        pytest.skip("no POSIX sh on this host")
+    env = _env(tmp_path, PSEUDOLIFE_AGENT_WAKE_HOOK=flag)
+    _digest(tmp_path, 3, BODY)
+    result = subprocess.run([shell, "-c", _stop_hook()["command"]], input=_payload(), env=env,
+                            capture_output=True, text=True, timeout=DEADLINE)
+    assert result.returncode == expected, result.stderr
 
 
 # --- no-ops -----------------------------------------------------------------
 
-def test_off_unless_the_flag_is_set(tmp_path):
+@pytest.mark.parametrize("change,expected", [
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": None}, 2),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "0"}, 0),
+    ({"PSEUDOLIFE_AGENT_WAKE_HOOK": "FALSE"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "0"}, 0),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "yes"}, 2),
+])
+def test_on_unless_told_off(tmp_path, change, expected):
     env = _env(tmp_path)
-    env.pop("PSEUDOLIFE_AGENT_WAKE_HOOK")
+    for name, value in change.items():
+        env.pop(name, None) if value is None else env.__setitem__(name, value)
     _digest(tmp_path, 3, BODY)
     result, _ = _run(env)
-    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
-    assert _read_seen(tmp_path) is None
+    assert result.returncode == expected, result.stderr
+    if expected == 0:
+        assert (result.stdout, result.stderr) == ("", "")
+        assert _read_seen(tmp_path) is None
+    else:
+        assert _woke(result.stderr) and _read_seen(tmp_path) == "3"
 
 
 @pytest.mark.parametrize("change", [

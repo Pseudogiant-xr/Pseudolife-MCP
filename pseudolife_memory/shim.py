@@ -637,6 +637,19 @@ def _board_available(url: str, provider) -> bool:
         return False
 
 
+_YES = {"1", "true", "yes", "on"}
+
+
+def _doorbell_setting(environ=None) -> tuple[bool, bool]:
+    """``(wanted, explicit)`` for ``PSEUDOLIFE_CODEX_DOORBELL``: unset is on
+    by default (2026-09-28), a yes is on and explicit, anything else is off,
+    matching how ``PSEUDOLIFE_AGENT_COORDINATION`` reads its opt-out."""
+    environ = os.environ if environ is None else environ
+    value = environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower()
+    explicit = value in _YES
+    return explicit or not value, explicit
+
+
 def _holds_bearer(provider) -> bool:
     try:
         return bool(provider.snapshot().token)
@@ -1208,14 +1221,17 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                                   "authenticated bridge with a separate host credential; "
                                   "using pull coordination.",
                                   file=sys.stderr)
-                    if os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
-                            "1", "true", "yes", "on"}:
+                    # The doorbell is on by default (2026-09-28) when a
+                    # codex CLI is found; unset stays quiet when none is
+                    # (doctor names it), an explicit yes says why on stderr.
+                    doorbell, doorbell_explicit = _doorbell_setting()
+                    if doorbell:
                         from pseudolife_memory.codex_doorbell import (
                             CodexDoorbell, resolve_codex_command)
                         command = resolve_codex_command()
                         if command is not None:
                             registry_options["doorbell"] = CodexDoorbell(command)
-                        else:
+                        elif doorbell_explicit:
                             reason = ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
                                       "existing file"
                                       if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
@@ -1235,8 +1251,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                         kwargs["board_checkin"] = board_ready
                     else:
                         kwargs["board_checkin"] = True  # the daemon said so above
-            elif os.environ.get("PSEUDOLIFE_CODEX_DOORBELL", "").strip().lower() in {
-                    "1", "true", "yes", "on"}:
+            elif _doorbell_setting()[1]:
                 needs = ("agent coordination, which is off here (no bearer token, or "
                          "the daemon does not serve the board to it)"
                          if not setting else "PSEUDOLIFE_AGENT_COORDINATION=1")

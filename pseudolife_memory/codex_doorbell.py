@@ -134,7 +134,13 @@ def resolve_codex_command(environ=None) -> list[str] | None:
     is a setup error, never a reason to run another binary. On Windows the
     PATHEXT order holds, so a native ``codex.exe`` wins over an npm
     ``codex.cmd`` in the same directory; a batch wrapper works too, because
-    the arguments are a canonical UUID and the fixed notice."""
+    the arguments are a canonical UUID and the fixed notice.
+
+    On Windows a desktop-only Codex install puts nothing on PATH and keeps
+    its CLI under ``%LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<build>\\codex.exe``, so
+    that directory is searched after PATH, newest build first, the way
+    ``ops/setup-codex-hooks.py`` finds it (2026-09-28: the doorbell is on by
+    default, and a desktop install must ring too)."""
     environ = os.environ if environ is None else environ
     explicit = environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
     if explicit:
@@ -156,6 +162,13 @@ def resolve_codex_command(environ=None) -> list[str] | None:
             candidate = os.path.join(directory, name)
             if os.path.isfile(candidate) and (os.name == "nt" or os.access(candidate, os.X_OK)):
                 return [candidate]
+    if os.name == "nt":
+        local = environ.get("LOCALAPPDATA", "").strip().strip('"')
+        if local and Path(local).is_absolute():
+            builds = [p for p in (Path(local) / "OpenAI" / "Codex" / "bin").glob("*/codex.exe")
+                      if p.is_file()]
+            if builds:
+                return [str(max(builds, key=lambda p: p.stat().st_mtime))]
     return None
 
 

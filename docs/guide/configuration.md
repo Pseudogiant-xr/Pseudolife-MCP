@@ -78,6 +78,22 @@ values are whole numbers; a cap of 0 rings nobody (or never honours
 `urgent`), and the two windows are at least 1. Over a cap the send answers
 `capped` with the cap's name.
 
+Wake is on by default and policy-gated (maintainer decision, 2026-09-28), so
+the caps are the guarantee, not the usual rate. `/health` reports the caps in
+force, and `pseudolife-mcp doctor` prints them beside each registered
+client's wake path (`stop_hook` for Claude Code, `doorbell` for Codex: `on`,
+or `off` with the setting that turned it off, `off (no codex CLI)`; for
+Codex also `off (PSEUDOLIFE_WRITER_ID is not codex)` and `off (no bearer
+token)`, since the shim arms the doorbell only as the codex writer with a
+bearer; for Claude Code `off (plugin not installed)` / `off (plugin
+disabled)`, since only the plugin carries the Stop hook). The hooks and the
+shim read these switches trimmed and case-insensitively, and a blank value
+is unset. The client-side switches are
+`PSEUDOLIFE_AGENT_COORDINATION=0` (the master off switch for that client),
+`PSEUDOLIFE_AGENT_WAKE_HOOK=0` (the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook)) and
+`PSEUDOLIFE_CODEX_DOORBELL=0` (the [Codex doorbell](#codex-doorbell)).
+
 `awareness_limit` must be an integer from 1 to 20 and caps peer summaries. Existing
 episodes have no trustworthy project/task or principal fields, so unregistered
 peers are shown with unknown scope and host capability. Titles do not establish
@@ -669,32 +685,51 @@ live delivery into the installed desktop UI.
 See the [Codex validation record](../specs/2026-09-12-codex-coordination.md) and
 [OpenAI's app-server contract](https://learn.chatgpt.com/docs/app-server).
 
-### Optional Codex doorbell
+### Codex doorbell
 
 Codex starts no turn for MCP notifications, hooks or finished background
 commands, so without the bridge a Codex task sees new mail only at its next
-Pseudolife call. The optional doorbell wakes an idle task, desktop app included,
+Pseudolife call. The doorbell wakes an idle task, desktop app included,
 through Codex's own `codex queue` command. That command persists a message which
 every app-server sharing the Codex home dispatches to the task once it is loaded
-and idle; app-servers poll for it about every 10 seconds. Enable it in the
-Pseudolife MCP server's environment, next to `PSEUDOLIFE_AGENT_COORDINATION`:
+and idle; app-servers poll for it about every 10 seconds.
+
+It is on by default since 2026-09-28 (before that, opt-in with
+`PSEUDOLIFE_CODEX_DOORBELL=1`) whenever the shim finds a `codex` CLI and the
+coordination adapter is up (on by default with a bearer token, off with
+`PSEUDOLIFE_AGENT_COORDINATION=0`, which stays the master off switch). It
+rings only when the daemon decides a message should wake the task: the task
+is parked with a declared need and the message plausibly clears it (see the
+`wake` caps under [Experimental agent coordination](#experimental-agent-coordination)).
+Set these in the Pseudolife MCP server's environment, next to
+`PSEUDOLIFE_AGENT_COORDINATION`, to turn it off or to name the CLI:
 
 ```toml
-PSEUDOLIFE_CODEX_DOORBELL = "1"
-# Optional: an absolute path; otherwise `codex` is looked up on PATH.
+# Opt out (any value but 1/true/yes/on):
+PSEUDOLIFE_CODEX_DOORBELL = "0"
+# Optional: an absolute path; otherwise `codex` is looked up on PATH, then
+# in the desktop app's own bin directory.
 PSEUDOLIFE_CODEX_BIN = 'C:\path\to\codex.exe'
 ```
 
-Reconnect the MCP server afterwards; the setup helper does not set either value,
-and the doorbell stays off without the coordination adapter (on by default
-with a bearer token, off with `PSEUDOLIFE_AGENT_COORDINATION=0`). The PATH
-lookup uses absolute PATH directories only, never the working directory (the
-task's checkout), so a repository cannot supply its own `codex`. A
-`PSEUDOLIFE_CODEX_BIN` that is relative or does not exist turns the doorbell
-off rather than falling back to PATH. With a non-default Codex home, give the
+Reconnect the MCP server afterwards; the setup helper does not set either
+value. The lookup uses absolute PATH directories only, never the working
+directory (the task's checkout), so a repository cannot supply its own
+`codex`; on Windows it then looks in the desktop app's
+`%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe` (newest build), so a
+desktop-only install rings too. A `PSEUDOLIFE_CODEX_BIN` that is relative or
+does not exist turns the doorbell off rather than falling back to PATH. With
+no CLI found the default stays quiet and falls back to pull delivery;
+`pseudolife-mcp doctor` reports `doorbell: off (no codex CLI)`, and an
+explicit `=1` says so on stderr. With a non-default Codex home, give the
 server `CODEX_HOME` too, in its `env` or through `env_vars`: Codex does not
 necessarily pass it to MCP servers, and without it `codex queue` writes to the
 default home's queue, which no app-server of the task's home reads.
+
+A woken task reads its mail with `memory_message receive`, so the task needs
+`memory_message` approved in Codex's tool configuration; without that
+approval a woken task stalls on an approval prompt until someone answers it
+(the 2026-09-12 validation record's complete-path test approved it explicitly).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
@@ -1314,21 +1349,31 @@ for delivery-state and host-verification contracts.
 ### Waking an idle Claude Code session: the Stop hook
 
 Mail otherwise reaches a Claude Code session only at its next memory call or
-prompt, so an idle session can sit on a message for hours. The plugin ships an
-opt-in `Stop` hook that waits on the session's digest after every turn and
-wakes the session when new mail arrives. It is off unless the hook's
-environment sets `PSEUDOLIFE_AGENT_WAKE_HOOK=1` (for example in the `env` block
-of `~/.claude/settings.json`, which Claude Code passes to the processes it
-starts); the hook's command checks the flag before bash reads the script. It
-needs the coordination adapter above, since it waits on the digest file the
-adapter writes: without a digest directory it exits at once. It also needs a
-Claude Code release that honours `asyncRewake` (verified on 2.1.280); one
-that ignored `async` would run it in the foreground and hold each turn end.
+prompt, so an idle session can sit on a message for hours. The plugin ships a
+`Stop` hook that waits on the session's digest after every turn and wakes the
+session when mail that should wake it arrives. It is on by default since
+2026-09-28 (before that, opt-in with `PSEUDOLIFE_AGENT_WAKE_HOOK=1`); set
+`PSEUDOLIFE_AGENT_WAKE_HOOK=0` in the hook's environment to turn it off (for
+example in the `env` block of `~/.claude/settings.json`, which Claude Code
+passes to the processes it starts), and `PSEUDOLIFE_AGENT_COORDINATION=0`
+there turns off the whole board for the client, hook included. The hook's
+command checks both flags before bash reads the script, and refuses a script
+that does not parse, so a broken copy cannot wake every session at every turn
+end. It needs the coordination adapter above, since it waits on the digest
+file the adapter writes: without a digest directory it exits at once. It also
+needs a Claude Code release that honours `asyncRewake` (verified on 2.1.280);
+one that ignored `async` would run it in the foreground and hold each turn end.
 
-Opting in lets any peer allowed to mail this session start a model turn in it
+A wake lets a peer allowed to mail this session start a model turn in it
 while you are away, in whatever permission mode the session runs; peer text
-still cannot grant approval. Every wake spends tokens, and two opted-in
-sessions can keep waking each other, so wakes are capped (below).
+still cannot grant approval. That is why wake is policy-gated: the daemon
+rings a session only while it is parked with a declared need that the message
+plausibly clears (the sender is the one it named, the message is tagged
+`clears=<need>`, or the sender set `urgent`), and never for chatter. Every
+wake spends tokens, and two sessions can keep waking each other, so wakes are
+also capped (below, and by the daemon's `wake` caps under
+[Experimental agent coordination](#experimental-agent-coordination)).
+`pseudolife-mcp doctor` reports the hook's state under `wake.claude_code`.
 
 - The hook runs with `"async": true` and `"asyncRewake": true`: in the
   background after each turn, and exit code 2 starts a new turn even when the
@@ -1397,11 +1442,11 @@ sessions can keep waking each other, so wakes are capped (below).
   `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
   which Codex turns into a continuation prompt; allow, no address, a
   continuation's Stop, or no answer prints nothing. The wake itself stays
-  Claude Code's: the bash command stops at the flag check, and the script
-  exits unless Claude Code started it. Codex runs the native command only
-  on Windows (`commandWindows`), so the Codex gate is Windows-only; an
-  explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or `PSEUDOLIFE_AGENT_COORDINATION`
-  of `0`, `false`, `no` or `off` turns it off. Whether Codex honours the decision
+  Claude Code's: the bash script exits unless Claude Code started it. Codex
+  runs the native command only on Windows (`commandWindows`), so the Codex
+  gate is Windows-only; an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`, `false`, `no` or `off` turns it
+  off. Whether Codex honours the decision
   of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).

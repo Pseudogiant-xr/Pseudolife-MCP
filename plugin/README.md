@@ -46,7 +46,8 @@ runs the Bash `command` through Git Bash (see [Windows](#windows)). With the
 daemon running, use
 `python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
 to approve the PseudoLife hook definitions and verify their lifecycle (the
-`Stop` entry is Claude Code's opt-in wake hook and a no-op in Codex).
+`Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
+the park gate).
 Automatic detection reuses a recognized, enabled plugin bundle. If the
 runtime cannot support automatic trust, setup gives `/hooks` review guidance
 and uses standing instructions when approved. A plugin installation or a
@@ -86,7 +87,7 @@ the budget, a plugin's cannot; measured 2026-09-27), so the `/clear` and
 reads the process identity SessionStart recorded instead of measuring it,
 while that record says it still holds (`ps -W` prints a process's start
 time differently after its first 24 hours, and a DST change shifts it);
-and the opt-in Stop hook checks that Claude Code is still running through
+and the Stop hook (on by default) checks that Claude Code is still running through
 `ps -W` at arm time and once a minute (a Windows PID is invisible to
 `kill -0`), so a watcher orphaned by a crash ends within the minute.
 
@@ -219,9 +220,10 @@ listed for review and left alone. By hand:
   independently of the memory reminder, without a daemon call.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
-- **Stop hook** (opt-in, `PSEUDOLIFE_AGENT_WAKE_HOOK=1`) — waits in the
-  background after each turn and wakes the idle session when new addressed
-  board mail arrives; off by default. See
+- **Stop hook** (on by default since 2026-09-28; `PSEUDOLIFE_AGENT_WAKE_HOOK=0`
+  turns it off, `PSEUDOLIFE_AGENT_COORDINATION=0` turns off the board) — waits
+  in the background after each turn and wakes the idle session when board
+  mail that clears its declared need arrives; policy-gated and capped. See
   [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout

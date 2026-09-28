@@ -111,6 +111,14 @@ not a promise that a first model download fits. The tool budget leaves time for
 the shim's 180-second deadline to report a failure before the host cancels it; prewarm with
 `pseudolife-mcp serve` in a terminal if needed.
 
+Approve `memory_message` in that table's tool configuration
+(`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
+"approve"`, or allow it once and keep the approval). Board mail can wake an
+idle Codex task by default, and the woken task reads its mail with that tool:
+without the approval it stalls on a prompt until someone answers it. Set
+`PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
+from being woken (see [Codex doorbell](docs/guide/configuration.md#codex-doorbell)).
+
 The agent board (peer awareness and addressed mail between sessions) is on by
 default, behind bearer authentication. Without `coordination.allowed_principals`
 in the daemon's `config.yaml`, only the singular `PSEUDOLIFE_MCP_TOKEN`
@@ -612,6 +620,17 @@ interpreter. A daemon-side credential change with an old shim leaves the
 two out of step: the Claude Desktop registrar refuses a shim that cannot
 read the selected token file (exit 4), and names the upgrade.
 
+- **Upgrading past 2026-09-28: board mail starts waking idle sessions.**
+  Once the plugin cache and the shim move (`-All`, then a client restart),
+  a Claude Code session and a Codex task with a `codex` CLI are woken when
+  mail arrives that clears the need they parked on; before this both wake
+  paths were opt-in. Nothing rings for chatter, and rings are capped. To
+  keep the old behaviour, set `PSEUDOLIFE_AGENT_WAKE_HOOK=0` in the `env`
+  block of `~/.claude/settings.json` and `PSEUDOLIFE_CODEX_DOORBELL = "0"`
+  in the Codex server's `env` table (`PSEUDOLIFE_AGENT_COORDINATION=0` in
+  either place turns off the board for that client). `pseudolife-mcp
+  doctor` shows each client's wake path under `wake`.
+
 The three tell on each other: `/health` reports the daemon's `version`
 and a digest of the hook scripts it shipped with; the session briefing
 opens with a one-line notice when the plugin's version differs from the
@@ -935,8 +954,8 @@ See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
 definitions: the memory and coordination SessionStart and UserPromptSubmit
-handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's opt-in
-wake hook, a no-op in Codex). It does not approve other plugins or bypass
+handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's wake
+hook, on by default; in Codex it runs only the park gate). It does not approve other plugins or bypass
 future trust checks. Changed definitions need approval again, and so does a
 handler a plugin update adds; Codex skips an unapproved one silently in the
 desktop app, which `ops/update.ps1 -All` (or `ops/update_clients.py`) now

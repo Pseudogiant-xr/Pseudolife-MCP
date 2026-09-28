@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Pseudolife-MCP Stop hook: wake an idle Claude Code session when addressed
-# board mail arrives. Opt-in: hooks.json runs it only when
-# PSEUDOLIFE_AGENT_WAKE_HOOK=1 (checked again here), and it is a no-op
-# anywhere but Claude Code (Codex loads the same hooks.json).
+# board mail arrives. On by default since 2026-09-28 (before that, opt-in
+# with PSEUDOLIFE_AGENT_WAKE_HOOK=1): hooks.json skips it when
+# PSEUDOLIFE_AGENT_WAKE_HOOK is 0/false/no/off or PSEUDOLIFE_AGENT_COORDINATION
+# is set to anything but a yes (both checked again here), refuses a copy that
+# does not parse, and it is a no-op anywhere but Claude Code (Codex loads the
+# same hooks.json).
 #
 # hooks.json registers it with "async": true and "asyncRewake": true, so it
 # waits in the background after each turn, and exit code 2 starts a new turn
@@ -67,7 +70,16 @@ WAKE_WINDOW=3600
 # checked at arm time and then this often (seconds), not at every poll.
 PARENT_CHECK=60
 
-if [ "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}" != "1" ] || [ "${CLAUDECODE:-}" != "1" ]; then
+# Read the two settings the way the shim and doctor do: trimmed and
+# lower-cased, blank meaning unset. Only a non-empty value costs a spawn.
+setting() {
+    [ -n "$1" ] || return 0
+    printf %s "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'
+}
+OFF=""
+case "$(setting "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}")" in 0|false|no|off) OFF=1 ;; esac
+case "$(setting "${PSEUDOLIFE_AGENT_COORDINATION:-}")" in ''|1|true|yes|on) ;; *) OFF=1 ;; esac
+if [ -n "$OFF" ] || [ "${CLAUDECODE:-}" != "1" ]; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done
     exit 0

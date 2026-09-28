@@ -129,7 +129,7 @@ def test_unexpected_plugin_is_not_trusted_or_replaced(tmp_path, monkeypatch, pro
         assert script.read_text() == "Write-Output 'custom user script'\n"
 
 
-# --- the plugin's Stop entry (Claude Code's opt-in wake hook) ---------------
+# --- the plugin's Stop entry (Claude Code's wake hook, on by default) -------
 # Codex loads the plugin's hooks.json too, so it lists the Stop entry beside
 # the memory and coordination lifecycle hooks. It is a no-op in Codex, and
 # setup approves it with them; manual installs omit Stop.

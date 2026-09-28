@@ -170,6 +170,15 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     build = _build_stamp()
     if build is not None:
         payload["build"] = build
+    # Whether the board is on and the wake caps in force (config.yaml
+    # `coordination.wake`), so `pseudolife-mcp doctor` can report them
+    # beside each client's wake path (2026-09-28: wake on by default).
+    # Absent when the service carries no config (stand-ins).
+    coordination = getattr(getattr(svc, "config", None), "coordination", None)
+    if coordination is not None:
+        from dataclasses import asdict
+        payload["coordination"] = {"enabled": bool(coordination.enabled),
+                                   "wake": asdict(coordination.wake)}
     # Deliberately does NOT touch `status`: a bank with no extractor is
     # serving correctly, and web/api.py turns any non-ok payload into a
     # 503 that the Docker healthcheck and ops/update.* treat as fatal.
