@@ -9,19 +9,20 @@ healthy; it is also usable on its own.
 
     python ops/update_clients.py [--repo PATH] [--only shim,plugin,codex] [--json]
 
-Shim: the command registered with Claude Code (``claude mcp get``) and
-Codex (``codex mcp get``) says how the shim was installed. A launcher
-inside the checkout's ``.venv`` is an editable install — the code is
-already live and the metadata refresh needs every session closed, so it
-is named, not run. A pipx-managed one is ``pipx install --force``-ed
-from the checkout. A launcher or ``python -m pseudolife_memory.cli``
-inside some other virtualenv is upgraded through that interpreter's pip.
-Anything else is left alone and named. On Windows a pip or pipx upgrade is
-skipped while any process runs from the shim's virtualenv or its registered
-launcher (either would strand it half-removed); the sessions are counted
-and the rerun named instead. A bare global interpreter registered with
-``-m`` names no path of its own and is not checked. A pip run that fails
-anyway gets back what it moved aside.
+Shim: every stdio registration of the shim (Claude Code's ``~/.claude.json``,
+Codex's ``config.toml``, Claude Desktop's and Gemini CLI's config files)
+is read from its file. When any of them runs the launcher, a runtime under
+the runtimes root, a pipx-managed launcher or a virtualenv's launcher or
+``python -m pseudolife_memory.cli``, a NEW shim runtime is installed from
+the checkout beside the existing ones (``pseudolife_memory/runtimes.py``),
+the launcher every client should run is put in place, and registrations
+that still name a runtime, pipx or virtualenv path are moved to the
+launcher in place, each file backed up first. Nothing running is ever
+replaced: sessions keep the runtime they started from, the next session
+start takes the new one, and an old runtime is removed only once no
+process runs from it and no registration names it. A launcher inside the
+checkout's ``.venv`` is an editable install — the code is already live
+and is named, not reinstalled. Anything else is left alone and named.
 
 Plugin: the version string is pinned to the package version, so a plugin
 change on master does not move ``/plugin update``. The marketplace clone
@@ -41,7 +42,6 @@ tokens: registration output is parsed for the command line only.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -281,76 +281,44 @@ def _classify(command: str, args: str, repo: Path, pipx_listing: dict | None = N
     return "unmanaged", None
 
 
-# ── what an upgrade must not pull out from under running sessions ───────────
+# ── the runtime behind the launcher ─────────────────────────────────────────
 #
 # 2026-09-25: `pip install --upgrade` into a runtime that ~36 sessions were
-# running failed with WinError 32 on its Scripts\pseudolife-mcp.exe. pip 24.0
-# stashes what it uninstalls in sorted order, so Lib\site-packages\
-# pseudolife_memory and its dist-info had already been renamed to `~`-prefixed
-# siblings, and the raise came from uninstall(), which sits outside the try
-# that rolls a failed install back: the runtime was left with no package of
-# its own. pipx is worse: `install --force` deletes the venv with
-# rmtree(ignore_errors=True) before rebuilding it, so with the launcher
-# running everything else in it is gone, with nothing to put back. On Windows
-# a runtime something is running is therefore never upgraded; the restore
-# below is the net for a session that starts after the check.
+# running failed with WinError 32 on its Scripts\pseudolife-mcp.exe and left
+# the runtime without its package (pip had stashed site-packages first);
+# pipx's `install --force` deletes the venv before rebuilding it. Every
+# registration therefore had to wait for every session to close, and on
+# 2026-09-28 thirteen idle Desktop sessions held the step. The shim now
+# installs into a NEW runtime beside the old one (pseudolife_memory/
+# runtimes.py) behind one launcher path that starts the newest complete
+# runtime; sessions already running keep theirs, and an old runtime goes
+# only once nothing runs from it and no registration names it.
+
+_RUNTIMES_MODULE = None
+
+
+def runtimes_module():
+    """``pseudolife_memory.runtimes`` from this helper's own checkout, loaded
+    by path (an installed release may predate it). The checkout being
+    installed (``--repo``) is the runtime's source, not this helper's code."""
+    global _RUNTIMES_MODULE
+    if _RUNTIMES_MODULE is None:
+        _RUNTIMES_MODULE = _load_from_checkout(ROOT, "pseudolife_memory/runtimes.py", "checkout_runtimes")
+    return _RUNTIMES_MODULE
+
 
 def list_processes() -> list[tuple[int, int, str]] | None:
     """``(pid, parent pid, image path)`` of every process this user can
-    query, or ``None`` off Windows, where an open or running file does not
-    stop pip or pipx replacing it. Raises ``OSError`` when the table cannot
-    be read."""
-    if os.name != "nt":
-        return None
-    import ctypes
-    from ctypes import wintypes
+    query, ``None`` where the platform has no process table (see
+    ``runtimes.list_processes``); raises ``OSError`` when it cannot be read."""
+    return runtimes_module().list_processes()
 
-    class ProcessEntry(ctypes.Structure):   # PROCESSENTRY32W
-        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
-                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
-                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
-                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
-                    ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
 
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    kernel32.Process32FirstW.argtypes = kernel32.Process32NextW.argtypes = [
-        wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.QueryFullProcessImageNameW.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
-    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    parents: list[tuple[int, int]] = []
-    try:
-        entry = ProcessEntry(dwSize=ctypes.sizeof(ProcessEntry))
-        more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
-        while more:
-            parents.append((entry.th32ProcessID, entry.th32ParentProcessID))
-            more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
-    finally:
-        kernel32.CloseHandle(snapshot)
-    if not parents:
-        raise ctypes.WinError(ctypes.get_last_error())
-    rows: list[tuple[int, int, str]] = []
-    image = ctypes.create_unicode_buffer(32768)
-    for pid, ppid in parents:
-        # PROCESS_QUERY_LIMITED_INFORMATION; a process this user may not
-        # query (another account's, a protected one) is not one of its shims.
-        handle = kernel32.OpenProcess(0x1000, False, pid)
-        if not handle:
-            continue
-        try:
-            size = wintypes.DWORD(len(image))
-            if kernel32.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size)):
-                rows.append((pid, ppid, image.value))
-        finally:
-            kernel32.CloseHandle(handle)
-    return rows
+def client_env() -> dict:
+    """The environment the client configs are found in: this process's, with
+    the home directory the ``home`` seam names."""
+    user = str(home())
+    return {**os.environ, "HOME": user, "USERPROFILE": user}
 
 
 def _venv_root(path: Path) -> Path | None:
@@ -360,8 +328,7 @@ def _venv_root(path: Path) -> Path | None:
 
 def _pipx_venv_roots(pipx_listing: dict) -> list[Path]:
     """The pipx venv of ``pseudolife-mcp``, from the app paths its metadata
-    names inside it: ``install --force`` deletes all of it, so a session
-    running from it directly (not through the exposed launcher) holds it."""
+    names inside it."""
     venv = next((v for k, v in pipx_listing.get("venvs", {}).items() if k.lower() == PACKAGE), None)
     paths = venv.get("metadata", {}).get("main_package", {}).get("app_paths", []) if isinstance(venv, dict) else []
     roots = []
@@ -373,167 +340,26 @@ def _pipx_venv_roots(pipx_listing: dict) -> list[Path]:
     return roots
 
 
-def _held_paths(command: Path, interpreter: Path | None, extra: list[Path] = ()) -> list[Path]:
-    """What a running session of this registration executes from: the
-    registered launcher itself, and the whole virtualenv the shim lives in
-    (its launcher and the venv's python.exe redirector both run from there;
-    ``interpreter`` only when pip installs into that interpreter's own
-    environment). A user scripts or pipx bin directory holds other tools'
-    launchers too, so only the registered one counts there. A bare
-    interpreter outside any virtualenv is shared with everything else
-    Python on the machine and names nothing by itself."""
-    roots = {root for root in (_venv_root(command), interpreter and _venv_root(interpreter)) if root}
-    roots.update(extra)
-    if not _PYTHON_STEM.fullmatch(command.name.lower().removesuffix(".exe")):
-        roots.add(command)
-    return sorted(roots)
-
-
-def _path_forms(path) -> set[str]:
-    """A path as written and as resolved: Windows reports a process's image
-    by its final path, while a registration may go through a junction,
-    symlink or 8.3 short name."""
-    forms = {os.path.normcase(os.path.abspath(path))}
+def _legacy_directories(rt, layout) -> list[Path]:
+    """Directories under the runtimes root that are not numbered runtimes:
+    hand-made virtualenvs from before the launcher, left for the operator."""
     try:
-        forms.add(os.path.normcase(os.path.realpath(path)))
-    except (OSError, ValueError):
-        pass
-    return forms
-
-
-def _sessions_holding(paths: list[Path]) -> tuple[int, int] | None:
-    """``(sessions, processes)`` running from ``paths``, or ``None`` where
-    that cannot stop an upgrade. A Claude session is a launcher plus the
-    venv redirector it starts, a Codex one the redirector alone, so each
-    process tree rooted in ``paths`` counts once. This helper and its
-    parent never count (it may be run with the runtime's own python)."""
-    rows = list_processes()
-    if rows is None or not paths:
-        return None
-    held = {form for p in paths for form in _path_forms(p)}
-
-    def inside(image: str) -> bool:
-        return any(form == p or form.startswith(p.rstrip(os.sep) + os.sep)
-                   for form in _path_forms(image) for p in held)
-
-    own = {os.getpid(), os.getppid()}
-    running = {pid: ppid for pid, ppid, image in rows if pid not in own and inside(image)}
-    return sum(1 for ppid in running.values() if ppid not in running), len(running)
-
-
-# pip's AdjacentTempDirectory.LEADING_CHARS (pip 24.0, src/pip/_internal/utils/
-# temp_dir.py): a stashed directory is renamed to "~" + some of these + the
-# rest of its name, the same length, or failing that "~" + some + the whole name.
-_PIP_STASH_CHARS = set("-~.=%0123456789")
-# This distribution's entries in a library directory (its import package and
-# dist-info), normcased as Windows compares them.
-_OWN_NAMES = ("pseudolife_memory", "pseudolife_mcp-")
-
-
-def _stash_of(stash: str, original: str) -> bool:
-    """Whether ``stash`` is a name pip gives ``original`` when it moves it
-    aside next to itself during an uninstall."""
-    stash, original = os.path.normcase(stash), os.path.normcase(original)
-    if not stash.startswith("~") or stash == original:
-        return False
-    for k in range(len(original)):
-        tail = original[k:]
-        head = stash[:len(stash) - len(tail)]
-        if (stash.endswith(tail) and head.startswith("~") and set(head[1:]) <= _PIP_STASH_CHARS
-                and (k == 0 or len(stash) == len(original))):
-            return True
-    return False
-
-
-def _listing(libs: list[Path]) -> dict[Path, set[str]]:
-    listing = {}
-    for lib in libs:
-        try:
-            listing[lib] = set(os.listdir(lib))
-        except OSError:
-            continue
-    return listing
-
-
-def _restore_stashes(before: dict[Path, set[str]]) -> tuple[list[str], list[str]]:
-    """Put back what a failed pip run moved aside and left there.
-
-    Only entries that vanished during this run are restored, each from the
-    one ``~`` sibling that appeared during it and can be its stash — an
-    older failed run's leftover is not this run's and is never picked. Where
-    that is ambiguous, or this package's own files are simply gone (a file
-    pip moved to a temp directory), they are named, not guessed. A
-    dependency whose upgrade the same run completed before failing is
-    neither. Returns ``(restored, missing)``."""
-    restored, missing = [], []
-    for lib, names in before.items():
-        now = _listing([lib]).get(lib, set())
-        gone = sorted(names - now)
-        stashes = [name for name in now - names if name.startswith("~")]
-        for original in gone:
-            found = [s for s in stashes if _stash_of(s, original)]
-            if len(found) == 1 and sum(_stash_of(found[0], g) for g in gone) == 1:
-                try:
-                    os.rename(lib / found[0], lib / original)
-                    restored.append(str(lib / original))
-                    continue
-                except OSError:
-                    pass
-            if found or os.path.normcase(original).startswith(_OWN_NAMES):
-                missing.append(str(lib / original))
-    return restored, missing
-
-
-def _after_failed_pip(interpreter: Path, before: dict[Path, set[str]], own_root: Path | None) -> str:
-    """What the runtime is left with once pip has failed, in words. With
-    system site-packages on, a venv also sees the user site and the base
-    interpreter's: a copy found there is not its own package, so the
-    package must import from inside ``own_root`` when there is one."""
-    restored, missing = _restore_stashes(before)
-    kind, where, _ = _probe_install_kind(interpreter)
-    if kind == "site" and own_root is not None:
-        try:
-            kind = "site" if Path(where).resolve().is_relative_to(own_root.resolve()) else f"elsewhere: {where}"
-        except (OSError, ValueError):
-            kind = f"elsewhere: {where}"
-    notes = []
-    if restored:
-        notes.append("pip had moved " + ", ".join(restored) + " aside and not put "
-                     + ("them" if len(restored) > 1 else "it") + " back: restored")
-    if missing:
-        notes.append("pip removed " + ", ".join(missing) + " and "
-                     + ("they" if len(missing) > 1 else "it") + " could not be restored")
-    if kind == "site":
-        notes.append("the runtime still imports its own package" if not notes
-                     else "the runtime imports its own package again")
-    else:
-        notes.append(f"the runtime has no package of its own (probe: {kind}) and imports fall through to "
-                     "whatever else is on sys.path; reinstall it with every session closed before "
-                     "starting another")
-    return "; ".join(notes)
-
-
-def _retry_command(repo: Path) -> str:
-    return f"python \"{Path(__file__).resolve()}\" --only shim --repo \"{repo}\""
+        names = sorted(os.listdir(layout.root))
+    except OSError:
+        return []
+    return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
 def update_shim(repo: Path) -> dict:
     repo = Path(repo)
-    registrations: list[tuple[str, str, str]] = []
-    for client in ("claude", "codex"):
-        cli = which(client)
-        if not cli:
-            continue
-        code, text = run_cli([cli, "mcp", "get", SERVER])
-        if code != 0:
-            continue
-        found = _registered_command(text)
-        if found:
-            registrations.append((client, *found))
+    rt = runtimes_module()
+    env = client_env()
+    layout = rt.default_layout(env)
+    registrations = rt.find_registrations(env)
     if not registrations:
         return {"state": "not-registered",
-                "detail": f"no stdio registration of {SERVER} in Claude Code or Codex; "
-                          f"nothing to upgrade ({INSTALLER_HINT})"}
+                "detail": f"no stdio registration of {SERVER} in Claude Code, Codex, Claude Desktop or "
+                          f"Gemini CLI; nothing to upgrade ({INSTALLER_HINT})"}
     pipx = which("pipx")
     pipx_listing: dict = {}
     if pipx:
@@ -544,88 +370,91 @@ def update_shim(repo: Path) -> dict:
             pipx_listing = {}
         if not isinstance(pipx_listing, dict):
             pipx_listing = {}
-    done: set[str] = set()
+    pipx_roots = _pipx_venv_roots(pipx_listing)
+    managed: list = []          # (registration, kind)
     results: list[dict] = []
-    for client, command, args in registrations:
-        kind, interpreter = _classify(command, args, repo, pipx_listing)
-        key = str(interpreter or command).lower()
-        if key in done:
+    for registration in registrations:
+        if rt.registers_launcher(registration, layout):
+            managed.append((registration, "launcher"))
             continue
-        done.add(key)
+        if any(rt.registers_runtime_path(registration, layout, [root]) and not rt.registers_runtime_path(
+                registration, layout) for root in pipx_roots):
+            managed.append((registration, "pipx"))
+            continue
+        if rt.registers_runtime_path(registration, layout):
+            managed.append((registration, "runtime"))
+            continue
+        kind, interpreter = _classify(registration.command, " ".join(registration.args), repo, pipx_listing)
         if kind in ("pipx", "pip", "pip-user"):
-            # pip --user writes to the user site, not to its interpreter's
-            # environment; pipx --force deletes its whole venv.
-            held = _held_paths(Path(command), interpreter if kind == "pip" else None,
-                               _pipx_venv_roots(pipx_listing) if kind == "pipx" else [])
-            try:
-                holding = _sessions_holding(held)
-            except OSError as exc:
-                results.append({"state": "unknown",
-                                "detail": f"{client}: could not read the process table to see whether a "
-                                          f"session runs {command} ({exc}); left alone rather than upgraded. "
-                                          f"With every session closed: {_retry_command(repo)}"})
-                continue
-            # Gate on processes: the session count is for the message (a
-            # cycle of reused parent pids can leave a tree with no root).
-            if holding and holding[1]:
-                processes = holding[1]
-                sessions = max(holding[0], 1)
-                results.append({"state": "in-use",
-                                "detail": f"{client}: {sessions} session{'s are' if sessions != 1 else ' is'} "
-                                          f"running the shim from {', '.join(map(str, held))} "
-                                          f"({processes} process{'es' if processes != 1 else ''}); not "
-                                          f"upgraded, since {'pipx' if kind == 'pipx' else 'pip'} would leave "
-                                          f"it half-removed. Close {'them' if sessions != 1 else 'it'} and run: "
-                                          f"{_retry_command(repo)}"})
-                continue
-        if kind == "editable":
-            venv_python = interpreter or _interpreter_beside(Path(command)) or Path(command).parent / "python"
-            # The probe's detail is a project directory only for an editable
-            # answer (a package path for "site", a failure reason for "unknown").
+            managed.append((registration, kind))
+        elif kind == "editable":
+            venv_python = interpreter or _interpreter_beside(Path(registration.command)) \
+                or Path(registration.command).parent / "python"
             probed, found = install_kind(venv_python) if Path(venv_python).is_file() else ("", "")
             project = found if probed == "editable" else ""
             results.append({"state": "editable",
-                            "detail": f"{client}: {command} runs a source tree directly"
+                            "detail": f"{registration.client}: {registration.command} runs a source tree directly"
                                       + (f" ({project})" if project else "")
-                                      + "; the code is already live and is never pip-upgraded. To refresh "
-                                      f"its package metadata, close every session and run: "
+                                      + "; the code is already live and is never reinstalled. To refresh its "
+                                      f"package metadata, close every session and run: "
                                       f"\"{venv_python}\" -m pip install -e \"{project or repo}\" --no-deps"})
         elif kind == "unknown":
             reason = install_kind(interpreter)[1]
             results.append({"state": "unknown",
-                            "detail": f"{client}: could not tell how \"{interpreter}\" installed the package "
-                                      f"({reason}); left alone rather than pip-upgraded. Once sure it is "
-                                      f"not an editable install: \"{interpreter}\" -m pip install --upgrade "
-                                      f"\"{repo}\""})
-        elif kind == "pipx":
-            code, out = run_cli([pipx, "install", "--force", str(repo)])
-            results.append({"state": "reinstalled:pipx", "detail": f"{client}: pipx install --force {repo}"}
-                           if code == 0 else
-                           {"state": "failed", "detail": f"{client}: pipx install --force {repo} failed "
-                                                         f"({_failure_line(out, code)}); "
-                                                         f"close every session using the shim and retry"})
-        elif kind in ("pip", "pip-user"):
-            scope = ["--user"] if kind == "pip-user" else []
-            shown = f"\"{interpreter}\" -m pip install {' '.join(scope + ['--upgrade'])} {repo}"
-            before = _listing(install_libs(interpreter))
-            code, out = run_cli([str(interpreter), "-m", "pip", "install", *scope, "--upgrade", str(repo)])
-            results.append({"state": f"reinstalled:{kind}", "detail": f"{client}: {shown}"}
-                           if code == 0 else
-                           {"state": "failed",
-                            "detail": f"{client}: {shown} failed "
-                                      f"({_failure_line(out, code)}); "
-                                      f"{_after_failed_pip(interpreter, before, _venv_root(interpreter) if kind == 'pip' else None)}. "
-                                      f"Close every session using the shim and run: {_retry_command(repo)}"})
+                            "detail": f"{registration.client}: could not tell how \"{interpreter}\" installed the "
+                                      f"package ({reason}); left alone. Once sure it is not an editable install, "
+                                      f"re-run the installer to move this registration to the launcher"})
         else:
             results.append({"state": "unmanaged",
-                            "detail": f"{client}: {command} {args}".strip() + " is not a registration this "
-                                      "helper recognises (checkout .venv, pipx, a virtualenv's launcher or "
-                                      "python -m, or pip --user); upgrade it in its own environment, e.g. "
-                                      f"<its python> -m pip install --upgrade \"{repo}\""})
-    order = ("failed", "in-use", "unknown", "reinstalled:pipx", "reinstalled:pip", "reinstalled:pip-user", "editable",
-             "unmanaged")
-    results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
-    return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
+                            "detail": f"{registration.client}: {registration.command} {' '.join(registration.args)}".strip()
+                                      + " is not a registration this helper recognises (the launcher, a runtime "
+                                      "under the runtimes root, pipx, a virtualenv's launcher or python -m, or "
+                                      "pip --user); upgrade it in its own environment, e.g. <its python> -m pip "
+                                      f"install --upgrade \"{repo}\""})
+    if not managed:
+        order = ("failed", "unknown", "editable", "unmanaged")
+        results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
+        return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
+    lines: list[str] = []
+    try:
+        runtime = rt.install(str(repo), layout, run=run_cli, log=lines.append)
+    except rt.RuntimeInstallError as exc:
+        detail = (f"installing a new shim runtime from {repo} failed at {exc.step} ({_failure_line(exc.output, 1)}); "
+                  f"registrations were not touched and the runtime that was current stays current. "
+                  f"Retry: python \"{Path(__file__).resolve()}\" --only shim --repo \"{repo}\"")
+        return {"state": "failed", "detail": "; ".join([detail] + [r["detail"] for r in results])}
+    detail = [f"runtime {runtime.name} ({runtime.version}"
+              + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
+              + f") installed from {repo} behind {layout.launcher}"]
+    failed = False
+    for registration, kind in managed:
+        if kind == "launcher":
+            detail.append(f"{registration.client}: already runs the launcher")
+            continue
+        moved = rt.migrate_registration(registration, layout)
+        failed = failed or moved["state"] == "failed"
+        note = moved["detail"] + (f" (backup {moved['backup']})" if moved.get("backup") else "")
+        if kind == "pipx":
+            note += "; its pipx environment is no longer registered: `pipx uninstall pseudolife-mcp` once no session runs it"
+        detail.append(note)
+    pinned = rt.pinned_runtimes(layout, rt.find_registrations(env))
+    pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes)
+    if pruned["error"]:
+        detail.append(f"older runtimes kept: {pruned['error']}")
+    for entry in pruned["held"]:
+        detail.append(f"{entry['path']} still runs {entry['processes']} process"
+                      f"{'es' if entry['processes'] != 1 else ''}; it is removed by a later update once idle")
+    if pruned["removed"]:
+        detail.append("removed " + ", ".join(pruned["removed"]))
+    for path in pruned["unverified"]:
+        detail.append(f"{path} left (no process table on this platform to say whether a session runs it)")
+    for legacy in _legacy_directories(rt, layout):
+        if not any(rt.registered_runtime(r, layout) == legacy for r in rt.find_registrations(env)):
+            detail.append(f"{legacy} is a hand-made runtime no registration names any more; remove it once no "
+                          f"session runs from it")
+    detail.append("sessions already running keep their runtime; new sessions start on the new one")
+    state = "failed" if failed else f"installed:{runtime.version}"
+    return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results])}
 
 
 # ── the plugin cache ────────────────────────────────────────────────────────
@@ -714,6 +543,7 @@ def _load_from_checkout(repo: Path, relative: str, name: str):
     on ``import pseudolife_memory``."""
     spec = importlib.util.spec_from_file_location(name, Path(repo) / relative)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -807,9 +637,9 @@ def check_codex_hooks(repo: Path) -> dict:
 # ── the command ─────────────────────────────────────────────────────────────
 
 def _marker(state: str) -> str:
-    if state in ("failed", "in-use"):
+    if state == "failed":
         return "[!]"
-    if state.startswith(("reinstalled", "refreshed", "current")) or state == "editable":
+    if state.startswith(("installed", "refreshed", "current")) or state == "editable":
         return "[x]"
     if state in ("stale", "needs-approval"):
         return "[!]"
@@ -833,7 +663,7 @@ def main(argv=None) -> int:
     if "codex" in steps:
         report["codex"] = check_codex_hooks(repo)
     # A shim left un-upgraded because sessions run it still needs the rerun.
-    report["ok"] = all(r["state"] not in ("failed", "in-use") for k, r in report.items() if k != "ok")
+    report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
     if args.json:
         print(json.dumps(report, indent=2))
         return 0 if report["ok"] else 1

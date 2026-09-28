@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-29 — the shim installs side by side, behind one launcher path; no session has to close for an upgrade)
+- Every shim version now installs into its own runtime directory
+  (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN` on Windows,
+  `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere; a virtualenv
+  with the package and the shim's dependencies only, plus a `runtime.json`
+  marker written last), and every client registration points at ONE
+  launcher path (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/bin/pseudolife-mcp`) that starts the newest complete runtime.
+  Sessions already running keep the runtime they started with; the next
+  session start uses the new one; a runtime is removed only when no process
+  runs from it and no registration names it (the process-table check the
+  installers' in-use gate already used, now also on Linux via `/proc` and
+  macOS via `ps`). `pseudolife_memory/runtimes.py` holds the logic;
+  `python ops/shim_runtime.py install|list|current|launcher|prune|migrate`
+  drives it from a checkout with nothing installed. On 2026-09-28 thirteen
+  idle Desktop sessions had refused the shim step of a deploy; nothing has
+  to close now. [stdio shim](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+- `ops/update_clients.py` (and so `ops/update.ps1 -All` / `update.sh
+  --all`) reads every stdio registration from the client config files
+  (Claude Code, Codex, Claude Desktop, Gemini CLI), installs the checkout as
+  a new runtime whenever a registration runs the launcher, a runtime under
+  the runtimes root, a pipx-managed launcher or a virtualenv's launcher or
+  `python -m pseudolife_memory.cli`, moves those registrations to the
+  launcher in place (each file backed up as `<file>.bak-<stamp>`; Codex's
+  `config.toml` is edited textually inside the shim's table and verified by
+  re-parsing, with the other tables untouched), prunes idle old runtimes and
+  names the ones still held or hand-made. The `in-use` refusal, the pip
+  stash restore and the "close every session and rerun" instruction are
+  gone with the in-place upgrade they guarded. An editable checkout
+  `.venv` is still named, never reinstalled.
+- The installers (`ops/install.sh`, `ops/install.ps1`) install the shim
+  runtime first and register the launcher; pipx / `pip install --user`
+  remain the fallback for a host whose Python cannot make a virtualenv, with
+  the earlier in-use check. On a rerun, an existing registration that names
+  a runtime, pipx or virtualenv path — or bare `pseudolife-mcp` on PATH —
+  is moved to the launcher (ladder state `present-migrated`).
+  `PSEUDOLIFE_SHIM_PYTHON` names the interpreter the runtimes are created
+  from; `PSEUDOLIFE_SHIM_RUNTIMES` + `PSEUDOLIFE_SHIM_LAUNCHER` relocate
+  both paths.
+
 ### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
 - The one-shot installers' extractor modes are renamed from the models that
   were current when they were written: `claude-only` / `claude-fallback`

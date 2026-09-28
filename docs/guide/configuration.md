@@ -287,8 +287,8 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
 (`-NoToken`). `--transport http` mints no token either, nor does a host that
-cannot install the shim (no pipx, and no Python >= 3.10 whose pip may install
-packages), since its registrations fall back to HTTP. None of these removes a
+cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
+pipx), since its registrations fall back to HTTP. None of these removes a
 token that is already configured.
 
 ### Waking an idle session: `pseudolife-mcp wait-mail`
@@ -2172,6 +2172,40 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 (print the session-start briefing; used by the hook).
 
 ## stdio shim (per-session identity)
+
+### Where the shim lives: side-by-side runtimes behind one launcher
+
+The installers put the shim into its own **runtime** and register one
+**launcher** path with every client (`pseudolife_memory/runtimes.py`;
+`python ops/shim_runtime.py` from a checkout):
+
+| | Windows | Linux / macOS |
+|---|---|---|
+| runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
+| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `~/.local/bin/pseudolife-mcp` |
+
+A runtime is a plain virtualenv holding the package (`pip install
+--no-deps`) and the shim's own dependencies — not torch, chromadb or the
+embedder, which a stdio shim never loads (`serve` and `embedded` need a
+full install). `runtime.json` inside it (version, source, commit) is
+written last, so a directory without it is an install that did not
+finish; the launcher starts the highest-numbered complete runtime (on
+Windows a console-script executable of the kind pip writes, on POSIX a
+`/bin/sh` script that `exec`s it). Installing a new version — the
+installer, `ops/update.ps1 -All` / `update.sh --all`, or `python
+ops/shim_runtime.py install --source <checkout or requirement>` — builds a
+new runtime beside the old ones and never touches a file a running session
+has open: sessions keep the runtime they started with, the next session
+start takes the new one, and an old runtime is removed (by the same step,
+or `shim_runtime.py prune`) only once no process runs from it and no
+registration names it. A registration that still names a runtime, pipx or
+virtualenv path directly is moved to the launcher in place, the file
+backed up first (`shim_runtime.py migrate`). Set `PSEUDOLIFE_SHIM_PYTHON`
+to choose the interpreter the runtimes are created from;
+`PSEUDOLIFE_SHIM_RUNTIMES` and `PSEUDOLIFE_SHIM_LAUNCHER` (together) move
+both paths. A host whose Python cannot make a virtualenv falls back to the
+earlier pipx / `pip install --user` install, which does need every session
+closed to upgrade.
 
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the

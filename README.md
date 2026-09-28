@@ -621,11 +621,6 @@ your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the
 daemon is healthy:
 
-On Windows, close every Claude Code, Codex and Claude Desktop session
-using the shim first (quit Desktop from the tray). If an in-use shim was
-skipped, the daemon deploy has already succeeded; after closing those
-sessions, retry only the shim: `python ops/update_clients.py --only shim`.
-
 ```powershell
 .\ops\update.ps1 -All   # Windows
 ```
@@ -633,20 +628,29 @@ sessions, retry only the shim: `python ops/update_clients.py --only shim`.
 ./ops/update.sh --all   # Linux / macOS
 ```
 
-It reinstalls the shim behind each Claude Code / Codex registration where
-that is safe (pipx, or the registered interpreter's pip; a shim running
-straight from this checkout is already live and is named instead, since
-its metadata refresh needs every session closed; on Windows a shim whose
-virtualenv or launcher a session is running from is skipped, with the
-sessions counted and the rerun named, because pip or pipx would leave it
-half-removed), refreshes the plugin
-cache by comparing bytes against the marketplace clone (the plugin's
-version string only moves with a release, so `/plugin update` alone would
-say "already latest"), and reports whether Codex's hook copy matches the
-checkout (that refresh is a consent step: `python ops/setup-codex-hooks.py`).
-It ends with a ladder of what moved and which clients need a restart; a
-client-side step that fails is reported, never a failed deploy. The same
-helper runs on its own: `python ops/update_clients.py`. Custom
+No session has to be closed for the shim step. Each shim version installs
+into its own **runtime** (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN`
+on Windows, `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere) and
+every client registers one **launcher** path
+(`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` /
+`~/.local/bin/pseudolife-mcp`) that starts the newest complete runtime.
+The step installs the checkout as a new runtime beside the old one, moves
+any registration that still names a runtime, pipx or virtualenv path to
+the launcher in place (Claude Code, Codex, Claude Desktop and Gemini CLI;
+each file is backed up first as `<file>.bak-<stamp>`), and removes older
+runtimes once no process runs from them and no registration names them.
+Sessions already running keep the runtime they started with; the next
+session start uses the new one. A shim running straight from this
+checkout's `.venv` is already live and is named instead. It then
+refreshes the plugin cache by comparing bytes against the marketplace
+clone (the plugin's version string only moves with a release, so
+`/plugin update` alone would say "already latest"), and reports whether
+Codex's hook copy matches the checkout (that refresh is a consent step:
+`python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
+and which clients need a restart; a client-side step that fails is
+reported, never a failed deploy. The same helper runs on its own:
+`python ops/update_clients.py`, and `python ops/shim_runtime.py` manages
+the runtimes by hand (`install`, `list`, `prune`, `migrate`). Custom
 registrations are preserved and named; upgrade those in their own
 interpreter. A daemon-side credential change with an old shim leaves the
 two out of step: the Claude Desktop registrar refuses a shim that cannot
@@ -813,10 +817,9 @@ releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
 the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
-(`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. On Windows, run that upgrade with every session using the shim
-closed (Desktop fully quit from the tray), or it can leave the shim
-half-removed. After any edit, fully quit Desktop from the tray or
+(re-run the installer, or `python ops/update_clients.py --only shim` from
+the checkout: it installs a new runtime beside the running one, so no
+session has to close) and re-run. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 
