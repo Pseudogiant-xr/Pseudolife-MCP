@@ -28,7 +28,15 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass. Three exemptions, spelled out under
+   without it, which is not a pass. **A full run the bench Postgres rejects
+   refuses to start** (conftest asks the server before queueing for the
+   suite lock): a fresh worktree has no `ops/.env`, or the `.example` copy,
+   so the suite resolves the compose default password and every PG-backed
+   test would ERROR on setup (1,424 in one 2026-09-27 run). The refusal
+   names the fix: copy `ops/.env` from the main checkout into the
+   worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD` for the
+   pytest process. Targeted runs print one line and start. Three
+   exemptions, spelled out under
    "One full suite at a time per machine" below: **docs-only changes** run
    the doc guards instead, **test-only changes** run the touched test
    files, and **merging origin/master into a branch that already passed**,
