@@ -43,8 +43,16 @@ def _q(value: str | Path) -> str:
     return str(value).replace("'", "''")
 
 
+# pwsh on Linux renders an uncaught error in its concise view: coloured, and
+# wrapped to the console width behind "     | " prefixes, which split the
+# message a test looks for. The prelude's trap prints the bare message on
+# one line; this also strips any colour and rejoins a wrapped message.
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_WRAPPED = re.compile(r"\r?\n[ \t]*\|[ \t]?")
+
+
 def _output(proc: subprocess.CompletedProcess[str]) -> str:
-    return proc.stdout + proc.stderr
+    return _WRAPPED.sub("", _ANSI.sub("", proc.stdout + proc.stderr))
 
 
 class _PowerShell:
@@ -73,6 +81,10 @@ class _PowerShell:
             stdin_text: str | None = None) -> subprocess.CompletedProcess[str]:
         prelude = (
             "$ErrorActionPreference = 'Stop'\n"
+            # Plain text on every OS, and an uncaught error as one plain line
+            # (exit 1, as pwsh gives it): see _output.
+            "if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }\n"
+            "trap { [Console]::Error.WriteLine(\"ERROR: $($_.Exception.Message)\"); exit 1 }\n"
             f"$repo = '{_q(ROOT)}'\n"
             "function Step($message) { Write-Output \"STEP: $message\" }\n"
             f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
@@ -81,6 +93,7 @@ class _PowerShell:
         script = self.tmp / "run.ps1"
         script.write_text(prelude + body, encoding="utf-8")
         env = dict(self.env)
+        env.update({"NO_COLOR": "1", "TERM": "dumb"})
         env.update(extra_env or {})
         stdin = {"input": stdin_text} if stdin_text is not None else {
             "stdin": subprocess.DEVNULL}
@@ -125,6 +138,50 @@ def test_a_loopback_daemon_url_keeps_the_local_install(tmp_path, url):
     proc = _mode(_PowerShell(tmp_path), daemon_url=url)
     assert proc.returncode == 0, _output(proc)
     assert "CLIENT_ONLY=False" in proc.stdout
+
+
+# Forms where a hand-written rule and the shim have disagreed; the expected
+# answer is the shim's own (daemon_url._is_loopback_url, on this Python).
+SHIM_LOOPBACK_FORMS = ["http://127.999.1.1:8765", "http://127.0.0.01:8765",
+                       "http://[::ffff:127.0.0.1]:8765", "http://[0:0:0:0:0:0:0:1]:8765",
+                       "http://LOCALHOST:8765"]
+
+
+@pytest.mark.parametrize("url", SHIM_LOOPBACK_FORMS)
+def test_loopback_is_the_shims_own_answer(tmp_path, url):
+    from pseudolife_memory.daemon_url import _is_loopback_url
+    proc = _mode(_PowerShell(tmp_path), daemon_url=url)
+    assert proc.returncode == 0, _output(proc)
+    assert f"CLIENT_ONLY={not _is_loopback_url(url)}" in proc.stdout.splitlines()
+
+
+def test_the_installer_asks_the_shims_helper(tmp_path):
+    """The decision is the helper's, not a copy of its rule: a stand-in
+    interpreter answering "loopback" (exit 10) keeps even a remote URL local."""
+    ps = _PowerShell(tmp_path)
+    proc = ps.run("function Get-InstallerPython { 'fake-loopback-python' }\n"
+                  "function global:fake-loopback-python { $global:LASTEXITCODE = 10 }\n"
+                  f"$DaemonUrl = '{REMOTE}'\n$ReadToken = [switch]$false\n"
+                  "$ClientOnly = [switch]$false\n$TokenFile = ''\n$Extractor = ''\n"
+                  "$Model = ''\n$ShimPort = 0\n$NoToken = [switch]$false\n$Transport = 'shim'\n"
+                  + _block("client-only mode")
+                  + "\nWrite-Output \"CLIENT_ONLY=$([bool]$ClientOnly)\"\n")
+    assert proc.returncode == 0, _output(proc)
+    assert "CLIENT_ONLY=False" in proc.stdout.splitlines()
+
+
+@pytest.mark.parametrize("url,client_only", [
+    ("http://127.0.0.1:8765", False), ("http://[::1]:8765", False), (REMOTE, True)])
+def test_without_python_the_host_rule_decides(tmp_path, url, client_only):
+    ps = _PowerShell(tmp_path)
+    proc = ps.run("function Get-InstallerPython { $null }\n"
+                  f"$DaemonUrl = '{url}'\n$ReadToken = [switch]$false\n"
+                  "$ClientOnly = [switch]$false\n$TokenFile = ''\n$Extractor = ''\n"
+                  "$Model = ''\n$ShimPort = 0\n$NoToken = [switch]$false\n$Transport = 'shim'\n"
+                  + _block("client-only mode")
+                  + "\nWrite-Output \"CLIENT_ONLY=$([bool]$ClientOnly)\"\n")
+    assert proc.returncode == 0, _output(proc)
+    assert f"CLIENT_ONLY={client_only}" in proc.stdout.splitlines()
 
 
 def test_the_environment_url_is_honoured_when_the_flag_is_absent(tmp_path):
@@ -314,7 +371,8 @@ def test_a_token_file_written_with_set_content_is_refused(tmp_path):
     assert plain.exists()
     assert proc.returncode == 1
     assert "owner-only" in _output(proc)
-    assert "-ReadToken" in _output(proc)
+    # -ReadToken refuses an existing file, so the advice deletes it first.
+    assert "delete it and re-run with -ReadToken" in _output(proc)
     assert FIXTURE_TOKEN not in _output(proc)
     assert not any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
 
@@ -680,7 +738,7 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     system_dirs = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] \
         if os.name == "nt" else ["/usr/bin", "/bin"]
     env.update({"PATH": os.pathsep.join([str(fake_bin), *system_dirs]),
-                "PYTHONPATH": str(ROOT),
+                "PYTHONPATH": str(ROOT), "NO_COLOR": "1", "TERM": "dumb",
                 # The installer's own environment carries an older credential.
                 "PSEUDOLIFE_MCP_TOKEN": "fixture-local-literal"})
     proc = subprocess.run(

@@ -45,9 +45,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machine wired to another machine's daemon by hand before this release
   keeps working; re-running the installer with `--client-only` puts the
   registrations, the hooks' env and the token file on the supported path.
-  The public-tree identifier guard (`tests/test_release_ux.py`) now also
-  screens tailnet addresses (100.64.0.0/10) and `*.ts.net` names, allowing
-  only the `100.64.0.x` and `<machine>.<tailnet>.ts.net` placeholders.
+- The public-tree identifier guard (`tests/test_release_ux.py`) now also
+  screens tailnet addresses (100.64.0.0/10 and Tailscale's
+  `fd7a:115c:a1e0::/48`) and `*.ts.net` names, allowing only the
+  `100.64.0.x` and `<machine>.<tailnet>.ts.net` placeholders.
 - The shim never starts a local daemon for a daemon URL that is not
   loopback, whether or not `PSEUDOLIFE_MCP_NO_SPAWN` is set. Before, a
   remote client whose link was down spawned a host-side daemon with an

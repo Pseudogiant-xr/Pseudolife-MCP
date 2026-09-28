@@ -103,10 +103,10 @@ class _Shell:
 def _mode(shell: _Shell, *, daemon_url: str = "", client_only: str = "",
           token_file: str = "", extractor: str = "", model: str = "",
           shim_port: str = "0", no_token: str = "", transport: str = "shim",
-          read_token: str = "",
+          read_token: str = "", prelude: str = "",
           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return shell.run(
-        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\nREAD_TOKEN='{read_token}'\n"
+        prelude + f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\nREAD_TOKEN='{read_token}'\n"
         f"TOKEN_FILE='{_q(token_file)}'\nEXTRACTOR='{extractor}'\nMODEL='{model}'\n"
         f"SHIM_PORT='{shim_port}'\nNO_TOKEN='{no_token}'\nTRANSPORT='{transport}'\n"
         + _block("client-only mode")
@@ -132,6 +132,46 @@ def test_a_loopback_daemon_url_keeps_the_local_install(bash, tmp_path, url):
     proc = _mode(_Shell(bash, tmp_path), daemon_url=url)
     assert proc.returncode == 0, proc.stderr
     assert "CLIENT_ONLY=\n" in proc.stdout
+
+
+# Forms where a hand-written rule and the shim have disagreed; the expected
+# answer is the shim's own (daemon_url._is_loopback_url, on this Python).
+SHIM_LOOPBACK_FORMS = ["http://127.999.1.1:8765", "http://127.0.0.01:8765",
+                       "http://[::ffff:127.0.0.1]:8765", "http://[0:0:0:0:0:0:0:1]:8765",
+                       "http://LOCALHOST:8765"]
+
+
+@pytest.mark.parametrize("url", SHIM_LOOPBACK_FORMS)
+@BASH
+def test_loopback_is_the_shims_own_answer(bash, tmp_path, url):
+    from pseudolife_memory.daemon_url import _is_loopback_url
+    proc = _mode(_Shell(bash, tmp_path), daemon_url=url)
+    assert proc.returncode == 0, proc.stderr
+    expected = "" if _is_loopback_url(url) else "1"
+    assert f"CLIENT_ONLY={expected}\n" in proc.stdout
+
+
+@BASH
+def test_the_installer_asks_the_shims_helper(bash, tmp_path):
+    """The decision is the helper's, not a copy of its rule: a stand-in
+    interpreter answering "loopback" (exit 10) keeps even a remote URL local."""
+    shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "fake-loopback-python", "exit 10\n")
+    proc = _mode(shell, daemon_url=REMOTE,
+                 prelude=f"installer_python() {{ printf '%s\\n' "
+                         f"'{shell.path(shell.bin / 'fake-loopback-python')}'; }}\n")
+    assert proc.returncode == 0, proc.stderr
+    assert "CLIENT_ONLY=\n" in proc.stdout
+
+
+@pytest.mark.parametrize("url,client_only", [
+    ("http://127.0.0.1:8765", ""), ("http://[::1]:8765", ""), (REMOTE, "1")])
+@BASH
+def test_without_python_the_host_rule_decides(bash, tmp_path, url, client_only):
+    proc = _mode(_Shell(bash, tmp_path), daemon_url=url,
+                 prelude="installer_python() { :; }\n")
+    assert proc.returncode == 0, proc.stderr
+    assert f"CLIENT_ONLY={client_only}\n" in proc.stdout
 
 
 @BASH
@@ -322,7 +362,8 @@ def test_a_token_file_without_owner_only_protection_is_refused(bash, tmp_path):
     proc = _preflight(shell, token_file=shell.path(token))
     assert proc.returncode == 1
     assert "owner-only" in proc.stderr
-    assert "--read-token" in proc.stderr
+    # --read-token refuses an existing file, so the advice deletes it first.
+    assert "delete it and re-run with --read-token" in proc.stderr
     assert FIXTURE_TOKEN not in proc.stdout + proc.stderr
     assert not any(call.startswith("curl|") for call in shell.logged())
 
@@ -666,6 +707,46 @@ def test_write_token_file_refuses_a_malformed_token(tmp_path, stdin):
     proc = _helper("write-token-file", "--path", str(target), stdin=stdin)
     assert proc.returncode == 1
     assert not target.exists()
+
+
+def test_check_token_file_refuses_a_leading_byte_order_mark(tmp_path):
+    """U+FEFF is neither whitespace nor a control character, so the shim
+    would send it as part of the bearer and every call would be refused."""
+    token = tmp_path / "bom.token"
+    _write_token_file(token, "﻿" + FIXTURE_TOKEN)
+    proc = _helper("check-token-file", "--path", str(token))
+    assert proc.returncode == 1
+    assert "byte-order mark" in json.loads(proc.stdout)["recovery"]
+    assert FIXTURE_TOKEN.encode() not in proc.stdout + proc.stderr
+
+
+def test_write_token_file_never_writes_a_byte_order_mark(tmp_path):
+    target = tmp_path / "new.token"
+    proc = _helper("write-token-file", "--path", str(target),
+                   stdin=b"\xef\xbb\xbf" + FIXTURE_TOKEN.encode() + b"\r\n")
+    assert proc.returncode == 0, proc.stdout
+    assert not target.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert CredentialProvider(path=target).snapshot().token == FIXTURE_TOKEN
+    assert _helper("check-token-file", "--path", str(target)).returncode == 0
+
+
+def test_write_token_file_loses_a_race_without_replacing_the_winner(tmp_path):
+    """The final path is created exclusively: a file that appears while the
+    token is being read is left alone, and the report says it exists."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("client_credentials_race", HELPER)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    target = tmp_path / "raced.token"
+
+    class RacingStdin:
+        def read(self, size):
+            target.write_bytes(b"winner\n")
+            return FIXTURE_TOKEN.encode() + b"\n"
+
+    with pytest.raises(helper.HelperError, match="already exists"):
+        helper.write_token_file(target, RacingStdin())
+    assert target.read_bytes() == b"winner\n"
 
 
 def test_write_token_file_never_replaces_an_existing_file(tmp_path):

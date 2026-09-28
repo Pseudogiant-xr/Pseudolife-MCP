@@ -48,6 +48,7 @@ TOKEN_KEY = "PSEUDOLIFE_MCP_TOKEN"
 TOKENS_KEY = "PSEUDOLIFE_MCP_TOKENS"
 TOKEN_FILE_KEY = "PSEUDOLIFE_MCP_TOKEN_FILE"
 DAEMON_URL_KEY = "PSEUDOLIFE_MCP_DAEMON_URL"
+BOM = "﻿"
 SOURCE_ENV = "PSEUDOLIFE_INSTALLER_TOKEN"
 MAP_SOURCE_ENV = "PSEUDOLIFE_INSTALLER_TOKENS"
 MINTED_COMMENT = ("# Bearer token minted by the installer: the agent board needs one. "
@@ -268,27 +269,69 @@ def check_token_file(path: Path) -> dict:
     """The shim's own check, so a file the installer accepts is one the
     shim will read. The reason names what is wrong, never the value."""
     try:
-        credentials.CredentialProvider(path=path).snapshot()
+        token = credentials.CredentialProvider(path=path).snapshot().token
     except credentials.CredentialError as error:
         return {"status": "failed", "recovery": str(error)}
+    # U+FEFF is neither whitespace nor a control character, so the shim
+    # would send it as the start of the bearer and every call would fail.
+    if token.startswith(BOM):
+        return {"status": "failed",
+                "recovery": "the file starts with a UTF-8 byte-order mark, which the shim "
+                            "would send as part of the token; write it without one"}
     return {"status": "ready"}
 
 
+def _already_exists(target: Path) -> HelperError:
+    return HelperError(f"{target} already exists; the installer creates a token file "
+                       "but never replaces one")
+
+
 def write_token_file(path: Path, stream) -> dict:
-    """Create ``path`` owner-only from one token read on ``stream``."""
+    """Create ``path`` owner-only from one token read on ``stream``.
+
+    The final path is created exclusively (O_CREAT | O_EXCL, no link
+    followed), so a file that appears meanwhile, even in a race, is never
+    replaced: this run reports that it exists and leaves it alone."""
     target = Path(os.path.abspath(path.expanduser()))
     if target.exists() or target.is_symlink():
-        raise HelperError(f"{target} already exists; the installer creates a token file "
-                          "but never replaces one")
+        raise _already_exists(target)
     data = stream.read(credentials.MAX_TOKEN_BYTES + 3)
     try:
-        token = data.decode("utf-8").rstrip("\r\n")
-        credentials._write_token_file(target, token)
+        # A BOM is never part of a token (a PowerShell 5.1 pipe adds one).
+        token = data.decode("utf-8").removeprefix(BOM).rstrip("\r\n")
+        credentials._decode_token(token.encode("utf-8"))
     except UnicodeDecodeError as error:
         raise HelperError("the token read on stdin is not UTF-8 text") from error
     except credentials.CredentialError as error:
         raise HelperError("the token read on stdin is empty, too long, or holds "
                           "whitespace or control characters") from error
+    credentials._reject_ancestor_redirects(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+             | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        fd = os.open(target, flags, 0o600)
+    except FileExistsError as error:
+        raise _already_exists(target) from error
+    try:
+        try:
+            # Owner-only before a byte is written: the ACL on Windows, the
+            # mode bits elsewhere (the umask may have narrowed 0o600 only).
+            if os.name == "nt":
+                credentials._secure_windows_file(target)
+            else:
+                os.fchmod(fd, 0o600)
+            credentials._validate_file(fd)
+            os.write(fd, token.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        if credentials.CredentialProvider(path=target).snapshot().token != token:
+            raise credentials.CredentialError("credential file validation failed")
+    except BaseException:
+        # This run created the file, so removing a half-written one is safe.
+        target.unlink(missing_ok=True)
+        raise
     return {"status": "written", "path": str(target)}
 
 

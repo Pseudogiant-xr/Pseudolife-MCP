@@ -8176,7 +8176,8 @@ anyone else.
 The simplest way to write it is the installer's `--read-token`
 (`-ReadToken`): it reads the token without echo and writes the
 `--token-file` path owner-only on Linux, macOS and Windows, and only when
-that file does not exist yet. The installer then validates the file with the
+that file does not exist yet: it refuses an existing file, so delete a bad
+one first. The installer then validates the file with the
 shim's own owner-only check on every OS, and refuses a file that would fail
 at session start.
 
@@ -8184,17 +8185,20 @@ By hand on Linux or macOS, without the token touching shell history:
 
 ```bash
 mkdir -p ~/.pseudolife-mcp && chmod 700 ~/.pseudolife-mcp
-( umask 077; read -rs -p "token: " t; printf '%s
-' "$t" > ~/.pseudolife-mcp/claude-code.token )
+( umask 077; read -rs -p "token: " t; printf '%s\n' "$t" > ~/.pseudolife-mcp/claude-code.token )
 ```
 
 By hand on Windows, write the token alone to the file with no byte-order
-mark (a BOM becomes part of the token and every call is rejected), then
-remove inherited access:
+mark (the installer refuses a file that starts with one), then remove
+inherited access:
 
 ```bat
 icacls <file> /inheritance:r /grant:r "%USERNAME%:F"
 ```
+
+Run this from a normal shell, not an elevated one: from an elevated shell a
+new file is owned by Administrators rather than by you, and fails the
+owner-only check. Or let `-ReadToken` write it.
 
 ### With the installer (client-only path)
 
@@ -8227,17 +8231,27 @@ token rotation therefore has to be written to both places.
 ```bash
 pipx install pseudolife-mcp
 
-claude mcp add --scope user pseudolife-memory   -e PSEUDOLIFE_WRITER_ID=claude-code   -e PSEUDOLIFE_MCP_NO_SPAWN=1   -e PSEUDOLIFE_MCP_TOKEN_FILE=<path>   -e PSEUDOLIFE_MCP_DAEMON_URL=<url>   -- <shim path>
+claude mcp add --scope user pseudolife-memory \
+  -e PSEUDOLIFE_WRITER_ID=claude-code \
+  -e PSEUDOLIFE_MCP_NO_SPAWN=1 \
+  -e PSEUDOLIFE_MCP_TOKEN_FILE=<path> \
+  -e PSEUDOLIFE_MCP_DAEMON_URL=<url> \
+  -- <shim path>
 
-codex mcp add pseudolife-memory   --env PSEUDOLIFE_WRITER_ID=codex   --env PSEUDOLIFE_MCP_NO_SPAWN=1   --env PSEUDOLIFE_MCP_TOKEN_FILE=<path>   --env PSEUDOLIFE_MCP_DAEMON_URL=<url>   -- <shim path>
+codex mcp add pseudolife-memory \
+  --env PSEUDOLIFE_WRITER_ID=codex \
+  --env PSEUDOLIFE_MCP_NO_SPAWN=1 \
+  --env PSEUDOLIFE_MCP_TOKEN_FILE=<path> \
+  --env PSEUDOLIFE_MCP_DAEMON_URL=<url> \
+  -- <shim path>
 ```
 
 `<shim path>` is the absolute path of the `pseudolife-mcp` executable pipx
 installed, `<url>` an origin such as `http://100.64.0.2:8765` (no `/mcp`, no
 path).
 
-The shim waits up to 15 seconds for a remote daemon that does not answer,
-which is longer than Codex's default MCP startup timeout. Set the Codex
+The shim waits about 20 seconds for a remote daemon that does not answer (a
+first probe, then a 15-second retry loop), which is longer than Codex's default MCP startup timeout. Set the Codex
 startup timeout as the [README's Codex setup](../../README.md#quickstart)
 describes.
 

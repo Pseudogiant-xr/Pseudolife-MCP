@@ -30,7 +30,7 @@ def _private_fd(fd: int, path: Path, error: type[Exception]) -> None:
     try:
         _secure_windows_file(path)
     except CredentialError as exc:
-        raise error("cannot secure adapter state") from exc
+        raise error("cannot secure the private state file") from exc
 
 
 def open_private(path: Path, flags: int,
@@ -40,7 +40,7 @@ def open_private(path: Path, flags: int,
     is secured (mode 0600 or an owner-only ACL); an existing file is only
     checked, since tightening it cannot prove who wrote it before."""
     if path.is_symlink():
-        raise error("adapter state must be a private regular file")
+        raise error("the private state file must be a private regular file")
     open_flags = flags | getattr(os, "O_NOFOLLOW", 0)
     created = False
     if flags & os.O_CREAT:
@@ -56,7 +56,7 @@ def open_private(path: Path, flags: int,
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-            raise error("adapter state must be a private regular file")
+            raise error("the private state file must be a private regular file")
         # Only newly created files may be secured here. Tightening an existing
         # record's ACL cannot prove who created or previously modified it.
         if created:
@@ -68,7 +68,7 @@ def open_private(path: Path, flags: int,
         else:
             private = info.st_uid == os.geteuid() and not (info.st_mode & 0o077)
         if not private:
-            raise error("adapter state must be private and owned by the current user")
+            raise error("the private state file must be private and owned by the current user")
         return fd
     except BaseException:
         os.close(fd)

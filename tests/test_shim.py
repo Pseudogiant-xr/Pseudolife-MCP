@@ -1259,3 +1259,28 @@ def test_is_loopback_url_is_keyed_on_the_host_only(url, expected):
     from pseudolife_memory.daemon_url import _is_loopback_url
 
     assert _is_loopback_url(url) is expected
+
+
+def test_remote_daemon_probes_use_the_remote_timeout(monkeypatch):
+    """Every probe of a daemon on another machine carries the remote
+    timeout: the loopback default (0.25 s) is shorter than a relayed
+    tailnet round trip, so with it the shim could give up on a daemon that
+    is up. Reverting _REMOTE_PROBE_TIMEOUT_S to the loopback value, or
+    passing the default on any probe, turns this red."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    timeouts = []
+
+    def fake_probe(url, timeout=0.25):
+        timeouts.append(timeout)
+        return {"status": "ok"} if len(timeouts) >= 3 else None
+
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+    shim.ensure_daemon("http://100.64.0.2:8765")
+    assert len(timeouts) == 3
+    assert min(timeouts) >= 2.0, timeouts

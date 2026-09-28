@@ -686,3 +686,31 @@ def test_private_json_needs_no_third_party_modules(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "http://100.64.0.2:8765"
+
+
+def test_hook_verify_needs_no_third_party_modules(tmp_path):
+    """Same rule as the private-file helper: the hook verify step imports
+    ``pseudolife_memory.coordination_identity`` for the digest directory, and
+    that module imported httpx at load, so a bare ``python3`` failed the
+    whole Codex hook setup with a swallowed ModuleNotFoundError (2026-09-28
+    client-only dogfood, second run). The module must import and answer the
+    path questions with the standard library alone."""
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[1]
+    script = (
+        "import sys, os\n"
+        "sys.modules['httpx'] = None\n"
+        "sys.modules['anyio'] = None\n"
+        "from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for\n"
+        "d = default_digest_dir()\n"
+        "print(type(digest_path_for('abc', d)).__name__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        cwd=str(repo), timeout=60,
+        env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("Path")

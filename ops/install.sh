@@ -153,6 +153,20 @@ case "$CLAUDE_LEGACY_HOOKS" in ask|remove|keep) ;; *)
     echo "invalid --claude-legacy-hooks '$CLAUDE_LEGACY_HOOKS' (ask|remove|keep)" >&2; exit 2 ;;
 esac
 
+# Both are needed from here on: the client-only mode block asks this
+# checkout's shim code whether a daemon URL is loopback.
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+installer_python() {  # echoes an interpreter >= 3.10, or nothing
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 0
+}
+
 # >>> client-only mode >>>
 # A client-only install wires this machine's clients to a daemon that runs
 # elsewhere (typically over a tailnet). The URL comes from --daemon-url,
@@ -168,9 +182,25 @@ daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
     esac
     printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
 }
-is_loopback_host() {  # the shim's rule (daemon_url._is_loopback_url)
-    case "$1" in localhost|::1) return 0 ;; esac
-    printf '%s' "$1" | grep -Eq '^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'
+is_loopback_url() {  # $1 = URL; status 0 when it names this machine
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    loopback_py="$(installer_python)"
+    if [ -n "$loopback_py" ]; then
+        loopback_rc=0
+        "$loopback_py" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from pseudolife_memory.daemon_url import _is_loopback_url
+sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)' "$repo" "$1" 2>/dev/null || loopback_rc=$?
+        case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
+    fi
+    loopback_host="$(daemon_url_host "$1")"
+    case "$loopback_host" in localhost|::1) return 0 ;; esac
+    # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
+    printf '%s' "$loopback_host" |
+        grep -Eq '^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'
 }
 CLIENT_ONLY_VIA=""
 daemon_url_from_env=""
@@ -200,7 +230,7 @@ if [ -n "$DAEMON_URL" ]; then
         echo "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)" >&2
         exit 2
     fi
-    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_host "$(daemon_url_host "$DAEMON_URL")"; then
+    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_url "$DAEMON_URL"; then
         CLIENT_ONLY=1
         [ -z "$daemon_url_from_env" ] || CLIENT_ONLY_VIA=" (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
     fi
@@ -226,7 +256,6 @@ elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ]; then
 fi
 # <<< client-only mode <<<
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
@@ -432,16 +461,6 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
-installer_python() {  # echoes an interpreter >= 3.10, or nothing
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 &&
-            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 0
-}
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
 # token file and on the remote daemon answering. The token is never read
@@ -489,7 +508,7 @@ client_only_preflight() {
     token_report=$("$token_py" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
     case "$token_report" in *'"ready"'*) ;; *)
         token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
-        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or create it with --read-token, then re-run" >&2
+        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with --read-token to create it again" >&2
         exit 1 ;;
     esac
     TOKEN_FILE="$(cd "$(dirname "$TOKEN_FILE")" && pwd)/$(basename "$TOKEN_FILE")"
@@ -511,7 +530,7 @@ client_only_preflight() {
         echo "  The daemon must be exposed to this machine, for example through the tailnet: check the host and port, that the daemon listens beyond loopback on its host, and that this machine reaches it (curl $DAEMON_URL/health)." >&2
         exit 1
     fi
-    if ! is_loopback_host "$(daemon_url_host "$DAEMON_URL")"; then
+    if ! is_loopback_url "$DAEMON_URL"; then
         if printf '%s' "$daemon_health" | grep -q '"auth"[[:space:]]*:[[:space:]]*false'; then
             echo "client-only install: the daemon runs without a bearer token (auth: false) at $DAEMON_URL. An unauthenticated bank must never be reached over a network: set PSEUDOLIFE_MCP_TOKEN for the daemon on its host, restart it, and re-run" >&2
             exit 1

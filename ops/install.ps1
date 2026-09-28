@@ -114,6 +114,23 @@ $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites 
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
 $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
 
+# Needed from here on: the client-only mode block asks this checkout's shim
+# code whether a daemon URL is loopback.
+function Get-InstallerPython {
+    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
+    # independently: Store aliases and stale launchers must not block the
+    # next one. Never alters the user's PATH.
+    foreach ($candidate in @("python", "python3", "py")) {
+        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        try {
+            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
+        } catch { continue }
+    }
+    return $null
+}
+
 # >>> client-only mode >>>
 # A client-only install wires this machine's clients to a daemon that runs
 # elsewhere (typically over a tailnet). The URL comes from -DaemonUrl, else
@@ -130,11 +147,23 @@ function Get-DaemonUrlHost([string]$url) {
     } else { ($authority -split ':', 2)[0] }
     return $name.ToLowerInvariant()
 }
-function Test-LoopbackHost([string]$name) {
-    # The shim's rule (daemon_url._is_loopback_url): localhost, or a
-    # loopback address (all of 127.0.0.0/8, and ::1).
+function Test-LoopbackUrl([string]$url) {
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    $python = Get-InstallerPython
+    if ($python) {
+        try {
+            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 10) { return $true }
+            if ($LASTEXITCODE -eq 11) { return $false }
+        } catch { }
+    }
+    $name = Get-DaemonUrlHost $url
     if ($name -eq "localhost") { return $true }
-    if (($name -notmatch '^\d{1,3}(\.\d{1,3}){3}$') -and -not $name.Contains(":")) { return $false }
+    # Dotted quads without leading zeros (Python's ipaddress rejects those).
+    if (($name -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$') -and -not $name.Contains(":")) { return $false }
     $address = $null
     return [Net.IPAddress]::TryParse($name, [ref]$address) -and [Net.IPAddress]::IsLoopback($address)
 }
@@ -160,7 +189,7 @@ if ($DaemonUrl) {
         Write-Host "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)"
         exit 2
     }
-    if (-not $ClientOnly -and -not (Test-LoopbackHost (Get-DaemonUrlHost $DaemonUrl))) {
+    if (-not $ClientOnly -and -not (Test-LoopbackUrl $DaemonUrl)) {
         $ClientOnly = [switch]$true
         if ($daemonUrlFromEnv) {
             $clientOnlyVia = " (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
@@ -381,20 +410,6 @@ if ($interactive) {
 }
 
 # -- 2. preflight --------------------------------------------------------------
-function Get-InstallerPython {
-    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
-    # independently: Store aliases and stale launchers must not block the
-    # next one. Never alters the user's PATH.
-    foreach ($candidate in @("python", "python3", "py")) {
-        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
-        try {
-            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
-        } catch { continue }
-    }
-    return $null
-}
 # The status field of an ops/client_credentials.py JSON report, or $null.
 function Get-HelperStatus($output) {
     try { return [string](($output -join "`n") | ConvertFrom-Json).status } catch { return $null }
@@ -444,7 +459,7 @@ function Invoke-ClientOnlyPreflight {
     $tokenReport = & $tokenPython $helper check-token-file --path $script:TokenFile
     if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
         $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
-        throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or create it with -ReadToken, then re-run"
+        throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
     }
     foreach ($selectedClient in $clients) {
         if (($selectedClient -in "claude", "codex", "gemini") -and
@@ -462,7 +477,7 @@ function Invoke-ClientOnlyPreflight {
         Write-Host "  The daemon must be exposed to this machine, for example through the tailnet: check the host and port, that the daemon listens beyond loopback on its host, and that this machine reaches it (Invoke-RestMethod $DaemonUrl/health)."
         exit 1
     }
-    if (-not (Test-LoopbackHost (Get-DaemonUrlHost $DaemonUrl))) {
+    if (-not (Test-LoopbackUrl $DaemonUrl)) {
         if (($daemonHealth.PSObject.Properties.Name -contains "auth") -and ($daemonHealth.auth -eq $false)) {
             throw "client-only install: the daemon runs without a bearer token (auth: false) at $DaemonUrl. An unauthenticated bank must never be reached over a network: set PSEUDOLIFE_MCP_TOKEN for the daemon on its host, restart it, and re-run"
         }

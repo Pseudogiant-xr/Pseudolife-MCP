@@ -32,14 +32,15 @@ def test_existing_identity_with_unsafe_permissions_is_not_repaired_and_trusted(t
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows handle ACL validation")
 def test_existing_windows_identity_checks_owner_before_mutating_acl(tmp_path, monkeypatch):
-    from pseudolife_memory import credentials, coordination_adapter
+    from pseudolife_memory import credentials, coordination_adapter, private_state
 
     path = tmp_path / "identity.json"
     fd = coordination_adapter._open_state(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     os.close(fd)
     monkeypatch.setattr(credentials, "_windows_owner_only", lambda fd: False)
     mutations = []
-    monkeypatch.setattr(coordination_adapter, "_private_fd", lambda *args: mutations.append(True))
+    # open_private calls private_state's _private_fd, not the adapter's wrapper.
+    monkeypatch.setattr(private_state, "_private_fd", lambda *args: mutations.append(True))
     with pytest.raises(AdapterError, match="private"):
         fd = coordination_adapter._open_state(path, os.O_RDONLY)
         os.close(fd)

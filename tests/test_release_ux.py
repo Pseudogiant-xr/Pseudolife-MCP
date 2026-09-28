@@ -393,6 +393,11 @@ _ALLOWED_TAILNET_PREFIXES = (b"100.64.0.",)
 _TSNET_PAT = re.compile(rb"[a-z0-9<>._-]+\.ts\.net\b")
 _TSNET_PRESCREEN = (b".ts.net",)
 _ALLOWED_TSNET_NAMES = (b"<machine>.<tailnet>.ts.net",)
+# Tailscale's IPv6 range (fd7a:115c:a1e0::/48); no placeholder is sanctioned.
+# A real address carries hex digits after the prefix; the bare range name
+# (prefix, "::", a slash) does not, and may be written down.
+_TAILNET6_PAT = re.compile(rb"\bfd7a:115c:a1e0:[0-9a-f:]*[0-9a-f]")
+_TAILNET6_PRESCREEN = (b"fd7a:115c:a1e0:",)
 _CREDENTIAL_PAT = re.compile(
     rb"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
     rb"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
@@ -441,6 +446,12 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
                 name = m.group(0).decode("ascii", "replace")
                 hits.append((rel, f"tailnet name {name}"))
                 return
+    if any(p in low for p in _TAILNET6_PRESCREEN):
+        m = _TAILNET6_PAT.search(low)
+        if m:
+            ip = m.group(0).decode("ascii", "replace")
+            hits.append((rel, f"tailnet IPv6 address {ip}"))
+            return
 
 
 def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
@@ -618,6 +629,20 @@ def test_identifier_guard_catches_tailnet_addresses_and_names():
     for text in (b"http://100.64.0.2:8765", b"100.64.0.10",
                  b"https://<machine>.<tailnet>.ts.net", b"a 100.63.0.1 (not tailnet)",
                  b"100.128.0.1 (outside the /10)"):
+        hits = []
+        _scan_identifiers("x.md", text, hits)
+        assert not hits, (text, hits)
+
+
+def test_identifier_guard_catches_tailnet_ipv6_addresses():
+    """Tailscale also hands every node an address in fd7a:115c:a1e0::/48;
+    a real one identifies a machine just like the IPv4 form. No placeholder
+    is sanctioned: docs use the IPv4 placeholder."""
+    hits: list = []
+    _scan_identifiers("x.md", b"at [fd7a:115c:" + b"a1e0::a33:376f]:8765", hits)
+    assert hits
+    for text in (b"fd7a:115d:a1e0::1 is not in the /48",
+                 b"the range fd7a:115c:a1e0::/48 itself may be named"):
         hits = []
         _scan_identifiers("x.md", text, hits)
         assert not hits, (text, hits)
