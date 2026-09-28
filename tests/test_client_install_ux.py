@@ -149,13 +149,14 @@ def test_hook_installers_wire_user_prompt_submit_for_both_clients() -> None:
 
 def test_installers_offer_dreamer_model_choice() -> None:
     """Claude-shim installs prompt for the dreamer model (2026-08-04): all
-    four current Anthropic tiers are offered, Opus is the recommended
-    default (dreamer-choice-verdict.json), and the choice reaches the
+    current Anthropic tiers are offered, Opus is the recommended default
+    (dreamer-choice-verdict.json; Opus 5.5 since 2026-09-29, on
+    ladder-opus55-paired-verdict-threshold.json), and the choice reaches the
     autostart script instead of being hardcoded there."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        for model in ("claude-opus-5", "claude-sonnet-5",
+        for model in ("claude-opus-5", "claude-opus-5-5", "claude-sonnet-5",
                       "claude-haiku-4-5", "claude-fable-5"):
             assert model in text, f"missing model option: {model}"
     assert "-Model $Model" in ps          # choice forwarded to autostart
@@ -165,9 +166,11 @@ def test_installers_offer_dreamer_model_choice() -> None:
 def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
     ps = _read("ops/install-shim-autostart.ps1")
     sh = _read("ops/install-shim-autostart.sh")
-    # Opus stays the non-interactive default (measured winner).
-    assert 'Model = "claude-opus-5"' in ps
-    assert 'MODEL="claude-opus-5"' in sh
+    # Opus 5.5 is the non-interactive default since 2026-09-29: it clears
+    # the paired extraction-ladder gate with no regression against Opus 5,
+    # the 2026-08-02 measured winner.
+    assert 'Model = "claude-opus-5-5"' in ps
+    assert 'MODEL="claude-opus-5-5"' in sh
     assert "--model" in sh
     # The Linux unit must launch the shim that exists: evals/claude_shim.py
     # (sonnet_shim.py was renamed; a unit pointing at it fails at start).
@@ -178,14 +181,15 @@ def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
 
 def test_installers_offer_codex_extractor_modes() -> None:
     """A ChatGPT-plan adopter gets the same one-shot path a Max-plan user has
-    (2026-08-31): codex-only / codex-fallback extractor modes with a GPT-5.6
+    (2026-08-31): openai-only / openai-fallback extractor modes (named
+    codex-only / codex-fallback until 2026-09-28) with a GPT-5.6
     dreamer-model prompt. Terra is the non-interactive default (the shim's
     own default; nothing is quality-measured yet, and the menus must say so
     rather than borrow the Claude modes' 'recommended')."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        for needle in ("codex-only", "codex-fallback", "gpt-5.6-sol",
+        for needle in ("openai-only", "openai-fallback", "gpt-5.6-sol",
                        "gpt-5.6-terra", "gpt-5.6-luna", "unmeasured"):
             assert needle in text, f"missing: {needle}"
     # A model from the wrong family must be rejected up front, not passed
@@ -221,15 +225,16 @@ def test_codex_shim_autostart_scripts_mirror_the_claude_pair() -> None:
 
 
 def test_installer_env_block_covers_codex_modes() -> None:
-    """codex-fallback / codex-only write the same env-triple shapes as the
-    sonnet pair (fallback => auto + sidecar pair; only => primary), and the
+    """openai-fallback / openai-only write the same env-triple shapes as the
+    claude pair (fallback => auto + sidecar pair; only => primary), and the
     installer-managed override marker keeps recognizing files written by
-    pre-codex installs (legacy '(sonnet-only)' text) while writing the
-    generalized marker."""
+    earlier installs (the '(sonnet-only)' and '(shim-only extractor)' texts)
+    while writing the generalized marker."""
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert "managed override (shim-only extractor)" in text
+        assert "managed override (sidecar disabled)" in text
+        assert "managed override (shim-only extractor)" in text  # legacy accepted
         assert "managed override (sonnet-only)" in text     # legacy accepted
     # codex modes reach the autostart stage with the codex script, not the
     # claude one.
@@ -256,7 +261,7 @@ def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
 def test_shim_modes_fail_fast_on_a_missing_cli() -> None:
     """The shim family's CLI is checked right after the extractor choice,
     BEFORE volumes/env/compose — preflight only knows -Client, so
-    `-Extractor codex-fallback -Client claude` used to sail through
+    `-Extractor openai-fallback -Client claude` used to sail through
     preflight and die at stage 8 with the stack already up (2026-08-31
     review finding; symmetric fix for the claude modes)."""
     ps = _read("ops/install.ps1")

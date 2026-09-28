@@ -8,9 +8,11 @@
 #
 #   ops/install.sh                                  # interactive
 #   ops/install.sh --extractor sidecar --client codex
-#   ops/install.sh --extractor sonnet-only --client claude,gemini
-#   ops/install.sh --extractor sonnet-fallback --instructions append
-#   ops/install.sh --extractor codex-fallback --client codex
+#   ops/install.sh --extractor claude-only --client claude,gemini
+#   ops/install.sh --extractor claude-fallback --instructions append
+#   ops/install.sh --extractor openai-fallback --client codex
+#   ops/install.sh --extractor endpoint --extractor-url http://127.0.0.1:1234/v1 \
+#       --model qwen3.6-27b --client claude
 #   ops/install.sh --daemon-url http://100.64.0.2:8765 \
 #       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
 #
@@ -38,7 +40,13 @@
 #   --no-art                         plain output (no banner, no color)
 #   --no-token                       open-loopback install: mint no bearer
 #                                    token, so the agent board stays off
-#   --model / --shim-port / --transport   as before
+#   --model <name>                   the dreamer model: one the CLI shim modes
+#                                    list (docs/guide/dreaming.md), or any
+#                                    name an endpoint mode's server serves
+#   --extractor-url <url>            endpoint modes: the server's
+#                                    OpenAI-compatible base URL (where /models
+#                                    and /chat/completions live, usually /v1)
+#   --shim-port / --transport        as before
 #
 # Client-only install (this machine runs no daemon; one runs elsewhere,
 # typically reached over a tailnet): no Docker, volumes, ops/.env, token
@@ -62,21 +70,29 @@
 # each run with that client's own token file.
 #
 # Extractor modes (spec: docs/superpowers/specs/
-# 2026-07-14-installer-extractor-choice-design.md):
-#   sonnet-only      Claude shim only — the ~11.8 GB sidecar image is never built
-#                    or pulled; dreams pause while the shim is down
-#   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar as
-#                    automatic fallback (needs a logged-in Max-plan CLI)
-#   codex-only       Codex (ChatGPT-plan) shim only — sidecar never built;
-#                    extraction quality unmeasured (docs/guide/dreaming.md)
-#   codex-fallback   Codex shim primary, sidecar as automatic fallback
+# 2026-07-14-installer-extractor-choice-design.md; the modes and models:
+# docs/guide/dreaming.md, "Extractor modes and dreamer models"):
+#   claude-only      Claude CLI shim only — the ~11.8 GB sidecar image is never
+#                    built or pulled; dreams pause while the shim is down
+#   claude-fallback  Claude CLI shim primary, sidecar as automatic fallback
+#                    (needs a logged-in Max-plan CLI)
+#   openai-only      Codex CLI (ChatGPT-plan) shim only — sidecar never built
+#   openai-fallback  Codex CLI shim primary, sidecar as automatic fallback
+#   endpoint         any OpenAI-compatible server you name (--extractor-url,
+#                    --model) — sidecar never built
+#   endpoint-fallback  that server primary, sidecar as automatic fallback
 #   sidecar          bundled local CPU extractor only (stock default; no
-#                    Claude Max plan needed)
+#                    plan or server needed)
+# The earlier spellings sonnet-only, sonnet-fallback, codex-only and
+# codex-fallback still work, as deprecated aliases of the claude-* and
+# openai-* modes.
 # <<< usage <<<
 set -euo pipefail
 
 EXTRACTOR=""
+EXTRACTOR_URL=""
 MODEL=""
+MODEL_SET=""
 CLIENT=""
 CODEX_HOOKS=auto
 CODEX_HOOK_TRUST=ask
@@ -104,7 +120,8 @@ usage() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --extractor) EXTRACTOR="$2"; shift 2 ;;
-        --model) MODEL="$2"; shift 2 ;;
+        --extractor-url) EXTRACTOR_URL="$2"; shift 2 ;;
+        --model) MODEL="$2"; MODEL_SET=1; shift 2 ;;
         --client) CLIENT="$2"; shift 2 ;;
         --codex-hooks) CODEX_HOOKS="$2"; shift 2 ;;
         --codex-hook-trust) CODEX_HOOK_TRUST="$2"; shift 2 ;;
@@ -125,12 +142,109 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
-case "$EXTRACTOR" in ""|sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only) ;; *)
-    echo "invalid --extractor '$EXTRACTOR' (sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only)" >&2; exit 2 ;;
+# >>> extractor modes >>>
+# The dream extractor modes, named for the extractor family, and the models
+# the CLI shim modes offer. tests/test_extractor_model_lists.py keeps these
+# lists identical to install.ps1's, the Claude shim autostart scripts',
+# docs/guide/dreaming.md's and the Console's. The model lists are the menu,
+# not a gate: a CLI shim mode passes an id it does not list to the shim
+# unchanged, so a model release is usable the day it ships.
+EXTRACTOR_MODES="sidecar claude-only claude-fallback openai-only openai-fallback endpoint endpoint-fallback"
+CLAUDE_MODELS="claude-opus-5-5 claude-opus-5 claude-sonnet-5 claude-haiku-4-5 claude-fable-5"
+OPENAI_MODELS="gpt-5.6-terra gpt-5.6-sol gpt-5.6-luna gpt-6-sol gpt-6-luna"
+# The model-era names (2026-07-14 to 2026-09-28) stay accepted.
+extractor_alias=""
+case "$EXTRACTOR" in
+    sonnet-only) extractor_alias=claude-only ;;
+    sonnet-fallback) extractor_alias=claude-fallback ;;
+    codex-only) extractor_alias=openai-only ;;
+    codex-fallback) extractor_alias=openai-fallback ;;
 esac
-case "$MODEL" in ""|claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna) ;; *)
-    echo "invalid --model '$MODEL' (claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna)" >&2; exit 2 ;;
-esac
+if [ -n "$extractor_alias" ]; then
+    echo "note: --extractor $EXTRACTOR is a deprecated spelling of --extractor $extractor_alias, which this run uses." >&2
+    EXTRACTOR="$extractor_alias"
+fi
+EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+extractor_disables_sidecar() {  # status 0 for the single-extractor modes
+    case "$EXTRACTOR" in claude-only|openai-only|endpoint) return 0 ;; *) return 1 ;; esac
+}
+model_is_blank() {  # status 0 for a --model given empty or all whitespace
+    { [ -n "${MODEL_SET:-}" ] || [ -n "$MODEL" ]; } &&
+        [ -z "$(printf '%s' "$MODEL" | tr -d '[:space:]')" ]
+}
+# What may reach ops/.env (compose expands $ and reads " #" as a comment),
+# a systemd ExecStart line and a Windows task's command line unquoted: model
+# ids and endpoint URLs are held to these characters. Brackets are allowed
+# in a URL only, for an IPv6 host.
+SAFE_ID_PATTERN='^[A-Za-z0-9._:/@+-]+$'
+SAFE_URL_PATTERN='^[][A-Za-z0-9._:/@+-]+$'
+check_extractor_args() {  # the mode, its model and its URL, together
+    if model_is_blank; then
+        echo "--model needs a model id (it was empty)" >&2
+        exit 2
+    fi
+    if [ -n "$MODEL" ] && ! printf '%s' "$MODEL" | grep -Eq "$SAFE_ID_PATTERN"; then
+        echo "--model '$MODEL' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -" >&2
+        exit 2
+    fi
+    case " $EXTRACTOR_MODES " in *" $EXTRACTOR "*) ;; *)
+        echo "invalid --extractor '$EXTRACTOR' ($(printf '%s' "$EXTRACTOR_MODES" | tr ' ' '|'))" >&2
+        exit 2 ;;
+    esac
+    case "$EXTRACTOR" in
+        endpoint|endpoint-fallback)
+            # Any server's own model names: none is listed here.
+            if [ -z "$EXTRACTOR_URL" ] || [ -z "$MODEL" ]; then
+                echo "--extractor $EXTRACTOR needs --extractor-url <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and --model <a model name that server serves>" >&2
+                exit 2
+            fi
+            # Checked before any other message, which never echoes the URL.
+            url_authority="${EXTRACTOR_URL#*://}"
+            case "${url_authority%%/*}" in *@*)
+                echo "--extractor-url must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env" >&2
+                exit 2 ;;
+            esac
+            case "$EXTRACTOR_URL" in http://?*|https://?*) ;; *)
+                echo "invalid --extractor-url: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1" >&2
+                exit 2 ;;
+            esac
+            if ! printf '%s' "$EXTRACTOR_URL" | grep -Eq "$SAFE_URL_PATTERN"; then
+                echo "invalid --extractor-url: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)" >&2
+                exit 2
+            fi ;;
+        *)
+            if [ -n "$EXTRACTOR_URL" ]; then
+                echo "--extractor-url applies only to --extractor endpoint or endpoint-fallback" >&2
+                exit 2
+            fi
+            # One family rule, the same in install.ps1, before any note: a
+            # shim only honours its own family's ids per request.
+            if [ -n "$MODEL" ]; then
+                case "$EXTRACTOR:$MODEL" in
+                    sidecar:*|claude-only:claude-?*|claude-fallback:claude-?*) ;;
+                    openai-only:gpt-?*|openai-only:codex-?*) ;;
+                    openai-fallback:gpt-?*|openai-fallback:codex-?*) ;;
+                    *)
+                        echo "--model '$MODEL' does not match extractor mode $EXTRACTOR: a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id" >&2
+                        exit 2 ;;
+                esac
+            fi
+            case " $CLAUDE_MODELS $OPENAI_MODELS " in *" $MODEL "*) ;; *)
+                if [ -n "$MODEL" ] && [ "$EXTRACTOR" = sidecar ]; then
+                    echo "--model '$MODEL' is not one this installer knows, and --extractor sidecar serves only its bundled model; --model picks a CLI shim or endpoint mode's model" >&2
+                    exit 2
+                elif [ -n "$MODEL" ]; then
+                    echo "model $MODEL is not in this installer's known list; passing it to the shim unchanged (add it to the lists when it is a real release)" >&2
+                fi ;;
+            esac ;;
+    esac
+}
+if model_is_blank; then
+    echo "--model needs a model id (it was empty)" >&2
+    exit 2
+fi
+[ -z "$EXTRACTOR" ] || check_extractor_args
+# <<< extractor modes <<<
 case "$CLAUDE_MD" in ""|append|skip) ;; *)
     echo "invalid --claude-md '$CLAUDE_MD' (append|skip)" >&2; exit 2 ;;
 esac
@@ -242,6 +356,7 @@ if [ -n "$CLIENT_ONLY" ]; then
     fi
     local_flags=""
     [ -z "$EXTRACTOR" ] || local_flags="$local_flags --extractor"
+    [ -z "${EXTRACTOR_URL:-}" ] || local_flags="$local_flags --extractor-url"
     [ -z "$MODEL" ] || local_flags="$local_flags --model"
     [ "$SHIM_PORT" = 0 ] || local_flags="$local_flags --shim-port"
     [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
@@ -259,10 +374,12 @@ fi
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
-OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
+OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sidecar disabled) — do not edit; installer rewrites/removes this file"
 # Pre-codex installs wrote the mode-specific text; keep recognizing it so a
 # mode switch still removes/rewrites their override file.
 LEGACY_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
+# ... and the text between the codex modes (2026-08-31) and the endpoint modes.
+LEGACY_SHIM_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
 ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 ENV_END="# <<< pseudolife-mcp install <<<"
 
@@ -554,46 +671,56 @@ fi
 # A client-only install has none: the remote daemon runs its own extractor.
 if [ -z "$EXTRACTOR" ] && [ -z "$CLIENT_ONLY" ]; then
     if [ ! -t 0 ]; then
-        echo "Non-interactive run: --extractor sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only is required." >&2
+        echo "Non-interactive run: --extractor $(printf '%s' "$EXTRACTOR_MODES" | tr ' ' '|') is required." >&2
         exit 2
     fi
     echo ""
     echo "Which dream extractor should consolidate memories?"
-    echo "  1) sonnet-only      — lightest: Claude shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
-    echo "  2) sonnet-fallback  — Claude shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
-    echo "  3) sidecar          — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
-    echo "  4) codex-fallback   — Codex (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
-    echo "  5) codex-only       — Codex shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+    echo "  1) claude-only       — lightest: Claude CLI shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+    echo "  2) claude-fallback   — Claude CLI shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+    echo "  3) sidecar           — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+    echo "  4) openai-fallback   — Codex CLI (ChatGPT-plan) shim primary, sidecar auto-fallback (ladder-measured at parity with the Claude ceiling — see docs/guide/dreaming.md)"
+    echo "  5) openai-only       — Codex CLI shim only; sidecar never built (ladder-measured; dreams pause when the shim is down)"
+    echo "  6) endpoint          — any OpenAI-compatible server you name (LM Studio, Ollama, vLLM, a hosted API); sidecar never built"
+    echo "  7) endpoint-fallback — that server primary, sidecar auto-fallback (~11.8 GB image)"
     while [ -z "$EXTRACTOR" ]; do
-        printf "Choose 1/2/3/4/5: "
+        printf "Choose 1-7: "
         read -r choice
         case "$choice" in
-            1) EXTRACTOR=sonnet-only ;;
-            2) EXTRACTOR=sonnet-fallback ;;
+            1) EXTRACTOR=claude-only ;;
+            2) EXTRACTOR=claude-fallback ;;
             3) EXTRACTOR=sidecar ;;
-            4) EXTRACTOR=codex-fallback ;;
-            5) EXTRACTOR=codex-only ;;
-            *) echo "  please answer 1-5" ;;
+            4) EXTRACTOR=openai-fallback ;;
+            5) EXTRACTOR=openai-only ;;
+            6) EXTRACTOR=endpoint ;;
+            7) EXTRACTOR=endpoint-fallback ;;
+            *) echo "  please answer 1-7" ;;
         esac
     done
+    case "$EXTRACTOR" in endpoint|endpoint-fallback)
+        while [ -z "$EXTRACTOR_URL" ]; do
+            printf "The server's OpenAI-compatible base URL (e.g. http://127.0.0.1:1234/v1): "
+            read -r EXTRACTOR_URL
+            EXTRACTOR_URL="${EXTRACTOR_URL%/}"
+        done
+        while [ -z "$MODEL" ]; do
+            printf "The model name that server serves: "
+            read -r MODEL
+        done ;;
+    esac
+    check_extractor_args
 fi
 [ -n "$CLIENT_ONLY" ] || step "Extractor mode: $EXTRACTOR"
 claude_shim_mode=""; codex_shim_mode=""
-case "$EXTRACTOR" in sonnet-only|sonnet-fallback) claude_shim_mode=1 ;; esac
-case "$EXTRACTOR" in codex-only|codex-fallback) codex_shim_mode=1 ;; esac
+case "$EXTRACTOR" in claude-only|claude-fallback) claude_shim_mode=1 ;; esac
+case "$EXTRACTOR" in openai-only|openai-fallback) codex_shim_mode=1 ;; esac
 if [ "$SHIM_PORT" = 0 ]; then
     if [ -n "$codex_shim_mode" ]; then SHIM_PORT=8086; else SHIM_PORT=8082; fi
 fi
 # A model from the wrong family would silently serve the shim's launch
-# default (the per-request override only honours its own prefixes).
-case "$MODEL" in
-    claude-*) [ -z "$codex_shim_mode" ] || {
-        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
-    gpt-*) [ -z "$claude_shim_mode" ] || {
-        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
-esac
+# default: check_extractor_args (the extractor modes block) refuses it.
 # Fail fast on a missing shim CLI: preflight only knows --client, so e.g.
-# --extractor codex-fallback --client claude would otherwise sail through
+# --extractor openai-fallback --client claude would otherwise sail through
 # and die at the autostart stage with the stack already up.
 if [ -n "$claude_shim_mode" ] && ! command -v claude >/dev/null 2>&1; then
     echo "claude CLI not found (needed by extractor mode $EXTRACTOR) —" >&2
@@ -605,54 +732,87 @@ if [ -n "$codex_shim_mode" ] && ! command -v codex >/dev/null 2>&1; then
     echo "  install Codex and run \`codex login\`: https://developers.openai.com/codex/cli/" >&2
     exit 1
 fi
+# >>> endpoint preflight >>>
+# An endpoint mode's server must answer before the stack is configured to
+# depend on it. Any HTTP answer from <url>/models counts: a server may list
+# no models, and a key it wants (PSEUDOLIFE_DREAM_API_KEY) is never taken on
+# the command line, so a 401 is a warning, not a refusal.
+endpoint_preflight() {
+    command -v curl >/dev/null 2>&1 || {
+        echo "curl is needed to check the extractor endpoint; install it, then re-run." >&2
+        exit 1; }
+    endpoint_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$EXTRACTOR_URL/models" 2>/dev/null)" || true
+    case "$endpoint_code" in
+        2??) step "Extractor endpoint answered at $EXTRACTOR_URL/models." ;;
+        401|403)
+            echo "WARNING: $EXTRACTOR_URL/models answered HTTP $endpoint_code: the server wants a key. Set PSEUDOLIFE_DREAM_API_KEY in ops/.env (outside the installer's managed block) before the first dream." >&2 ;;
+        [1-5]??)
+            echo "WARNING: $EXTRACTOR_URL/models answered HTTP $endpoint_code. The server is reachable; if dreams fail, check that the URL is its OpenAI-compatible base (usually ending in /v1)." >&2 ;;
+        *)
+            echo "The extractor endpoint did not answer at $EXTRACTOR_URL/models. Start the server, or correct the URL (its OpenAI-compatible base, usually ending in /v1), then re-run." >&2
+            exit 1 ;;
+    esac
+}
+# <<< endpoint preflight <<<
+case "$EXTRACTOR" in endpoint|endpoint-fallback) endpoint_preflight ;; esac
 
 # ── 3b. dreamer model choice (Claude-shim modes only) ──────────────────────
-# Opus is the recommended default per the 2026-08-02 same-harness comparison
-# (evals/results/dreamer-choice-verdict.json). The shim honours per-request
+# Opus is the recommended family per the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json, run on claude-opus-5); Opus 5.5
+# is the default since 2026-09-29, when it cleared the paired extraction-ladder
+# gate with no regression against claude-opus-5
+# (evals/results/ladder-opus55-paired-verdict-threshold.json). The shim honours per-request
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
 if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
     if [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
-        echo "  1) claude-opus-5    — recommended: best measured extraction quality"
-        echo "  2) claude-sonnet-5  — balanced"
-        echo "  3) claude-haiku-4-5 — fastest / lightest on plan usage"
-        echo "  4) claude-fable-5   — most capable tier"
+        echo "  1) claude-opus-5-5  — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        echo "  2) claude-opus-5    — the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
+        echo "  3) claude-sonnet-5  — balanced"
+        echo "  4) claude-haiku-4-5 — fastest / lightest on plan usage"
+        echo "  5) claude-fable-5   — most capable tier"
         while [ -z "$MODEL" ]; do
-            printf "Choose 1/2/3/4 (Enter = 1): "
+            printf "Choose 1/2/3/4/5 (Enter = 1): "
             read -r choice
             case "$choice" in
-                ""|1) MODEL=claude-opus-5 ;;
-                2) MODEL=claude-sonnet-5 ;;
-                3) MODEL=claude-haiku-4-5 ;;
-                4) MODEL=claude-fable-5 ;;
-                *) echo "  please answer 1, 2, 3 or 4" ;;
+                ""|1) MODEL=claude-opus-5-5 ;;
+                2) MODEL=claude-opus-5 ;;
+                3) MODEL=claude-sonnet-5 ;;
+                4) MODEL=claude-haiku-4-5 ;;
+                5) MODEL=claude-fable-5 ;;
+                *) echo "  please answer 1, 2, 3, 4 or 5" ;;
             esac
         done
     else
-        MODEL=claude-opus-5
+        MODEL=claude-opus-5-5
     fi
     step "Dreamer model: $MODEL"
 fi
-# GPT-5.6 menu: no 'recommended' — extraction quality is unmeasured for all
-# three (the ladder's terra rung exists to measure it); Terra is only the
-# shim's balanced default.
+# GPT menu: no 'recommended' — extraction quality is unmeasured for all of
+# them (the ladder's terra rung exists to measure it); Terra is only the
+# shim's balanced default. The GPT-6 ids were accepted by the Codex CLI on
+# 2026-09-29; no ladder run has measured them.
 if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
     if [ -t 0 ]; then
         echo ""
-        echo "Which GPT-5.6 model should extract memories (the 'dreamer')?"
+        echo "Which GPT model should extract memories (the 'dreamer')?"
         echo "  1) gpt-5.6-terra — balanced default (extraction quality unmeasured)"
         echo "  2) gpt-5.6-sol   — flagship (unmeasured)"
         echo "  3) gpt-5.6-luna  — fastest / lightest on plan usage (unmeasured)"
+        echo "  4) gpt-6-sol     — GPT-6 flagship (unmeasured)"
+        echo "  5) gpt-6-luna    — GPT-6 fastest / lightest (unmeasured)"
         while [ -z "$MODEL" ]; do
-            printf "Choose 1/2/3 (Enter = 1): "
+            printf "Choose 1/2/3/4/5 (Enter = 1): "
             read -r choice
             case "$choice" in
                 ""|1) MODEL=gpt-5.6-terra ;;
                 2) MODEL=gpt-5.6-sol ;;
                 3) MODEL=gpt-5.6-luna ;;
-                *) echo "  please answer 1, 2 or 3" ;;
+                4) MODEL=gpt-6-sol ;;
+                5) MODEL=gpt-6-luna ;;
+                *) echo "  please answer 1, 2, 3, 4 or 5" ;;
             esac
         done
     else
@@ -672,6 +832,52 @@ if [ -z "$CLIENT_ONLY" ]; then
 fi
 
 # ── 5. managed env block ───────────────────────────────────────────────────
+# >>> extractor env >>>
+# What the managed block of ops/.env says about the extractor. The daemon
+# runs in Docker, where this host is host.docker.internal (extra_hosts in
+# ops/docker-compose.yml), so a server named on loopback is written that way.
+extractor_container_url() {  # $1 = URL; echoes it as written for the daemon container
+    url_scheme="${1%%://*}"
+    url_rest="${1#*://}"
+    url_authority="${url_rest%%/*}"
+    url_path="${url_rest#"$url_authority"}"
+    case "$url_authority" in
+        \[*) url_host="${url_authority%%]*}]" ;;
+        *) url_host="${url_authority%%:*}" ;;
+    esac
+    url_port="${url_authority#"$url_host"}"
+    case "$url_host" in localhost|\[::1\]|127.*) url_host=host.docker.internal ;; esac
+    printf '%s://%s%s%s\n' "$url_scheme" "$url_host" "$url_port" "$url_path"
+}
+extractor_env_lines() {
+    case "$EXTRACTOR" in
+        sidecar)
+            echo "# extractor: sidecar (stock defaults — nothing to set)" ;;
+        claude-fallback|openai-fallback)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
+            echo "PSEUDOLIFE_DREAM_MODEL=extractor"
+            echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
+            echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
+            echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto" ;;
+        claude-only|openai-only)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
+            echo "PSEUDOLIFE_DREAM_MODEL=extractor"
+            # `primary` (not `auto`): states the single-extractor intent and
+            # keeps the auto-without-fallback startup warning silent.
+            echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary" ;;
+        endpoint|endpoint-fallback)
+            echo "PSEUDOLIFE_DREAM_BASE_URL=$(extractor_container_url "$EXTRACTOR_URL")"
+            echo "PSEUDOLIFE_DREAM_MODEL=$MODEL"
+            if [ "$EXTRACTOR" = endpoint-fallback ]; then
+                echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
+                echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
+                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto"
+            else
+                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary"
+            fi ;;
+    esac
+}
+# <<< extractor env <<<
 # Daemon-side writer default: a single first-class provider gets its own id;
 # any multi-provider or generic install falls back to the neutral id — the
 # per-provider ids then ride each MCP registration's env instead (stage 10).
@@ -691,26 +897,17 @@ if [ -z "$CLIENT_ONLY" ]; then
         "$env_file" > "$tmp" && mv "$tmp" "$env_file"
     {
         echo "$ENV_BEGIN"
-        case "$EXTRACTOR" in
-            sidecar)
-                echo "# extractor: sidecar (stock defaults — nothing to set)" ;;
-            sonnet-fallback|codex-fallback)
-                echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
-                echo "PSEUDOLIFE_DREAM_MODEL=extractor"
-                echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
-                echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
-                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto" ;;
-            sonnet-only|codex-only)
-                echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
-                echo "PSEUDOLIFE_DREAM_MODEL=extractor"
-                # `primary` (not `auto`): states the single-extractor intent and
-                # keeps the auto-without-fallback startup warning silent.
-                echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary" ;;
-        esac
+        extractor_env_lines
         echo "PSEUDOLIFE_WRITER_ID=$WRITER_ID"
         echo "$ENV_END"
     } >> "$env_file"
     step "Wrote managed block in ops/.env"
+    case "$EXTRACTOR" in endpoint|endpoint-fallback)
+        endpoint_in_container="$(extractor_container_url "$EXTRACTOR_URL")"
+        [ "$endpoint_in_container" = "$EXTRACTOR_URL" ] ||
+            step "Extractor endpoint written as $endpoint_in_container: the daemon runs in Docker, where this host is host.docker.internal."
+        echo "    If the server wants a key, set PSEUDOLIFE_DREAM_API_KEY in ops/.env outside the managed block." ;;
+    esac
 fi
 
 # ── 5b. bearer token (the agent board needs one) ──────────────────────────
@@ -763,15 +960,17 @@ fi
 # <<< mint token <<<
 
 # ── 6. sidecar enable/disable via the compose override ────────────────────
+# >>> sidecar override >>>
 installer_owns_override() {
     [ -f "$override_file" ] || return 1
     local first
     first="$(head -1 "$override_file")"
-    [ "$first" = "$OVERRIDE_MARKER" ] || [ "$first" = "$LEGACY_OVERRIDE_MARKER" ]
+    [ "$first" = "$OVERRIDE_MARKER" ] || [ "$first" = "$LEGACY_OVERRIDE_MARKER" ] ||
+        [ "$first" = "$LEGACY_SHIM_OVERRIDE_MARKER" ]
 }
 if [ -n "$CLIENT_ONLY" ]; then
     :  # no local daemon here, so its compose override is not this run's to change
-elif [ "$EXTRACTOR" = "sonnet-only" ] || [ "$EXTRACTOR" = "codex-only" ]; then
+elif extractor_disables_sidecar; then
     if [ ! -f "$override_file" ] || installer_owns_override; then
         cat > "$override_file" <<EOF
 $OVERRIDE_MARKER
@@ -801,6 +1000,7 @@ else
         step "Removed installer-managed override (sidecar re-enabled)"
     fi
 fi
+# <<< sidecar override <<<
 
 # ── 7. bring the stack up ──────────────────────────────────────────────────
 if [ -z "$CLIENT_ONLY" ]; then
@@ -2068,6 +2268,44 @@ for selected_client in $CLIENTS; do
 done
 
 # ── 12. health ─────────────────────────────────────────────────────────────
+# >>> endpoint container probe >>>
+# A server named on this machine's loopback is written as host.docker.internal
+# (the extractor env block). Docker Desktop routes that name to this
+# machine's loopback; Linux Docker Engine routes it to the docker bridge,
+# where a server bound only to 127.0.0.1 is not listening (the same trap
+# ops/install-shim-autostart.sh binds the Claude shim around). So once the
+# daemon is up, the endpoint is asked from inside its container, the only
+# place the answer means anything.
+ENDPOINT_CONTAINER=""
+endpoint_container_probe() {
+    case "$EXTRACTOR" in endpoint|endpoint-fallback) ;; *) return 0 ;; esac
+    probe_url="$(extractor_container_url "$EXTRACTOR_URL")"
+    [ "$probe_url" != "$EXTRACTOR_URL" ] || return 0
+    if [ "$(uname -s 2>/dev/null)" = Linux ]; then
+        step "Note: on Linux, host.docker.internal is the docker bridge address, so a server listening only on 127.0.0.1 is out of the daemon container's reach."
+    fi
+    # Any HTTP answer counts: a 401 or 404 still means the server is there.
+    if docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$probe_url" >/dev/null 2>&1; then
+        ENDPOINT_CONTAINER=reachable
+        step "The daemon's container reaches the extractor endpoint at $probe_url."
+    else
+        ENDPOINT_CONTAINER=unreachable
+        if [ "$EXTRACTOR" = endpoint-fallback ]; then endpoint_until="dreams fall back to the sidecar"
+        else endpoint_until="dreams pause"; fi
+        echo "WARNING: the daemon's container cannot reach the extractor endpoint at $probe_url/models. A server on this machine must listen where the container can reach it, not only on 127.0.0.1: OLLAMA_HOST=0.0.0.0 (or the docker bridge address) for Ollama, llama-server --host <bridge address>, LM Studio's \"Serve on Local Network\". Restart the server so; the daemon retries every sweep, and until then $endpoint_until." >&2
+    fi
+}
+describe_endpoint_container() {
+    case "${ENDPOINT_CONTAINER:-}" in
+        reachable) echo "  [x] Extractor endpoint   reachable from the daemon's container" ;;
+        unreachable) echo "  [!] Extractor endpoint   not reachable from the daemon's container - see the warning above" ;;
+    esac
+}
+# <<< endpoint container probe <<<
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if [ -z "$CLIENT_ONLY" ]; then
@@ -2085,6 +2323,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         exit 1
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    endpoint_container_probe
 fi
 
 # >>> client-only claude hook >>>
@@ -2246,14 +2485,20 @@ case "$TOKEN_STATE" in minted|present)
 esac
 echo ""
 # <<< board line <<<
+describe_endpoint_container
 case "$EXTRACTOR" in
     sidecar)
         echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;
-    sonnet-fallback|codex-fallback)
+    claude-fallback|openai-fallback)
         echo "Verify: memory_dream(action=\"status\") — fallback_url set and primary_healthy: true (shim up)." ;;
-    sonnet-only|codex-only)
+    claude-only|openai-only)
         echo "Verify: memory_dream(action=\"status\") — primary_url on :$SHIM_PORT, extractor_mode: primary."
         echo "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out." ;;
+    endpoint-fallback)
+        echo "Verify: memory_dream(action=\"status\") — primary_url on your endpoint, fallback_url set, primary_healthy: true." ;;
+    endpoint)
+        echo "Verify: memory_dream(action=\"status\") — primary_url on your endpoint, extractor_mode: primary."
+        echo "Note: dreams pause (and retry next sweep) whenever the endpoint is down." ;;
 esac
 if [ -n "$codex_shim_mode" ]; then
     echo "Note: Codex-served extraction quality is unmeasured — see the 'OpenAI primary' section of docs/guide/dreaming.md."

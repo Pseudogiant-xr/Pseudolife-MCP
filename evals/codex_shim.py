@@ -356,7 +356,8 @@ def make_handler(cli: CodexCli):
                     {"id": m, "object": "model"}
                     for m in dict.fromkeys([
                         cli.model, "gpt-5.6-sol", "gpt-5.6-terra",
-                        "gpt-5.6-luna", "extractor", "bench"])]})
+                        "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna",
+                        "extractor", "bench"])]})
             else:
                 self._json(404, {"error": "not found"})
 

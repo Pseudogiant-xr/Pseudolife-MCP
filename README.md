@@ -231,16 +231,22 @@ consolidate memories —
 
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone, and keeps every memory on the box (~11.8 GB image);
-- **sonnet-only** — the lightest install: a Claude model via a CLI shim
-  (`claude-opus-5` by default; the mode name is historical. Needs a
-  logged-in Max-plan `claude` CLI); the sidecar image is **never built or
-  pulled** (~11.8 GB lighter; dreams pause while the shim is down);
-- **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
+- **claude-only** — the lightest install: a Claude model via a CLI shim
+  (`claude-opus-5-5` by default since 2026-09-29, when it cleared the
+  extraction-ladder gate against `claude-opus-5`; needs a logged-in
+  Max-plan `claude` CLI);
+  the sidecar image is **never built or pulled** (~11.8 GB lighter; dreams
+  pause while the shim is down);
+- **claude-fallback** — the Claude shim primary, the bundled sidecar as
   automatic fallback (Max-plan CLI plus the ~11.8 GB image);
-- **codex-only / codex-fallback** — the same two shapes on an OpenAI
-  subscription: a GPT-5.6 model (Sol / Terra / Luna) via the Codex CLI
+- **openai-only / openai-fallback** — the same two shapes on an OpenAI
+  subscription: a GPT-5.6 or GPT-6 model (Terra by default) via the Codex CLI
   shim on a signed-in ChatGPT plan (extraction quality unmeasured — see
-  the [dreaming guide](docs/guide/dreaming.md)) —
+  the [dreaming guide](docs/guide/dreaming.md));
+- **endpoint / endpoint-fallback** — any OpenAI-compatible server you name
+  (`--extractor-url`, `--model`: LM Studio, Ollama, vLLM, a hosted API),
+  alone or with the sidecar as fallback. The earlier names `sonnet-*` and
+  `codex-*` still work as deprecated spellings —
 
 then brings the stack up, installs the selected clients' session hooks
 (where the client has a hook system), registers the MCP transport (the
@@ -497,7 +503,7 @@ in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
 image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
 ~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
-bake; skip the sidecar entirely with the installer's `sonnet-only` mode).
+bake; skip the sidecar entirely with the installer's `claude-only` mode).
 The ~12.6 GB and ~10.4 GB figures published before
 2026-07-29 are retired: both were inflated by a CUDA torch build that a
 dependency-resolution bug pulled into the image (see the CHANGELOG); the

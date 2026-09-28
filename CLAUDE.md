@@ -296,6 +296,30 @@ took 143 CUDA OOMs.
   `evals/judge_determinism_check.py` measures the floor directly;
   `evals/analyze_extractor_comparison.py` reports it beside each paired test.
 
+## Extractor model and mode lists
+
+The installer's extractor modes, and the dreamer models its CLI shim modes
+offer, are written in several places: `ops/install.sh` (`EXTRACTOR_MODES`,
+`CLAUDE_MODELS`, `OPENAI_MODELS` and its menus), `ops/install.ps1` (the same
+three lists, its menus and the `-Extractor` ValidateSet), the `Claude
+models:` / `OpenAI models:` help text of the shims' autostart scripts
+(`ops/install-shim-autostart.*`, `ops/install-codex-shim-autostart.*`), the
+"Extractor modes and dreamer models" section of `docs/guide/dreaming.md`,
+the Console's `DREAMER_MODELS` (`pseudolife_memory/web/static/js/views/
+console.js`), the Extractor panel's `extractor_model_override` suggestions
+(`pseudolife_memory/web/config_io.py`) and both shims' `/models` lists
+(`evals/claude_shim.py`, `evals/codex_shim.py`). The lists are the menu, not
+a gate: a CLI shim mode passes a model id they do not hold to the shim
+unchanged, with one line saying so, so a new release is usable the day it
+ships. When a new Claude or OpenAI model is a real release, add it to every
+list in one change; `tests/test_extractor_model_lists.py` fails while any
+list differs, and while the places that name a default (the autostart
+scripts, the installers' menu entry 1 and non-interactive choice, the guide)
+disagree. A new model joins as an option: it becomes the default, and takes
+the "recommended" wording, only after a ladder run has measured it (see the
+"Eval- or retrieval-affecting changes" bullet under Review discipline), and
+the claim it replaces is retired at its old site, not deleted.
+
 ## Pull requests
 
 - **Open the body with 1–3 plain-language sentences: the problem as a user

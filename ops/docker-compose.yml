@@ -128,7 +128,7 @@ services:
     # No depends_on for the extractor: dream extraction is runtime HTTP with
     # per-sweep retry (a probe against a still-loading extractor just fails
     # and retries next sweep), and the sidecar must be disableable via a
-    # `profiles:` override for sonnet-only installs — a hard dependency on a
+    # `profiles:` override for claude-only installs — a hard dependency on a
     # profile-disabled service is a compose error.
     depends_on:
       pseudolife-pg:

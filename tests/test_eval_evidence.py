@@ -8938,6 +8938,80 @@ def test_the_v5_gate_budget_clause_holds():
     assert _tok_max(*runs) / budget < 0.45
 
 
+# ── claude-opus-5-5 against claude-opus-5 on the shim (2026-09-28) ─────────
+#
+# The gate the Claude-shim default moved on (maintainer decision 2026-09-29).
+# The arm files cannot say which model the shim served (rung `opus-5`, the
+# daemon's alias `extractor`), so the verdict carries `served_model` from the
+# shim's serving lines, recorded by the operator at run time; it is pinned
+# here with the table, the gate and the no-regression predicate.
+O55_PRE = RESULTS + "opus-5-opus55-pre.json"
+O55_PRE2 = RESULTS + "opus-5-opus55-pre-rep2.json"
+O55_POST = RESULTS + "opus-5-opus55-post.json"
+O55_POST2 = RESULTS + "opus-5-opus55-post-rep2.json"
+O55_THRESH = RESULTS + "ladder-opus55-paired-verdict-threshold.json"
+_O55_ROW_PRE = ("| pre | claude-opus-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                "`opus-5-opus55-pre.json` |")
+_O55_ROW_PRE2 = ("| pre, rep 2 | claude-opus-5 | 1.0 | 0.0 | 13.9 | 16 / 16 | "
+                 "`opus-5-opus55-pre-rep2.json` |")
+_O55_ROW_POST = ("| post | claude-opus-5-5 | 1.0 | 0.0 | 13.7 | 17 / 17 | "
+                 "`opus-5-opus55-post.json` |")
+_O55_ROW_POST2 = ("| post, rep 2 | claude-opus-5-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | "
+                  "`opus-5-opus55-post-rep2.json` |")
+_O55_GATE = ("`ladder-opus55-paired-verdict-threshold.json` reads `gate: PASS` and "
+             "`no_regression_gate: PASS`")
+_O55_SERVED = ("its `served_model` field reads `claude-opus-5` for the pre arm and "
+               "`claude-opus-5-5` for the post arm")
+_O55_SPREAD = "the token ranges (pre 13.9–14.8, post 13.7–14.8) overlap"
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    *[(f"o55-{_arm}-{_key}", EVALS, _row, _run, _fn, _n, _p)
+      for _arm, _row, _run, _tok, _claims in (
+          ("pre", _O55_ROW_PRE, O55_PRE, 14.8, 16),
+          ("pre2", _O55_ROW_PRE2, O55_PRE2, 13.9, 16),
+          ("post", _O55_ROW_POST, O55_POST, 13.7, 17),
+          ("post2", _O55_ROW_POST2, O55_POST2, 14.8, 16))
+      for _key, _fn, _n, _p in (
+          ("gold", lambda d: d["gold_recoverable"], 1.0, 1),
+          ("stale", lambda d: d["stale_leak"], 0.0, 1),
+          ("tokens", lambda d: d["tokens_per_query"], _tok, 1),
+          ("claims", _sp_tally("claims"), _claims, 0),
+          ("inserted", _sp_tally("inserted"), _claims, 0))],
+    ("o55-gate", EVALS, _O55_GATE, O55_THRESH,
+     lambda d: float(d["gate"] == "PASS"), 1, 0),
+    ("o55-no-regression-gate", EVALS, _O55_GATE, O55_THRESH,
+     lambda d: float(d["no_regression_gate"] == "PASS"), 1, 0),
+    ("o55-cleared", EVALS, _O55_GATE, O55_THRESH,
+     _thr_rung("opus-5", "cleared"), 1, 0),
+    ("o55-no-regression", EVALS, _O55_GATE, O55_THRESH,
+     _thr_rung("opus-5", "no_regression"), 1, 0),
+    ("o55-served-pre", EVALS, _O55_SERVED, O55_THRESH,
+     lambda d: float(d["served_model"]["pre"] == "claude-opus-5"), 1, 0),
+    ("o55-served-post", EVALS, _O55_SERVED, O55_THRESH,
+     lambda d: float(d["served_model"]["post"] == "claude-opus-5-5"), 1, 0),
+    ("o55-spread-pre-lo", EVALS, _O55_SPREAD, O55_PRE2,
+     lambda d: d["tokens_per_query"], 13.9, 1),
+    ("o55-spread-pre-hi", EVALS, _O55_SPREAD, O55_PRE,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+    ("o55-spread-post-lo", EVALS, _O55_SPREAD, O55_POST,
+     lambda d: d["tokens_per_query"], 13.7, 1),
+    ("o55-spread-post-hi", EVALS, _O55_SPREAD, O55_POST2,
+     lambda d: d["tokens_per_query"], 14.8, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,), value=_val,
+        stated=_stated, places=_places))
+
+
+def test_the_opus55_verdict_says_which_model_each_arm_served():
+    """The arm files record the rung, not the model; without this field the
+    gate the default moved on could not show it compared 5.5 against 5."""
+    served = _load_artifact(O55_THRESH)["served_model"]
+    assert served["pre"] == "claude-opus-5"
+    assert served["post"] == "claude-opus-5-5"
+    assert "serving lines" in served["source"]
+
+
 # docs/guide/benchmarks.md — the third honest limit.
 _BM_TYPE_1 = ("spread evenly across question types: `temporal-reasoning` "
               "carries **+12 of")

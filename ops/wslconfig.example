@@ -7,7 +7,7 @@
 #   native bf16) or ~4 GiB with fp32, hard-capped at 6 GiB; extractor = the
 #   default Gemma 4 E4B v3 bake, a ~5.3 GB model that llama.cpp mmaps (it
 #   unloads after 5 idle minutes). Plan ~9-10 GiB for the full stack under
-#   dream load, ~3-4.5 GiB for sonnet-only installs (no sidecar); encode
+#   dream load, ~3-4.5 GiB for claude-only installs (no sidecar); encode
 #   bursts add up to ~1 GiB. If the VM itself runs out first, its kernel
 #   picks the process to kill (possibly Postgres) instead of the daemon's
 #   container cap restarting just the daemon, so leave headroom.

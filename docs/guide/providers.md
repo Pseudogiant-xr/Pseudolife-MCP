@@ -80,11 +80,12 @@ startup briefing is not a relevance-ranked answer to a prompt it has not seen.
 The provider that *talks* to the bank and the model that *consolidates* it
 are separate choices, and the installer wires both. `--extractor` /
 `-Extractor` takes `sidecar` (the bundled CPU model, the default),
-`sonnet-fallback` / `sonnet-only` (a Claude Max plan via the CLI shim), or
-`codex-fallback` / `codex-only` (a ChatGPT plan via the Codex CLI shim) —
-independently of `--client`. Any OpenAI-compatible endpoint works without a
-shim at all. See [Dreaming](dreaming.md) for the wiring and the measured
-extraction quality per model.
+`claude-fallback` / `claude-only` (a Claude Max plan via the CLI shim),
+`openai-fallback` / `openai-only` (a ChatGPT plan via the Codex CLI shim),
+or `endpoint` / `endpoint-fallback` (any OpenAI-compatible server, no shim:
+`--extractor-url` and `--model`) — independently of `--client`. See
+[Dreaming](dreaming.md#extractor-modes-and-dreamer-models) for the modes,
+the models and the measured extraction quality per model.
 
 ## Claude Code
 

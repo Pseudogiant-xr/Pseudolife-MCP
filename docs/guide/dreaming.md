@@ -323,12 +323,85 @@ stdio mode), the `$env:` variables above apply directly and `localhost`
 URLs work as-is. A local or LAN model keeps all memory text on your
 network; the same env triple pointed at a hosted endpoint does not.
 
+## Extractor modes and dreamer models
+
+The one-shot installers take the extractor as a mode
+(`ops/install.sh --extractor <mode>`, `ops\install.ps1 -Extractor <mode>`);
+re-running with another mode switches it.
+
+| Mode | Primary extractor | Bundled sidecar |
+|---|---|---|
+| `sidecar` | the bundled CPU sidecar | built and run |
+| `claude-only` | a Claude model through the Claude CLI shim (Max plan) | never built |
+| `claude-fallback` | a Claude model through the Claude CLI shim (Max plan) | automatic fallback |
+| `openai-only` | a GPT model through the Codex CLI shim (ChatGPT plan) | never built |
+| `openai-fallback` | a GPT model through the Codex CLI shim (ChatGPT plan) | automatic fallback |
+| `endpoint` | any OpenAI-compatible server you name | never built |
+| `endpoint-fallback` | any OpenAI-compatible server you name | automatic fallback |
+
+The endpoint modes take the server's base URL and one of its model names:
+`--extractor endpoint --extractor-url http://127.0.0.1:1234/v1 --model
+<name>` (Windows: `-ExtractorUrl`). The installer checks that
+`<url>/models` answers (a server that lists no models, or wants a key, is
+warned about, not refused), writes `PSEUDOLIFE_DREAM_BASE_URL` and
+`PSEUDOLIFE_DREAM_MODEL` into its managed block of `ops/.env`, and writes a
+server on this machine's loopback as `host.docker.internal`, the name the
+daemon's container is given for this machine. Docker Desktop routes it to
+this machine's loopback; Linux Docker Engine routes it to the docker bridge,
+so there a server listening only on `127.0.0.1` is out of the container's
+reach: bind it to the bridge address or all interfaces (`OLLAMA_HOST`,
+`llama-server --host`, LM Studio's "Serve on Local Network"). Once the stack
+is up the installer asks the server from inside the daemon container and
+warns, marking the extractor endpoint `[!]` in its summary, when it cannot
+reach it. A key the server needs goes in `PSEUDOLIFE_DREAM_API_KEY` by hand,
+outside the managed block; the installer never takes one on its command
+line. A model id or URL is held to letters, digits and `. _ : / @ + -`, and
+a URL carrying `user:password@` is refused.
+
+The names used until 2026-09-28, `sonnet-only`, `sonnet-fallback`,
+`codex-only` and `codex-fallback`, are still accepted as deprecated
+spellings of `claude-only`, `claude-fallback`, `openai-only` and
+`openai-fallback`.
+
+The CLI shim modes offer these dreamer models (`--model`, or the installer's
+menu):
+
+- Claude:
+  - `claude-opus-5-5`: the default. It clears the extraction-ladder gate with
+    no regression against Opus 5
+    (`evals/results/ladder-opus55-paired-verdict-threshold.json`,
+    2026-09-28).
+  - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
+    comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
+    (`evals/results/dreamer-choice-verdict.json`).
+  - `claude-sonnet-5`: balanced.
+  - `claude-haiku-4-5`: fastest, lightest on plan usage.
+  - `claude-fable-5`: the most capable tier.
+- OpenAI:
+  - `gpt-5.6-terra`: the default, balanced.
+  - `gpt-5.6-sol`: flagship.
+  - `gpt-5.6-luna`: fastest, lightest on plan usage.
+  - `gpt-6-sol`: GPT-6 flagship.
+  - `gpt-6-luna`: GPT-6 fastest, lightest.
+
+No ladder run has measured the OpenAI models yet; the GPT-6 ids were
+accepted by the Codex CLI on 2026-09-29.
+
+These lists are the menu, not a gate: a CLI shim mode takes a model id it
+does not list, says so in one line, and passes it to the shim unchanged, so
+a new release is usable the day it ships. The id must still be the mode's
+family (`claude-*` for the claude modes, `gpt-*` or `codex-*` for the openai
+modes), since a shim honours only its own family per request. An endpoint mode takes whatever
+model name its server serves. `tests/test_extractor_model_lists.py` keeps
+these lists, and the default, the same in both installers, the shims'
+autostart scripts, this guide and the Console.
+
 ## Claude primary with local fallback
 
 With a Claude Max plan, the dream pass can use a Claude model as its primary
 extractor and keep the bundled local sidecar as an automatic fallback. The
 installer does all of this in one go —
-`ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip the
+`ops/install.sh --extractor claude-fallback` (or `claude-only` to skip the
 sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
@@ -341,7 +414,9 @@ steps:
      reboot — see
      [anthropics/claude-code#61635](https://github.com/anthropics/claude-code/issues/61635);
      `-Model` picks the served default —
-     `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
+     `claude-opus-5-5` since 2026-09-29, when it cleared the paired
+     extraction-ladder gate against `claude-opus-5`, the default the
+     2026-08-02 dreamer comparison chose; the one-shot
      installer prompts for this choice on Claude-shim installs). Re-running
      the installer replaces a shim already serving the port: it stops that
      process tree first, then waits (`-StartupTimeoutSec`, default 90 s)
@@ -349,8 +424,9 @@ steps:
      and fails, rather than reporting success, if no listener appears.
    The shim also honors a concrete `claude-*` model named per request, so
    the Console's **Dreamer** card switches the dreamer live — one click
-   between `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` /
-   `claude-fable-5` (or any `claude-*` name typed in), no shim restart and
+   between `claude-opus-5-5` / `claude-opus-5` / `claude-sonnet-5` /
+   `claude-haiku-4-5` / `claude-fable-5` (or any `claude-*` name typed in),
+   no shim restart and
    no settings-source flip; alias names like the compose default
    `extractor` keep the launch model.
    - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit, same
@@ -395,10 +471,11 @@ OpenAI-compatible endpoint on `127.0.0.1:8086`, serving `gpt-5.6-terra` by
 default. The one-shot installer wires the whole mode:
 
 ```bash
-ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\install.ps1 -Extractor codex-fallback
+ops/install.sh --extractor openai-fallback     # or openai-only; Windows: ops\install.ps1 -Extractor openai-fallback
 ```
 
-which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
+which prompts for the GPT dreamer (GPT-5.6 Terra / Sol / Luna, GPT-6 Sol /
+Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
 Scheduler, elevated pwsh opened from the Start menu, same caveat as the
 Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
@@ -409,7 +486,7 @@ stale-ok window only costs one failed primary attempt before the dream
 falls back. To run it by hand instead:
 
 ```bash
-python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the default
+python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna / gpt-6-sol / gpt-6-luna to change the default
 ```
 
 then point the env triple at it exactly as in step 2 above, with
@@ -417,7 +494,8 @@ then point the env triple at it exactly as in step 2 above, with
 Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
 accordingly). Either way the shim honours a concrete `gpt-*` or `codex-*`
 name per request, so the Console's **Dreamer** card switches between
-`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` live, exactly like the
+`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` / `gpt-6-sol` /
+`gpt-6-luna` live, exactly like the
 Claude presets. On Windows the shim finds the official installer's
 `codex.exe` on its own (the `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`
 layout is off PATH and rotates on auto-update — the shim re-resolves the

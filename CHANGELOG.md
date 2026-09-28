@@ -6,6 +6,81 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
+- The one-shot installers' extractor modes are renamed from the models that
+  were current when they were written: `claude-only` / `claude-fallback`
+  (were `sonnet-only` / `sonnet-fallback`) and `openai-only` /
+  `openai-fallback` (were `codex-only` / `codex-fallback`); `sidecar` is
+  unchanged. The old names still work in `ops/install.sh --extractor` and
+  `ops/install.ps1 -Extractor`, with a one-line note that they are
+  deprecated spellings. The installer-managed compose override is now
+  marked `(sidecar disabled)`; files carrying the earlier `(sonnet-only)`
+  or `(shim-only extractor)` marker are still recognised as the
+  installer's own. [Extractor modes and dreamer models](docs/guide/dreaming.md#extractor-modes-and-dreamer-models)
+- New modes `endpoint` and `endpoint-fallback`: any OpenAI-compatible
+  server the operator names, `--extractor endpoint --extractor-url <base
+  url> --model <name>` (Windows: `-ExtractorUrl`). The model may be any name
+  the server serves (the fixed model list applies only to the CLI shim
+  modes). The installer checks that `<url>/models` answers before it
+  configures anything (an unreachable server is refused; a 401/403 or
+  another HTTP status only warns, since a server may list no models or want
+  a key), writes `PSEUDOLIFE_DREAM_BASE_URL` and `PSEUDOLIFE_DREAM_MODEL`
+  into its managed block of `ops/.env` (a loopback host as
+  `host.docker.internal`, the daemon container's name for this machine), and
+  disables the sidecar for `endpoint` while `endpoint-fallback` keeps it as
+  the automatic fallback. A key goes in `PSEUDOLIFE_DREAM_API_KEY` by hand;
+  the installer never takes one on its command line.
+- `claude-opus-5-5` joins the Claude dreamer models: both installers' lists
+  and menus, the Claude shim autostart scripts' help, the Console's
+  Dreamer card, the Extractor panel's suggestions and the Claude shim's
+  `/models` list. On the paired extraction ladder (Claude shim, v5 prompt,
+  two replicates per arm) `claude-opus-5-5` clears the gate with no
+  regression and is not distinguishable from `claude-opus-5` at the ladder
+  ceiling (`evals/results/ladder-opus55-paired-verdict-threshold.json`; the
+  arm files record the rung, not the model, so the verdict's `served_model`
+  field records the shim's serving lines: `claude-opus-5` pre,
+  `claude-opus-5-5` post). The default stayed `claude-opus-5` until the
+  maintainer decision below. `tests/test_extractor_model_lists.py` now fails
+  when any of these lists, or the mode lists of the installers and the
+  dreaming guide, differ.
+- **`claude-opus-5-5` is the default Claude-shim extractor** (maintainer
+  decision 2026-09-29): the shim autostart scripts' default, the installers'
+  recommended menu entry and non-interactive choice, the guide, the README
+  and the Console's Dreamer card. It clears the extraction-ladder gate with
+  no regression against `claude-opus-5`
+  (`evals/results/ladder-opus55-paired-verdict-threshold.json`, 2026-09-28);
+  the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality)
+  (`evals/results/dreamer-choice-verdict.json`) ran on `claude-opus-5`, which
+  stays in the list. A non-interactive re-run of the installer moves an
+  existing Opus 5 shim to 5.5; pass `--model claude-opus-5` (`-Model` on
+  Windows) to keep it. The guard test now also fails when the places naming
+  a default disagree, or a menu number and its case arm name different
+  models.
+- `gpt-6-sol` and `gpt-6-luna` join the OpenAI dreamer models (both ids
+  accepted by the Codex CLI on 2026-09-29): both installers' lists and
+  menus, the Codex shim autostart scripts' help, the guide, the Console and
+  the Codex shim's `/models` list. The OpenAI default stays `gpt-5.6-terra`;
+  no ladder run has measured GPT-6.
+- On Linux, an endpoint on this machine's loopback is out of the daemon
+  container's reach (`host.docker.internal` is the docker bridge there), so
+  once the stack is up the installer asks it from inside the container
+  (`docker exec pseudolife-mcp-daemon python ...`); when the container
+  cannot reach it, the installer warns with the fix (`OLLAMA_HOST`,
+  `llama-server --host`, LM Studio's "Serve on Local Network") and marks the
+  extractor endpoint `[!]`. Model ids and endpoint URLs are held to letters,
+  digits and `. _ : / @ + -` before they reach `ops/.env` or a command line,
+  and a URL carrying credentials is refused without being echoed. The two
+  installers now share one family rule: claude modes take `claude-*` ids,
+  openai modes `gpt-*` or `codex-*` ids, refused otherwise before any
+  pass-through note. The PowerShell endpoint check now reads a redirect as a
+  reachable server, as the bash one does (under the script's
+  `ErrorAction Stop` pwsh 7.6.6 turned it into an error).
+- A CLI shim mode's `--model` / `-Model` takes an id the installer does not
+  list: it prints one line (`model <id> is not in this installer's known
+  list; passing it to the shim unchanged ...`) and passes it on, so a model
+  release is usable the day it ships. An empty or whitespace id is still
+  refused, and so is an unlisted id with `--extractor sidecar`, which serves
+  only its bundled model.
 ### Added (2026-09-28 — a stalled dream extractor is reported, not silent)
 - When live dreams stop being served, the daemon now says so. On 2026-08-11
   the primary extractor's CLI login had been expired for over a day and ten
