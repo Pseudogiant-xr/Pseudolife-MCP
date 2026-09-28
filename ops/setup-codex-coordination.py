@@ -97,9 +97,14 @@ def wake_path(effective, env, board, board_reason, bank_token):
     since 2026-09-28) or ``pull-only``, read the way ``pseudolife_memory.shim``
     reads the switches and ``pseudolife-mcp doctor`` reports them.
     ``bank_token`` is the bearer the shim would send, from the token file
-    when one is configured, which is what it compares the bridge's with."""
+    when one is configured, which is what it compares the bridge's with.
+    A missing bearer is caught before here: --check's board needs one, and
+    --enable refuses without one."""
     def value(key):
         return str(effective(key) or "").strip()
+
+    def raw(key):  # the shim reads the bridge values unstripped
+        return str(effective(key) or "")
 
     if not board:
         return "pull-only", board_reason
@@ -108,17 +113,22 @@ def wake_path(effective, env, board, board_reason, bank_token):
     if value("PSEUDOLIFE_AGENT_STATE"):
         return "pull-only", ("PSEUDOLIFE_AGENT_STATE is set, which turns Codex "
                              "coordination off")
-    if not bank_token:
-        return "pull-only", "no bearer token"  # the board registry needs one
-    bridge_token = value("PSEUDOLIFE_CODEX_SERVER_TOKEN")
+    bridge_token = raw("PSEUDOLIFE_CODEX_SERVER_TOKEN")
     if (value("PSEUDOLIFE_AGENT_WAKE").lower() in TRUTHY
-            and value("PSEUDOLIFE_CODEX_SERVER_URL") and bridge_token
+            and raw("PSEUDOLIFE_CODEX_SERVER_URL") and bridge_token
             and bridge_token != bank_token):
         return "live", "PSEUDOLIFE_AGENT_WAKE with the app-server bridge"
     doorbell = value("PSEUDOLIFE_CODEX_DOORBELL")
     if doorbell and doorbell.lower() not in TRUTHY:
         return "pull-only", f"PSEUDOLIFE_CODEX_DOORBELL={doorbell}"
+    # PATH and the rest come from the launching environment, but the CLI
+    # override is read where the shim gets it (the server's env or a
+    # forwarded variable), so the lookup and its reason agree. Doctor
+    # (doctor_cli.py _codex_wake) merges the whole environment instead.
     lookup = {**os.environ, **{key: str(item) for key, item in env.items()}}
+    lookup.pop("PSEUDOLIFE_CODEX_BIN", None)
+    if value("PSEUDOLIFE_CODEX_BIN"):
+        lookup["PSEUDOLIFE_CODEX_BIN"] = value("PSEUDOLIFE_CODEX_BIN")
     if codex_cli(lookup) is None:
         return "pull-only", ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
                              "existing file" if value("PSEUDOLIFE_CODEX_BIN")
@@ -196,7 +206,9 @@ def configure(client, home, cwd, action):
     if access == "principal_not_allowed":
         report["reason"] = PRINCIPAL_REASON
     if action == "check":
-        if mode == "disabled":
+        if not server.get("enabled", True):
+            board, board_reason = False, "the Pseudolife MCP server is disabled in Codex"
+        elif mode == "disabled":
             board_reason = f"PSEUDOLIFE_AGENT_COORDINATION={setting}"
         elif not token:
             board_reason = "no bearer token"

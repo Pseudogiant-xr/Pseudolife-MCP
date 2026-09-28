@@ -549,8 +549,9 @@ doorbell](#codex-doorbell), on by default since 2026-09-28, so a ready
 registration with a `codex` CLI reports it) or `pull-only`, and
 `wake_reason` says why: the switch that turned it off
 (`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`), `no codex
-CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, or the board
-question the daemon answered no to.
+CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a fixed
+`PSEUDOLIFE_AGENT_STATE`, a server disabled in Codex, or the board question
+the daemon answered no to.
 
 `python ops/setup-codex-coordination.py --enable` is only for pinning explicit
 mode (`PSEUDOLIFE_AGENT_COORDINATION=1`), after which the check reports

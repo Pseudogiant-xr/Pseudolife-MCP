@@ -2,6 +2,7 @@
 import importlib.util
 import hmac
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -549,7 +550,12 @@ def test_check_requires_codex_writer_and_enabled_server(tmp_path, monkeypatch):
     assert setup.configure(client, tmp_path, tmp_path, "check")["status"] == "needs-configuration"
     server["env"]["PSEUDOLIFE_WRITER_ID"] = "codex"
     server["enabled"] = False
-    assert setup.configure(client, tmp_path, tmp_path, "check")["status"] == "needs-configuration"
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: ["codex"])
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "needs-configuration"
+    # Codex never starts a disabled server, so nothing rings (#439 review).
+    assert (result["wake"], result["wake_reason"]) == (
+        "pull-only", "the Pseudolife MCP server is disabled in Codex")
 
 
 def test_enable_verifies_effective_values_after_write(tmp_path, monkeypatch):
@@ -693,6 +699,8 @@ def test_check_is_pull_only_without_a_codex_cli_or_a_served_board(tmp_path, monk
     assert "does not serve the board" in result["wake_reason"]
 
     monkeypatch.setattr(setup, "served", lambda *args: True)
+    # The real probe answers "unavailable" without a bearer.
+    monkeypatch.setattr(setup, "probe", lambda url, token: "ready" if token else "unavailable")
     env.pop("PSEUDOLIFE_MCP_TOKEN")
     result = setup.configure(client, tmp_path, tmp_path, "check")
     assert (result["wake"], result["wake_reason"]) == ("pull-only", "no bearer token")
@@ -726,7 +734,7 @@ def test_codex_cli_lookup_reads_the_servers_env_over_the_process_env(monkeypatch
                   "PSEUDOLIFE_CODEX_BIN": "from-server"}
     path, _ = setup.wake_path(server_env.get, server_env, True, "", "private-fixture")
     assert path == "doorbell"
-    assert seen == [{**dict(__import__("os").environ), **server_env}]
+    assert seen == [{**os.environ, **server_env}]
 
 
 def _codex_writer(client):
@@ -1093,3 +1101,33 @@ def test_real_codex_runtime_defaults_use_versioned_config_interface(
     assert readback["mcp_servers"]["unrelated"]["command"] == "fixture-command"
     assert readback["hooks"]["state"]["fixture"]["trusted_hash"] == trusted_hash
     assert config.read_text().startswith("# Preserved user comment")
+
+
+def test_codex_bin_is_read_from_what_the_shim_sees(monkeypatch):
+    """The lookup and its reason read PSEUDOLIFE_CODEX_BIN from the same place
+    the shim gets it: the server's env or a forwarded variable, never an
+    unforwarded launching-shell value (#439 review)."""
+    seen = []
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: seen.append(lookup) or None)
+    monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", "relative/codex")
+    server_env = {"PSEUDOLIFE_WRITER_ID": "codex"}
+    path, reason = setup.wake_path(server_env.get, server_env, True, "", "private-fixture")
+    assert (path, reason) == ("pull-only", "no codex CLI")
+    assert "PSEUDOLIFE_CODEX_BIN" not in seen[-1]
+    # Forwarded, it is what the shim sees, and the reason names it.
+    forwarded = lambda key: server_env.get(key, os.environ.get(key)
+                                           if key == "PSEUDOLIFE_CODEX_BIN" else None)
+    path, reason = setup.wake_path(forwarded, server_env, True, "", "private-fixture")
+    assert seen[-1]["PSEUDOLIFE_CODEX_BIN"] == "relative/codex"
+    assert "PSEUDOLIFE_CODEX_BIN" in reason
+
+
+def test_bridge_values_are_compared_raw_as_the_shim_does(monkeypatch):
+    """The shim reads the bridge URL and token unstripped and compares the
+    token with its bearer as is; a padded copy of the bearer is a different
+    credential to it, so live stays live (#439 review)."""
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: ["codex"])
+    env = {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_AGENT_WAKE": "1",
+           "PSEUDOLIFE_CODEX_SERVER_URL": "ws://127.0.0.1:4500",
+           "PSEUDOLIFE_CODEX_SERVER_TOKEN": "private-fixture "}
+    assert setup.wake_path(env.get, env, True, "", "private-fixture")[0] == "live"

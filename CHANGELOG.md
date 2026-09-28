@@ -22,8 +22,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `wake_reason` names the gate that decided it
   (`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`, `no
   codex CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a
-  fixed `PSEUDOLIFE_AGENT_STATE`, or the board question the daemon answered
-  no to). `--disable` reports `pull-only` with the master switch.
+  fixed `PSEUDOLIFE_AGENT_STATE`, a server disabled in Codex, or the board
+  question the daemon answered no to). `--disable` reports `pull-only` with the master switch.
 - `examples/hook-instructions.md` (the maintainer host's dialect for
   `<data_dir>/hook-instructions.md`) no longer asks every full suite for a
   hand-sent `SUITE-START`/`SUITE-END`: a run that takes the lock mirrors
