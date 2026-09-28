@@ -4321,14 +4321,24 @@ without `PSEUDOLIFE_AGENT_COORDINATION` reports `ready (default-on)` when the
 daemon serves the board to its bearer, the same question the shim asks at
 startup. Nothing more is needed then. When it reports `needs-configuration`
 because the daemon refuses the bearer's principal, its `reason` says so
-(below).
+(below). The report also names the wake path the shim would take with this
+registration, read the way the shim reads the switches and `pseudolife-mcp
+doctor` reports them: `wake` is `live` (the [app-server
+bridge](#optional-codex-live-delivery)), `doorbell` (the [Codex
+doorbell](#codex-doorbell), on by default since 2026-09-28, so a ready
+registration with a `codex` CLI reports it) or `pull-only`, and
+`wake_reason` says why: the switch that turned it off
+(`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`), `no codex
+CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, or the board
+question the daemon answered no to.
 
 `python ops/setup-codex-coordination.py --enable` is only for pinning explicit
 mode (`PSEUDOLIFE_AGENT_COORDINATION=1`), after which the check reports
 `ready (explicit)`. In explicit mode the shim skips the startup question and
 keeps the adapter's own diagnostics. Enable also sets `PSEUDOLIFE_WRITER_ID=codex`
 and `PSEUDOLIFE_MCP_NO_SPAWN=1`. It leaves `PSEUDOLIFE_AGENT_WAKE` as it is:
-unset means pull-only, and a live-delivery opt-in survives a re-run. Enable
+unset means no live delivery (the doorbell still rings by default), and a
+live-delivery opt-in survives a re-run. Enable
 requires a configured bearer and an enabled daemon that allows its principal;
 it does not change the daemon's authentication or allowlist. The token must be
 in the MCP registration's `env`, or explicitly forwarded through `env_vars`.

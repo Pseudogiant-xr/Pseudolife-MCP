@@ -581,14 +581,128 @@ def test_enable_preserves_an_existing_wake_setting(tmp_path, monkeypatch, wake):
 
 
 def test_enable_reports_live_wake_only_with_the_bridge(tmp_path, monkeypatch):
+    """PSEUDOLIFE_AGENT_WAKE alone is not live delivery: without the bridge the
+    shim falls back, and since #434 that fallback is the doorbell when a
+    codex CLI is found, pull-only when none is."""
     client = Client(tmp_path)
     env = client.config["config"]["mcp_servers"]["pseudolife-memory"]["env"]
     env["PSEUDOLIFE_AGENT_WAKE"] = "1"
     monkeypatch.setattr(setup, "probe", lambda *args: "ready")
-    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "pull-only"
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: None)
+    result = setup.configure(client, tmp_path, tmp_path, "enable")
+    assert result["wake"] == "pull-only"
+    assert "no codex CLI" in result["wake_reason"]
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: ["codex"])
+    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "doorbell"
     env.update({"PSEUDOLIFE_CODEX_SERVER_URL": "ws://127.0.0.1:4500",
                 "PSEUDOLIFE_CODEX_SERVER_TOKEN": "bridge-fixture"})
-    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "live"
+    result = setup.configure(client, tmp_path, tmp_path, "enable")
+    assert result["wake"] == "live"
+    assert "PSEUDOLIFE_AGENT_WAKE" in result["wake_reason"]
+    # The bridge credential must differ from the bank bearer, as the shim insists.
+    env["PSEUDOLIFE_CODEX_SERVER_TOKEN"] = "private-fixture"
+    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == "doorbell"
+
+
+def _ready_default_on(client, monkeypatch, cli=True):
+    env = _codex_writer(client)
+    monkeypatch.setattr(setup, "probe", lambda *args: "ready")
+    monkeypatch.setattr(setup, "served", lambda *args: True)
+    monkeypatch.setattr(setup, "codex_cli",
+                        lambda lookup: ["codex"] if cli else None)
+    return env
+
+
+def test_check_reports_the_doorbell_as_the_default_wake_path(tmp_path, monkeypatch):
+    """Since #434 the Codex doorbell rings by default, so a ready default-on
+    registration with a codex CLI is not pull-only: --check says so the way
+    ``pseudolife-mcp doctor`` does, with the reason."""
+    client = Client(tmp_path)
+    _ready_default_on(client, monkeypatch)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["status"] == "ready (default-on)"
+    assert result["wake"] == "doorbell"
+    assert "PSEUDOLIFE_CODEX_DOORBELL" in result["wake_reason"]
+    assert "default" in result["wake_reason"]
+    assert len(client.calls) == 1  # still read-only
+
+
+def test_check_reports_live_delivery_over_the_doorbell(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    env = _ready_default_on(client, monkeypatch)
+    env.update({"PSEUDOLIFE_AGENT_WAKE": "1",
+                "PSEUDOLIFE_CODEX_SERVER_URL": "ws://127.0.0.1:4500",
+                "PSEUDOLIFE_CODEX_SERVER_TOKEN": "bridge-fixture"})
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["wake"] == "live"
+
+
+@pytest.mark.parametrize("change, reason", [
+    ({"PSEUDOLIFE_CODEX_DOORBELL": "0"}, "PSEUDOLIFE_CODEX_DOORBELL=0"),
+    ({"PSEUDOLIFE_CODEX_DOORBELL": "off"}, "PSEUDOLIFE_CODEX_DOORBELL=off"),
+    ({"PSEUDOLIFE_AGENT_COORDINATION": "0"}, "PSEUDOLIFE_AGENT_COORDINATION=0"),
+    ({"PSEUDOLIFE_WRITER_ID": "other"}, "PSEUDOLIFE_WRITER_ID is not codex"),
+    ({"PSEUDOLIFE_AGENT_STATE": "shared.json"}, "PSEUDOLIFE_AGENT_STATE"),
+    ({"PSEUDOLIFE_CODEX_BIN": "relative/codex"}, "PSEUDOLIFE_CODEX_BIN"),
+])
+def test_check_names_why_the_doorbell_is_off(tmp_path, monkeypatch, change, reason):
+    """Each switch the shim reads (and doctor reports) turns the path to
+    pull-only with that switch named, so an operator sees what to change."""
+    client = Client(tmp_path)
+    env = _ready_default_on(client, monkeypatch, cli=False if "PSEUDOLIFE_CODEX_BIN" in change else True)
+    env.update(change)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["wake"] == "pull-only"
+    assert reason in result["wake_reason"], result["wake_reason"]
+
+
+def test_check_is_pull_only_without_a_codex_cli_or_a_served_board(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    env = _ready_default_on(client, monkeypatch, cli=False)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert (result["wake"], result["wake_reason"]) == ("pull-only", "no codex CLI")
+
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: ["codex"])
+    monkeypatch.setattr(setup, "served", lambda *args: False)
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["wake"] == "pull-only"
+    assert "does not serve the board" in result["wake_reason"]
+
+    monkeypatch.setattr(setup, "served", lambda *args: True)
+    env.pop("PSEUDOLIFE_MCP_TOKEN")
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert (result["wake"], result["wake_reason"]) == ("pull-only", "no bearer token")
+
+
+def test_check_pull_only_names_a_daemon_that_refuses_the_principal(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    _ready_default_on(client, monkeypatch)
+    monkeypatch.setattr(setup, "probe", lambda *args: "principal_not_allowed")
+    result = setup.configure(client, tmp_path, tmp_path, "check")
+    assert result["wake"] == "pull-only"
+    assert result["wake_reason"] == setup.PRINCIPAL_REASON
+
+
+def test_disable_reports_pull_only_with_the_master_switch(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: ["codex"])
+    result = setup.configure(client, tmp_path, tmp_path, "disable")
+    assert (result["wake"], result["wake_reason"]) == (
+        "pull-only", "PSEUDOLIFE_AGENT_COORDINATION=0")
+
+
+def test_codex_cli_lookup_reads_the_servers_env_over_the_process_env(monkeypatch):
+    """The shim finds ``codex`` in its own process environment, which Codex
+    builds from the server's ``env`` table over the launching environment, so
+    the lookup passes the merged view (as doctor does)."""
+    seen = []
+    monkeypatch.setattr(setup, "codex_cli", lambda lookup: seen.append(lookup) or ["codex"])
+    monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", "from-process")
+    server_env = {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_TOKEN": "private-fixture",
+                  "PSEUDOLIFE_CODEX_BIN": "from-server"}
+    path, _ = setup.wake_path(server_env.get, server_env, True, "")
+    assert path == "doorbell"
+    assert seen == [{**dict(__import__("os").environ), **server_env}]
 
 
 def _codex_writer(client):

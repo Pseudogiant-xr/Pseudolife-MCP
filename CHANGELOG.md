@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — the Codex setup check names the wake path the shim will take)
+- `ops/setup-codex-coordination.py --check` (and `--enable`) reported
+  `wake: pull-only` for every registration without the live-delivery bridge,
+  while since the entry below the Codex doorbell rings by default. The report
+  now carries the wake path the shim would take, read the way
+  `pseudolife_memory/shim.py` reads the switches and `pseudolife-mcp doctor`
+  reports them: `wake` is `live` (`PSEUDOLIFE_AGENT_WAKE` with the app-server
+  bridge and a bridge credential distinct from the bank bearer), `doorbell`
+  (the codex writer with a bearer and a `codex` CLI found through the
+  server's `env` over the launching environment, unless
+  `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes) or `pull-only`,
+  and `wake_reason` names the gate that decided it
+  (`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`, `no
+  codex CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a
+  fixed `PSEUDOLIFE_AGENT_STATE`, or the board question the daemon answered
+  no to). `--disable` reports `pull-only` with the master switch.
+- `examples/hook-instructions.md` (the maintainer host's dialect for
+  `<data_dir>/hook-instructions.md`) no longer asks every full suite for a
+  hand-sent `SUITE-START`/`SUITE-END`: a run that takes the lock mirrors
+  itself as the `full-suite` lease and mails the peers concerned (the lease
+  entry below). The hand-sent note stays for what the mirror does not cover
+  (`PSEUDOLIFE_SUITE_LOCK=off`, a suite without a bearer, a GPU launch
+  outside `Start-Qwen`, any other saturating window), as the project
+  `CLAUDE.md` already says.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
