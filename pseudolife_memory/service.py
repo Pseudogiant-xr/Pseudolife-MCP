@@ -943,6 +943,10 @@ class MemoryService(DreamOps):
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
         self._last_dream_extractor: dict | None = None
+        # Whether live dreams are being served (dream-stall signal,
+        # 2026-09-28); read by dream_status, /health and the session hook.
+        from pseudolife_memory.service_dream import DreamStallTracker
+        self._dream_stall_tracker = DreamStallTracker()
         # Identity tier 3 (spec 2026-07-18): machine-scoped active-session
         # pointer, set by the SessionStart hook / cleared by SessionEnd.
         # ``(session_id, ts)`` or None. In-memory always; persisted to
@@ -8267,7 +8271,9 @@ class MemoryService(DreamOps):
             raise ValueError("awareness limit must be a positive integer")
         if principal is None:
             principal = self._request_principal()
-        if principal not in cfg.allowed_principals:
+        # The daemon's reserved sender is never a client (as in dispatch).
+        from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
+        if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
             return {**result, "reason": "principal_not_allowed"}
         cap = min(cfg.awareness_limit, limit if limit is not None else cfg.awareness_limit, 20)
         # The header/context is an attribution signal, not bearer authentication.
@@ -8317,9 +8323,13 @@ class MemoryService(DreamOps):
     def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3,
                          max_world: int = 3, *,
                          session_id: str | None = None,
-                         include_coordination: bool = True) -> dict[str, Any]:
+                         include_coordination: bool = True,
+                         include_dream_stall: bool = True) -> dict[str, Any]:
         """Assemble the session-start briefing: graph 'unsure-about' + avoid-first
         lessons + fresh world facts + a one-line recap of the last closed session.
+        While live dreams are stalled, the markdown opens with one line naming
+        the stall and its remedy; the SessionStart hook puts that line in its
+        own prefix instead (``include_dream_stall=False``).
         The memory startup hook skips coordination; its separate hook owns
         that output. Read-only; no LLM. Each sub-call takes the lock itself, so this
         orchestrator must not hold it."""
@@ -8363,6 +8373,11 @@ class MemoryService(DreamOps):
         markdown = format_briefing(surprises, questions, lessons,
                                    world=world, recap=recap,
                                    coordination=coordination)
+        if include_dream_stall:
+            from pseudolife_memory.memory.dream import dream_stall_line
+            line = dream_stall_line(self.dream_stall_state()["stall"])
+            if line:
+                markdown = line + ("\n\n" + markdown if markdown else "")
         result = {
             "available": bool(markdown),
             "markdown": markdown,

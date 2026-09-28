@@ -1153,7 +1153,42 @@ class ExtractorError(Exception):
     """An extractor call failed (network, timeout, HTTP error, malformed
     response) — as opposed to succeeding with zero claims. Callers use this to
     distinguish a transient failure (don't advance the dream cursor / leave
-    signals pending, retry next sweep) from a genuine empty result."""
+    signals pending, retry next sweep) from a genuine empty result.
+
+    ``auth_failure`` is True when the endpoint's answer said its login or
+    credential failed (see :func:`classify_extractor_error`); the answer
+    itself is never kept."""
+
+    auth_failure = False
+
+
+# Words that mark an authentication failure in an extractor's error: the
+# CLI shims answer a failed call with HTTP 500 and the CLI's own error text
+# (2026-08-11: "OAuth session expired and could not be refreshed"). Whole
+# words only: a bare "auth" matched "author" and psycopg's "password
+# authentication failed", and "log ?in" matched "catalog in" (PR #456 review).
+_AUTH_WORDS_RE = re.compile(
+    r"\b(?:oauth|session expired|not logged in|log ?in|unauthori[sz]ed|401)\b",
+    re.IGNORECASE)
+# How much of an HTTP error body is read to look for those words.
+_AUTH_BODY_PEEK = 4096
+
+
+def _http_auth_failure(exc: BaseException) -> bool:
+    """Whether an HTTP error answer reports a failed login: 401/403, or the
+    auth words in the first bytes of its body. The body is read only here
+    and discarded; nothing of it leaves this function but the boolean."""
+    import urllib.error
+
+    if not isinstance(exc, urllib.error.HTTPError):
+        return False
+    if exc.code in (401, 403):
+        return True
+    try:
+        body = exc.read(_AUTH_BODY_PEEK) or b""
+    except Exception:  # noqa: BLE001 — a classification hint, never an error
+        return False
+    return bool(_AUTH_WORDS_RE.search(body.decode("utf-8", "replace")))
 
 
 class OpenAICompatExtractor:
@@ -1269,7 +1304,9 @@ class OpenAICompatExtractor:
         except Exception as exc:  # noqa: BLE001
             # Signal failure (vs genuine empty) so the dream doesn't advance its
             # cursor past these memories on a transient timeout/network blip.
-            raise ExtractorError(f"extract failed: {exc}") from exc
+            err = ExtractorError(f"extract failed: {exc}")
+            err.auth_failure = _http_auth_failure(exc)
+            raise err from exc
         claims: list[Claim] = []
         for c in raw if isinstance(raw, list) else []:
             if not isinstance(c, dict):
@@ -2158,6 +2195,94 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
     }
 
 
+def classify_extractor_error(exc: BaseException) -> tuple[str, str]:
+    """``(reason, error)`` for a failed extraction, for the dream-stall
+    record. ``reason`` is ``extractor_unreachable`` (connection refused,
+    timeout, DNS), ``login_expired`` (HTTP 401/403, or an answer or message
+    naming a failed login) or ``extractor_error`` (any other failure).
+    ``error`` is built from a fixed vocabulary, an HTTP status and an
+    exception type name only, never from exception text or a response body,
+    which can carry prompts, hostnames or credentials (the ``AdapterError``
+    rule)."""
+    import socket
+    import urllib.error
+
+    chain: list[BaseException] = []
+    cur: BaseException | None = exc
+    while cur is not None and len(chain) < 8 and all(cur is not c for c in chain):
+        chain.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    auth = any(getattr(e, "auth_failure", False)
+               or _AUTH_WORDS_RE.search(str(e)) for e in chain)
+    for e in chain:
+        if isinstance(e, urllib.error.HTTPError):
+            return ("login_expired" if auth else "extractor_error"), f"HTTP {e.code}"
+    for e in chain:
+        inner = e.reason if isinstance(e, urllib.error.URLError) else e
+        if isinstance(inner, (socket.timeout, TimeoutError)):
+            return "extractor_unreachable", "timed out"
+        if isinstance(inner, ConnectionRefusedError):
+            return "extractor_unreachable", "connection refused"
+        if isinstance(e, urllib.error.URLError) or isinstance(inner, OSError):
+            return "extractor_unreachable", f"unreachable ({type(inner).__name__})"
+    return ("login_expired" if auth else "extractor_error"), type(chain[-1]).__name__
+
+
+# What the operator does about each stall reason: one clause each, shared by
+# the session-start line, the briefing and the board notice.
+_STALL_REMEDIES = {
+    "login_expired": ("the extractor CLI's login expired; re-run `claude auth login` "
+                      "(or `codex login`) on the daemon host"),
+    "extractor_unreachable": "check the extractor endpoint is up and reachable from the daemon",
+    "extractor_error": "the extractor answers with errors; check its log",
+    "served_by_fallback": ("the primary is down and the fallback is serving; check the "
+                           "primary extractor"),
+}
+
+
+def stall_remedy(reason: str) -> str:
+    return _STALL_REMEDIES.get(reason, _STALL_REMEDIES["extractor_error"])
+
+
+def _stall_reason(record: dict) -> str:
+    reason = str(record.get("reason") or "")
+    return reason if reason in _STALL_REMEDIES else "extractor_error"
+
+
+def _local_minute(ts) -> str:
+    from datetime import datetime
+    return datetime.fromtimestamp(float(ts)).astimezone().isoformat(
+        sep=" ", timespec="minutes")
+
+
+def dream_stall_line(stall: dict | None) -> str:
+    """The one line a session start and the briefing show while dreams are
+    stalled (or the fallback is serving), else ''. Never raises."""
+    if not stall:
+        return ""
+    try:
+        since = _local_minute(stall["since"])
+    except Exception:  # noqa: BLE001 — a display line, never an error
+        return ""
+    reason = _stall_reason(stall)
+    head = ("dream primary extractor down" if reason == "served_by_fallback"
+            else "dreams stalled")
+    return f"Pseudolife-MCP: {head} since {since} ({reason}): {stall_remedy(reason)}."
+
+
+def dream_stall_notice_text(kind: str, record: dict) -> str:
+    """The board text for a stall notice: ``begin``/``repeat`` while it
+    lasts, ``clear`` once it is over."""
+    reason = _stall_reason(record)
+    since = _local_minute(record["since"])
+    if kind == "clear":
+        return (f"Dream extraction recovered at {_local_minute(record['recovered_at'])} "
+                f"(was {reason} since {since}).")
+    head = "degraded" if reason == "served_by_fallback" else "stalled"
+    remedy = stall_remedy(reason)
+    return f"Dream extraction {head} since {since}: {reason}. {remedy[0].upper()}{remedy[1:]}."
+
+
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set, else a no-op (no automatic regex writes —
@@ -2302,6 +2427,12 @@ def run_sweep_once(service) -> dict:
         if res is not None:
             extra[f"deep_{key}"] = res
     status = service.dream_status()
+    # Dream-stall signal (2026-09-28): flags a due backlog that no dream has
+    # served for three sweeps and posts the board notices a stall owes.
+    # getattr-guarded like the ticks above; never raises into the sweep.
+    stall_tick = getattr(service, "dream_stall_tick", None)
+    if stall_tick is not None:
+        _timed("stall_tick", lambda: stall_tick(status))
     if not status["would_fire"]:
         return _done({"fired": False, "reason": "below_threshold",
                       "backlog": status["backlog"], "compacted": compacted,

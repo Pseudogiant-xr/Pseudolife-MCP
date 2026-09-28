@@ -535,3 +535,92 @@ def test_briefing_source_fields_cannot_add_markdown_item_boundaries():
     assert sum(line.startswith("- ") for line in lines) == 5
     assert not any(line.startswith("## forged") for line in lines)
     assert "a summary - forged" in md
+
+
+# ── the dream-stall line (2026-09-28) ─────────────────────────────────────
+# On 2026-08-11 the dream extractor's CLI login had expired for over a day
+# and nothing a session read said so. While a stall is open, the briefing
+# and the SessionStart hook (the plugin's session-start.sh and
+# `briefing --hook-json` both serve /api/hook/session-start) carry ONE line
+# naming it and the remedy.
+
+def _stall_service(tmp_path, *, stalled=True):
+    from types import SimpleNamespace
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=str(tmp_path))
+    svc.config = SimpleNamespace(coordination=SimpleNamespace(enabled=False))
+    svc.stats = lambda: {"total_memories": 5}
+    svc.graph_digest = lambda: {"available": False}
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": "keep the lesson", "polarity": "+"}]}
+    svc.world_dump = lambda: {"entries": []}
+    svc.episode_list = lambda **kw: {"episodes": []}
+    if stalled:
+        failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
+                  "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}}
+        for _ in range(2):
+            svc._dream_stall_tracker.record(failed, served_by_fallback=False)
+    return svc
+
+
+STALL_HEAD = "Pseudolife-MCP: dreams stalled since "
+
+
+def test_session_briefing_opens_with_the_dream_stall_line(tmp_path):
+    svc = _stall_service(tmp_path)
+    md = svc.session_briefing()["markdown"]
+    first = md.splitlines()[0]
+    assert first.startswith(STALL_HEAD)
+    assert "(login_expired)" in first and "claude auth login" in first
+    assert "keep the lesson" in md
+    assert STALL_HEAD not in svc.session_briefing(include_dream_stall=False)["markdown"]
+
+
+def test_session_briefing_has_no_stall_line_while_dreams_are_served(tmp_path):
+    md = _stall_service(tmp_path, stalled=False).session_briefing()["markdown"]
+    assert "stalled" not in md
+
+
+def test_session_start_hook_carries_the_stall_line_exactly_once(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    text = hook_session_start(_stall_service(tmp_path), authorized=True)
+    assert text.startswith(STALL_HEAD)
+    assert text.count("dreams stalled") == 1
+    assert text.index(STALL_HEAD) < text.index("## Memory at session start")
+    assert "keep the lesson" in text
+
+
+def test_session_start_stall_line_is_for_authorized_callers(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    assert "stalled" not in hook_session_start(_stall_service(tmp_path), authorized=False)
+
+
+def test_session_start_stall_line_rides_resumed_sessions_too(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    text = hook_session_start(_stall_service(tmp_path), source="resume", authorized=True)
+    assert text.startswith(STALL_HEAD) and text.count("dreams stalled") == 1
+
+
+def test_session_start_stall_line_fits_the_hook_budget(tmp_path):
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    hook_session_start)
+
+    svc = _stall_service(tmp_path)
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": f"lesson {i} " + "x" * 400, "polarity": "+"} for i in range(60)]}
+    text = hook_session_start(svc, authorized=True)
+    assert text.startswith(STALL_HEAD)
+    assert len(text.encode("utf-8")) <= HOOK_CONTEXT_MAX_CHARS
+    line = text.splitlines()[0]
+    assert len(line) <= 240
+
+
+def test_session_start_is_unchanged_without_a_stall(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    assert "stalled" not in hook_session_start(_stall_service(tmp_path, stalled=False),
+                                               authorized=True)

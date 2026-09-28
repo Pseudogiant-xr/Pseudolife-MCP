@@ -244,6 +244,12 @@ BANK_ID_META_KEY = "coordination_bank_id"
 # Every message a recipient reads is agent-origin collaboration, never the
 # operator's authority; the label rides on the row so no consumer infers it.
 MESSAGE_ORIGIN = "agent"
+# The daemon's own sender (dream-stall notices, 2026-09-28). Reserved: the
+# dispatch layer refuses it as a bearer principal, so a row whose sender
+# principal is this came from the daemon. Its notices are context: decided
+# ``hinted`` without the wake table, and never a live-channel turn.
+DAEMON_PRINCIPAL = "daemon"
+DAEMON_NOTICE_WAKE = {"decision": "hinted", "reason": "daemon_notice"}
 # The audit log (schema v42): one append-only row per board mutation, written
 # in the mutation's own transaction and chained by sha256(prev_hash ||
 # canonical row), so an edited, inserted, reordered or removed row fails
@@ -1081,9 +1087,20 @@ class CoordinationStore:
                                            (row["lease_until"] or 0) > self.clock())
         return result
 
+    @staticmethod
+    def _check_label(principal, fields):
+        """The label ``daemon`` names the daemon's own sender: the per-turn
+        digest shows a sender's label, so a session could otherwise post as
+        "from daemon" (PR #456 review)."""
+        label = fields.get("label")
+        if (principal != DAEMON_PRINCIPAL and isinstance(label, str)
+                and label.strip().casefold() == DAEMON_PRINCIPAL):
+            raise CoordinationError("invalid_label")
+
     def register(self, principal, *, label="", project="", task="", episode="", status="",
                  capabilities=None, wake_enabled=False):
         _string(principal, 256, "principal", empty=False)
+        self._check_label(principal, {"label": label})
         fields = self._fields(label=label, project=project, task=task, episode=episode, status=status,
                               capabilities={} if capabilities is None else capabilities,
                               wake_enabled=wake_enabled)
@@ -1168,6 +1185,7 @@ class CoordinationStore:
         ``status_overdue``. A new status without one clears the old
         expectation; ``expect`` alone re-times the current status."""
         fields = self._fields(**fields)
+        self._check_label(principal, fields)
         if expect is not None and (type(expect) is not int
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
             raise CoordinationError("invalid_expect")
@@ -1611,13 +1629,25 @@ class CoordinationStore:
         beside it says how much the preview omits. Reading is not delivery:
         nothing here touches attempts or acknowledgements."""
         rows = self._all(
-            "SELECT m.message_id,m.sender_agent_id,m.created_at,m.text,a.label AS sender_label "
+            "SELECT m.message_id,m.sender_agent_id,m.sender_principal,m.created_at,m.text,"
+            "a.label AS sender_label "
             "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
             "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
             "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
         return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
-                 "sender_label": r["sender_label"] or "", "created_at": r["created_at"],
+                 "sender_principal": r["sender_principal"],
+                 "sender_label": self._preview_label(r), "created_at": r["created_at"],
                  "excerpt": _excerpt(r["text"])} for r in rows]
+
+    @staticmethod
+    def _preview_label(row):
+        """The digest's sender name: ``daemon`` only for the daemon's own
+        mail, whatever label a row carries (one registered before the label
+        was refused renders as a plain peer)."""
+        if row["sender_principal"] == DAEMON_PRINCIPAL:
+            return DAEMON_PRINCIPAL
+        label = row["sender_label"] or ""
+        return "" if label.strip().casefold() == DAEMON_PRINCIPAL else label
 
     def _mailbox_state(self, agent_id):
         return {"pending_count": self._pending_count(agent_id),
@@ -2017,7 +2047,7 @@ class CoordinationStore:
 
     def send(self, principal, agent_id, credential, *, to, text, request_id,
              reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
-             enforce_writer_epoch=False, clears=None, urgent=False):
+             enforce_writer_epoch=False, clears=None, urgent=False, notice=False):
         """Queue ``text`` for ``to``: one agent (a full id, or a unique
         prefix of at least ID_PREFIX_MIN hex characters), or a burst,
         ``project:<name>`` or ``all`` (see ``_fanout_rows``), at most
@@ -2032,7 +2062,13 @@ class CoordinationStore:
         Each recipient gets its own wake decision (v49, ``_wake_decision``),
         on its row as the message arrives; ``clears`` says which parked need
         the message answers, ``urgent`` asks for a ring whatever the need,
-        within the sender's cap. A retry repeats the first decisions."""
+        within the sender's cap. A retry repeats the first decisions.
+
+        ``notice`` is the daemon's own send (``DAEMON_PRINCIPAL`` only, never
+        reachable from dispatch): every recipient's decision is
+        ``DAEMON_NOTICE_WAKE``, so nothing rings."""
+        if notice and principal != DAEMON_PRINCIPAL:
+            raise CoordinationError("invalid_request")
         _string(to, 120, "recipient", empty=False)
         _string(request_id, 120, "request_id", empty=False)
         _string(hlc, 120, "hlc")
@@ -2179,8 +2215,9 @@ class CoordinationStore:
                 # Decided on the recipient row as the message arrives (the row
                 # is locked above); a burst's earlier rings are visible here,
                 # so the fan-out stagger spaces them.
-                wake = self._wake_decision(sender, recipient, now, clears=clears,
-                                           urgent=urgent, message_id=message_id)
+                wake = (dict(DAEMON_NOTICE_WAKE) if notice else
+                        self._wake_decision(sender, recipient, now, clears=clears,
+                                            urgent=urgent, message_id=message_id))
                 self.storage.conn.execute("UPDATE coordination_agents SET next_sequence=%s "
                                           "WHERE agent_id=%s", (seq, recipient["agent_id"]))
                 rows.append(self._one(
@@ -2230,7 +2267,9 @@ class CoordinationStore:
         daemon decided not to ring: every message it yields becomes a turn in
         a live-channel recipient, so it carries only mail decided ``rung``,
         ``nudged`` or ``hinted`` (and mail from before v49, which has no
-        decision). An explicit receive still returns all of it. The first
+        decision), and never the daemon's notices, which are context for
+        the next turn rather than a turn of their own. An explicit receive
+        still returns all of it. The first
         time a message is served, by either path, its ``first_read_at`` is
         stamped and a ``read`` event logged; a replay of unacknowledged mail
         writes nothing."""
@@ -2245,10 +2284,11 @@ class CoordinationStore:
                     raise ValueError
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
-        attempt_clause = (" AND attempts<%s AND (wake IS NULL OR "
+        attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
                           "wake->>'decision' IN ('rung','nudged','hinted'))" if for_delivery else "")
         now = self.clock()
-        params = [agent_id, seq, now] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
+        params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
+                  + [limit])
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"
                          + attempt_clause + " ORDER BY recipient_sequence LIMIT %s", params)

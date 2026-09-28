@@ -101,6 +101,10 @@ def _extractor_status(svc) -> str | None:
     startup, but the shim spawns it with ``stderr=DEVNULL``, so ``/health``
     is the only place a lite user can actually read it.
 
+    ``"stalled"`` is a configured extractor that live dreams stopped
+    reaching (the service's dream-stall record, 2026-09-28): read from
+    memory, not probed.
+
     Returns ``None`` — key omitted — when the service carries no resolvable
     dream config, so the bare stubs this builder is called with elsewhere
     keep working. Never probes the network: this is a config reading, not a
@@ -122,7 +126,45 @@ def _extractor_status(svc) -> str | None:
     # extract, so calling it "none" would be a lie.
     configured = (r.get("primary_url") and r.get("primary_model")) or (
         r.get("fallback_url") and r.get("fallback_model"))
-    return "configured" if configured else "none"
+    if not configured:
+        return "none"
+    # A configured extractor that live dreams have stopped reaching. The
+    # fallback serving for the primary is a warning, not a stall: dreams
+    # still land, so it stays "configured" with the ``stall`` sub-object.
+    stall = _dream_stall(svc)
+    if stall is not None and stall.get("reason") != "served_by_fallback":
+        return "stalled"
+    return "configured"
+
+
+def reserved_principal_warnings(allowed_principals, token_map) -> list[str]:
+    """Startup warnings for a configured principal named ``daemon``: the
+    board reserves that name for the daemon's own notices, so such a caller
+    silently loses the board. Names the principal, never a token."""
+    from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
+
+    out = []
+    if DAEMON_PRINCIPAL in (allowed_principals or []):
+        out.append(f"coordination.allowed_principals lists {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; no client can use the "
+                   "board as it. Rename the principal.")
+    if DAEMON_PRINCIPAL in (token_map or {}).values():
+        out.append(f"PSEUDOLIFE_MCP_TOKENS maps a token to {DAEMON_PRINCIPAL!r}, which the "
+                   "board reserves for the daemon's own notices; that caller cannot use "
+                   "the board. Rename the principal.")
+    return out
+
+
+def _dream_stall(svc) -> dict | None:
+    """The service's open dream-stall record, or ``None`` (none open, or a
+    stand-in without a tracker). Lock-free; never raises."""
+    tracker = getattr(svc, "_dream_stall_tracker", None)
+    if tracker is None:
+        return None
+    try:
+        return tracker.snapshot()["stall"]
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
 
 
 def _warn_near_memory_limit(memory: dict) -> None:
@@ -185,6 +227,13 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     extractor = _extractor_status(svc)
     if extractor is not None:
         payload["extractor"] = extractor
+    # The dream-stall record behind "stalled" (or the fallback warning),
+    # same refusal to touch `status`. This probe is unauthenticated, so
+    # only the reason and times: the error string stays in dream_status.
+    stall = _dream_stall(svc) if extractor in ("stalled", "configured") else None
+    if stall is not None:
+        payload["stall"] = {key: stall.get(key) for key in (
+            "since", "reason", "consecutive_failures", "last_success_at")}
     # The hook scripts this daemon was built with, so a cached plugin at the
     # same version but with different hooks can be told apart (2026-09-21).
     # Absent from a bare pip install, which ships no plugin tree.
@@ -365,6 +414,12 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
             "\"token:principal,...\") — continuing with the singular "
             "PSEUDOLIFE_MCP_TOKEN only; no named principals are active.")
+    try:
+        allowed = mcp_server.service.config.coordination.allowed_principals
+    except AttributeError:
+        allowed = []
+    for warning in reserved_principal_warnings(allowed, token_map):
+        logger.warning("%s", warning)
     auth_configured = token is not None or bool(token_map)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
