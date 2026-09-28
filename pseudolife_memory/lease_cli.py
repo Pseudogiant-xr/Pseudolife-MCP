@@ -908,7 +908,7 @@ def _clear_by(agent: dict, now: float):
     return []
 
 
-def _concerned(agent: dict, name: str, project: str) -> bool:
+def _concerned(agent: dict, name: str, project: str, now: float) -> bool:
     """Whether a listed peer is told about ``name``. In ``project`` when one
     is known, compared without case (the board holds this repo as
     Pseudolife-MCP, PseudoLife-MCP and pseudolife-mcp). Then either parked
@@ -924,7 +924,7 @@ def _concerned(agent: dict, name: str, project: str) -> bool:
         return False
     if project and str(agent.get("project") or "").lower() != project.lower():
         return False
-    if name in _clear_by(agent, time.time()):
+    if name in _clear_by(agent, now):
         return True
     if lifecycle not in (None, "attached", "registered"):
         return False
@@ -1205,9 +1205,10 @@ class BoardMirror:
                  f"({_clean(str(exc), MAX_PURPOSE)})")
             return
         project = _project(self._environ)
+        now = time.time()
         recipients = [agent["agent_id"] for agent in peers
                       if agent["agent_id"] != board.agent_id
-                      and _concerned(agent, self.name, project)]
+                      and _concerned(agent, self.name, project, now)]
         text = self._text(event)
         stamp = int(self._held_since or time.time())
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", self.name)[:40]

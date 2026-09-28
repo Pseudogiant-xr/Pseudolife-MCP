@@ -1516,11 +1516,31 @@ def test_only_a_standing_park_is_told(lease_env, sleeper):
     assert told == {"a" * 32, "b" * 32, "e" * 32}
 
 
-def test_a_park_expiring_now_has_lapsed():
-    # _live_park's boundary: park_expires <= now is lapsed.
-    agent = {"park_reason": "needs_resource", "park_clear_by": "gpu", "park_expires": 1000.0}
-    assert lease_cli._clear_by(agent, 999.0) == ["gpu"]
-    assert lease_cli._clear_by(agent, 1000.0) == []
+@pytest.mark.parametrize("reason, expires, stands", [
+    (None, None, False),               # no park
+    ("needs_resource", 1060.0, True),  # live
+    ("needs_resource", None, True),    # no expiry
+    ("needs_resource", 940.0, False),  # lapsed
+    ("needs_resource", 1000.0, False),  # expires == now has lapsed
+    (None, 1060.0, False),             # an expiry without a reason
+])
+def test_a_standing_park_is_the_daemons_live_park(reason, expires, stands):
+    # _clear_by copies CoordinationStore._live_park's rule rather than
+    # importing it (the lease CLI stays stdlib-only; the store imports
+    # psycopg), so both run over the same table and must agree.
+    from pseudolife_memory.storage.coordination import CoordinationStore
+    now = 1000.0
+    row = {"park_reason": reason, "park_clear_by": "gpu", "park_expires": expires}
+    assert (CoordinationStore._live_park(None, row, now) is not None) is stands
+    assert lease_cli._clear_by(row, now) == (["gpu"] if stands else [])
+
+
+def test_a_park_with_an_unreadable_expiry_is_told():
+    # The daemon stores park_expires only as a positive finite number, so
+    # the list never carries anything else; should one arrive, the notice
+    # goes out (one extra message) rather than raising in the mirror.
+    row = {"park_reason": "needs_resource", "park_clear_by": "gpu", "park_expires": "soon"}
+    assert lease_cli._clear_by(row, 1000.0) == ["gpu"]
 
 
 def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):
