@@ -1171,8 +1171,9 @@ class CoordinationStore:
             now = self.clock()
             # A lapsed park (past its ``park_expires``) still carries its
             # fields but no longer stands: it cannot be refined, and a new
-            # park over it starts fresh, with the default expiry from now
-            # (review of PR #441, 2026-09-28). A status clears either.
+            # park over it starts fresh, with an empty record and the
+            # default expiry from now (review of PR #441, 2026-09-28). A
+            # status clears either.
             recorded = row.get("park_reason") is not None
             parked = self._live_park(row, now) is not None
             # The park record (v49). A null reason clears the whole record;
@@ -1185,6 +1186,11 @@ class CoordinationStore:
                 elif "park_reason" not in fields and not parked:
                     raise CoordinationError("invalid_park")
                 else:
+                    if recorded and not parked:
+                        # A new park over a lapsed one starts empty: its
+                        # stale need must not come back live with it.
+                        for key in _PARK_TEXT_LIMITS:
+                            fields.setdefault(key, "")
                     fields["park_set_at"] = now
                     # Only a park that would have no expiry gets the default:
                     # a refinement, or a new reason, keeps the standing one.

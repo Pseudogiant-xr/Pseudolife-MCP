@@ -5007,7 +5007,9 @@ The **park record** lives on the agent row and is set through
 
 An omitted field stays; a refinement or a new reason keeps the standing
 expiry. A park past its `park_expires` no longer stands: a new reason over
-it is a new park, with the 12-hour default counted from then. A plain status
+it is a new park, with the 12-hour default counted from then and none of
+the lapsed park's `park_needs`, `park_clear_by` or `park_resume` carried
+over. A plain status
 update while parked clears the record,
 since a session that is working is not parked; a task or `children` update
 leaves it. A park field on its own refines a standing park and is refused

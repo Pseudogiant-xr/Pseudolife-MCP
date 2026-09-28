@@ -13,8 +13,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   did not ring it, and the Stop-hook park gate answered `no_park` and asked
   it to park again. `memory_agents(action="update")` now treats only a live
   park as standing: a new `park_reason` over a lapsed park is a new park,
-  with the 12-hour default counted from then and `park_set_at` restamped,
-  and a park field on its own (including `park_expires` alone) is refused
+  with the 12-hour default counted from then, `park_set_at` restamped and
+  the lapsed `park_needs`, `park_clear_by` and `park_resume` not carried
+  over (with a fresh expiry they would be live again, and the old clearer's
+  chatter would ring for 12 hours); a park field on its own (including `park_expires` alone) is refused
   with `invalid_park` on a lapsed park as on an unparked row, since its need
   may be stale and the session restates it with a reason. A plain status
   update still clears a lapsed record as it clears a live one. Found by the
