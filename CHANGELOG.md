@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   park everywhere else, so the notice was an extra message the session
   had stopped waiting for. A lapsed peer whose status says
   `suite=running|queued` or `gpu=` is still told, like any live peer.
-  Found in review of the lapsed-park re-park fix (2026-09-28).
+  Found in review of #442 (a park set after a lapsed one stands), 2026-09-28.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
@@ -222,8 +222,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message each to the peers of the same project that it concerns: live
   agents (attached, or registered without an adapter) whose status says
   `suite=running`, `suite=queued` or `gpu=`, and agents parked with
-  `park_clear_by` naming the lease, attached or not (read where present; a
-  sibling change defines it). At most 20 per event, with pid, worktree and
+  `park_clear_by` naming the lease, attached or not (while that park stands;
+  see the lapsed-park entry above). At most 20 per event, with pid, worktree and
   expected end. `CLAUDE.md`'s full-suite rule and
   `docs/guide/configuration.md` now say to read `lease check` instead of
   hand-announcing.

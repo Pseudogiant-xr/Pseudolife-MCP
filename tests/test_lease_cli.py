@@ -1516,6 +1516,13 @@ def test_only_a_standing_park_is_told(lease_env, sleeper):
     assert told == {"a" * 32, "b" * 32, "e" * 32}
 
 
+def test_a_park_expiring_now_has_lapsed():
+    # _live_park's boundary: park_expires <= now is lapsed.
+    agent = {"park_reason": "needs_resource", "park_clear_by": "gpu", "park_expires": 1000.0}
+    assert lease_cli._clear_by(agent, 999.0) == ["gpu"]
+    assert lease_cli._clear_by(agent, 1000.0) == []
+
+
 def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypatch):
     seen = {}
     real = lease_cli.BoardMirror.release

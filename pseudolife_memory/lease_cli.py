@@ -63,7 +63,7 @@ or stops anything. The same mirror is what ``tests/conftest.py`` puts behind
 the full-suite lock. Acquiring and releasing tell the peers the lease
 concerns, by board mail: those whose status says ``suite=running``,
 ``suite=queued`` or ``gpu=``, and those parked with ``park_clear_by`` naming
-the lease (the field is read where present). That replaces the hand-written
+the lease while that park stands (not lapsed). That replaces the hand-written
 SUITE-START/SUITE-END notes, which on the night of 2026-09-27 were status
 overwrites nobody was sent.
 
