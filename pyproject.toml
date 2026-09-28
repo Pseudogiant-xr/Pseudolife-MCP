@@ -22,7 +22,13 @@ dependencies = [
     # Migrated to SDK v2 (2026-08-25, spec 2026-08-25-mcp-v2-session-identity):
     # serves protocol 2026-07-28 plus every earlier revision. Floor 2.1 —
     # 2.0.x shipped with the ping regression (#3273) fixed only in 2.1.0.
-    "mcp>=2.1,<3",
+    # Ceiling 2.2 (2026-09-28): a shim on mcp 2.2.0 fails every tools/list
+    # against a daemon on 2.1.x ("unhandled errors in a TaskGroup": its
+    # upstream initialize gets an error response), while the same bearer
+    # over curl succeeds. A fresh pipx install resolved to 2.2.0 and hit
+    # exactly that on the first remote client; the lock pins 2.1.0. Raise
+    # both sides together, never the shim alone.
+    "mcp>=2.1,<2.2",
     # Declared 2026-08-25: `mcp_server.py` imports `pydantic.Field` directly
     # to attach per-argument descriptions to the tool inputSchemas, so it is
     # a first-party import now, not merely mcp's transitive dependency. The

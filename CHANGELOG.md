@@ -139,6 +139,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answer cut off at the 2 s limit can block. Whether Codex honours the
   decision of a hook declared `async` is still unprobed on a live install,
   on every platform.
+### Added (2026-09-28 — one bank shared across machines: client-only install, a shim that never spawns for a remote daemon)
+- The installers take `--daemon-url <url>`, `--token-file <path>` and
+  `--client-only` (`-DaemonUrl`, `-TokenFile`, `-ClientOnly` on Windows) to
+  wire a machine that has no daemon of its own to a daemon elsewhere,
+  typically over a tailnet. A daemon URL whose host is not loopback implies
+  client-only. That mode skips everything a local daemon needs (Docker
+  preflight, volumes, `ops/.env`, token minting, the extractor, `compose
+  up`, shim autostart) and still installs the shim, registers Claude Code,
+  Gemini and Claude Desktop with the URL, the token file and
+  `PSEUDOLIFE_MCP_NO_SPAWN=1`, hands Codex its own copy of the token
+  through its credential helper, installs the Claude Code plugin and Codex
+  hooks, and writes the standing instructions. It never mints a token: the
+  token file must already exist, or `--read-token` (`-ReadToken`) reads one
+  without echo and writes it owner-only; on every OS the file is validated
+  with the shim's own owner-only check, so an install cannot report success
+  for a file every session would then refuse (a plain `Set-Content` file on
+  Windows inherits an ACL the shim rejects). The preflight refuses a daemon
+  that does not answer `/health` or answers with auth off over a
+  non-loopback host, and a URL with credentials, a path, a query or a
+  fragment. A plain-`http` URL to another machine gets one warning that the
+  link itself is unencrypted, so it belongs inside a tailnet or behind TLS.
+  In client-only mode Codex is marked failed rather than registered against
+  loopback when its Python, credential step or shim install is missing, and
+  the Claude Code hooks' `settings.json` env is set to the client URL and
+  token file even where an earlier local install left loopback values. One
+  token file per run means one principal: run the installer once per
+  client for per-client attribution. The 2026-09-28 dogfood of a Linux
+  container against the maintainer's daemon did all of this by hand, and
+  its Codex step then failed on a bare system Python: the Codex credential
+  helper imported the coordination adapter (anyio, httpx) just to open a
+  private file, which now lives in the stdlib-only
+  `pseudolife_memory/private_state.py`. The new guide page
+  `docs/guide/remote-bank.md` walks through exposure (Tailscale Serve in
+  TCP mode, HTTPS, LAN or a reverse proxy), per-machine principals, board
+  admission via `coordination.allowed_principals`, and what was measured.
+- Upgrading: nothing changes for a machine that runs its own daemon. A
+  machine wired to another machine's daemon by hand before this release
+  keeps working; re-running the installer with `--client-only` puts the
+  registrations, the hooks' env and the token file on the supported path.
+- The public-tree identifier guard (`tests/test_release_ux.py`) now also
+  screens tailnet addresses (100.64.0.0/10 and Tailscale's
+  `fd7a:115c:a1e0::/48`) and `*.ts.net` names, allowing only the
+  `100.64.0.x` and `<machine>.<tailnet>.ts.net` placeholders.
+- The shim never starts a local daemon for a daemon URL that is not
+  loopback, whether or not `PSEUDOLIFE_MCP_NO_SPAWN` is set. Before, a
+  remote client whose link was down spawned a host-side daemon with an
+  empty bank while the shim kept probing the remote URL, then gave up three
+  minutes later. Now it waits 15 s for the remote daemon, probing with a
+  2 s timeout (the loopback probe's 0.25 s is too short for a relayed
+  tailnet path), and exits 1 with a message that says the address is
+  another machine and names what to check (the link, the host's exposure,
+  the daemon's `/health`), instead of the local Docker remedy. Loopback is
+  `localhost`, `::1`, any `127.x` address and the IPv4-mapped form; those
+  keep today's autostart. Any other hostname counts as another machine
+  without being resolved, so a name that happens to resolve to loopback no
+  longer spawns either: that is the safe direction, and the 15 s wait is
+  longer than Codex's default MCP startup timeout, which the guide says how
+  to raise.
+- `mcp` is capped below 2.2 in `pyproject.toml`: a shim on mcp 2.2.0 fails
+  every `tools/list` against a daemon on 2.1.x with "unhandled errors in a
+  TaskGroup" (its upstream initialize gets an error response) while the
+  same bearer over curl succeeds, which the first remote client hit on a
+  fresh pipx install. The lock already pins 2.1.0; a guard test keeps the
+  cap and the lock on the same minor line. A shim installed from an older
+  release fixes itself with `pipx runpip pseudolife-mcp install
+  "mcp==2.1.1"` or a reinstall from the daemon's checkout.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

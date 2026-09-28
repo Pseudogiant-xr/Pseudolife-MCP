@@ -382,6 +382,22 @@ _RFC1918_PAT = re.compile(
     rb"|192\.168\.\d{1,3}\.\d{1,3})\b")
 _RFC1918_PRESCREEN = (b"10.", b"172.", b"192.168.")
 _ALLOWED_IP_PREFIXES = (b"10.0.0.", b"192.168.1.", b"172.17.0.1")
+# Tailnet addresses (CGNAT 100.64.0.0/10) and MagicDNS names: the remote-bank
+# docs and tests talk about them, and a real one is a machine identifier
+# like a LAN address. Sanctioned placeholders: the 100.64.0.x prefix and the
+# literal <machine>.<tailnet>.ts.net.
+_TAILNET_PAT = re.compile(
+    rb"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b")
+_TAILNET_PRESCREEN = (b"100.",)
+_ALLOWED_TAILNET_PREFIXES = (b"100.64.0.",)
+_TSNET_PAT = re.compile(rb"[a-z0-9<>._-]+\.ts\.net\b")
+_TSNET_PRESCREEN = (b".ts.net",)
+_ALLOWED_TSNET_NAMES = (b"<machine>.<tailnet>.ts.net",)
+# Tailscale's IPv6 range (fd7a:115c:a1e0::/48); no placeholder is sanctioned.
+# A real address carries hex digits after the prefix; the bare range name
+# (prefix, "::", a slash) does not, and may be written down.
+_TAILNET6_PAT = re.compile(rb"\bfd7a:115c:a1e0:[0-9a-f:]*[0-9a-f]")
+_TAILNET6_PRESCREEN = (b"fd7a:115c:a1e0:",)
 _CREDENTIAL_PAT = re.compile(
     rb"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
     rb"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
@@ -418,6 +434,24 @@ def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
                 ip = m.group(0).decode("ascii", "replace")
                 hits.append((rel, f"unsanctioned private IP {ip}"))
                 return
+    if any(p in low for p in _TAILNET_PRESCREEN):
+        for m in _TAILNET_PAT.finditer(low):
+            if not m.group(0).startswith(_ALLOWED_TAILNET_PREFIXES):
+                ip = m.group(0).decode("ascii", "replace")
+                hits.append((rel, f"unsanctioned tailnet IP {ip}"))
+                return
+    if any(p in low for p in _TSNET_PRESCREEN):
+        for m in _TSNET_PAT.finditer(low):
+            if m.group(0) not in _ALLOWED_TSNET_NAMES:
+                name = m.group(0).decode("ascii", "replace")
+                hits.append((rel, f"tailnet name {name}"))
+                return
+    if any(p in low for p in _TAILNET6_PRESCREEN):
+        m = _TAILNET6_PAT.search(low)
+        if m:
+            ip = m.group(0).decode("ascii", "replace")
+            hits.append((rel, f"tailnet IPv6 address {ip}"))
+            return
 
 
 def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
@@ -577,3 +611,38 @@ def test_docs_tool_tier_counts_match_code() -> None:
         got = tuple(int(g) for g in m.groups())
         want = (counts["minimal"], counts["core"], counts["full"])
         assert got == want, f"{site.name} states tiers {got}, code has {want}"
+
+
+def test_identifier_guard_catches_tailnet_addresses_and_names():
+    """Remote-bank docs and tests talk about tailnet addresses, so the guard
+    must screen the tailnet range (100.64.0.0/10) and ``*.ts.net`` names the
+    way it screens RFC1918: a real machine's address or MagicDNS name must
+    not reach the public tree. Only the ``100.64.0.`` placeholder prefix and
+    the ``<machine>.<tailnet>.ts.net`` placeholder are sanctioned."""
+    # Samples are assembled at runtime so this file never carries one.
+    for text in (b"daemon at http://100." + b"101.102.103:8765",
+                 b"use 100.64." + b"7.9 here",
+                 b"https://some-box.tail1234ab" + b".ts.net:8765"):
+        hits: list = []
+        _scan_identifiers("x.md", text, hits)
+        assert hits, text
+    for text in (b"http://100.64.0.2:8765", b"100.64.0.10",
+                 b"https://<machine>.<tailnet>.ts.net", b"a 100.63.0.1 (not tailnet)",
+                 b"100.128.0.1 (outside the /10)"):
+        hits = []
+        _scan_identifiers("x.md", text, hits)
+        assert not hits, (text, hits)
+
+
+def test_identifier_guard_catches_tailnet_ipv6_addresses():
+    """Tailscale also hands every node an address in fd7a:115c:a1e0::/48;
+    a real one identifies a machine just like the IPv4 form. No placeholder
+    is sanctioned: docs use the IPv4 placeholder."""
+    hits: list = []
+    _scan_identifiers("x.md", b"at [fd7a:115c:" + b"a1e0::a33:376f]:8765", hits)
+    assert hits
+    for text in (b"fd7a:115d:a1e0::1 is not in the /48",
+                 b"the range fd7a:115c:a1e0::/48 itself may be named"):
+        hits = []
+        _scan_identifiers("x.md", text, hits)
+        assert not hits, (text, hits)

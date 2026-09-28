@@ -735,3 +735,61 @@ def test_real_codex_test_does_not_launch_codex_on_a_busy_machine(tmp_path, monke
     with pytest.raises(pytest.skip.Exception, match="too busy"):
         test_real_codex_manual_trust_and_lifecycle(tmp_path, monkeypatch, True)
     assert launches == []
+
+
+def test_private_json_needs_no_third_party_modules(tmp_path):
+    """The installers run ops/setup-codex-hooks.py with whatever ``python3``
+    is on PATH, and a client-only machine has a bare interpreter: no anyio,
+    no httpx. Writing Codex's private connection file must not import the
+    coordination adapter (which imports both). The 2026-09-28 client-only
+    dogfood failed its Codex step with a swallowed ModuleNotFoundError
+    exactly here; the Windows host never saw it because its system Python
+    happens to carry anyio."""
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[1]
+    target = tmp_path / "connection.json"
+    script = (
+        "import sys, importlib.util, json\n"
+        "sys.modules['anyio'] = None\n"
+        "sys.modules['httpx'] = None\n"
+        f"spec = importlib.util.spec_from_file_location('hooks', {str(repo / 'ops' / 'setup-codex-hooks.py')!r})\n"
+        "hooks = importlib.util.module_from_spec(spec); spec.loader.exec_module(hooks)\n"
+        f"hooks._private_json(__import__('pathlib').Path({str(target)!r}), {{'daemon_url': 'http://100.64.0.2:8765'}})\n"
+        "print(json.load(open(sys.argv[1]))['daemon_url'])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(target)],
+        capture_output=True, text=True, cwd=str(repo), timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "http://100.64.0.2:8765"
+
+
+def test_hook_verify_needs_no_third_party_modules(tmp_path):
+    """Same rule as the private-file helper: the hook verify step imports
+    ``pseudolife_memory.coordination_identity`` for the digest directory, and
+    that module imported httpx at load, so a bare ``python3`` failed the
+    whole Codex hook setup with a swallowed ModuleNotFoundError (2026-09-28
+    client-only dogfood, second run). The module must import and answer the
+    path questions with the standard library alone."""
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[1]
+    script = (
+        "import sys, os\n"
+        "sys.modules['httpx'] = None\n"
+        "sys.modules['anyio'] = None\n"
+        "from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for\n"
+        "d = default_digest_dir()\n"
+        "print(type(digest_path_for('abc', d)).__name__)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        cwd=str(repo), timeout=60,
+        env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("Path")

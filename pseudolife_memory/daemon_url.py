@@ -13,6 +13,7 @@ imports.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
 import urllib.parse
@@ -51,6 +52,22 @@ def _validated_daemon_url(value: str) -> str:
         raise SystemExit(1)
     return urllib.parse.urlunsplit(
         (parsed.scheme, parsed.netloc.rstrip("/"), "", "", ""))
+
+
+def _is_loopback_url(url: str) -> bool:
+    """True when ``url`` (already validated) names this machine: ``localhost``
+    or a loopback address. Anything else is a daemon on ANOTHER machine (a
+    tailnet or LAN address, a reverse-proxy name), which no process started
+    here could ever be."""
+    hostname = urllib.parse.urlsplit(url).hostname or ""
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    return address.is_loopback or bool(mapped and mapped.is_loopback)
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

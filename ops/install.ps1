@@ -13,6 +13,8 @@
 #   ops\install.ps1 -Extractor sonnet-only -Client claude,gemini
 #   ops\install.ps1 -Extractor sonnet-fallback -Instructions append
 #   ops\install.ps1 -Extractor codex-fallback -Client codex
+#   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
+#       -TokenFile ~\.pseudolife-mcp\claude-code.token -ReadToken -Client claude
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -29,6 +31,24 @@
 #   prompts; unattended runs keep them).
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
+#
+# Client-only install (this machine runs no daemon; one runs elsewhere,
+# typically reached over a tailnet): no Docker, volumes, ops/.env, token
+# minting or local daemon. Shim, registrations, plugin, hooks and standing
+# instructions are set up as usual, aimed at the remote daemon.
+# -DaemonUrl <url>: the daemon's URL (default: the PSEUDOLIFE_MCP_DAEMON_URL
+#   environment variable). A host other than 127.0.0.1, localhost or ::1
+#   implies -ClientOnly.
+# -TokenFile <path>: client-only - an owner-only file holding the daemon's
+#   bearer token (default: PSEUDOLIFE_MCP_TOKEN_FILE); the installer never
+#   mints one here.
+# -ClientOnly (switch): wire clients to -DaemonUrl only; with a loopback URL,
+#   for an SSH tunnel.
+# -ReadToken (switch): client-only - create the -TokenFile (it must not exist
+#   yet) from the token typed, unechoed, or piped on stdin.
+# One token file is one principal: every client a run wires shares it. For
+# per-client attribution on the board, run the installer once per client,
+# each run with that client's own token file.
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
@@ -73,7 +93,12 @@ param(
     [string]$ClaudeLegacyHooks = "ask",
     [switch]$NoArt,
     # Open-loopback install: mint no bearer token, so the agent board stays off.
-    [switch]$NoToken
+    [switch]$NoToken,
+    # Client-only install against a daemon running elsewhere (see the header).
+    [string]$DaemonUrl = "",
+    [string]$TokenFile = "",
+    [switch]$ClientOnly,
+    [switch]$ReadToken
 )
 $ErrorActionPreference = "Stop"
 
@@ -88,6 +113,109 @@ $LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
 $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+
+# Needed from here on: the client-only mode block asks this checkout's shim
+# code whether a daemon URL is loopback.
+function Get-InstallerPython {
+    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
+    # independently: Store aliases and stale launchers must not block the
+    # next one. Never alters the user's PATH.
+    foreach ($candidate in @("python", "python3", "py")) {
+        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+        try {
+            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
+        } catch { continue }
+    }
+    return $null
+}
+
+# >>> client-only mode >>>
+# A client-only install wires this machine's clients to a daemon that runs
+# elsewhere (typically over a tailnet). The URL comes from -DaemonUrl, else
+# from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
+# loopback implies -ClientOnly, since no local daemon answers there.
+function Get-DaemonUrlHost([string]$url) {
+    # Its host, lowercased, without brackets, read from the text as given:
+    # [Uri] would rewrite a short form such as 127.1 that the shim rejects.
+    $authority = ($url -split '://', 2)[-1]
+    $authority = ($authority -split '/', 2)[0]
+    $authority = ($authority -split '@')[-1]
+    $name = if ($authority.StartsWith("[")) {
+        ($authority.Substring(1) -split '\]', 2)[0]
+    } else { ($authority -split ':', 2)[0] }
+    return $name.ToLowerInvariant()
+}
+function Test-LoopbackUrl([string]$url) {
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    $python = Get-InstallerPython
+    if ($python) {
+        try {
+            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 10) { return $true }
+            if ($LASTEXITCODE -eq 11) { return $false }
+        } catch { }
+    }
+    $name = Get-DaemonUrlHost $url
+    if ($name -eq "localhost") { return $true }
+    # Dotted quads without leading zeros (Python's ipaddress rejects those).
+    if (($name -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$') -and -not $name.Contains(":")) { return $false }
+    $address = $null
+    return [Net.IPAddress]::TryParse($name, [ref]$address) -and [Net.IPAddress]::IsLoopback($address)
+}
+$clientOnlyVia = ""
+$daemonUrlFromEnv = $false
+if (-not $DaemonUrl -and $env:PSEUDOLIFE_MCP_DAEMON_URL) {
+    $DaemonUrl = "$env:PSEUDOLIFE_MCP_DAEMON_URL"
+    $daemonUrlFromEnv = $true
+}
+if ($DaemonUrl.EndsWith("/")) { $DaemonUrl = $DaemonUrl.Substring(0, $DaemonUrl.Length - 1) }
+if ($DaemonUrl) {
+    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
+    # http(s), a host and an optional numeric port; no credentials, path,
+    # query, fragment or whitespace. The URL is not echoed: it may hold a
+    # password.
+    $urlAuthority = ($DaemonUrl -split '://', 2)[-1]
+    $urlPort = ""
+    if ($urlAuthority -match '^\[.*\]:(.*)$') { $urlPort = $Matches[1] }
+    elseif ($urlAuthority -match '^[^\[][^:]*:(.*)$') { $urlPort = $Matches[1] }
+    $urlOk = ($DaemonUrl -cmatch '^https?://.') -and ($urlAuthority -notmatch '[/?#@\s]') -and
+        ($urlPort -notmatch '\D') -and [bool](Get-DaemonUrlHost $DaemonUrl)
+    if (-not $urlOk) {
+        Write-Host "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)"
+        exit 2
+    }
+    if (-not $ClientOnly -and -not (Test-LoopbackUrl $DaemonUrl)) {
+        $ClientOnly = [switch]$true
+        if ($daemonUrlFromEnv) {
+            $clientOnlyVia = " (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
+        }
+    }
+}
+if ($ClientOnly) {
+    if (-not $DaemonUrl) {
+        Write-Host "-ClientOnly needs the daemon's URL: pass -DaemonUrl http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL"
+        exit 2
+    }
+    $localFlags = @()
+    if ($Extractor) { $localFlags += "-Extractor" }
+    if ($Model) { $localFlags += "-Model" }
+    if ($ShimPort -ne 0) { $localFlags += "-ShimPort" }
+    if ($NoToken) { $localFlags += "-NoToken" }
+    if ($Transport -ne "shim") { $localFlags += "-Transport http" }
+    if ($localFlags) {
+        Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
+        exit 2
+    }
+} elseif ($TokenFile -or $ReadToken) {
+    Write-Host "client-only install: -TokenFile and -ReadToken name a remote daemon's token, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
+    exit 2
+}
+# <<< client-only mode <<<
 
 # -- presentation helpers -------------------------------------------------------
 # Art and color are interactive sugar only: NO_COLOR unset, no -NoArt, and an
@@ -197,6 +325,21 @@ function Show-GenericSnippets {
 }
 # <<< generic-snippets <<<
 
+# >>> client-only notes >>>
+function Show-ClientOnlyNotes {
+    Write-Host @'
+  This machine is a client only: the daemon, its bank and its dream
+  extractor run on the other host, and nothing here starts, stops or
+  upgrades them.
+  - A new token there: write it into the token file here. The shims and
+    the Claude Code hooks read that file on every call. Codex keeps its
+    own copy in ~/.codex/pseudolife/token: write it there too.
+  - A daemon upgrade there: bring this checkout to the same release and
+    re-run this installer, so the shim matches the daemon.
+'@
+}
+# <<< client-only notes <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 function Get-ProviderList([string]$Spec) {
     $expanded = @()
@@ -267,15 +410,98 @@ if ($interactive) {
 }
 
 # -- 2. preflight --------------------------------------------------------------
+# The status field of an ops/client_credentials.py JSON report, or $null.
+function Get-HelperStatus($output) {
+    try { return [string](($output -join "`n") | ConvertFrom-Json).status } catch { return $null }
+}
+# >>> client-only preflight >>>
+# Nothing Docker-shaped to check: a client-only install depends on the
+# token file and on the remote daemon answering. The token is never read
+# into output.
+function Invoke-ClientOnlyPreflight {
+    Step "Client-only install$($clientOnlyVia): this machine's clients will use the daemon at $DaemonUrl (no Docker, volumes or local daemon here)."
+    if (-not $script:TokenFile) { $script:TokenFile = "$env:PSEUDOLIFE_MCP_TOKEN_FILE" }
+    if (-not $script:TokenFile) {
+        Write-Host "client-only install: pass -TokenFile <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and -ReadToken to create it. The installer never mints one for a remote daemon$clientOnlyVia"
+        exit 2
+    }
+    $script:TokenFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($script:TokenFile)
+    $tokenPython = Get-InstallerPython
+    if (-not $tokenPython) {
+        throw "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run"
+    }
+    $helper = Join-Path $repo "ops/client_credentials.py"
+    if ($ReadToken) {
+        if (Test-Path -LiteralPath $script:TokenFile) {
+            throw "client-only install: -ReadToken creates the token file, and it already exists: $($script:TokenFile). Drop -ReadToken to use it, or remove it first"
+        }
+        # Read unechoed (or from piped input) and handed to the helper on
+        # stdin: the token never reaches an argument list or the output.
+        $tokenValue = if ([Console]::IsInputRedirected) {
+            [Console]::In.ReadLine()
+        } else {
+            [Net.NetworkCredential]::new("", (Read-Host -AsSecureString "Paste the daemon's bearer token (not shown)")).Password
+        }
+        $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
+        $tokenValue = $null
+        if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
+            $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
+            throw "client-only install: could not write the token file ($problem): $($script:TokenFile)"
+        }
+        Step "Wrote the token file $($script:TokenFile) (owner-only; the token is not shown)."
+    }
+    $tokenItem = Get-Item -LiteralPath $script:TokenFile -Force -ErrorAction SilentlyContinue
+    if (-not $tokenItem -or $tokenItem.PSIsContainer -or $tokenItem.Length -eq 0) {
+        throw "client-only install: the token file is missing or empty: $($script:TokenFile). Create it with -ReadToken, or write the daemon's token into it owner-only, then re-run"
+    }
+    # The shim's own check, on every OS: an owner-only regular file (the ACL
+    # on Windows, mode bits on POSIX), no link, one well-formed token.
+    $tokenReport = & $tokenPython $helper check-token-file --path $script:TokenFile
+    if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
+        $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
+        throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
+    }
+    foreach ($selectedClient in $clients) {
+        if (($selectedClient -in "claude", "codex", "gemini") -and
+            -not (Get-Command $selectedClient -ErrorAction SilentlyContinue)) {
+            throw "client-only install: the $selectedClient CLI is not on PATH. Install it, or drop it from -Client, then re-run"
+        }
+    }
+    # A redirect is refused, as curl -f and the shim refuse one.
+    $daemonHealth = $null
+    try {
+        $daemonHealth = Invoke-RestMethod -Uri "$DaemonUrl/health" -TimeoutSec 5 -MaximumRedirection 0
+    } catch { $daemonHealth = $null }
+    if (-not $daemonHealth -or ($daemonHealth.status -ne "ok")) {
+        Write-Host "client-only install: no healthy daemon answered at $DaemonUrl/health.$clientOnlyVia"
+        Write-Host "  The daemon must be exposed to this machine, for example through the tailnet: check the host and port, that the daemon listens beyond loopback on its host, and that this machine reaches it (Invoke-RestMethod $DaemonUrl/health)."
+        exit 1
+    }
+    if (-not (Test-LoopbackUrl $DaemonUrl)) {
+        if (($daemonHealth.PSObject.Properties.Name -contains "auth") -and ($daemonHealth.auth -eq $false)) {
+            throw "client-only install: the daemon runs without a bearer token (auth: false) at $DaemonUrl. An unauthenticated bank must never be reached over a network: set PSEUDOLIFE_MCP_TOKEN for the daemon on its host, restart it, and re-run"
+        }
+        if ($DaemonUrl -like "http://*") {
+            Write-Warning "$DaemonUrl is plain HTTP: the link itself is unencrypted, so it must be a private network such as a tailnet, or a TLS reverse proxy must front the daemon."
+        }
+    }
+    Step "Daemon answered at $DaemonUrl/health."
+}
+# <<< client-only preflight <<<
 Step "Preflight..."
-# `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
-# clear the stale value a prior native command may have left.
-$global:LASTEXITCODE = 0
-& (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
-if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
+if ($ClientOnly) {
+    Invoke-ClientOnlyPreflight
+} else {
+    # `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
+    # clear the stale value a prior native command may have left.
+    $global:LASTEXITCODE = 0
+    & (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
+    if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
+}
 
 # -- 3. extractor choice (explicit, no default) ---------------------------------
-if (-not $Extractor) {
+# A client-only install has none: the remote daemon runs its own extractor.
+if (-not $Extractor -and -not $ClientOnly) {
     if (-not $interactive) {
         throw "Non-interactive run: -Extractor sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only is required."
     }
@@ -297,7 +523,7 @@ if (-not $Extractor) {
         }
     }
 }
-Step "Extractor mode: $Extractor"
+if (-not $ClientOnly) { Step "Extractor mode: $Extractor" }
 $claudeShimMode = $Extractor -in "sonnet-only", "sonnet-fallback"
 $codexShimMode = $Extractor -in "codex-only", "codex-fallback"
 if ($ShimPort -eq 0) { $ShimPort = $codexShimMode ? 8086 : 8082 }
@@ -372,25 +598,6 @@ if ($codexShimMode -and -not $Model) {
     Step "Dreamer model: $Model"
 }
 
-function Get-InstallerPython {
-    # A python >= 3.10 for the stdlib-only ops helpers. Probe candidates
-    # independently: Store aliases and stale launchers must not block the
-    # next one. Never alters the user's PATH.
-    foreach ($candidate in @("python", "python3", "py")) {
-        if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-        $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
-        try {
-            $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-            if (($LASTEXITCODE -eq 0) -and $probe) { return "$probe".Trim() }
-        } catch { continue }
-    }
-    return $null
-}
-# The status field of an ops/client_credentials.py JSON report, or $null.
-function Get-HelperStatus($output) {
-    try { return [string](($output -join "`n") | ConvertFrom-Json).status } catch { return $null }
-}
-
 # -- 4. volumes (respect names overridden in an existing ops/.env) --------------
 function Get-EnvValue($name) {
     if (Test-Path $envFile) {
@@ -401,9 +608,11 @@ function Get-EnvValue($name) {
 }
 $bankVol = (Get-EnvValue "PSEUDOLIFE_BANK_VOLUME"); if (-not $bankVol) { $bankVol = "pseudolife-mcp-bank" }
 $stateVol = (Get-EnvValue "PSEUDOLIFE_STATE_VOLUME"); if (-not $stateVol) { $stateVol = "pseudolife-mcp-state" }
-docker volume create $bankVol | Out-Null
-docker volume create $stateVol | Out-Null
-Step "Volumes ready: $bankVol, $stateVol"
+if (-not $ClientOnly) {
+    docker volume create $bankVol | Out-Null
+    docker volume create $stateVol | Out-Null
+    Step "Volumes ready: $bankVol, $stateVol"
+}
 
 # -- 5. managed env block --------------------------------------------------------
 # Daemon-side writer default: a single first-class provider gets its own id;
@@ -418,38 +627,40 @@ $writerId = if ($clients.Count -eq 1) {
         default { "mcp-client" }
     }
 } else { "mcp-client" }
-if (-not (Test-Path $envFile)) { Copy-Item (Join-Path $repo "ops\.env.example") $envFile }
-$lines = @(Get-Content $envFile)
-$kept = New-Object System.Collections.Generic.List[string]
-$skip = $false
-foreach ($l in $lines) {
-    if ($l -eq $EnvBegin) { $skip = $true; continue }
-    if ($l -eq $EnvEnd) { $skip = $false; continue }
-    if (-not $skip) { $kept.Add($l) }
-}
-$block = New-Object System.Collections.Generic.List[string]
-$block.Add($EnvBegin)
-switch ($Extractor) {
-    "sidecar" { $block.Add("# extractor: sidecar (stock defaults - nothing to set)") }
-    { $_ -in "sonnet-fallback", "codex-fallback" } {
-        $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
-        $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
-        $block.Add("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1")
-        $block.Add("PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor")
-        $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto")
+if (-not $ClientOnly) {
+    if (-not (Test-Path $envFile)) { Copy-Item (Join-Path $repo "ops\.env.example") $envFile }
+    $lines = @(Get-Content $envFile)
+    $kept = New-Object System.Collections.Generic.List[string]
+    $skip = $false
+    foreach ($l in $lines) {
+        if ($l -eq $EnvBegin) { $skip = $true; continue }
+        if ($l -eq $EnvEnd) { $skip = $false; continue }
+        if (-not $skip) { $kept.Add($l) }
     }
-    { $_ -in "sonnet-only", "codex-only" } {
-        $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
-        $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
-        # `primary` (not `auto`): states the single-extractor intent and
-        # keeps the auto-without-fallback startup warning silent.
-        $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary")
+    $block = New-Object System.Collections.Generic.List[string]
+    $block.Add($EnvBegin)
+    switch ($Extractor) {
+        "sidecar" { $block.Add("# extractor: sidecar (stock defaults - nothing to set)") }
+        { $_ -in "sonnet-fallback", "codex-fallback" } {
+            $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
+            $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
+            $block.Add("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1")
+            $block.Add("PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor")
+            $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto")
+        }
+        { $_ -in "sonnet-only", "codex-only" } {
+            $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
+            $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
+            # `primary` (not `auto`): states the single-extractor intent and
+            # keeps the auto-without-fallback startup warning silent.
+            $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary")
+        }
     }
+    $block.Add("PSEUDOLIFE_WRITER_ID=$writerId")
+    $block.Add($EnvEnd)
+    Set-Content -Path $envFile -Value (@($kept) + @($block)) -Encoding utf8
+    Step "Wrote managed block in ops/.env"
 }
-$block.Add("PSEUDOLIFE_WRITER_ID=$writerId")
-$block.Add($EnvEnd)
-Set-Content -Path $envFile -Value (@($kept) + @($block)) -Encoding utf8
-Step "Wrote managed block in ops/.env"
 
 # -- 5b. bearer token (the agent board needs one) --------------------------------
 # A default install mints one, so the board is on; every client wired below
@@ -471,9 +682,13 @@ function Test-ShimToolingReady($python) {
 }
 $tokenState = $null
 $tokenPython = $null
-# A token already set gates the daemon whatever this run may mint, and the
-# HTTP-registration warning and the board hint depend on knowing that.
-if ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
+# A client-only install never mints: the remote daemon's token is the file
+# the operator supplied. A token already set gates the daemon whatever this
+# run may mint, and the HTTP-registration warning and the board hint depend
+# on knowing that.
+if ($ClientOnly) {
+    $tokenState = "remote"
+} elseif ($env:PSEUDOLIFE_MCP_TOKEN -or $env:PSEUDOLIFE_MCP_TOKENS -or
         (Get-EnvValue "PSEUDOLIFE_MCP_TOKEN") -or (Get-EnvValue "PSEUDOLIFE_MCP_TOKENS")) {
     $tokenState = "present"
 } elseif ($NoToken) {
@@ -503,7 +718,9 @@ function InstallerOwnsOverride {
     (Test-Path $overrideFile) -and
         ((Get-Content $overrideFile -TotalCount 1) -in $OverrideMarker, $LegacyOverrideMarker)
 }
-if ($Extractor -in "sonnet-only", "codex-only") {
+if ($ClientOnly) {
+    # No local daemon here, so its compose override is not this run's to change.
+} elseif ($Extractor -in "sonnet-only", "codex-only") {
     if (-not (Test-Path $overrideFile) -or (InstallerOwnsOverride)) {
         @(
             $OverrideMarker
@@ -534,11 +751,13 @@ if ($Extractor -in "sonnet-only", "codex-only") {
 }
 
 # -- 7. bring the stack up --------------------------------------------------------
-$compose = @("--env-file", $envFile, "-f", $composeFile)
-if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
-Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
-docker compose @compose up -d --build
-if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
+if (-not $ClientOnly) {
+    $compose = @("--env-file", $envFile, "-f", $composeFile)
+    if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
+    Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
+    docker compose @compose up -d --build
+    if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
+}
 
 # -- 8. CLI shim autostart (Claude / Codex modes) ---------------------------------
 # A mode switch must tear down the OTHER family's autostart: an abandoned
@@ -554,8 +773,9 @@ function Remove-ShimTask($name) {
         Step "Removed autostart task '$name' (a running shim process, if any, persists until logoff)"
     }
 }
-if (-not $codexShimMode) { Remove-ShimTask "Pseudolife Codex Shim" }
-if (-not $claudeShimMode) {
+# A client-only install leaves any local daemon's extractor shims alone.
+if (-not $codexShimMode -and -not $ClientOnly) { Remove-ShimTask "Pseudolife Codex Shim" }
+if (-not $claudeShimMode -and -not $ClientOnly) {
     Remove-ShimTask "Pseudolife Claude Shim"
     Remove-ShimTask "Pseudolife Sonnet Shim"   # pre-rename installs
 }
@@ -808,8 +1028,12 @@ foreach ($selectedClient in $clients) {
                 "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
             $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
                 "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
-            $installerToken = Get-EnvValue "PSEUDOLIFE_MCP_TOKEN"
-            $installerUrl = Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL"
+            # A client-only install: the remote daemon's token, from the
+            # operator's file on stdin, and its URL.
+            $installerToken = if ($ClientOnly) {
+                (Get-Content -LiteralPath $TokenFile -Raw).Trim()
+            } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
+            $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
             if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
             try {
                 $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
@@ -852,6 +1076,15 @@ foreach ($selectedClient in $clients) {
                 $codexCredentialBootstrapFailed = $true
                 $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
             }
+            # An existing Codex registration keeps its own daemon URL.
+            if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
+                ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
+                $codexCredentialBootstrapFailed = $true
+                $codexSetup.recovery = "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+            }
             if (-not $codexCredentialBootstrapFailed) {
                 $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
                     "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
@@ -889,6 +1122,12 @@ foreach ($selectedClient in $clients) {
         $hookState["codex"] = $codexSetup.status
         Step "Codex hooks: $($codexSetup.status); standing instructions: $($codexSetup.instructions)."
         if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
+        continue
+    }
+    if ($ClientOnly) {
+        # No daemon container here: the hook runs the installed shim by its
+        # path, known once section 11 installed it (after section 12's check).
+        $hookState["claude"] = "deferred"
         continue
     }
     Step "Installing $selectedClient session hook..."
@@ -1310,7 +1549,7 @@ function Set-CodexRuntimeDefaults {
 # process environment, not the registration, so they get the file through
 # settings.json unless the user's own environment supplies a credential.
 # >>> client token files >>>
-$clientDaemonUrl = Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL"
+$clientDaemonUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
 if (-not $clientDaemonUrl) { $clientDaemonUrl = "http://127.0.0.1:8765" }
 $claudeAgentStateDir = Join-Path $env:USERPROFILE ".pseudolife-mcp\claude-code-agents"
 $claudeConfigHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $env:USERPROFILE }
@@ -1340,15 +1579,32 @@ function Get-ClientTokenFile([string]$principal) {
         }
     }
 }
-$claudeTokenFile = if ($clients -contains "claude") { Get-ClientTokenFile "claude-code" } else { $null }
-$geminiTokenFile = if ($clients -contains "gemini") { Get-ClientTokenFile "gemini" } else { $null }
-if (($hookState["claude"] -eq "plugin") -and $claudeTokenFile) {
+# A remote daemon's token stays in the file the operator supplied.
+$claudeTokenFile = if ($clients -notcontains "claude") { $null } elseif ($ClientOnly) { $TokenFile } else { Get-ClientTokenFile "claude-code" }
+$geminiTokenFile = if ($clients -notcontains "gemini") { $null } elseif ($ClientOnly) { $TokenFile } else { Get-ClientTokenFile "gemini" }
+# A client-only install's settings.json hooks run the host shim, which needs
+# the file and the URL there as much as the plugin's hooks do.
+if ((($hookState["claude"] -eq "plugin") -or $ClientOnly) -and $claudeTokenFile) {
     $claudeSettingsHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-    $settingsOutput = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") claude-settings-env --settings (Join-Path $claudeSettingsHome "settings.json") --token-file $claudeTokenFile --daemon-url $clientDaemonUrl
-    switch ("$(Get-HelperStatus $settingsOutput)") {
-        "updated" { Step "Claude Code plugin hook settings: PSEUDOLIFE_MCP_TOKEN_FILE saved in ~/.claude/settings.json (env); hook authentication not verified." }
-        "kept" { }
-        default { Write-Warning "Could not give the plugin's hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the env block of ~/.claude/settings.json." }
+    $settingsArgs = @((Join-Path $repo "ops/client_credentials.py"), "claude-settings-env",
+        "--settings", (Join-Path $claudeSettingsHome "settings.json"),
+        "--token-file", $claudeTokenFile, "--daemon-url", $clientDaemonUrl)
+    # A client-only install's hooks must reach the remote daemon with the
+    # operator's file, whatever an earlier local install left there.
+    if ($ClientOnly) { $settingsArgs += "--replace" }
+    $settingsOutput = & (Get-InstallerPython) @settingsArgs
+    $settingsReport = try { ($settingsOutput -join "`n") | ConvertFrom-Json } catch { $null }
+    switch ("$($settingsReport.status)") {
+        "updated" {
+            if ($ClientOnly) {
+                $settingsBackup = if ($settingsReport.backup) { " (backup: $($settingsReport.backup))" } else { "" }
+                Step "Claude Code hooks: set $(@($settingsReport.changed) -join ', ') in ~/.claude/settings.json (env) for the daemon at $clientDaemonUrl$settingsBackup."
+            } else {
+                Step "Claude Code plugin hook settings: PSEUDOLIFE_MCP_TOKEN_FILE saved in ~/.claude/settings.json (env); hook authentication not verified."
+            }
+        }
+        { $_ -in "kept", "unchanged" } { }
+        default { Write-Warning "Could not give the Claude Code hooks the token file ($($settingsOutput -join ' ')). Set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile and PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl in the env block of ~/.claude/settings.json." }
     }
 }
 # <<< client token files <<<
@@ -1376,7 +1632,10 @@ foreach ($selectedClient in $clients) {
         }
         $desktopArgs = @("--command", $script:shimInstallPath, "--writer-id", "claude-desktop")
         $desktopTokenFile = Get-DesktopTokenFile
-        if ($desktopTokenFile) {
+        if ($ClientOnly) {
+            # The operator's file as it is: a remote daemon's token is never copied.
+            $desktopArgs += @("--daemon-url", $clientDaemonUrl, "--token-file", $TokenFile)
+        } elseif ($desktopTokenFile) {
             if ($env:PSEUDOLIFE_MCP_TOKEN_FILE) {
                 $desktopArgs += @("--token-file", $desktopTokenFile)
             } else {
@@ -1406,12 +1665,25 @@ foreach ($selectedClient in $clients) {
         Write-Host ""
         Show-GenericSnippets
         Write-Host ""
+        if ($ClientOnly) {
+            Write-Host "  This daemon is remote: use the stdio shape, with"
+            Write-Host "  `"PSEUDOLIFE_MCP_DAEMON_URL`": `"$clientDaemonUrl`" and"
+            Write-Host "  `"PSEUDOLIFE_MCP_TOKEN_FILE`": `"$($TokenFile.Replace('\', '\\'))`" added to its env"
+            Write-Host "  (the HTTP shape cannot carry the token)."
+            Write-Host ""
+        }
         continue
     }
     if ($selectedClient -eq "codex") {
         if ($codexCredentialBootstrapFailed) {
             $mcpState["codex"] = "failed"
             Write-Warning "Codex MCP registration was skipped because credential setup failed. Rerun the installer after repairing the reported credential problem."
+            continue
+        }
+        if ($ClientOnly -and -not $codexCredentialFile) {
+            # Without it Codex would reach whatever daemon its defaults name.
+            $mcpState["codex"] = "failed"
+            Write-Warning "Codex was not registered: a client-only install points it at $clientDaemonUrl through the Codex credential setup, which did not run (it needs Python 3.10 or newer; see above). Fix that, then re-run."
             continue
         }
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
@@ -1499,7 +1771,7 @@ foreach ($selectedClient in $clients) {
                 Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
                 Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
             }
-            if ($codexCredentialFile) {
+            if ($codexCredentialFile -or $ClientOnly) {
                 Write-Warning "Codex authentication requires the stdio shim; HTTP fallback was not registered."
                 $mcpState["codex"] = "failed"
             } else {
@@ -1593,6 +1865,9 @@ foreach ($selectedClient in $clients) {
                 Write-Warning "This Gemini CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
                 $mcpState["gemini"] = "failed"
             }
+        } elseif ($ClientOnly) {
+            Write-Warning "Shim unavailable for Gemini CLI (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx or Python >=3.10 and re-run."
+            $mcpState["gemini"] = "failed"
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Gemini CLI (see warnings above) - falling back to HTTP."
@@ -1672,6 +1947,12 @@ foreach ($selectedClient in $clients) {
             if ((-not $claudeCredentialOk) -and $claudeTokenFile -and ($existingClaude -notmatch 'PSEUDOLIFE_MCP_TOKEN')) {
                 Write-Warning "The daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with -NoToken."
             }
+            # The in-place edit above only adds what is missing, so a
+            # registration from an earlier local install may still name that
+            # daemon.
+            if ($ClientOnly -and -not ([string](claude mcp get pseudolife-memory 2>$null | Out-String)).Contains($clientDaemonUrl)) {
+                Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile."
+            }
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
                 $envFlag = Get-EnvFlag "claude"
@@ -1699,6 +1980,9 @@ foreach ($selectedClient in $clients) {
                     Write-Warning "This Claude CLI has no env flag; the stdio registration was skipped because PSEUDOLIFE_MCP_NO_SPAWN=1 cannot be guaranteed."
                     $mcpState["claude"] = "failed"
                 }
+            } elseif ($ClientOnly) {
+                Write-Warning "Could not install the pseudolife-mcp shim (see warnings above), and a remote daemon needs it: an HTTP registration cannot carry the token file. Install pipx or Python >=3.10 and re-run."
+                $mcpState["claude"] = "failed"
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
@@ -1714,20 +1998,47 @@ foreach ($selectedClient in $clients) {
 }
 
 # -- 12. health -----------------------------------------------------------------------
-Step "Waiting for the daemon to report healthy..."
-$h = $null
-for ($i = 0; $i -lt 40; $i++) {
-    try {
-        $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
-        if ($h.status -eq "ok") { break }
-    } catch { Start-Sleep -Milliseconds 1500 }
+# A client-only install checked the remote daemon at preflight, and nothing
+# starts locally, so there is nothing to wait for.
+if (-not $ClientOnly) {
+    Step "Waiting for the daemon to report healthy..."
     $h = $null
+    for ($i = 0; $i -lt 40; $i++) {
+        try {
+            $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
+            if ($h.status -eq "ok") { break }
+        } catch { Start-Sleep -Milliseconds 1500 }
+        $h = $null
+    }
+    if (-not $h) {
+        Write-Warning "Daemon not healthy yet. Logs: docker logs pseudolife-mcp-daemon"
+        exit 1
+    }
+    Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
 }
-if (-not $h) {
-    Write-Warning "Daemon not healthy yet. Logs: docker logs pseudolife-mcp-daemon"
-    exit 1
+
+# >>> client-only claude hook >>>
+# A client-only install's Claude Code session hook (deferred from section
+# 9): the installed shim by its path, since a hook's PATH need not include
+# pipx's directory. It reads the daemon's address and the token file from
+# the settings.json env block section 11 wrote. Forward slashes and no .exe:
+# the hook runs under Claude Code's shell.
+if ($hookState["claude"] -eq "deferred") {
+    if ((Install-ShimOnce) -and $script:shimInstallPath) {
+        $shimCommand = ($script:shimInstallPath -replace '\.exe$', '').Replace('\', '/')
+        if ($shimCommand -match '\s') {
+            Write-Warning "The shim's path holds a space, so the session hook runs pseudolife-mcp from PATH instead: $shimCommand"
+            $shimCommand = "pseudolife-mcp"
+        }
+        Step "Installing claude session hook..."
+        & (Join-Path $PSScriptRoot "install-hook.ps1") -Client claude -Command "$shimCommand briefing --hook-json"
+        $hookState["claude"] = "hook"
+    } else {
+        Write-Warning "The Claude Code session hook was not installed: it runs the pseudolife-mcp shim, which is unavailable (see above)."
+        $hookState["claude"] = "failed"
+    }
 }
-Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+# <<< client-only claude hook <<<
 
 # -- 13. per-provider wiring ladder + per-mode verify hints ---------------------------
 # [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
@@ -1762,6 +2073,10 @@ function Describe-Instr($state) {
 }
 Write-Host ""
 Step "What got wired, per agent:"
+if ($ClientOnly) {
+    Write-Host ""
+    Write-Host "  Daemon: remote at $clientDaemonUrl - this machine runs none (client-only install)"
+}
 foreach ($selectedClient in $clients) {
     Write-Host ""
     switch ($selectedClient) {
@@ -1772,6 +2087,9 @@ foreach ($selectedClient in $clients) {
             if ($hookState["claude"] -eq "plugin") {
                 Write-Host "    [x] Session briefing     Claude Code plugin"
                 Write-Host "    [x] Per-turn discipline  Claude Code plugin"
+            } elseif ($hookState["claude"] -eq "failed") {
+                Write-Host "    [!] Session briefing     not installed - the shim is unavailable"
+                Write-Host "    [!] Per-turn discipline  not installed"
             } else {
                 Write-Host "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
                 Write-Host "    [x] Per-turn discipline  UserPromptSubmit hook"
@@ -1836,7 +2154,7 @@ $boardHint = switch ($tokenState) {
     "no-shim" { " (no pipx or pip-capable Python >= 3.10 to install the shim, so no token was minted; install one and re-run)" }
     default { "" }
 }
-$boardFile = @($claudeTokenFile, $geminiTokenFile, $codexCredentialFile) | Where-Object { $_ } | Select-Object -First 1
+$boardFile = @($claudeTokenFile, $geminiTokenFile, $codexCredentialFile, $TokenFile) | Where-Object { $_ } | Select-Object -First 1
 $boardPython = Get-InstallerPython
 if (-not $boardPython) {
     $boardLine = "unknown - no Python >= 3.10 to ask the daemon"
@@ -1883,5 +2201,6 @@ switch ($Extractor) {
 if ($codexShimMode) {
     Write-Host "Note: Codex-served extraction quality is unmeasured - see the 'OpenAI primary' section of docs/guide/dreaming.md."
 }
+if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
 Write-Host "Done. First session: tell your coding agent to remember something."
