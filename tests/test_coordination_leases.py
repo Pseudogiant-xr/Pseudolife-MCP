@@ -550,37 +550,45 @@ def _notice(store, sender, recipient, tag):
                       request_id=f"notice-{tag}")["wake"]
 
 
-def test_the_lease_holder_clears_a_park_on_its_lease(store):
-    """``park_clear_by`` may name a lease (full-suite, gpu): the lease CLI's
-    acquire notice comes from the mirror's own address, which the daemon's
-    lease table names as the holder, so it rings; a peer that does not hold
-    that lease, or holds another one, is chatter."""
-    holder, bystander, other = (store.register("alice") for _ in range(3))
+def test_a_release_notice_clears_a_park_on_that_lease(store):
+    """``park_clear_by`` may name a lease (full-suite, gpu). The lease CLI's
+    notices come from the mirror's own address, and its release notice after
+    the board lease is already free (a successor told "released" must find
+    it free), so the daemon's own record of the release, at most
+    LEASE_CLEAR_GRACE earlier, makes the sender the clearer. Taking the
+    lease clears nothing: the acquire notice is chatter, as is mail from a
+    peer that never held it or that let go of another lease."""
+    holder, successor, bystander, other = (store.register("alice") for _ in range(4))
     parked = _parked_on(store, "full-suite")
     store.acquire_lease(*creds(holder), name="full-suite", ttl=600)
     store.acquire_lease(*creds(other), name="gpu", ttl=600)
-    assert _notice(store, holder, parked, "acquired") == {
-        "decision": "rung", "reason": "clearer", "ring_at": 1000.0}
-    assert _notice(store, bystander, parked, "chatter")["decision"] == "withheld"
-    assert _notice(store, other, parked, "other-lease")["decision"] == "withheld"
-
-
-def test_a_release_notice_rings_though_the_lease_is_already_free(store):
-    """The mirror frees the board lease before telling the peers (a
-    successor told "released" must find it free), so its release notice
-    comes from an address that no longer holds it. The daemon's own record
-    of that release, moments earlier, makes it the clearer; an hour later it
-    is just a former holder."""
-    holder, successor = store.register("alice"), store.register("alice")
-    parked = _parked_on(store, "full-suite")
-    store.acquire_lease(*creds(holder), name="full-suite", ttl=600)
+    assert _notice(store, holder, parked, "acquired")["decision"] == "withheld"
     store.acquire_lease(*creds(successor), name="full-suite", ttl=600)   # queued
     store.release_lease(*creds(holder), name="full-suite")               # granted on
-    store.test_time[0] = 1010.0
+    store.release_lease(*creds(other), name="gpu")
+    store.test_time[0] = 1059.0
     assert _notice(store, holder, parked, "released") == {
-        "decision": "rung", "reason": "clearer", "ring_at": 1010.0}
-    store.test_time[0] = 1010.0 + 3600
+        "decision": "rung", "reason": "clearer", "ring_at": 1059.0}
+    assert _notice(store, successor, parked, "successor")["decision"] == "withheld"
+    assert _notice(store, bystander, parked, "chatter")["decision"] == "withheld"
+    assert _notice(store, other, parked, "other-lease")["decision"] == "withheld"
+    store.test_time[0] = 1061.0
     assert _notice(store, holder, parked, "late")["decision"] == "withheld"
+
+
+def test_no_lease_stands_in_for_the_maintainer_or_a_peer(store):
+    """Any string is a lease name, so a lease called ``maintainer`` or
+    after a peer's agent id, taken and released, clears no park that names
+    the human or that peer."""
+    sender, peer = store.register("alice"), store.register("alice")
+    on_human = _parked_on(store, "maintainer")
+    on_peer = _parked_on(store, peer["agent_id"])
+    for name in ("maintainer", peer["agent_id"]):
+        store.acquire_lease(*creds(sender), name=name, ttl=600)
+        store.release_lease(*creds(sender), name=name)
+    store.test_time[0] = 1010.0
+    assert _notice(store, sender, on_human, "human")["decision"] == "withheld"
+    assert _notice(store, sender, on_peer, "peer")["decision"] == "withheld"
 
 
 def test_a_hold_that_lapsed_moments_ago_still_clears(store):

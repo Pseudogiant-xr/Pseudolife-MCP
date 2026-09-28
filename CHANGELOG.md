@@ -6,18 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-09-28 — a session parked on a lease is rung by its notices)
+### Fixed (2026-09-28 — a session parked on a lease is rung when the lease frees)
 - A session parked with `park_clear_by` naming a lease (`full-suite`,
-  `gpu`) slept through the acquire and release notices the lease CLI sends
-  it: the notices come from the hold's own `lease-hold@` address, never
-  equal to the lease name, so the wake decision withheld them as chatter
-  (`need_not_cleared`). The daemon now counts the sender as the clearer when
-  its lease table shows it holding the named lease, or its audit log shows
-  that hold released or expired within the last 60 seconds
-  (`LEASE_CLEAR_GRACE`): the CLI frees the board lease before it mails the
-  release notice. Both come from the daemon's own records, never from a
-  string the sender supplies, and the receipt's reason stays `clearer`.
-  Found in the review of #443.
+  `gpu`) slept through the release notice the lease CLI sends it: the
+  notice comes from the hold's own `lease-hold@` address, never equal to
+  the lease name, so the wake decision withheld it as chatter
+  (`need_not_cleared`). The daemon now counts the sender as the clearer
+  when its audit log shows the sender's hold on that lease released or
+  expired within the last 60 seconds (`LEASE_CLEAR_GRACE`); the CLI frees
+  the board lease before it mails the notice. It reads only the daemon's
+  own records, never a string the sender supplies; the receipt's reason
+  stays `clearer`. Taking a lease clears nothing, so the acquire notice
+  and mail from a current holder are still held, and no lease stands in
+  for `maintainer` or an agent id. Found in the review of #443.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

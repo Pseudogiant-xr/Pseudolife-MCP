@@ -242,13 +242,13 @@ def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypat
     assert "board skipped" not in capsys.readouterr().err
 
 
-def test_a_session_parked_on_the_lease_is_rung_by_both_notices(board, monkeypatch):
+def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch):
     """A session parked until the ``gpu`` lease clears (``park_clear_by:
-    gpu``) is rung by the hold's acquire and release notices. They come from
-    the hold's own address, and the release notice after the board lease is
-    already free, so the daemon names the clearer from its lease table and
-    audit log: withheld as chatter, the parked session slept through the
-    notice the CLI sent it (PR #443 review, 2026-09-28)."""
+    gpu``) gets both of the hold's notices and is rung by the release. The
+    notice comes from the hold's own address after the board lease is
+    already free, so the daemon names the clearer from its audit log; before
+    that, withheld as chatter, the parked session slept through it (PR #443
+    review, 2026-09-28). The acquire notice clears nothing and is held."""
     bridge, storage = board
     monkeypatch.delenv("PSEUDOLIFE_AGENT_PROJECT", raising=False)
     parked = _post(bridge, "register", {"label": "parked-on-gpu"})
@@ -267,4 +267,5 @@ def test_a_session_parked_on_the_lease_is_rung_by_both_notices(board, monkeypatc
         "SELECT text, wake FROM coordination_messages WHERE recipient_agent_id=%s "
         "ORDER BY recipient_sequence", (parked["agent_id"],)).fetchall()
     assert [text.split(":")[0] for text, _ in rows] == ["LEASE gpu acquired", "LEASE gpu released"]
-    assert [(wake["decision"], wake["reason"]) for _, wake in rows] == [("rung", "clearer")] * 2
+    assert [(wake["decision"], wake["reason"]) for _, wake in rows] == [("withheld", "need_not_cleared"),
+                                                               ("rung", "clearer")]
