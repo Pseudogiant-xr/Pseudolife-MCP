@@ -3,6 +3,7 @@ reachable server that rejects it errors the PG-backed tests instead of
 skipping them (2026-09-20: ~1000 silent skips after the 09-14 rotation)."""
 from __future__ import annotations
 
+import io
 import re
 from pathlib import Path
 
@@ -605,3 +606,199 @@ def test_conftest_defaults_the_bench_admin_url_for_the_eval_backed_tests():
     seeded_matches_resolver = (
         os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] == pg_defaults.bench_admin_url())
     assert seeded_matches_resolver
+
+
+# -- the full-run password preflight -------------------------------------------
+#
+# 2026-09-27: two sessions ran the full suite from fresh worktrees whose
+# ops/.env was missing or a copy of ops/.env.example. The resolved password
+# was the compose default, the dev server rejected it, and each run went to
+# the end with every PG-backed test ERRORing on setup (1,424 in one run): a
+# gate that gated nothing, for the machine's one full-suite slot.
+
+def _example_env(tmp_path: Path) -> Path:
+    example = tmp_path / ".env.example"
+    example.write_bytes((ROOT / "ops" / ".env.example").read_bytes())
+    return example
+
+
+def test_password_source_names_a_missing_or_example_env_file_without_the_value(tmp_path):
+    example = _example_env(tmp_path)
+    env_file = tmp_path / ".env"
+    describe = pg_defaults.describe_pg_login_source
+
+    assert "ops/.env is missing" in describe({}, env_file, example)
+    env_file.write_bytes(example.read_bytes())
+    assert "copy of ops/.env.example" in describe({}, env_file, example)
+    env_file.write_text("POSTGRES_USER=pseudolife\n", encoding="utf-8")
+    assert "sets no POSTGRES_PASSWORD" in describe({}, env_file, example)
+    env_file.write_text(f"POSTGRES_PASSWORD={pg_defaults.EXAMPLE_PASSWORD}\n",
+                        encoding="utf-8")
+    assert "example POSTGRES_PASSWORD" in describe({}, env_file, example)
+    env_file.write_text("POSTGRES_PASSWORD=" + SECRET + "\n", encoding="utf-8")
+    described = describe({}, env_file, example)
+    assert described == "POSTGRES_PASSWORD from ops/.env"
+    assert SECRET not in described
+    # The explicit override wins whatever the file says, and is named, not shown.
+    described = describe({"PSEUDOLIFE_TEST_PG_PASSWORD": SECRET}, tmp_path / "absent",
+                         example)
+    assert described == "PSEUDOLIFE_TEST_PG_PASSWORD"
+    assert SECRET not in described
+    # Compose expansion is refused by the parser; the description carries the
+    # parser's value-free diagnosis rather than raising out of pytest_configure.
+    env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED_SECRET_VALUE\n", encoding="utf-8")
+    described = describe({}, env_file, example)
+    assert "POSTGRES_PASSWORD cannot be parsed" in described
+    assert "Compose variable expansion" in described
+    assert "UNSUPPORTED_SECRET_VALUE" not in described
+
+
+def test_the_example_password_pin_matches_the_example_file():
+    text = (ROOT / "ops" / ".env.example").read_text(encoding="utf-8")
+    assert f"#POSTGRES_PASSWORD={pg_defaults.EXAMPLE_PASSWORD}" in text
+
+
+def test_probe_classifies_the_dev_server_answer(monkeypatch):
+    def connect_raising(exc):
+        def connect(*args, **kwargs):
+            raise exc
+        return connect
+
+    monkeypatch.setattr(psycopg, "connect", connect_raising(
+        psycopg.OperationalError("FATAL:  password authentication failed for user")))
+    assert pg_defaults.probe_dev_server({}, Path("absent")) == "auth"
+    monkeypatch.setattr(psycopg, "connect", connect_raising(
+        ConnectionRefusedError("connection refused")))
+    assert pg_defaults.probe_dev_server({}, Path("absent")) == "absent"
+    monkeypatch.setattr(psycopg, "connect", connect_raising(
+        psycopg.OperationalError("FATAL:  too many connections")))
+    assert pg_defaults.probe_dev_server({}, Path("absent")) == "other"
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: _Conn())
+    assert pg_defaults.probe_dev_server({}, Path("absent")) == "ok"
+
+
+@pytest.mark.parametrize("answer", ["ok", "absent", "other"])
+def test_preflight_lets_a_full_run_through_unless_the_server_rejects_it(tmp_path, answer):
+    out = io.StringIO()
+    assert pg_defaults.full_run_password_preflight(
+        "full", {}, tmp_path / "absent", probe=lambda env, env_file, **kwargs: answer,
+        out=out) is None
+    assert out.getvalue() == ""
+
+
+def test_preflight_refuses_a_full_run_the_server_rejects_and_names_the_fix(tmp_path):
+    example = _example_env(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(example.read_bytes())
+    probed: list[tuple] = []
+
+    def probe(env, path, **kwargs):
+        probed.append((env, path))
+        return "auth"
+
+    out = io.StringIO()
+    refusal = pg_defaults.full_run_password_preflight(
+        "full", {}, env_file, example_file=example, probe=probe, out=out)
+    assert refusal is not None
+    assert refusal.startswith("refusing the full suite")
+    assert "copy of ops/.env.example" in refusal
+    assert "copy ops/.env from the main checkout" in refusal
+    assert "PSEUDOLIFE_TEST_PG_PASSWORD" in refusal
+    assert out.getvalue() == ""  # the refusal is raised by conftest, not printed
+    assert probed == [({}, env_file)]
+
+
+def test_preflight_gives_a_targeted_run_one_line_and_lets_it_run(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=" + SECRET + "\n", encoding="utf-8")
+    out = io.StringIO()
+    assert pg_defaults.full_run_password_preflight(
+        "targeted", {}, env_file, probe=lambda env, path, **kwargs: "auth",
+        out=out) is None
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 1, lines
+    assert "POSTGRES_PASSWORD from ops/.env" in lines[0]
+    assert "PSEUDOLIFE_TEST_PG_PASSWORD" in lines[0]
+    assert "refusing" not in lines[0]
+    assert SECRET not in lines[0]
+
+
+@pytest.mark.parametrize(("kind", "env"), [
+    ("worker", {}),
+    ("off", {}),
+    # An explicit test DSN is used verbatim (CI's form): ops/.env is never
+    # read for it, so there is no password to check.
+    ("full", {"PSEUDOLIFE_TEST_DATABASE_URL": "dbname=pseudolife_memory_test host=x"}),
+    ("targeted", {"PSEUDOLIFE_TEST_DATABASE_URL": "dbname=pseudolife_memory_test host=x"}),
+])
+def test_preflight_never_probes_outside_a_gated_local_run(tmp_path, kind, env):
+    def probe(*args):
+        raise AssertionError("probed")
+
+    out = io.StringIO()
+    assert pg_defaults.full_run_password_preflight(
+        kind, env, tmp_path / "absent", probe=probe, out=out) is None
+    assert out.getvalue() == ""
+
+
+def test_probe_never_raises_on_an_env_file_the_parser_refuses(tmp_path, monkeypatch):
+    # Reached with PSEUDOLIFE_BENCH_ADMIN_URL exported, when conftest's own
+    # import-time resolve is skipped: a raise here would escape
+    # pytest_configure as an INTERNALERROR whose --fulltrace frames list
+    # os.environ.
+    def connect(*args, **kwargs):
+        raise AssertionError("no connect is attempted without a URL")
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED_SECRET_VALUE\n", encoding="utf-8")
+    assert pg_defaults.probe_dev_server({}, env_file) == "other"
+
+
+def test_a_quick_probe_finds_no_listener_without_waiting_on_libpq(monkeypatch):
+    # A targeted run on a machine without the dev server must not pay
+    # libpq's connect timeout (3.09 s measured to a closed loopback port on
+    # the maintainer's Windows host, 2026-09-28) on every invocation.
+    import socket
+
+    def connect(*args, **kwargs):
+        raise AssertionError("libpq is not tried when nothing listens")
+
+    def create_connection(address, timeout=None):
+        assert timeout is not None and timeout <= 0.5
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    monkeypatch.setattr(socket, "create_connection", create_connection)
+    assert pg_defaults.probe_dev_server({}, Path("absent"), quick=True) == "absent"
+
+
+def test_a_targeted_run_probes_quickly_and_a_full_run_does_not(tmp_path):
+    calls: list[dict] = []
+
+    def probe(env, path, **kwargs):
+        calls.append(kwargs)
+        return "absent"
+
+    pg_defaults.full_run_password_preflight("targeted", {}, tmp_path / "absent",
+                                            probe=probe, out=io.StringIO())
+    pg_defaults.full_run_password_preflight("full", {}, tmp_path / "absent",
+                                            probe=probe, out=io.StringIO())
+    assert calls == [{"quick": True}, {"quick": False}]
+
+
+def test_a_rejected_override_is_named_as_the_thing_to_fix(tmp_path):
+    refusal = pg_defaults.full_run_password_preflight(
+        "full", {"PSEUDOLIFE_TEST_PG_PASSWORD": SECRET}, tmp_path / "absent",
+        probe=lambda env, path, **kwargs: "auth", out=io.StringIO())
+    assert "correct or unset PSEUDOLIFE_TEST_PG_PASSWORD" in refusal
+    assert "copy ops/.env" not in refusal  # the override wins over the file
+    assert SECRET not in refusal

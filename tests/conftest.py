@@ -54,7 +54,9 @@ from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
 # resolver pg_fixtures uses (explicit test DSN, then password from ops/.env),
 # so a rotated dev password or alternate test server cannot turn those files
 # into silent skips. An operator's own bench value is left alone.
-from tests.pg_defaults import ENV_FILE, bench_admin_url, conninfo_with_dbname  # noqa: E402
+from tests.pg_defaults import (  # noqa: E402
+    ENV_FILE, bench_admin_url, conninfo_with_dbname, full_run_password_preflight,
+)
 
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
     os.environ["PSEUDOLIFE_BENCH_ADMIN_URL"] = bench_admin_url()
@@ -362,12 +364,27 @@ def pytest_configure(config: pytest.Config) -> None:
     # What it read from the checkout by now (this file, its imports, and
     # ops/.env for the bench URL above) is fingerprinted and re-checked on
     # every poll: a run whose copies changed while it queued stops instead
-    # of running them. The board mirrors the lock as the lease `full-suite`
-    # (holder, queue, expected end, a notice to the peers concerned), built
-    # only for a run that takes the lock, before the fingerprint, so its
-    # module is part of it.
+    # of running them.
+    #
+    # Before it queues, the dev Postgres is asked whether it accepts the
+    # password the suite resolved (PSEUDOLIFE_TEST_PG_PASSWORD, else
+    # ops/.env, else the compose default). A full run it rejects is refused
+    # here: from a fresh worktree, whose ops/.env is missing or the template
+    # copy, such a run went to the end with 1,424 PG-backed setup errors
+    # (2026-09-27, twice), holding the machine's one slot for a gate that
+    # gated nothing. A targeted run gets one line and goes on, as it did.
+    #
+    # The board mirrors the lock as the lease `full-suite` (holder, queue,
+    # expected end, a notice to the peers concerned), built only for a full
+    # run past that preflight, before the fingerprint, so its module is part
+    # of it.
+    def preflight(kind: str) -> None:
+        refusal = full_run_password_preflight(kind)
+        if refusal:
+            raise pytest.UsageError(refusal)
+
     held = suite_lock.take_for_session(
-        config, os.environ, ROOT / "tests", read_files=(ENV_FILE,),
+        config, os.environ, ROOT / "tests", read_files=(ENV_FILE,), preflight=preflight,
         mirror=lambda: suite_lock.board_mirror(
             suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV))
     if held is not None:

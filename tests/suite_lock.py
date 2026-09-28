@@ -741,36 +741,55 @@ class TreeChanged(RuntimeError):
     """Files a queued run already read changed on disk while it waited."""
 
 
+def session_kind(config, environ, tests_root: Path) -> str:
+    """What this session is to the lock: ``worker`` (an xdist worker, whose
+    controller holds it), ``off`` (the lock is off, as on GitHub Actions),
+    ``full`` or ``targeted`` (:func:`is_full_run`). ``ValueError`` for a bad
+    ``PSEUDOLIFE_SUITE_LOCK``, whatever the run."""
+    if hasattr(config, "workerinput"):
+        # An xdist worker: its controller already holds the lock, and a
+        # worker queued behind its own controller would never start.
+        return "worker"
+    if lock_mode(environ) == "off":
+        return "off"
+    option = config.option
+    full = is_full_run(
+        config.args, config.invocation_params.dir, tests_root,
+        keyword=getattr(option, "keyword", "") or "",
+        markexpr=getattr(option, "markexpr", "") or "",
+        listing_only=any(getattr(option, name, False)
+                         for name in LISTING_OPTIONS))
+    return "full" if full else "targeted"
+
+
 def take_for_session(config, environ, tests_root: Path,
-                     read_files=(), mirror=None) -> HeldLock | None:
+                     read_files=(), preflight: Callable[[str], None] | None = None,
+                     mirror=None) -> HeldLock | None:
     """The conftest entry point: the held lock, or None when this session
     does not take it (targeted run, ``off``, or an xdist worker). A usage
     error, without ever taking the lock, when tree code this process
     imported, its ini file, or one of ``read_files`` (files conftest read
-    at import) changed on disk while it queued. ``mirror`` is the board's
-    view of the lock (:func:`board_mirror`), or a callable that builds it,
-    called only for a run that takes the lock, before the fingerprint, so
-    the modules it imports are fingerprinted with the rest."""
+    at import) changed on disk while it queued. ``preflight``, when given,
+    is called with ``"full"`` or ``"targeted"`` once the run is classified
+    and before a full run queues; never for a worker or with the lock off.
+    Whatever it raises ends the session with the lock untouched. ``mirror``
+    is the board's view of the lock (:func:`board_mirror`), or a callable
+    that builds it, called only for a full run past the preflight, before
+    the fingerprint, so the modules it imports are fingerprinted with the
+    rest."""
     import pytest
 
-    if hasattr(config, "workerinput"):
-        # An xdist worker: its controller already holds the lock, and a
-        # worker queued behind its own controller would never start.
-        return None
     try:
-        mode = lock_mode(environ)
+        kind = session_kind(config, environ, tests_root)
     except ValueError as exc:
         raise pytest.UsageError(str(exc)) from None
-    if mode == "off":
+    if kind in ("worker", "off"):
         return None
-    option = config.option
-    if not is_full_run(
-            config.args, config.invocation_params.dir, tests_root,
-            keyword=getattr(option, "keyword", "") or "",
-            markexpr=getattr(option, "markexpr", "") or "",
-            listing_only=any(getattr(option, name, False)
-                             for name in LISTING_OPTIONS)):
+    if preflight is not None:
+        preflight(kind)
+    if kind == "targeted":
         return None
+    mode = lock_mode(environ)  # wait or fail: session_kind validated it
     directory = lock_dir(environ)
     if callable(mirror):
         mirror = mirror()
