@@ -270,10 +270,11 @@ class ConsoleRoutes:
         ``None`` when the board cannot carry it (off, no Postgres), which
         the caller reports as not said."""
         from pseudolife_memory import coordination
+        from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
         resolve = getattr(self.svc, "_request_principal", None)
         principal = resolve() if resolve else None
         allowed = self.svc.config.coordination.allowed_principals
-        if principal is None or principal not in allowed:
+        if principal is None or principal == DAEMON_PRINCIPAL or principal not in allowed:
             raise ValueError("principal_not_allowed: a daemon notice needs a bearer whose principal is in "
                              "coordination.allowed_principals")
         text = body.get("text")

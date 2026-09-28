@@ -2687,15 +2687,15 @@ board lists no active session. It then takes the same path as an attended
 for `/health` at the new version, then the client side; the board is
 read once more right before the daemon is recreated, since the backup
 can take minutes, and a session that started meanwhile holds the
-recreate off (the backup and the rollback tag already taken are
-harmless). When a release is out it posts a board notice from the
+recreate off before the rollback tag is moved (the backup already taken
+is harmless). When a release is out it posts a board notice from the
 daemon's reserved principal, stamped with the posting principal, to the
 sessions the board lists as active: updated (with the rollback tag, the
 client states and, when the hook scripts changed, the Codex re-approval
 steps), or held off and why (which sessions are active; the board
 unreadable). With the knob off it only logs, so a daily run never
 nags. The durable record is `~/.pseudolife-mcp/unattended-update.log`,
-which every line reaches; the notice is best effort. An update succeeds
+which every step line reaches; the notice is best effort. An update succeeds
 only when no session is active, so its notice usually reaches nobody
 and a session that starts later meets the new daemon through the
 version handshake and the log; a failed update posts the failure with
@@ -2748,13 +2748,24 @@ differs from the scripts just deployed, and only then, every update path
 `ops/update_clients.py`, the unattended run's board notice) prints the
 complete steps: which hook files changed (read from Codex's marketplace
 clone against the checkout, or against the Claude plugin cache when that
-holds the daemon's scripts), the refresh (Codex's plugin manager, or
-`python ops/setup-codex-hooks.py --source plugin --trust ask`), the
-approval (`/hooks` in a Codex session, or `--trust yes` /
+holds the daemon's scripts), the refresh (update the plugin in Codex's
+plugin manager so its clone holds the new scripts;
+`ops/setup-codex-hooks.py --source plugin` approves what the clone holds
+and does not pull one), the approval (`/hooks` in a Codex session, or
+`python ops/setup-codex-hooks.py --source plugin --trust yes` /
 `--codex-hook-trust yes` for an unattended install), what is off until
-then (the memory briefing, the per-turn memory and mail notes, the Stop
-wake), and the check: `pseudolife-mcp doctor` reports `codex_hooks =
-current`. An update whose hooks did not change says nothing about Codex.
+then (the memory briefing, the per-turn memory and mail notes, the board
+check-in, the SessionEnd close and the Stop-hook park gate), and the
+check: `pseudolife-mcp doctor` reports `codex_hooks = current`. A manual
+copy (`setup-codex-hooks.py --source manual`) gets its own commands, and
+`doctor` reports `bundle-present` for it. An update whose hooks did not
+change says nothing about Codex, and neither does one that finds no
+marketplace clone at all. A daemon-only update (`ops/update.ps1` without
+`-All`, `update --daemon-only`) whose hook scripts changed says in one
+line that the client side and these steps are still to do; the shim's
+unattended client half leaves the steps beside its result file
+(`~/.pseudolife-mcp/update-clients.<version>.codex`) and its next
+session's note points at them.
 
 ## Schema version history
 

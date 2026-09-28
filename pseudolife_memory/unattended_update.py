@@ -213,8 +213,8 @@ def _run(update) -> int:
                 + (f" ({idle} idle)" if idle else ""))
     def board_still_idle() -> None:
         # The backup can take minutes: a session that started meanwhile
-        # must not get its daemon recreated under it. The backup and the
-        # rollback tag already taken are harmless.
+        # must not get its daemon recreated under it. It runs before the
+        # rollback tag moves, so a hold-off leaves only the backup behind.
         active, _idle, reason = board_activity(o.daemon_url.rstrip("/"), bearer())
         if reason or active:
             why = f"the board could not be read ({reason})" if reason else \
@@ -310,7 +310,10 @@ def _unit_environment() -> list[str]:
 
         path = data_dir() / "unattended-update.token"
         path.parent.mkdir(parents=True, exist_ok=True)
-        _write_token_file(path, token)          # owner-only, atomically, whatever was there before
+        try:
+            _write_token_file(path, token)      # owner-only, atomically, whatever was there before
+        except Exception as exc:  # noqa: BLE001 - CredentialError and OSError alike: say it, exit 2
+            raise UpdateError(f"could not write the private token file {path} ({exc}); nothing was installed", 2)
         token_file = str(path)
     if token_file:
         lines.append(f"Environment=PSEUDOLIFE_MCP_TOKEN_FILE={token_file}")

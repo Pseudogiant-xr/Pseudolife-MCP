@@ -127,6 +127,7 @@ def test_a_session_that_starts_during_the_backup_holds_the_recreate_off(world, b
     assert len(reads) == 2
     calls = world.docker_calls()
     assert any("pg_dump" in c for c in calls)                       # the backup ran
+    assert not any(c.startswith("tag ") for c in calls)             # the rollback tag did not move
     assert not any("up -d --no-deps pseudolife-daemon" in c for c in calls)   # the recreate did not
     (_, _, text), = board["notices"]
     assert "held off after the backup" in text and "codex (started during the backup)" in text
@@ -382,9 +383,10 @@ def test_the_daemon_notice_route_admits_only_an_allowed_principal(monkeypatch):
     st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
     assert st == 200 and json.loads(reply)["recipients"] == 2
     assert sent == ["Pseudolife-MCP: updated\n(posted by the unattended updater, principal default)"]
-    svc._request_principal = lambda: "intruder"
-    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
-    assert st == 400 and b"principal_not_allowed" in reply
+    for who in ("intruder", "daemon"):                            # the reserved name is never a caller
+        svc._request_principal = lambda who=who: who
+        st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+        assert st == 400 and b"principal_not_allowed" in reply, who
     svc._request_principal = lambda: "default"
     st, reply = call(app, "POST", "/api/daemon-notice", body=json.dumps({"text": "x\x07y"}).encode(), headers=headers)
     assert st == 400 and b"printable" in reply

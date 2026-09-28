@@ -760,9 +760,9 @@ class Update:
         """``current`` and ``previous_digest`` are the daemon's version and
         hooks digest when the caller has just read them (the unattended
         run), else they are read here. ``before_recreate`` runs after the
-        backup and the rollback tag, right before the daemon is recreated;
-        it may raise ``UpdateError`` to stop there (the unattended run
-        re-reads the board at that point)."""
+        backup and before the rollback tag moves; it may raise
+        ``UpdateError`` to stop there (the unattended run re-reads the
+        board at that point)."""
         target = self.target_version()
         self.report.target = target
         if current is None:
@@ -794,6 +794,10 @@ class Update:
             raise UpdateError(f"docker pull {image} failed" + (f" ({_last_line(out)})" if out.strip() else "")
                               + f"; nothing was changed. Is {target} a published release?")
         self.backup(context["checkout"])
+        if before_recreate is not None:
+            # Before the rollback tag moves: a hold-off here leaves only the
+            # backup behind, and never counts toward rollback retention.
+            before_recreate()
         running_id, ref = self.running_image()
         if not running_id:
             raise UpdateError(f"the {DAEMON_CONTAINER} container vanished during the backup; nothing was deployed")
@@ -811,8 +815,6 @@ class Update:
         self.tag_rollback(ref or GHCR_IMAGE, None, running_id, source=running_id, rollback=rollback,
                           rollback_lines=lines)
         self.prune_rollbacks(context["checkout"], GHCR_IMAGE)
-        if before_recreate is not None:
-            before_recreate()
         self.step(f"recreating the daemon container on {image} (Postgres + extractor untouched)...")
         code, out = run_cli([self.docker, "compose", *compose, "up", "-d", "--no-deps", DAEMON_SERVICE],
                             timeout=3600, env=compose_environment(context["env_file"], {"PSEUDOLIFE_IMAGE_TAG": target}),
