@@ -293,24 +293,42 @@ def _hold(lease_env, name="gpu"):
     return blocker
 
 
-def _free_after_waiting(monkeypatch, blocker, seconds=0.4) -> dict:
+def _free_after_waiting(monkeypatch, blocker, seconds=0.4, *, after=None) -> dict:
     """Release ``blocker`` once the run has spent ``seconds`` waiting on it.
     The hook is the run's own pause, which it reaches only after a busy
     attempt, so the lock can never be freed before the first try however
     slow the host is. Returns a dict that gets the wall time of the release
-    under ``freed``."""
+    under ``freed``. With ``after``, wait for that predicate instead of a
+    duration (for example, completed renewal calls)."""
     pause = lease_cli._pause
     state: dict = {}
 
     def pause_then_maybe_free(poll, deadline):
         state.setdefault("first", time.monotonic())
-        if "freed" not in state and time.monotonic() - state["first"] >= seconds:
+        ready = after() if after is not None else time.monotonic() - state["first"] >= seconds
+        if "freed" not in state and ready:
             state["freed"] = time.time()
             blocker.release()
         pause(poll, deadline)
 
     monkeypatch.setattr(lease_cli, "_pause", pause_then_maybe_free)
     return state
+
+
+def _after_renewals(monkeypatch, marker, count):
+    """Let a child finish only after the requested renewals have completed."""
+    renew = lease_cli._Renewer._renew
+    completed = 0
+
+    def record(self):
+        nonlocal completed
+        delay = renew(self)
+        completed += 1
+        if completed >= count:
+            marker.touch()
+        return delay
+
+    monkeypatch.setattr(lease_cli._Renewer, "_renew", record)
 
 
 # --- lease run: the board path -------------------------------------------------
@@ -372,12 +390,14 @@ def test_a_queued_run_reports_its_place_then_runs_once_held(lease_env, tmp_path,
     assert released_last(daemon)
 
 
-def test_every_lease_call_repeats_the_same_expect(lease_env, tmp_path):
+def test_every_lease_call_repeats_the_same_expect(lease_env, tmp_path, monkeypatch):
     # The board keeps each hold's expect: repeating the same value leaves
     # the expected end alone, and a changed one would be logged as a change,
     # so it is never recomputed as the work goes on.
     daemon = FakeDaemon(lease=[QUEUED(), HELD()])
-    command, _ = _command(tmp_path, sleep=0.4)
+    renewed = tmp_path / "renewed"
+    _after_renewals(monkeypatch, renewed, 2)
+    command, _ = _command(tmp_path, wait_for=renewed)
 
     assert _run(["run", "gpu", "--expect", "90", "--", *command], daemon) == 0
 
@@ -399,7 +419,8 @@ def test_a_holder_without_a_board_lease_delays_the_run_while_renewing(
         lease_env, tmp_path, monkeypatch, capsys):
     daemon = FakeDaemon()
     blocker = _hold(lease_env)
-    state = _free_after_waiting(monkeypatch, blocker)
+    state = _free_after_waiting(monkeypatch, blocker,
+                                after=lambda: daemon.actions().count("lease") >= 3)
     command, marker = _command(tmp_path)
     try:
         code = _run(["run", "gpu", "--expect", "5m", "--", *command], daemon)
@@ -573,12 +594,14 @@ def test_the_fallback_waits_for_the_local_lock(lease_env, tmp_path, monkeypatch,
 # --- lease run: renewal while the command runs --------------------------------
 
 def test_renewal_survives_a_transient_error_and_warns_once_when_lost(
-        lease_env, tmp_path, capsys):
+        lease_env, tmp_path, monkeypatch, capsys):
     # acquire, a transient failure, a renewal, the loss, then the board
     # grants it again (the last reply repeats).
     daemon = FakeDaemon(lease=[HELD(), (503, {"error": "coordination_unavailable"}),
                                HELD(), QUEUED(), HELD()])
-    command, marker = _command(tmp_path, sleep=0.6)
+    renewed = tmp_path / "renewed"
+    _after_renewals(monkeypatch, renewed, 5)
+    command, marker = _command(tmp_path, wait_for=renewed)
 
     assert _run(["run", "gpu", "--", *command], daemon) == 0
 
@@ -592,9 +615,12 @@ def test_renewal_survives_a_transient_error_and_warns_once_when_lost(
     assert released_last(daemon)
 
 
-def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, capsys):
+def test_a_refused_renewal_warns_once_and_stops_renewing(lease_env, tmp_path, monkeypatch,
+                                                      capsys):
     daemon = FakeDaemon(lease=[HELD(), (401, {"error": "unauthorized"})])
-    command, marker = _command(tmp_path, sleep=0.5)
+    renewed = tmp_path / "renewed"
+    _after_renewals(monkeypatch, renewed, 1)
+    command, marker = _command(tmp_path, wait_for=renewed)
 
     assert _run(["run", "gpu", "--", *command], daemon) == 0
 
@@ -618,10 +644,11 @@ def signal_later():
     cancelled = threading.Event()
     threads = []
 
-    def arm(delay, *, ready=None, signum=signal.SIGINT):
+    def arm(delay, *, ready=None, when=None, signum=signal.SIGINT):
         def deliver():
             deadline = time.monotonic() + START_TIMEOUT
-            while ready is not None and not ready.exists():
+            while ((ready is not None and not ready.exists())
+                   or (when is not None and not when())):
                 if cancelled.wait(0.01) or time.monotonic() > deadline:
                     return
             if cancelled.wait(delay):
@@ -705,15 +732,24 @@ def test_the_local_lock_is_freed_as_soon_as_the_command_ends(lease_env, tmp_path
     assert seen and seen[0] is False
 
 
-def test_ctrl_c_lets_the_command_finish_its_own_cleanup(lease_env, tmp_path, signal_later):
+def test_ctrl_c_lets_the_command_finish_its_own_cleanup(
+        lease_env, tmp_path, monkeypatch, signal_later):
     # A console Ctrl-C reaches the command as well (one console on Windows,
     # one foreground process group on POSIX). Terminating it at once would
     # cut exactly the cleanup that Ctrl-C started: a test run's teardown, a
     # nested lease run's release.
     daemon = FakeDaemon()
     ready = tmp_path / "ready"
-    command, marker = _command(tmp_path, sleep=1.0, ready=ready)
-    signal_later(0.1, ready=ready)
+    interrupted = tmp_path / "interrupted"
+    command, marker = _command(tmp_path, ready=ready, wait_for=interrupted)
+    stop = lease_cli._stop_child
+
+    def cleanup(child, signum):
+        interrupted.touch()  # the wrapper entered cleanup; let the child finish itself
+        return stop(child, signum)
+
+    monkeypatch.setattr(lease_cli, "_stop_child", cleanup)
+    signal_later(0.0, ready=ready)
 
     code = _run(["run", "gpu", "--", *command], daemon)
 
@@ -781,9 +817,15 @@ def test_an_interrupt_aimed_at_the_wrapper_alone_is_forwarded(
 
 
 def test_ctrl_c_while_waiting_releases_and_exits_130(lease_env, tmp_path, signal_later):
-    daemon = FakeDaemon(lease=[QUEUED()])
+    waiting = tmp_path / "waiting"
+
+    def queued(request):
+        waiting.touch()
+        return QUEUED()
+
+    daemon = FakeDaemon(lease=[queued])
     command, marker = _command(tmp_path)
-    signal_later(0.3)
+    signal_later(0.0, ready=waiting)
     code = _run(["run", "gpu", "--", *command], daemon)
     assert code == 130
     assert not marker.exists()
@@ -1168,16 +1210,17 @@ def test_check_falls_back_to_the_local_lock_when_the_board_refuses(lease_env, ca
 # the launcher and end with the server. ``hold NAME --while-pid PID`` takes the
 # OS lock, mirrors it on the board, and releases both when PID exits.
 
-def _live_process(seconds=1.0):
-    return subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({seconds})"])
+def _live_process():
+    return subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.readline()"],
+                            stdin=subprocess.PIPE)
 
 
 @pytest.fixture
 def sleeper():
     started = []
 
-    def start(seconds=1.0):
-        started.append(_live_process(seconds))
+    def start():
+        started.append(_live_process())
         # Reaped as it exits: on POSIX an unreaped child is a zombie, which
         # still answers signal 0 where there is no procfs to read its state.
         threading.Thread(target=started[-1].wait, daemon=True).start()
@@ -1188,6 +1231,20 @@ def sleeper():
         if proc.poll() is None:
             proc.kill()
         proc.wait(timeout=START_TIMEOUT)
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.close()
+
+
+def _finish_after_acquired(monkeypatch, child):
+    """Keep the followed PID alive until every acquire notice has been sent."""
+    announce = lease_cli.BoardMirror._announce
+
+    def finish(self, event, deadline):
+        announce(self, event, deadline)
+        if event == "acquired":
+            child.stdin.close()
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "_announce", finish)
 
 
 def _lock_seen_held(path, timeout=10.0):
@@ -1201,9 +1258,16 @@ def _lock_seen_held(path, timeout=10.0):
 
 
 def test_hold_keeps_the_lease_while_the_pid_lives_then_releases(lease_env, sleeper, capsys):
-    daemon = FakeDaemon()
-    child = sleeper(1.5)
+    child = sleeper()
     seen = {}
+
+    def renewed(request):
+        # The observer and two renewals must run before the followed PID ends.
+        if len(daemon.bodies("lease")) >= 3 and seen.get("held_at") is not None:
+            child.stdin.close()
+        return HELD()
+
+    daemon = FakeDaemon(lease=[renewed])
     watcher = threading.Thread(
         target=lambda: seen.update(held_at=_lock_seen_held(lease_env / "lease-gpu.lock")))
     watcher.start()
@@ -1246,7 +1310,8 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
         peer(AGENT, "lease-hold", "lease:gpu held"),  # this run's own address
     ]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
-    child = sleeper(0.5)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
 
     worktree = str(tmp_path / "checkouts" / "wt-bench")
     assert _run(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "20m",
@@ -1286,7 +1351,14 @@ def test_hold_announces_to_the_peers_the_lease_concerns(lease_env, sleeper, monk
 def test_hold_without_a_board_holds_the_lock_alone(lease_env, sleeper, monkeypatch, capsys):
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN")
     daemon = FakeDaemon()
-    child = sleeper(0.5)
+    child = sleeper()
+    wait = lease_cli._wait_for_pid
+
+    def finish(pid):
+        child.stdin.close()  # the no-board path has taken the local lock
+        return wait(pid)
+
+    monkeypatch.setattr(lease_cli, "_wait_for_pid", finish)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     assert daemon.calls == []
     err = capsys.readouterr().err
@@ -1297,7 +1369,7 @@ def test_hold_exits_75_at_once_when_the_lock_is_held_and_the_timeout_is_zero(
         lease_env, sleeper, capsys):
     daemon = FakeDaemon()
     blocker = _hold(lease_env)
-    child = sleeper(5)
+    child = sleeper()
     try:
         code = _run(["hold", "gpu", "--while-pid", str(child.pid), "--timeout", "0"], daemon)
     finally:
@@ -1311,7 +1383,8 @@ def test_hold_waits_for_a_held_lock_then_takes_it(lease_env, sleeper, monkeypatc
     daemon = FakeDaemon()
     blocker = _hold(lease_env)
     state = _free_after_waiting(monkeypatch, blocker)
-    child = sleeper(2)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
     try:
         code = _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon)
     finally:
@@ -1332,15 +1405,21 @@ def test_hold_of_a_pid_that_is_gone_releases_at_once(lease_env, capsys):
     assert os_lock.probe(lease_env / "lease-gpu.lock") in (None, False)
 
 
-def test_hold_is_stopped_by_a_signal_and_releases(lease_env, sleeper, capsys):
+def test_hold_is_stopped_by_a_signal_and_releases(
+        lease_env, sleeper, monkeypatch, signal_later, capsys):
     daemon = FakeDaemon()
-    child = sleeper(20)
-    timer = threading.Timer(0.5, _thread.interrupt_main)
-    timer.start()
-    try:
-        code = _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon)
-    finally:
-        timer.cancel()
+    child = sleeper()
+    acquired = threading.Event()
+    announce = lease_cli.BoardMirror._announce
+
+    def record(self, event, deadline):
+        announce(self, event, deadline)
+        if event == "acquired":
+            acquired.set()
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "_announce", record)
+    signal_later(0.0, when=acquired.is_set)
+    code = _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon)
     assert code == 130
     assert child.poll() is None  # the process it followed is not its to stop
     assert released_last(daemon)
@@ -1478,7 +1557,7 @@ def test_a_check_that_fails_is_never_mistaken_for_held(lease_env, monkeypatch, c
     assert "RuntimeError" in capsys.readouterr().err
 
 
-def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
+def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper, monkeypatch):
     peers = [peer(p * 32, f"runner-{p}", "suite=running") for p in "abc"]
 
     def send(request):
@@ -1488,25 +1567,27 @@ def test_one_refused_notice_does_not_stop_the_others(lease_env, sleeper):
         return SENT()
 
     daemon = FakeDaemon(agents=[AGENTS(*peers)], send=[send])
-    child = sleeper(0.5)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
     assert told == {"a" * 32, "b" * 32, "c" * 32}
 
 
-def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper):
+def test_a_parked_peer_is_told_even_while_detached(lease_env, sleeper, monkeypatch):
     peers = [peer("a" * 32, "parked", "parked", lifecycle="detached",
                   park_reason="needs_resource", park_clear_by="gpu"),
              peer("b" * 32, "gone", "suite=running", lifecycle="detached"),
              peer("c" * 32, "revoked", "parked", lifecycle="revoked",
                   park_reason="needs_resource", park_clear_by="gpu")]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
-    child = sleeper(0.5)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     assert {body["to"] for body in daemon.bodies("send")} == {"a" * 32}
 
 
-def test_only_a_standing_park_is_told(lease_env, sleeper):
+def test_only_a_standing_park_is_told(lease_env, sleeper, monkeypatch):
     # The daemon's rule (CoordinationStore._live_park): a park stands while
     # its reason is set and its park_expires is unset or still ahead. The
     # peer list returns a lapsed park's fields as they were stored.
@@ -1521,7 +1602,8 @@ def test_only_a_standing_park_is_told(lease_env, sleeper):
              peer("e" * 32, "lapsed-running", "suite=running", park_expires=now - 1,
                   **parked)]
     daemon = FakeDaemon(agents=[AGENTS(*peers)])
-    child = sleeper(0.5)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], daemon) == 0
     told = {body["to"] for body in daemon.bodies("send") if "acquired" in body["text"]}
     assert told == {"a" * 32, "b" * 32, "e" * 32}
@@ -1563,7 +1645,8 @@ def test_hold_frees_the_lock_before_the_board_hears(lease_env, sleeper, monkeypa
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(lease_cli.BoardMirror, "release", release)
-    child = sleeper(0.3)
+    child = sleeper()
+    _finish_after_acquired(monkeypatch, child)
     assert _run(["hold", "gpu", "--while-pid", str(child.pid)], FakeDaemon()) == 0
     assert seen["lock"] is False
 

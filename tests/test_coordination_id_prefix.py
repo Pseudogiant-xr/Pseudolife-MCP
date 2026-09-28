@@ -11,6 +11,7 @@ the way the full id would. A value that is not eight to thirty-one lowercase
 hex characters is looked up exactly, as before.
 """
 import json
+import uuid
 
 import pytest
 
@@ -42,6 +43,19 @@ def rename_message(conn, message_id, new_id):
                  (new_id, message_id))
 
 
+def unused_prefix(store, *, messages=False):
+    """A valid prefix with no candidate in this bank, including pruned agents."""
+    prefix = uuid.uuid4().hex[:31]
+    sql = ("SELECT message_id FROM coordination_messages" if messages else
+           "SELECT agent_id FROM coordination_agents UNION "
+           "SELECT agent_id FROM coordination_events UNION "
+           "SELECT recipient_agent_id FROM coordination_events")
+    assert is_id_prefix(prefix)
+    assert not any(value and value.startswith(prefix)
+                   for (value,) in store.storage.conn.execute(sql).fetchall())
+    return prefix
+
+
 def test_a_prefix_is_eight_to_thirty_one_lowercase_hex_characters():
     assert is_id_prefix("deadbeef") and is_id_prefix("0123456789abcdef0123456789abcde")
     for other in ("deadbee", "DEADBEEF", "deadbeefg", "a" * 32, "", None, 12345678,
@@ -54,8 +68,10 @@ def test_a_prefix_is_eight_to_thirty_one_lowercase_hex_characters():
     assert distinguishing_prefixes(["a" + "0" * 31, "b" + "0" * 31]) == ["a0000000", "b0000000"]
 
 
-def test_a_unique_prefix_addresses_the_agent_and_the_receipt_names_it(store):
+@pytest.mark.parametrize("recipient_id", [B_ID, "12345678" + "0" * 24])
+def test_a_unique_prefix_addresses_the_agent_and_the_receipt_names_it(store, recipient_id):
     a, b = pair(store)
+    b = rename_agent(store.storage.conn, b, recipient_id)
     sent = store.send(*creds(a), to=b["agent_id"][:8], text="by prefix", request_id="r1")
     assert sent["recipient_agent_id"] == b["agent_id"] and sent["state"] == "queued"
     longer = store.send(*creds(a), to=b["agent_id"][:12], text="longer", request_id="r2")
@@ -63,7 +79,9 @@ def test_a_unique_prefix_addresses_the_agent_and_the_receipt_names_it(store):
     assert [m["text"] for m in store.receive(*creds(b))["messages"]] == ["by prefix", "longer"]
     # A retry by prefix is the same request as one by full id.
     assert store.send(*creds(a), to=b["agent_id"], text="by prefix", request_id="r1") == sent
-    for short in (b["agent_id"][:7], b["agent_id"][:8].upper(), "missing-agent"):
+    missing = unused_prefix(store)
+    # Uppercasing a numeric-only prefix leaves a valid address unchanged.
+    for short in (b["agent_id"][:7], "DEADBEEF", "missing-agent", missing):
         with pytest.raises(CoordinationError, match="recipient_not_found"):
             store.send(*creds(a), to=short, text="x", request_id="r3")
 
@@ -118,10 +136,11 @@ def test_a_reply_retried_with_a_prefix_is_the_same_request(store):
 
 
 def test_rebinding_a_prefix_that_matches_nothing_fails_as_the_full_id_does(store):
+    missing = unused_prefix(store)
     with pytest.raises(CoordinationError, match="invalid_rebind"):
-        store.rebind("0123456789ab", "alice")
+        store.rebind(missing, "alice")
     with pytest.raises(CoordinationError, match="invalid_rebind"):
-        store.rebind("0123456789ab" + "0" * 20, "alice")
+        store.rebind(missing + "0", "alice")
 
 
 def test_an_ambiguous_prefix_is_refused_naming_the_candidates(store):
@@ -153,12 +172,13 @@ def test_reply_to_and_ack_take_a_prefix_scoped_to_the_callers_own_mail(store):
     assert receipt["message_id"] == reply["message_id"] and receipt["state"] == "acknowledged"
     more = [store.send(*creds(a), to=b["agent_id"], text=f"n{i}", request_id=f"n{i}")["message_id"]
             for i in range(2)]
+    missing = unused_prefix(store, messages=True)
     batch = store.ack(*creds(b), message_id=f"{more[0][:8]},{more[1][:9]},{asked['message_id']},"
-                                              "0123456789ab")
+                                              f"{missing}")
     assert [r["message_id"] for r in batch["receipts"]] == [more[0], more[1], asked["message_id"]]
-    assert batch["missing"] == ["0123456789ab"]
+    assert batch["missing"] == [missing]
     with pytest.raises(CoordinationError, match="message_not_found"):
-        store.ack(*creds(b), message_id="0123456789ab")
+        store.ack(*creds(b), message_id=missing)
     # A prefix of another mailbox's message is not this mailbox's to acknowledge.
     with pytest.raises(CoordinationError, match="message_not_found"):
         store.ack(*creds(c), message_id=more[0][:8])
@@ -185,8 +205,9 @@ def test_redact_takes_a_message_id_prefix(store):
     sent = store.send(*creds(a), to=b["agent_id"], text="token pasted", request_id="r")
     out = store.redact(sent["message_id"][:8], "pasted a token")
     assert out["message_id"] == sent["message_id"] and out["audit_copy"] == "removed"
+    missing = unused_prefix(store, messages=True)
     with pytest.raises(CoordinationError, match="message_not_found"):
-        store.redact("0123456789ab", "nothing there")
+        store.redact(missing, "nothing there")
     ids = [store.send(*creds(a), to=b["agent_id"], text=f"m{i}", request_id=f"m{i}")["message_id"]
            for i in range(2)]
     rename_message(store.storage.conn, ids[0], "feedface01" + "0" * 22)
@@ -206,8 +227,9 @@ def test_board_audit_export_takes_an_agent_prefix_even_after_the_address_is_prun
     assert store.storage.conn.execute("SELECT count(*) FROM coordination_agents").fetchone()[0] == 0
     code, output = cli("export", "--agent", b["agent_id"][:8])
     assert code == 0 and [e["event"] for e in lines(output)] == ["register", "send"]
-    code, output = cli("export", "--agent", "0123456789ab")
-    assert code != 0 and "no agent id starts with 0123456789ab" in output.err
+    missing = unused_prefix(store)
+    code, output = cli("export", "--agent", missing)
+    assert code != 0 and f"no agent id starts with {missing}" in output.err
 
 
 def test_board_audit_export_refuses_an_ambiguous_agent_prefix_naming_the_candidates(store, cli):

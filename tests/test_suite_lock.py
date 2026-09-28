@@ -780,7 +780,7 @@ def test_a_full_run_takes_a_second_slot_when_the_file_allows_two(tmp_path):
         suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
 
 
-def _queue_for_session(tmp_path) -> tuple[threading.Thread, dict]:
+def _queue_for_session(tmp_path, *, name=None) -> tuple[threading.Thread, dict]:
     """A full run queueing through take_for_session on a thread; returns the
     thread and a dict that receives the HeldLock."""
     environ = {"PSEUDOLIFE_SUITE_LOCK_DIR": str(tmp_path),
@@ -790,7 +790,7 @@ def _queue_for_session(tmp_path) -> tuple[threading.Thread, dict]:
     def run():
         result["held"] = suite_lock.take_for_session(_config(["tests"]), environ, TESTS)
 
-    thread = threading.Thread(target=run, daemon=True)
+    thread = threading.Thread(target=run, name=name, daemon=True)
     thread.start()
     deadline = time.monotonic() + START_TIMEOUT
     queue_dir = tmp_path / suite_lock.QUEUE_DIR
@@ -822,28 +822,40 @@ def test_a_raised_slot_count_reaches_runs_already_queued(tmp_path):
             suite_lock.release(result["held"])
 
 
-def test_a_lowered_slot_count_reaches_runs_already_queued(tmp_path):
+def test_a_lowered_slot_count_reaches_runs_already_queued(tmp_path, monkeypatch):
     slots_file = tmp_path / suite_lock.SLOTS_FILE
     slots_file.write_text("2", encoding="utf-8")
     holders = [suite_lock.acquire(tmp_path, "fail", worktree=f"holder{i}", slots=2)
                for i in range(2)]
+    clock = _GatedClock()
+    clock.gates["queued"] = threading.Event()
+    monkeypatch.setattr(suite_lock, "time", clock)
     thread = None
+    result = {}
     try:
-        thread, result = _queue_for_session(tmp_path)
+        thread, result = _queue_for_session(tmp_path, name="queued")
+        # Finish the old-count attempt before changing the file. A sleep
+        # could leave that attempt in flight as the removed slot was freed.
+        clock.wait_for(lambda: clock.sleeps["queued"] >= 1, "the first queued poll")
         slots_file.write_text("1", encoding="utf-8")
-        time.sleep(2.5)                       # a poll under the new count
         suite_lock.release(holders.pop())     # slot 1 frees: no longer ours
-        thread.join(5)
+        polls = clock.sleeps["queued"]
+        clock.gates["queued"].set()
+        clock.wait_for(lambda: "held" in result or clock.sleeps["queued"] >= polls + 3,
+                       "three polls after lowering the slot count")
         assert "held" not in result, "the queued run took a slot the count dropped"
         suite_lock.release(holders.pop())     # slot 0 frees
-        thread.join(10)
+        thread.join(START_TIMEOUT)
         assert result["held"].slot == 0
         suite_lock.release(result["held"])
     finally:
+        clock.gates["queued"].set()
         for holder in holders:
             suite_lock.release(holder)
         if thread is not None:
             thread.join(START_TIMEOUT)
+        if "held" in result and not result["held"].file.closed:
+            suite_lock.release(result["held"])
 
 
 # --- the conftest wiring, end to end ----------------------------------------
@@ -1273,6 +1285,20 @@ def _mirror(directory, daemon, environ=BOARD_ENV, worktree=ROOT):
     return suite_lock.board_mirror(directory, worktree, environ, transport=daemon.transport)
 
 
+def _acquired_on_board(monkeypatch, mirror):
+    """Observe the mirror finishing its acquire call and peer notices."""
+    acquired = threading.Event()
+    announce = mirror._announce
+
+    def record(event, deadline):
+        announce(event, deadline)
+        if event == "acquired":
+            acquired.set()
+
+    monkeypatch.setattr(mirror, "_announce", record)
+    return acquired
+
+
 def _stderr_until(capsys, text, timeout=START_TIMEOUT):
     """The stderr seen until ``text`` appears in it: the mirror talks to the
     board on its own thread, so its lines arrive after the lock is taken."""
@@ -1398,16 +1424,20 @@ def test_a_full_run_mirrors_its_lock_on_the_board_and_tells_the_peers(
     assert "board skipped" not in capsys.readouterr().err
 
 
-def test_a_queued_run_is_a_board_waiter_until_it_takes_the_lock(held, quick_board):
+def test_a_queued_run_is_a_board_waiter_until_it_takes_the_lock(held, quick_board,
+                                                              monkeypatch):
     daemon = FakeDaemon(lease=[QUEUED(position=1, queued=1, name="full-suite",
                                       holder=holder_record(label="holder-run")),
                                HELD("full-suite")])
     result: dict = {}
+    mirror = _mirror(held.dir, daemon)
+    acquired = _acquired_on_board(monkeypatch, mirror)
+    released = False
 
     def run():
         result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.05,
                                             notice_every=0.2, out=io.StringIO(),
-                                            mirror=_mirror(held.dir, daemon))
+                                            mirror=mirror)
 
     thread = threading.Thread(target=run)
     thread.start()
@@ -1420,14 +1450,19 @@ def test_a_queued_run_is_a_board_waiter_until_it_takes_the_lock(held, quick_boar
         assert daemon.bodies("lease")[0]["name"] == "full-suite"
         assert "held" not in result
         held.holder.send_release()
+        released = True
         held.holder.expect("RELEASED")
         thread.join(START_TIMEOUT)
         assert "held" in result
+        assert acquired.wait(START_TIMEOUT), "the mirror never took the board lease"
     finally:
-        thread.join(1)
+        if not released:
+            held.holder.send_release()
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
     # Once it holds the OS lock it asks again, and the board grants it.
     assert daemon.actions().count("lease") >= 2
-    suite_lock.release(result["held"])
     assert released_last(daemon)
 
 
@@ -1611,31 +1646,64 @@ def test_the_board_environment_never_shows_its_token():
     assert "tok-SECRET" not in repr(env) and "tok-SECRET" not in str(env)
 
 
-def test_a_waiter_hands_back_a_board_grant_it_has_no_lock_for(held, quick_board):
-    # The OS lock's holder is a run the board does not show (older code, or
-    # no bearer), so the board grants the lease to the first waiter. Kept,
-    # the board would name a run that is still queued as the holder: the
-    # waiter gives it back and asks no more until it has the lock.
+def test_a_waiter_hands_back_a_board_grant_it_has_no_lock_for(held, quick_board,
+                                                            monkeypatch):
+    """A waiter hands back an early grant, stays quiet, then holds with the lock.
+
+    The old sleep assumed several queue polls ran in 0.3 s, and the final
+    exact count assumed the observer ran between the hold and its first
+    renewal. A slow runner can miss either interleaving. Observe the
+    mirror's idle wait and actual queue polls, then its completed acquire;
+    later renewals do not undo that acquire.
+    """
     daemon = FakeDaemon(lease=[HELD("full-suite")])
     err = io.StringIO()
     mirror = _mirror(held.dir, daemon)
+    acquired = _acquired_on_board(monkeypatch, mirror)
+    idle = threading.Event()
+    wake = mirror._wake
+
+    class ObservedWake:
+        def __getattr__(self, name):
+            return getattr(wake, name)
+
+        def wait(self, timeout=None):
+            if timeout is None:
+                idle.set()  # the hand-back finished: no more timed board polls
+            return wake.wait(timeout)
+
+    monkeypatch.setattr(mirror, "_wake", ObservedWake())
+    clock = _GatedClock()
+    monkeypatch.setattr(suite_lock, "time", clock)
     result = {}
+    released = False
 
     def run():
         result["held"] = suite_lock.acquire(held.dir, "wait", worktree="w", poll=0.02,
                                             notice_every=60, out=err, mirror=mirror)
 
-    thread = threading.Thread(target=run)
+    thread = threading.Thread(target=run, name="waiter")
     thread.start()
     try:
-        assert _wait_for(lambda: "release" in daemon.actions())
-        time.sleep(0.3)  # several polls: no second grant is asked for while queued
+        assert idle.wait(START_TIMEOUT), "the mirror never finished handing back the grant"
+        polls = clock.sleeps["waiter"]
+        clock.wait_for(lambda: clock.sleeps["waiter"] >= polls + 3,
+                       "three queue polls after the hand-back")
         assert daemon.actions() == ["register", "lease", "release"]
-    finally:
+        assert "held" not in result
         held.holder.send_release()
+        released = True
+        held.holder.expect("RELEASED")
         thread.join(START_TIMEOUT)
-    assert _wait_for(lambda: daemon.actions().count("lease") == 2)  # taken with the lock
-    suite_lock.release(result["held"])
+        assert not thread.is_alive() and "held" in result
+        assert acquired.wait(START_TIMEOUT), "the mirror never took the board lease"
+        assert daemon.actions().count("lease") >= 2  # hold, possibly followed by renewals
+    finally:
+        if not released:
+            held.holder.send_release()
+        thread.join(START_TIMEOUT)
+        if "held" in result:
+            suite_lock.release(result["held"])
 
 
 def test_a_waiter_whose_board_address_expired_registers_again_at_hold(held, quick_board,
@@ -1683,7 +1751,19 @@ def test_a_hand_back_that_keeps_failing_is_retried_at_the_poll_pace(held, quick_
     daemon = FakeDaemon(lease=[HELD("full-suite")],
                         release=[(503, {"error": "coordination_unavailable"})])
     mirror = _mirror(held.dir, daemon)
+    attempts = []
+    lease = mirror._lease
+
+    def record():
+        attempts.append(time.monotonic())
+        return lease()
+
+    monkeypatch.setattr(mirror, "_lease", record)
     mirror.waiting()
-    time.sleep(1.0)
-    mirror.release(0.5)
-    assert 2 <= daemon.actions().count("lease") <= 8
+    try:
+        assert _wait_for(lambda: daemon.actions().count("lease") >= 3)
+        # Scheduling may add delay, but a retry must never skip the poll pause.
+        assert all(later - earlier >= quick_board.BOARD_POLL
+                   for earlier, later in zip(attempts, attempts[1:]))
+    finally:
+        mirror.release(0.5)
