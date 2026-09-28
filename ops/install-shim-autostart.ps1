@@ -32,8 +32,8 @@
 # (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28).
 # claude-opus-5 was the default from the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0), the
-# judged comparison that established Opus as the best extractor; it ran on
-# claude-opus-5.
+# judged comparison that chose Opus over Sonnet (best measured extraction quality);
+# it ran on claude-opus-5.
 # -PromptFile default is sonnet_extractor_v5.md since 2026-09-07: the
 # v2 body with its two pre-rule worked examples re-cut on invented names (the
 # same re-cut the daemon's v12 base took on 2026-09-07), plus the

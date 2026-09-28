@@ -1411,6 +1411,34 @@ change — the shape of edit the KU-oracle gates for the v12 base (#279,
 #280) already measured on the daemon path. A shim prompt change that alters
 a rule needs the KU-oracle paired gate, not this table.
 
+##### Opus 5.5 against Opus 5 on the shim (2026-09-28)
+
+The same instrument, asked whether `claude-opus-5-5` extracts as well as
+`claude-opus-5` on the Claude shim with the v5 prompt: the `opus-5` rung on
+port 8083, two replicates per arm, only the model the shim served changed.
+The arm files cannot show that change (they record the rung, `opus-5`, and
+the alias the daemon asks for, `extractor`), so the verdict carries it:
+its `served_model` field reads `claude-opus-5` for the pre arm and `claude-opus-5-5` for the post arm,
+from the shim's serving lines recorded at run time. A first post attempt was
+discarded because the old shim still held the port.
+
+| arm | served model | `gold_recoverable` | `stale_leak` | tokens/query | claims / inserted | artifact |
+|---|---|---|---|---|---|---|
+| pre | claude-opus-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-opus55-pre.json` |
+| pre, rep 2 | claude-opus-5 | 1.0 | 0.0 | 13.9 | 16 / 16 | `opus-5-opus55-pre-rep2.json` |
+| post | claude-opus-5-5 | 1.0 | 0.0 | 13.7 | 17 / 17 | `opus-5-opus55-post.json` |
+| post, rep 2 | claude-opus-5-5 | 1.0 | 0.0 | 14.8 | 16 / 16 | `opus-5-opus55-post-rep2.json` |
+
+**The gate passes, at the ceiling.**
+`ladder-opus55-paired-verdict-threshold.json` reads `gate: PASS` and `no_regression_gate: PASS`,
+with `rungs["opus-5"].cleared: true`: both arms
+beat naive RAG inside its token budget and the post arm goes backwards on
+neither quality metric. Both arms sit at the ladder ceiling on every run and
+the token ranges (pre 13.9–14.8, post 13.7–14.8) overlap, so the ladder
+cannot tell the two models apart. That is what licensed moving the
+Claude-shim default to `claude-opus-5-5` (maintainer decision, 2026-09-29):
+no regression, not a measured improvement.
+
 The run artifacts carry `git_rev … 0e1338be-dirty`: the four runs were made
 from the working tree that became this change, before it was committed —
 the v4 file is byte-identical to master's and the v5 file is the one

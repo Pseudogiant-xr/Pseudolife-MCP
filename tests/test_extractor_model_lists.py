@@ -62,11 +62,26 @@ def _guide_section() -> str:
     return text.split("\n## Extractor modes and dreamer models\n", 1)[1].split("\n## ", 1)[0]
 
 
+def _guide_entries(family: str) -> list[tuple[str, str]]:
+    """(model, text) per `  - \\`model\\`: text` item under `- Family:`.
+    One item per model: an id mentioned inside another item's prose (the
+    5.5 entry names claude-opus-5) does not count as an entry."""
+    match = re.search(rf"(?m)^- {family}:\n((?:  .*\n)+)", _guide_section())
+    assert match, f"dreaming.md has no '- {family}:' list"
+    entries = re.findall(rf"(?m)^  - `({MODEL})`:(.*(?:\n    .*)*)", match.group(1))
+    assert entries, f"dreaming.md's {family} list has no '  - `model`:' items"
+    return entries
+
+
 def _guide_models(family: str) -> set[str]:
-    # The whole bullet, wrapped lines included, up to the next one or a blank line.
-    match = re.search(rf"(?ms)^- {family}: (.+?)(?=^- |\n\n)", _guide_section())
-    assert match, f"dreaming.md lists no '- {family}:' models"
-    return set(re.findall(MODEL, match.group(1)))
+    return {model for model, _ in _guide_entries(family)}
+
+
+def _guide_default(family: str) -> str:
+    defaults = [model for model, text in _guide_entries(family)
+                if text.lstrip().startswith("the default")]
+    assert len(defaults) == 1, f"dreaming.md's {family} list names {defaults} as the default"
+    return defaults[0]
 
 
 def _guide_modes() -> set[str]:
@@ -162,8 +177,10 @@ def test_every_place_names_the_same_default(family, prefix, sh_autostart, ps_aut
             rf'(?m)^\s*else\n\s*MODEL=({prefix}[\w.-]+)\n', "ops/install.sh"),
         "ops/install.ps1 non-interactive": _one(
             rf'\}} else \{{\n\s*\$Model = "({prefix}[\w.-]+)"', "ops/install.ps1"),
-        "docs/guide/dreaming.md": re.search(
-            rf"(?m)^- {family}: `({prefix}[\w.-]+)` \(the default", _guide_section()).group(1),
+        "docs/guide/dreaming.md": _guide_default(family),
+        # the fallback an empty --model (installer pass-through) lands on
+        f"{sh_autostart} empty --model": _one(
+            rf'(?m)^\[ -n "\$MODEL" \] \|\| MODEL="({prefix}[^"]+)"$', sh_autostart),
     }
     assert set(names.values()) == {default}, names
 
@@ -203,3 +220,41 @@ def test_the_old_mode_names_survive_only_as_aliases(old):
     assert old not in _sh_list("EXTRACTOR_MODES")
     assert old not in _ps_list("extractorModes")
     assert old not in _guide_modes()
+
+
+def _menu_block(text: str, start: str, end: str) -> str:
+    assert start in text, start
+    return text.split(start, 1)[1].split(end, 1)[0]
+
+
+# (installer, block start, block end, offered line, chosen line, Enter line)
+_SH_MENU = (r'(?m)^\s*echo "  (\d)\) ([\w.-]+)',
+            r'(?m)^\s*(?:""\|)?(\d)\) (?:MODEL|EXTRACTOR)=([\w.-]+) ;;',
+            r'(?m)^\s*""\|1\) (?:MODEL|EXTRACTOR)=([\w.-]+) ;;')
+_PS_MENU = (r'(?m)^\s*Write-Host "  (\d)\) ([\w.-]+)',
+            r'(?m)^\s*"(\d)" \{ \$(?:Model|Extractor) = "([\w.-]+)" \}',
+            r'(?m)^\s*\{ \$_ -in "", "1" \} \{ \$(?:Model|Extractor) = "([\w.-]+)" \}')
+_MENUS = [
+    ("ops/install.sh", _SH_MENU, 'echo "Which dream extractor', "\nfi\n", False),
+    ("ops/install.sh", _SH_MENU, 'echo "Which Claude model', 'step "Dreamer model', True),
+    ("ops/install.sh", _SH_MENU, 'echo "Which GPT model', 'step "Dreamer model', True),
+    ("ops/install.ps1", _PS_MENU, 'Write-Host "Which dream extractor', "\n}\n", False),
+    ("ops/install.ps1", _PS_MENU, 'Write-Host "Which Claude model', 'Step "Dreamer model', True),
+    ("ops/install.ps1", _PS_MENU, 'Write-Host "Which GPT model', 'Step "Dreamer model', True),
+]
+
+
+@pytest.mark.parametrize("rel,patterns,start,end,enter", _MENUS,
+                         ids=lambda v: v if isinstance(v, str) and "Which" in v else None)
+def test_each_menu_number_picks_the_name_it_shows(rel, patterns, start, end, enter):
+    """A menu line `N) name` and the case arm for N must name the same thing,
+    and Enter must pick entry 1, so reordering a menu cannot leave the
+    number a user types pointing at a different model."""
+    offered_pat, chosen_pat, enter_pat = patterns
+    block = _menu_block(_read(rel).replace("\r\n", "\n"), start, end)
+    offered = dict(re.findall(offered_pat, block))
+    chosen = dict(re.findall(chosen_pat, block))
+    if enter:
+        [pick] = re.findall(enter_pat, block)
+        chosen["1"] = pick
+    assert offered and offered == chosen, (rel, start, offered, chosen)

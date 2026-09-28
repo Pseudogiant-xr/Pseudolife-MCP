@@ -10,6 +10,7 @@ stub CLIs in a disposable home.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import subprocess
 
 import pytest
@@ -279,7 +280,179 @@ def test_client_only_refuses_an_extractor_url(bash, tmp_path):
                      "--daemon-url http://100.64.0.2:8765 "
                      "--extractor-url http://pl.example.invalid:1234/v1 --no-art\n")
     assert proc.returncode == 2
+    # The client-only refusal itself, not an unknown-flag usage exit.
+    [line] = [line for line in proc.stderr.splitlines() if "client-only install" in line]
+    assert "--extractor-url" in line
+    assert shell.logged() == []
+
+
+# -- one family rule for both shells --------------------------------------------
+
+@pytest.mark.parametrize("mode,model,passes", [
+    ("claude-only", "claude-opus-6", True), ("claude-fallback", "opus-6", False),
+    ("claude-only", "gpt-7-sol", False), ("claude-only", "codex-7", False),
+    ("claude-only", "gpt-5.6-terra", False),
+    ("openai-only", "gpt-7-sol", True), ("openai-fallback", "codex-7", True),
+    ("openai-only", "opus-6", False), ("openai-only", "claude-opus-6", False),
+    ("openai-only", "claude-opus-5-5", False)])
+@BASH
+def test_a_model_id_must_belong_to_its_modes_family(bash, tmp_path, mode, model, passes):
+    """claude-* modes take claude-* ids; openai-* modes take gpt-* or codex-*
+    ids (the Codex shim honours both). Anything else is refused before the
+    pass-through note, with the message install.ps1 gives."""
+    proc = _modes(_Shell(bash, tmp_path), extractor=mode, model=model)
+    if passes:
+        assert proc.returncode == 0, proc.stderr
+        assert f"model {model} {NOTE}" in proc.stderr
+    else:
+        assert proc.returncode == 2
+        assert (f"--model '{model}' does not match extractor mode {mode}"
+                in proc.stderr)
+        assert "known list" not in proc.stderr
+
+
+# -- free text is checked before it reaches ops/.env or a command line ----------
+
+@pytest.mark.parametrize("mode,model", [
+    ("claude-only", "claude opus"), ("claude-only", "claude-$HOME"),
+    ("openai-only", 'gpt-"x"'), ("endpoint", "qwen #comment"), ("endpoint", "a;b")])
+@BASH
+def test_a_model_id_outside_the_safe_characters_is_refused(bash, tmp_path, mode, model):
+    proc = _modes(_Shell(bash, tmp_path), extractor=mode, model=model,
+                  url="http://pl.example.invalid:1234/v1" if mode == "endpoint" else "")
+    assert proc.returncode == 2
+    assert "letters, digits" in proc.stderr
+
+
+@BASH
+def test_an_endpoint_url_with_credentials_is_refused_and_not_echoed(bash, tmp_path):
+    proc = _modes(_Shell(bash, tmp_path), extractor="endpoint", model="m",
+                  url="http://user:hunter2@pl.example.invalid:1234/v1")
+    assert proc.returncode == 2
+    assert "credentials" in proc.stderr
+    assert "hunter2" not in proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("url", ["http://pl.example.invalid:1234/v1 #x",
+                                 'http://pl.example.invalid:1234/v1"',
+                                 "http://pl.example.invalid:1234/$HOME"])
+@BASH
+def test_an_endpoint_url_outside_the_safe_characters_is_refused(bash, tmp_path, url):
+    proc = _modes(_Shell(bash, tmp_path), extractor="endpoint", model="m", url=url)
+    assert proc.returncode == 2
     assert "--extractor-url" in proc.stderr
+
+
+# -- a server on this machine must be reachable from the daemon's container -----
+
+def _probe(shell: _Shell, *, url: str, docker_exit: int = 0, uname: str = "Linux",
+           mode: str = "endpoint"):
+    _stub(shell.bin / "docker",
+          "printf 'docker|%s\\n' \"$*\" >>\"$CALL_LOG\"\nexit \"$FAKE_DOCKER_EXIT\"\n")
+    _stub(shell.bin / "uname", "printf '%s\\n' \"$FAKE_UNAME\"\n")
+    return shell.run(
+        f"EXTRACTOR='{mode}'\nMODEL=m\nEXTRACTOR_URL='{_q(url)}'\n"
+        + _block("extractor env") + _block("endpoint container probe")
+        + "\nendpoint_container_probe\nprintf 'STATE=%s\\n' \"$ENDPOINT_CONTAINER\"\n"
+        + "describe_endpoint_container\n",
+        extra_env={"FAKE_DOCKER_EXIT": str(docker_exit), "FAKE_UNAME": uname})
+
+
+@BASH
+def test_a_loopback_server_the_container_cannot_reach_is_flagged(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _probe(shell, url="http://127.0.0.1:11434/v1", docker_exit=1)
+    assert proc.returncode == 0, proc.stderr
+    # The probe's Python spans lines, so the logged call does too.
+    log = shell.calls.read_text(encoding="utf-8")
+    assert log.startswith("docker|exec pseudolife-mcp-daemon python")
+    assert log.count("docker|") == 1
+    assert "http://host.docker.internal:11434/v1" in log
+    assert "STATE=unreachable" in proc.stdout
+    for fix in ("OLLAMA_HOST", "llama-server --host", "Serve on Local Network"):
+        assert fix in proc.stderr, fix
+    assert re.search(r"\[!\] Extractor endpoint", proc.stdout)
+
+
+@BASH
+def test_a_loopback_server_the_container_reaches_passes(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _probe(shell, url="http://localhost:1234/v1", docker_exit=0, uname="Darwin")
+    assert proc.returncode == 0, proc.stderr
+    assert "STATE=reachable" in proc.stdout
+    assert "WARNING" not in proc.stderr
+    assert "bridge" not in proc.stdout + proc.stderr
+    assert re.search(r"\[x\] Extractor endpoint", proc.stdout)
+
+
+@BASH
+def test_linux_always_says_what_the_rewrite_means(bash, tmp_path):
+    proc = _probe(_Shell(bash, tmp_path), url="http://127.0.0.1:1234/v1", docker_exit=0)
+    assert proc.returncode == 0, proc.stderr
+    [note] = [line for line in proc.stdout.splitlines() if "bridge" in line]
+    assert "127.0.0.1" in note
+
+
+@pytest.mark.parametrize("mode,url", [("endpoint", "http://pl.example.invalid:1234/v1"),
+                                      ("claude-only", "")])
+@BASH
+def test_nothing_is_probed_without_a_rewritten_loopback_url(bash, tmp_path, mode, url):
+    shell = _Shell(bash, tmp_path)
+    proc = _probe(shell, url=url, mode=mode)
+    assert proc.returncode == 0, proc.stderr
+    assert not [line for line in shell.logged() if line.startswith("docker|")]
+    assert "Extractor endpoint" not in proc.stdout
+
+
+# -- the compose override the installer owns ------------------------------------
+
+def _markers() -> str:
+    text = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    return "\n".join(line for line in text.splitlines()
+                     if re.match(r"^(LEGACY_(SHIM_)?)?OVERRIDE_MARKER=", line)) + "\n"
+
+
+def _marker_texts() -> list[str]:
+    return [line.split("=", 1)[1].strip('"') for line in _markers().splitlines()]
+
+
+def _override(shell: _Shell, mode: str, first_line: str):
+    override = shell.tmp / "docker-compose.override.yml"
+    override.write_text(first_line + "\nservices:\n  mine: {}\n", encoding="utf-8")
+    proc = shell.run(
+        f"EXTRACTOR='{mode}'\nMODEL=''\nEXTRACTOR_URL=''\nCLIENT_ONLY=''\n"
+        f"override_file='{shell.path(override)}'\n" + _markers()
+        + _block("extractor modes") + _block("sidecar override"))
+    return proc, override
+
+
+@pytest.mark.parametrize("marker", range(3))
+@BASH
+def test_every_installer_marker_is_owned(bash, tmp_path, marker):
+    """A file headed by the current marker or either earlier one is the
+    installer's: a sidecar mode removes it, a single-extractor mode rewrites
+    it under the current marker."""
+    texts = _marker_texts()
+    assert len(texts) == 3
+    proc, override = _override(_Shell(bash, tmp_path), "sidecar", texts[marker])
+    assert proc.returncode == 0, proc.stderr
+    assert not override.exists()
+    again = tmp_path / "again"
+    again.mkdir()
+    proc, override = _override(_Shell(bash, again), "claude-only", texts[marker])
+    assert proc.returncode == 0, proc.stderr
+    lines = override.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == texts[0] and 'profiles: ["disabled"]' in lines[-1]
+
+
+@pytest.mark.parametrize("mode", ["sidecar", "claude-only"])
+@BASH
+def test_an_operators_own_override_is_never_touched(bash, tmp_path, mode):
+    proc, override = _override(_Shell(bash, tmp_path), mode, "# my own compose override")
+    assert proc.returncode == 0, proc.stderr
+    assert override.read_text(encoding="utf-8").startswith("# my own compose override\n")
+    if mode == "claude-only":
+        assert "not installer-managed" in proc.stdout
 
 
 def test_the_new_flag_is_parsed_and_documented():

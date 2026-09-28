@@ -8,7 +8,10 @@ ops/install.ps1 under pwsh with stub commands.
 """
 from __future__ import annotations
 
+import http.server
+import re
 import subprocess
+import threading
 
 import pytest
 
@@ -263,7 +266,192 @@ def test_client_only_refuses_an_extractor_url(tmp_path):
         capture_output=True, text=True, timeout=120, env=ps.env, check=False,
         stdin=subprocess.DEVNULL)
     assert proc.returncode == 2
+    # The client-only refusal itself, not a binding error.
+    [line] = [line for line in _output(proc).splitlines() if "client-only install" in line]
+    assert "-ExtractorUrl" in line
+
+
+# -- one family rule for both shells --------------------------------------------
+
+@pytest.mark.parametrize("mode,model,passes", [
+    ("claude-only", "claude-opus-6", True), ("claude-fallback", "opus-6", False),
+    ("claude-only", "gpt-7-sol", False), ("claude-only", "codex-7", False),
+    ("claude-only", "gpt-5.6-terra", False),
+    ("openai-only", "gpt-7-sol", True), ("openai-fallback", "codex-7", True),
+    ("openai-only", "opus-6", False), ("openai-only", "claude-opus-6", False),
+    ("openai-only", "claude-opus-5-5", False)])
+def test_a_model_id_must_belong_to_its_modes_family(tmp_path, mode, model, passes):
+    proc = _modes(_PowerShell(tmp_path), extractor=mode, model=model)
+    if passes:
+        assert proc.returncode == 0, _output(proc)
+        assert f"model {model} {NOTE}" in _output(proc)
+    else:
+        assert proc.returncode == 2
+        assert f"-Model '{model}' does not match extractor mode {mode}" in _output(proc)
+        assert "known list" not in _output(proc)
+
+
+# -- free text is checked before it reaches ops/.env or a command line ----------
+
+@pytest.mark.parametrize("mode,model", [
+    ("claude-only", "claude opus"), ("claude-only", "claude-$HOME"),
+    ("openai-only", 'gpt-"x"'), ("endpoint", "qwen #comment"), ("endpoint", "a;b")])
+def test_a_model_id_outside_the_safe_characters_is_refused(tmp_path, mode, model):
+    proc = _modes(_PowerShell(tmp_path), extractor=mode, model=model,
+                  url="http://pl.example.invalid:1234/v1" if mode == "endpoint" else "")
+    assert proc.returncode == 2
+    assert "letters, digits" in _output(proc)
+
+
+def test_an_endpoint_url_with_credentials_is_refused_and_not_echoed(tmp_path):
+    proc = _modes(_PowerShell(tmp_path), extractor="endpoint", model="m",
+                  url="http://user:hunter2@pl.example.invalid:1234/v1")
+    assert proc.returncode == 2
+    assert "credentials" in _output(proc)
+    assert "hunter2" not in _output(proc)
+
+
+@pytest.mark.parametrize("url", ["http://pl.example.invalid:1234/v1 #x",
+                                 'http://pl.example.invalid:1234/v1"',
+                                 "http://pl.example.invalid:1234/$HOME"])
+def test_an_endpoint_url_outside_the_safe_characters_is_refused(tmp_path, url):
+    proc = _modes(_PowerShell(tmp_path), extractor="endpoint", model="m", url=url)
+    assert proc.returncode == 2
     assert "-ExtractorUrl" in _output(proc)
+
+
+# -- a server on this machine must be reachable from the daemon's container -----
+
+def _probe(ps: _PowerShell, *, url: str, docker_exit: int = 0, linux: bool = True,
+           mode: str = "endpoint"):
+    return ps.run(
+        ps.stub_function("docker", f"$global:LASTEXITCODE = {docker_exit}")
+        + f"$Extractor = '{mode}'\n$Model = 'm'\n$ExtractorUrl = '{_q(url)}'\n"
+        + _block("extractor env") + _block("endpoint container probe")
+        + f"function Test-LinuxHost {{ return ${'true' if linux else 'false'} }}\n"
+        + "Invoke-EndpointContainerProbe\nWrite-Output \"STATE=$script:endpointContainer\"\n"
+        + "Show-EndpointContainer\n")
+
+
+def test_a_loopback_server_the_container_cannot_reach_is_flagged(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _probe(ps, url="http://127.0.0.1:11434/v1", docker_exit=1)
+    assert proc.returncode == 0, _output(proc)
+    # The probe's Python may span lines, so the logged call may too.
+    log = ps.calls.read_text(encoding="utf-8")
+    assert log.startswith("docker|exec pseudolife-mcp-daemon python")
+    assert log.count("docker|") == 1
+    assert "http://host.docker.internal:11434/v1" in log
+    assert "STATE=unreachable" in _lines(proc)
+    for fix in ("OLLAMA_HOST", "llama-server --host", "Serve on Local Network"):
+        assert fix in _output(proc), fix
+    assert re.search(r"\[!\] Extractor endpoint", proc.stdout)
+
+
+def test_a_loopback_server_the_container_reaches_passes(tmp_path):
+    proc = _probe(_PowerShell(tmp_path), url="http://localhost:1234/v1", linux=False)
+    assert proc.returncode == 0, _output(proc)
+    assert "STATE=reachable" in _lines(proc)
+    assert "WARNING" not in _output(proc)
+    assert "bridge" not in _output(proc)
+    assert re.search(r"\[x\] Extractor endpoint", proc.stdout)
+
+
+def test_linux_always_says_what_the_rewrite_means(tmp_path):
+    proc = _probe(_PowerShell(tmp_path), url="http://127.0.0.1:1234/v1")
+    assert proc.returncode == 0, _output(proc)
+    [note] = [line for line in proc.stdout.splitlines() if "bridge" in line]
+    assert "127.0.0.1" in note
+
+
+@pytest.mark.parametrize("mode,url", [("endpoint", "http://pl.example.invalid:1234/v1"),
+                                      ("claude-only", "")])
+def test_nothing_is_probed_without_a_rewritten_loopback_url(tmp_path, mode, url):
+    ps = _PowerShell(tmp_path)
+    proc = _probe(ps, url=url, mode=mode)
+    assert proc.returncode == 0, _output(proc)
+    assert not [line for line in ps.logged() if line.startswith("docker|")]
+    assert "Extractor endpoint" not in proc.stdout
+
+
+# -- a redirect is a warning, as the sh preflight gives -------------------------
+
+class _Redirect(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - http.server API
+        self.send_response(302)
+        self.send_header("Location", "http://pl.example.invalid/elsewhere")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def test_endpoint_preflight_treats_a_redirect_as_a_warning(tmp_path):
+    """Checked against this pwsh's real Invoke-WebRequest: whether it
+    returns the 3xx or throws on -MaximumRedirection 0, the answer is a
+    reachable server and a warning, not a refusal."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Redirect)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/v1"
+        proc = _PowerShell(tmp_path).run(
+            f"$Extractor = 'endpoint'\n$Model = 'm'\n$ExtractorUrl = '{url}'\n"
+            + _block("endpoint preflight") + "\nInvoke-EndpointPreflight\n")
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert proc.returncode == 0, _output(proc)
+    assert "WARNING" in _output(proc) and "302" in _output(proc)
+
+
+# -- the compose override the installer owns ------------------------------------
+
+def _markers() -> str:
+    text = (ROOT / INSTALL).read_text(encoding="utf-8")
+    return "\n".join(line for line in text.splitlines()
+                     if re.match(r"^\$(Legacy(Shim)?)?OverrideMarker = ", line)) + "\n"
+
+
+def _marker_texts() -> list[str]:
+    return [line.split(" = ", 1)[1].strip('"') for line in _markers().splitlines()]
+
+
+def _override(ps: _PowerShell, mode: str, first_line: str):
+    override = ps.tmp / "docker-compose.override.yml"
+    override.write_text(first_line + "\nservices:\n  mine: {}\n", encoding="utf-8")
+    proc = ps.run(
+        ps.stub_function("docker")
+        + f"$Extractor = '{mode}'\n$Model = ''\n$ExtractorUrl = ''\n"
+        "$ClientOnly = [switch]$false\n"
+        f"$overrideFile = '{_q(override)}'\n" + _markers()
+        + _block("extractor modes") + _block("sidecar override"))
+    return proc, override
+
+
+@pytest.mark.parametrize("marker", range(3))
+def test_every_installer_marker_is_owned(tmp_path, marker):
+    texts = _marker_texts()
+    assert len(texts) == 3
+    proc, override = _override(_PowerShell(tmp_path), "sidecar", texts[marker])
+    assert proc.returncode == 0, _output(proc)
+    assert not override.exists()
+    again = tmp_path / "again"
+    again.mkdir()
+    proc, override = _override(_PowerShell(again), "claude-only", texts[marker])
+    assert proc.returncode == 0, _output(proc)
+    lines = override.read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0] == texts[0] and 'profiles: ["disabled"]' in lines[-1]
+
+
+@pytest.mark.parametrize("mode", ["sidecar", "claude-only"])
+def test_an_operators_own_override_is_never_touched(tmp_path, mode):
+    proc, override = _override(_PowerShell(tmp_path), mode, "# my own compose override")
+    assert proc.returncode == 0, _output(proc)
+    assert override.read_text(encoding="utf-8").startswith("# my own compose override\n")
+    if mode == "claude-only":
+        assert "not installer-managed" in proc.stdout
 
 
 def test_the_new_parameter_is_declared_and_documented():

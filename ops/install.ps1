@@ -182,10 +182,20 @@ function Test-ModelBlank {
     # $true for a -Model given empty or all whitespace.
     return ($modelGiven -or $Model) -and -not "$Model".Trim()
 }
+# What may reach ops/.env (compose expands $ and reads " #" as a comment),
+# a systemd ExecStart line and a Windows task's command line unquoted: model
+# ids and endpoint URLs are held to these characters. Brackets are allowed
+# in a URL only, for an IPv6 host.
+$safeIdPattern = '^[A-Za-z0-9._:/@+-]+$'
+$safeUrlPattern = '^[\[\]A-Za-z0-9._:/@+-]+$'
 function Assert-ExtractorArgs {
     # The mode, its model and its URL, together.
     if (Test-ModelBlank) {
         Write-Host "-Model needs a model id (it was empty)"
+        exit 2
+    }
+    if ($Model -and ($Model -cnotmatch $safeIdPattern)) {
+        Write-Host "-Model '$Model' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -"
         exit 2
     }
     if ($Extractor -notin $extractorModes) {
@@ -198,13 +208,35 @@ function Assert-ExtractorArgs {
             Write-Host "-Extractor $Extractor needs -ExtractorUrl <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and -Model <a model name that server serves>"
             exit 2
         }
+        # Checked before any other message, which never echoes the URL.
+        $urlAuthority = (($ExtractorUrl -split '://', 2)[-1] -split '/', 2)[0]
+        if ($urlAuthority.Contains("@")) {
+            Write-Host "-ExtractorUrl must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env"
+            exit 2
+        }
         if ($ExtractorUrl -cnotmatch '^https?://.') {
             Write-Host "invalid -ExtractorUrl: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1"
+            exit 2
+        }
+        if ($ExtractorUrl -cnotmatch $safeUrlPattern) {
+            Write-Host "invalid -ExtractorUrl: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)"
             exit 2
         }
     } else {
         if ($ExtractorUrl) {
             Write-Host "-ExtractorUrl applies only to -Extractor endpoint or endpoint-fallback"
+            exit 2
+        }
+        # One family rule, the same in install.sh, before any note: a shim
+        # only honours its own family's ids per request.
+        $familyOk = switch -Regex ($Extractor) {
+            '^sidecar$' { $true }
+            '^claude-' { $Model -clike "claude-?*" }
+            '^openai-' { ($Model -clike "gpt-?*") -or ($Model -clike "codex-?*") }
+            default { $true }
+        }
+        if ($Model -and -not $familyOk) {
+            Write-Host "-Model '$Model' does not match extractor mode $($Extractor): a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id"
             exit 2
         }
         if ($Model -and ($Model -notin ($claudeModels + $openaiModels))) {
@@ -632,11 +664,7 @@ $claudeShimMode = $Extractor -in "claude-only", "claude-fallback"
 $codexShimMode = $Extractor -in "openai-only", "openai-fallback"
 if ($ShimPort -eq 0) { $ShimPort = $codexShimMode ? 8086 : 8082 }
 # A model from the wrong family would silently serve the shim's launch
-# default (the per-request override only honours its own prefixes).
-if (($claudeShimMode -and $Model -and -not $Model.StartsWith("claude-")) -or
-    ($codexShimMode -and $Model -and -not $Model.StartsWith("gpt-"))) {
-    throw "-Model $Model does not match extractor mode $Extractor"
-}
+# default: Assert-ExtractorArgs (the extractor modes block) refuses it.
 # Fail fast on a missing shim CLI: preflight only knows -Client, so e.g.
 # -Extractor openai-fallback -Client claude would otherwise sail through and
 # die at the autostart stage with the stack already up.
@@ -656,11 +684,18 @@ if ($codexShimMode -and
 # no models, and a key it wants (PSEUDOLIFE_DREAM_API_KEY) is never taken on
 # the command line, so a 401 is a warning, not a refusal.
 function Invoke-EndpointPreflight {
-    $answer = $null
+    # A redirect past -MaximumRedirection 0 is an error under this script's
+    # ErrorAction Stop (measured on pwsh 7.6.6: InvalidOperationException,
+    # MaximumRedirectExceeded, no response attached), yet it is a server that
+    # answered: -ErrorAction SilentlyContinue returns the 3xx response, and a
+    # build that throws anyway is read by its error id.
+    $code = 0
     try {
-        $answer = Invoke-WebRequest -Uri "$ExtractorUrl/models" -TimeoutSec 10 -MaximumRedirection 0 -SkipHttpErrorCheck
-    } catch { $answer = $null }
-    $code = if ($answer) { [int]$answer.StatusCode } else { 0 }
+        $answer = Invoke-WebRequest -Uri "$ExtractorUrl/models" -TimeoutSec 10 -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
+        if ($answer) { $code = [int]$answer.StatusCode }
+    } catch {
+        if ("$($_.FullyQualifiedErrorId)" -like "MaximumRedirectExceeded*") { $code = 300 }
+    }
     if (($code -ge 200) -and ($code -lt 300)) {
         Step "Extractor endpoint answered at $ExtractorUrl/models."
     } elseif ($code -in 401, 403) {
@@ -686,8 +721,8 @@ if ($claudeShimMode -and -not $Model) {
     if ($interactive) {
         Write-Host ""
         Write-Host "Which Claude model should extract memories (the 'dreamer')?"
-        Write-Host "  1) claude-opus-5-5  - recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that established Opus as the best extractor ran on claude-opus-5"
-        Write-Host "  2) claude-opus-5    - the earlier default: the 2026-08-02 judged comparison measured it as the best extractor (evals/results/dreamer-choice-verdict.json)"
+        Write-Host "  1) claude-opus-5-5  - recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        Write-Host "  2) claude-opus-5    - the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
         Write-Host "  3) claude-sonnet-5  - balanced"
         Write-Host "  4) claude-haiku-4-5 - fastest / lightest on plan usage"
         Write-Host "  5) claude-fable-5   - most capable tier"
@@ -891,6 +926,7 @@ if ($ClientOnly) {
 # <<< mint token <<<
 
 # -- 6. sidecar enable/disable via the compose override --------------------------
+# >>> sidecar override >>>
 function InstallerOwnsOverride {
     (Test-Path $overrideFile) -and
         ((Get-Content $overrideFile -TotalCount 1) -in $OverrideMarker, $LegacyOverrideMarker, $LegacyShimOverrideMarker)
@@ -926,6 +962,7 @@ if ($ClientOnly) {
     Remove-Item $overrideFile
     Step "Removed installer-managed override (sidecar re-enabled)"
 }
+# <<< sidecar override <<<
 
 # -- 7. bring the stack up --------------------------------------------------------
 if (-not $ClientOnly) {
@@ -2175,6 +2212,42 @@ foreach ($selectedClient in $clients) {
 }
 
 # -- 12. health -----------------------------------------------------------------------
+# >>> endpoint container probe >>>
+# A server named on this machine's loopback is written as host.docker.internal
+# (the extractor env block). Docker Desktop routes that name to this
+# machine's loopback; Linux Docker Engine routes it to the docker bridge,
+# where a server bound only to 127.0.0.1 is not listening. So once the
+# daemon is up, the endpoint is asked from inside its container, the only
+# place the answer means anything.
+$script:endpointContainer = ""
+function Test-LinuxHost { return [bool]$IsLinux }
+function Invoke-EndpointContainerProbe {
+    if ($Extractor -notin "endpoint", "endpoint-fallback") { return }
+    $probeUrl = ConvertTo-ExtractorContainerUrl $ExtractorUrl
+    if ($probeUrl -eq $ExtractorUrl) { return }
+    if (Test-LinuxHost) {
+        Step "Note: on Linux, host.docker.internal is the docker bridge address, so a server listening only on 127.0.0.1 is out of the daemon container's reach."
+    }
+    # Any HTTP answer counts: a 401 or 404 still means the server is there.
+    $probe = "import sys, urllib.error, urllib.request`ntry:`n    urllib.request.urlopen(sys.argv[1] + '/models', timeout=10)`nexcept urllib.error.HTTPError:`n    pass"
+    $global:LASTEXITCODE = 0
+    try { docker exec pseudolife-mcp-daemon python -c $probe $probeUrl 2>&1 | Out-Null } catch { $global:LASTEXITCODE = 1 }
+    if ($LASTEXITCODE -eq 0) {
+        $script:endpointContainer = "reachable"
+        Step "The daemon's container reaches the extractor endpoint at $probeUrl."
+    } else {
+        $script:endpointContainer = "unreachable"
+        $until = if ($Extractor -eq "endpoint-fallback") { "dreams fall back to the sidecar" } else { "dreams pause" }
+        Write-Warning "The daemon's container cannot reach the extractor endpoint at $probeUrl/models. A server on this machine must listen where the container can reach it, not only on 127.0.0.1: OLLAMA_HOST=0.0.0.0 (or the docker bridge address) for Ollama, llama-server --host <bridge address>, LM Studio's `"Serve on Local Network`". Restart the server so; the daemon retries every sweep, and until then $until."
+    }
+}
+function Show-EndpointContainer {
+    switch ($script:endpointContainer) {
+        "reachable" { Write-Host "  [x] Extractor endpoint   reachable from the daemon's container" }
+        "unreachable" { Write-Host "  [!] Extractor endpoint   not reachable from the daemon's container - see the warning above" }
+    }
+}
+# <<< endpoint container probe <<<
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if (-not $ClientOnly) {
@@ -2192,6 +2265,7 @@ if (-not $ClientOnly) {
         exit 1
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    Invoke-EndpointContainerProbe
 }
 
 # >>> client-only claude hook >>>
@@ -2363,6 +2437,7 @@ if (($tokenState -in "minted", "present") -and
 }
 Write-Host ""
 # <<< board line <<<
+Show-EndpointContainer
 switch ($Extractor) {
     "sidecar" {
         Write-Host "Verify: memory_dream(action=""status"") - primary_url should point at pseudolife-extractor:8081."

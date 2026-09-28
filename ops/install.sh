@@ -172,9 +172,19 @@ model_is_blank() {  # status 0 for a --model given empty or all whitespace
     { [ -n "${MODEL_SET:-}" ] || [ -n "$MODEL" ]; } &&
         [ -z "$(printf '%s' "$MODEL" | tr -d '[:space:]')" ]
 }
+# What may reach ops/.env (compose expands $ and reads " #" as a comment),
+# a systemd ExecStart line and a Windows task's command line unquoted: model
+# ids and endpoint URLs are held to these characters. Brackets are allowed
+# in a URL only, for an IPv6 host.
+SAFE_ID_PATTERN='^[A-Za-z0-9._:/@+-]+$'
+SAFE_URL_PATTERN='^[][A-Za-z0-9._:/@+-]+$'
 check_extractor_args() {  # the mode, its model and its URL, together
     if model_is_blank; then
         echo "--model needs a model id (it was empty)" >&2
+        exit 2
+    fi
+    if [ -n "$MODEL" ] && ! printf '%s' "$MODEL" | grep -Eq "$SAFE_ID_PATTERN"; then
+        echo "--model '$MODEL' holds characters the installer cannot write safely; use letters, digits and . _ : / @ + -" >&2
         exit 2
     fi
     case " $EXTRACTOR_MODES " in *" $EXTRACTOR "*) ;; *)
@@ -188,14 +198,36 @@ check_extractor_args() {  # the mode, its model and its URL, together
                 echo "--extractor $EXTRACTOR needs --extractor-url <the server's OpenAI-compatible base URL, e.g. http://127.0.0.1:1234/v1> and --model <a model name that server serves>" >&2
                 exit 2
             fi
+            # Checked before any other message, which never echoes the URL.
+            url_authority="${EXTRACTOR_URL#*://}"
+            case "${url_authority%%/*}" in *@*)
+                echo "--extractor-url must not carry credentials (user:password@host); a key the server wants goes in PSEUDOLIFE_DREAM_API_KEY in ops/.env" >&2
+                exit 2 ;;
+            esac
             case "$EXTRACTOR_URL" in http://?*|https://?*) ;; *)
                 echo "invalid --extractor-url: expected the server's http(s) base URL, e.g. http://127.0.0.1:1234/v1" >&2
                 exit 2 ;;
-            esac ;;
+            esac
+            if ! printf '%s' "$EXTRACTOR_URL" | grep -Eq "$SAFE_URL_PATTERN"; then
+                echo "invalid --extractor-url: it holds characters the installer cannot write safely; use letters, digits and . _ : / @ + - (and [ ] around an IPv6 host)" >&2
+                exit 2
+            fi ;;
         *)
             if [ -n "$EXTRACTOR_URL" ]; then
                 echo "--extractor-url applies only to --extractor endpoint or endpoint-fallback" >&2
                 exit 2
+            fi
+            # One family rule, the same in install.ps1, before any note: a
+            # shim only honours its own family's ids per request.
+            if [ -n "$MODEL" ]; then
+                case "$EXTRACTOR:$MODEL" in
+                    sidecar:*|claude-only:claude-?*|claude-fallback:claude-?*) ;;
+                    openai-only:gpt-?*|openai-only:codex-?*) ;;
+                    openai-fallback:gpt-?*|openai-fallback:codex-?*) ;;
+                    *)
+                        echo "--model '$MODEL' does not match extractor mode $EXTRACTOR: a claude-* mode takes a claude-* id, an openai-* mode a gpt-* or codex-* id" >&2
+                        exit 2 ;;
+                esac
             fi
             case " $CLAUDE_MODELS $OPENAI_MODELS " in *" $MODEL "*) ;; *)
                 if [ -n "$MODEL" ] && [ "$EXTRACTOR" = sidecar ]; then
@@ -686,13 +718,7 @@ if [ "$SHIM_PORT" = 0 ]; then
     if [ -n "$codex_shim_mode" ]; then SHIM_PORT=8086; else SHIM_PORT=8082; fi
 fi
 # A model from the wrong family would silently serve the shim's launch
-# default (the per-request override only honours its own prefixes).
-case "$MODEL" in
-    claude-*) [ -z "$codex_shim_mode" ] || {
-        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
-    gpt-*) [ -z "$claude_shim_mode" ] || {
-        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
-esac
+# default: check_extractor_args (the extractor modes block) refuses it.
 # Fail fast on a missing shim CLI: preflight only knows --client, so e.g.
 # --extractor openai-fallback --client claude would otherwise sail through
 # and die at the autostart stage with the stack already up.
@@ -742,8 +768,8 @@ if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
     if [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
-        echo "  1) claude-opus-5-5  — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that established Opus as the best extractor ran on claude-opus-5"
-        echo "  2) claude-opus-5    — the earlier default: the 2026-08-02 judged comparison measured it as the best extractor (evals/results/dreamer-choice-verdict.json)"
+        echo "  1) claude-opus-5-5  — recommended: clears the extraction-ladder gate with no regression against claude-opus-5 (evals/results/ladder-opus55-paired-verdict-threshold.json, 2026-09-28); the 2026-08-02 judged comparison that chose Opus over Sonnet (best measured extraction quality) ran on claude-opus-5"
+        echo "  2) claude-opus-5    — the earlier default: the 2026-08-02 judged comparison chose Opus over Sonnet (best measured extraction quality) on it (evals/results/dreamer-choice-verdict.json)"
         echo "  3) claude-sonnet-5  — balanced"
         echo "  4) claude-haiku-4-5 — fastest / lightest on plan usage"
         echo "  5) claude-fable-5   — most capable tier"
@@ -810,7 +836,7 @@ fi
 # What the managed block of ops/.env says about the extractor. The daemon
 # runs in Docker, where this host is host.docker.internal (extra_hosts in
 # ops/docker-compose.yml), so a server named on loopback is written that way.
-extractor_container_url() {  # $1 = URL; echoes it as the daemon container reaches it
+extractor_container_url() {  # $1 = URL; echoes it as written for the daemon container
     url_scheme="${1%%://*}"
     url_rest="${1#*://}"
     url_authority="${url_rest%%/*}"
@@ -934,6 +960,7 @@ fi
 # <<< mint token <<<
 
 # ── 6. sidecar enable/disable via the compose override ────────────────────
+# >>> sidecar override >>>
 installer_owns_override() {
     [ -f "$override_file" ] || return 1
     local first
@@ -973,6 +1000,7 @@ else
         step "Removed installer-managed override (sidecar re-enabled)"
     fi
 fi
+# <<< sidecar override <<<
 
 # ── 7. bring the stack up ──────────────────────────────────────────────────
 if [ -z "$CLIENT_ONLY" ]; then
@@ -2240,6 +2268,44 @@ for selected_client in $CLIENTS; do
 done
 
 # ── 12. health ─────────────────────────────────────────────────────────────
+# >>> endpoint container probe >>>
+# A server named on this machine's loopback is written as host.docker.internal
+# (the extractor env block). Docker Desktop routes that name to this
+# machine's loopback; Linux Docker Engine routes it to the docker bridge,
+# where a server bound only to 127.0.0.1 is not listening (the same trap
+# ops/install-shim-autostart.sh binds the Claude shim around). So once the
+# daemon is up, the endpoint is asked from inside its container, the only
+# place the answer means anything.
+ENDPOINT_CONTAINER=""
+endpoint_container_probe() {
+    case "$EXTRACTOR" in endpoint|endpoint-fallback) ;; *) return 0 ;; esac
+    probe_url="$(extractor_container_url "$EXTRACTOR_URL")"
+    [ "$probe_url" != "$EXTRACTOR_URL" ] || return 0
+    if [ "$(uname -s 2>/dev/null)" = Linux ]; then
+        step "Note: on Linux, host.docker.internal is the docker bridge address, so a server listening only on 127.0.0.1 is out of the daemon container's reach."
+    fi
+    # Any HTTP answer counts: a 401 or 404 still means the server is there.
+    if docker exec pseudolife-mcp-daemon python -c 'import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1] + "/models", timeout=10)
+except urllib.error.HTTPError:
+    pass' "$probe_url" >/dev/null 2>&1; then
+        ENDPOINT_CONTAINER=reachable
+        step "The daemon's container reaches the extractor endpoint at $probe_url."
+    else
+        ENDPOINT_CONTAINER=unreachable
+        if [ "$EXTRACTOR" = endpoint-fallback ]; then endpoint_until="dreams fall back to the sidecar"
+        else endpoint_until="dreams pause"; fi
+        echo "WARNING: the daemon's container cannot reach the extractor endpoint at $probe_url/models. A server on this machine must listen where the container can reach it, not only on 127.0.0.1: OLLAMA_HOST=0.0.0.0 (or the docker bridge address) for Ollama, llama-server --host <bridge address>, LM Studio's \"Serve on Local Network\". Restart the server so; the daemon retries every sweep, and until then $endpoint_until." >&2
+    fi
+}
+describe_endpoint_container() {
+    case "${ENDPOINT_CONTAINER:-}" in
+        reachable) echo "  [x] Extractor endpoint   reachable from the daemon's container" ;;
+        unreachable) echo "  [!] Extractor endpoint   not reachable from the daemon's container - see the warning above" ;;
+    esac
+}
+# <<< endpoint container probe <<<
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if [ -z "$CLIENT_ONLY" ]; then
@@ -2257,6 +2323,7 @@ if [ -z "$CLIENT_ONLY" ]; then
         exit 1
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+    endpoint_container_probe
 fi
 
 # >>> client-only claude hook >>>
@@ -2418,6 +2485,7 @@ case "$TOKEN_STATE" in minted|present)
 esac
 echo ""
 # <<< board line <<<
+describe_endpoint_container
 case "$EXTRACTOR" in
     sidecar)
         echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;

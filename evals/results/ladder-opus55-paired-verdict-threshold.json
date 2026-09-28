@@ -16,6 +16,11 @@
     "sha_source": "artifact",
     "worktree_head_at_compare": "db911ffd432fcf3561a44977d0dce859e2411741"
   },
+  "served_model": {
+    "pre": "claude-opus-5",
+    "post": "claude-opus-5-5",
+    "source": "claude_shim serving lines and call counts recorded by the operator at run time, 2026-09-28"
+  },
   "compared": [
     "gold_recoverable",
     "stale_leak",

@@ -2944,10 +2944,18 @@ The endpoint modes take the server's base URL and one of its model names:
 `<url>/models` answers (a server that lists no models, or wants a key, is
 warned about, not refused), writes `PSEUDOLIFE_DREAM_BASE_URL` and
 `PSEUDOLIFE_DREAM_MODEL` into its managed block of `ops/.env`, and writes a
-server on this machine's loopback as `host.docker.internal`, the address the
-daemon's container reaches it on. A key the server needs goes in
-`PSEUDOLIFE_DREAM_API_KEY` by hand, outside the managed block; the installer
-never takes one on its command line.
+server on this machine's loopback as `host.docker.internal`, the name the
+daemon's container is given for this machine. Docker Desktop routes it to
+this machine's loopback; Linux Docker Engine routes it to the docker bridge,
+so there a server listening only on `127.0.0.1` is out of the container's
+reach: bind it to the bridge address or all interfaces (`OLLAMA_HOST`,
+`llama-server --host`, LM Studio's "Serve on Local Network"). Once the stack
+is up the installer asks the server from inside the daemon container and
+warns, marking the extractor endpoint `[!]` in its summary, when it cannot
+reach it. A key the server needs goes in `PSEUDOLIFE_DREAM_API_KEY` by hand,
+outside the managed block; the installer never takes one on its command
+line. A model id or URL is held to letters, digits and `. _ : / @ + -`, and
+a URL carrying `user:password@` is refused.
 
 The names used until 2026-09-28, `sonnet-only`, `sonnet-fallback`,
 `codex-only` and `codex-fallback`, are still accepted as deprecated
@@ -2957,20 +2965,32 @@ spellings of `claude-only`, `claude-fallback`, `openai-only` and
 The CLI shim modes offer these dreamer models (`--model`, or the installer's
 menu):
 
-- Claude: `claude-opus-5-5` (the default: it clears the extraction-ladder
-  gate with no regression against `claude-opus-5`,
-  `evals/results/ladder-opus55-paired-verdict-threshold.json`, 2026-09-28),
-  `claude-opus-5` (the default until 2026-09-29: the 2026-08-02 judged
-  comparison that established Opus as the best extractor ran on it,
-  `evals/results/dreamer-choice-verdict.json`), `claude-sonnet-5`,
-  `claude-haiku-4-5`, `claude-fable-5`
-- OpenAI: `gpt-5.6-terra` (the default), `gpt-5.6-sol`, `gpt-5.6-luna`,
-  `gpt-6-sol`, `gpt-6-luna` (the GPT-6 ids were accepted by the Codex CLI on
-  2026-09-29; no ladder run has measured them yet)
+- Claude:
+  - `claude-opus-5-5`: the default. It clears the extraction-ladder gate with
+    no regression against Opus 5
+    (`evals/results/ladder-opus55-paired-verdict-threshold.json`,
+    2026-09-28).
+  - `claude-opus-5`: the previous default, until 2026-09-29. The 2026-08-02 judged
+    comparison that chose Opus over Sonnet (best measured extraction quality) ran on it
+    (`evals/results/dreamer-choice-verdict.json`).
+  - `claude-sonnet-5`: balanced.
+  - `claude-haiku-4-5`: fastest, lightest on plan usage.
+  - `claude-fable-5`: the most capable tier.
+- OpenAI:
+  - `gpt-5.6-terra`: the default, balanced.
+  - `gpt-5.6-sol`: flagship.
+  - `gpt-5.6-luna`: fastest, lightest on plan usage.
+  - `gpt-6-sol`: GPT-6 flagship.
+  - `gpt-6-luna`: GPT-6 fastest, lightest.
+
+No ladder run has measured the OpenAI models yet; the GPT-6 ids were
+accepted by the Codex CLI on 2026-09-29.
 
 These lists are the menu, not a gate: a CLI shim mode takes a model id it
 does not list, says so in one line, and passes it to the shim unchanged, so
-a new release is usable the day it ships. An endpoint mode takes whatever
+a new release is usable the day it ships. The id must still be the mode's
+family (`claude-*` for the claude modes, `gpt-*` or `codex-*` for the openai
+modes), since a shim honours only its own family per request. An endpoint mode takes whatever
 model name its server serves. `tests/test_extractor_model_lists.py` keeps
 these lists, and the default, the same in both installers, the shims'
 autostart scripts, this guide and the Console.
@@ -3053,7 +3073,8 @@ default. The one-shot installer wires the whole mode:
 ops/install.sh --extractor openai-fallback     # or openai-only; Windows: ops\install.ps1 -Extractor openai-fallback
 ```
 
-which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
+which prompts for the GPT dreamer (GPT-5.6 Terra / Sol / Luna, GPT-6 Sol /
+Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
 Scheduler, elevated pwsh opened from the Start menu, same caveat as the
 Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
