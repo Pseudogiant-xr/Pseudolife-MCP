@@ -63,3 +63,49 @@ def test_checkin_keeps_subagents_off_the_parents_board_writes():
     for word in ("list", "receive", "ack", "send", "status"):
         assert word in CHECKIN_TEXT.split("ubagent", 1)[1]
     assert "subagent" in CHECKIN_INSTRUCTION.lower()
+
+
+def test_agents_update_passes_park_fields_and_refuses_them_elsewhere(monkeypatch):
+    from pseudolife_memory import mcp_server as mod, coordination
+    seen = []
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, args: seen.append(
+        (action, args)) or {})
+    mod.memory_agents(action="update", park_reason="blocked", park_needs="GPU free",
+                      park_clear_by="anyone", park_resume="rerun the bench", park_expires=1.5e9)
+    # An empty reason is the tool's way to say null: it clears the park.
+    mod.memory_agents(action="update", park_reason="")
+    assert seen == [("update", {"park_reason": "blocked", "park_needs": "GPU free",
+                                "park_clear_by": "anyone", "park_resume": "rerun the bench",
+                                "park_expires": 1.5e9}),
+                    ("update", {"park_reason": None})]
+    for action in ("list", "claim", "release"):
+        with pytest.raises(ValueError, match="unexpected_parameter"):
+            mod.memory_agents(action=action, lease="claim:x", park_reason="done")
+
+
+def test_message_send_passes_clears_and_urgent(monkeypatch):
+    from pseudolife_memory import mcp_server as mod, coordination
+    seen = []
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, args: seen.append(
+        (action, args)) or {"state": "queued", "wake": {"decision": "rung", "reason": "clears"}})
+    out = mod.memory_message(action="send", to="peer", text="GPU is free", request_id="r1",
+                             clears="GPU free", urgent=True)
+    assert out["wake"]["decision"] == "rung"
+    mod.memory_message(action="send", to="peer", text="fyi", request_id="r2")
+    assert seen == [("send", {"to": "peer", "text": "GPU is free", "request_id": "r1",
+                              "clears": "GPU free", "urgent": True}),
+                    ("send", {"to": "peer", "text": "fyi", "request_id": "r2"})]
+
+
+def test_sessions_are_asked_to_park_where_the_text_is_not_benched():
+    """The park request reaches a session through the tool description and
+    the Stop hook's gate. The check-in sentence is kept ready but not
+    served: CHECKIN_TEXT is pinned to the text the check-in bench measured
+    (#435), so it joins only with a new bench run."""
+    from pseudolife_memory import mcp_server as mod
+    from pseudolife_memory.coordination import (
+        CHECKIN_TEXT, PARK_CHECKIN_SENTENCE, PARK_GATE_MESSAGE)
+    for text in (PARK_CHECKIN_SENTENCE, PARK_GATE_MESSAGE, mod.memory_agents.__doc__):
+        for field in ("park_reason", "park_needs", "park_clear_by", "park_resume"):
+            assert field in text, (field, text[:40])
+    assert PARK_CHECKIN_SENTENCE not in CHECKIN_TEXT

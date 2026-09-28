@@ -20,6 +20,7 @@ entry points: the HTTP/service layer must never expose them as agent tools.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import hashlib
 import hmac
 import json
@@ -119,6 +120,40 @@ MAX_SCOPE = 120
 # in a peer listing, like the 240-character status.
 MAX_CHILDREN = 8
 MAX_CHILD_LABEL = 40
+# v49: the park record, a session's standing statement of why it stopped
+# (maintainer decision 2026-09-28). ``park_needs`` is one line saying what
+# would clear it, ``park_resume`` what to do once cleared, sized like the
+# status; ``park_clear_by`` names an agent id, ``maintainer``, a lease name
+# or ``anyone``.
+PARK_REASONS = ("done", "blocked", "needs_approval", "needs_info", "needs_resource",
+                "waiting_peer")
+MAX_PARK_NEEDS = 120
+MAX_PARK_RESUME = 240
+MAX_PARK_CLEAR_BY = 120
+MAX_CLEARS = 120
+# A park must not withhold mail forever once its clearer is gone: a new
+# park without ``park_expires`` expires after PARK_DEFAULT_TTL, and none may
+# be set past PARK_MAX_TTL; an expired park is an idle session (nudged).
+# Starting values from the board orchestrator's review of PR #433
+# (2026-09-28), awaiting the maintainer, not measurements: 12 h covers one
+# overnight run, a week the longest lease a session may hold.
+PARK_DEFAULT_TTL = 12 * 3600
+PARK_MAX_TTL = 7 * 86400
+_PARK_TEXT_LIMITS = {"park_needs": MAX_PARK_NEEDS, "park_clear_by": MAX_PARK_CLEAR_BY,
+                     "park_resume": MAX_PARK_RESUME}
+PARK_FIELDS = ("park_reason", "park_needs", "park_clear_by", "park_resume", "park_expires")
+_PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "park_resume": "",
+                 "park_expires": None, "park_set_at": None}
+# A status that says the session's work is over reads as parked done to the
+# Stop-hook park gate, so a session that ended with one is not asked to park.
+DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.IGNORECASE)
+# Rings decided at send (v49) are kept this long: the nightly total counts a
+# day of them, and a week matches the request-key window.
+WAKE_RETENTION = 7 * 86400
+# A served ring rides the recipient's answers this long after it is first
+# served: longer than the adapter's 20 s heartbeat, so the answer to a
+# retried heartbeat still carries it (review, 2026-09-28).
+WAKE_SERVE_REPEAT = 25
 MAX_PAGE = 50
 MAX_PENDING = 256
 # Recipients one send may reach through ``to: "project:<name>"`` or ``"all"``:
@@ -245,6 +280,43 @@ BODY_SALT_BYTES = 16
 _SALT = re.compile("[0-9a-f]{%d}" % (2 * BODY_SALT_BYTES))
 
 
+@dataclass
+class WakePolicy:
+    """The caps the wake decision applies (v49); the same fields, names and
+    defaults as ``utils.config.WakeConfig``, which validates them. Defined
+    here so the offline CLIs and the storage tests need no config import."""
+
+    per_recipient_per_hour: int = 20
+    urgent_per_sender_per_hour: int = 6
+    nightly_total: int = 200
+    fan_out_stagger_seconds: int = 30
+    active_seconds: int = 60
+    nudge_interval_seconds: int = 3600
+
+    @classmethod
+    def from_config(cls, config) -> "WakePolicy":
+        """Copy the fields a config object carries; anything missing keeps
+        its default (a test service may hand over a bare namespace)."""
+        return cls(**{name: getattr(config, name) for name in cls.__dataclass_fields__
+                      if hasattr(config, name)})
+
+
+def _need_matches(clears: str, needs: str) -> bool:
+    """Whether a message's ``clears`` names the recipient's ``park_needs``:
+    the same words, case and spacing aside, or the words of one as a run of
+    whole words inside the other, holding at least one word of four letters
+    or more. So neither a letter nor a filler word ("the", "of") matches
+    any need and rings past the urgent cap."""
+    left = re.findall(r"\w+", clears.lower())
+    right = re.findall(r"\w+", needs.lower())
+    if not left or not right:
+        return False
+    short, long = (left, right) if len(left) <= len(right) else (right, left)
+    if not any(len(word) >= 4 for word in short):
+        return False
+    return any(long[i:i + len(short)] == short for i in range(len(long) - len(short) + 1))
+
+
 def body_commitment(salt_hex, body):
     """sha256(salt || body), the value a v46 send's hashed payload holds;
     None when the salt or body is not the shape one is written in."""
@@ -344,12 +416,15 @@ def _resolved(ids, *, missing, ambiguous):
     return ids[0]
 
 
-def _fingerprint(to, text, reply_to, expires_at):
+def _fingerprint(to, text, reply_to, expires_at, clears=None, urgent=False):
     """A send's request fingerprint over its resolved recipient (a burst:
     its address as given) and resolved parent. The same digest a full-id
-    send has always stored, so pre-v48 request keys still match."""
-    return _hash(json.dumps([to, text, reply_to, expires_at], ensure_ascii=False,
-                            separators=(",", ":")))
+    send has always stored, so pre-v48 request keys still match; v49's
+    ``clears`` and ``urgent`` join it only when set, for the same reason."""
+    fingerprinted = [to, text, reply_to, expires_at]
+    if clears is not None or urgent:
+        fingerprinted += [clears, urgent]
+    return _hash(json.dumps(fingerprinted, ensure_ascii=False, separators=(",", ":")))
 
 
 def _fanout_target(to):
@@ -843,9 +918,11 @@ def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, un
 
 
 class CoordinationStore:
-    def __init__(self, storage, *, clock=time.time):
+    def __init__(self, storage, *, clock=time.time, wake=None):
         self.storage = storage
         self.clock = clock
+        # The wake caps (v49); the daemon hands over its configured ones.
+        self.wake = WakePolicy() if wake is None else wake
 
     def _one(self, sql, params=()):
         with self.storage.conn.cursor(row_factory=dict_row) as cur:
@@ -990,8 +1067,10 @@ class CoordinationStore:
                 "last_activity", "lifecycle")
         result = {k: row[k] for k in keys}
         # Offline rebind runs on a restored bank before any schema pass, so
-        # a pre-v47 row has no children column.
+        # a pre-v47 row has no children column, and a pre-v49 row no park.
         result["children"] = row.get("children", [])
+        for key, default in _PARK_CLEARED.items():
+            result[key] = row.get(key, default)
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
         return result
@@ -1054,6 +1133,25 @@ class CoordinationStore:
                     _refuse_secret(label)
                 if len(set(value)) != len(value):
                     raise CoordinationError("invalid_children")
+            elif key == "park_reason":
+                # None (REST null) and "" (the tool's spelling of it) both
+                # clear the park.
+                if value is None or value == "":
+                    fields[key] = None
+                elif value not in PARK_REASONS:
+                    raise CoordinationError("invalid_park")
+            elif key in _PARK_TEXT_LIMITS:
+                _string(value, _PARK_TEXT_LIMITS[key], "park")
+                # Hashed into the update event, like the status.
+                _refuse_secret(value)
+            elif key == "park_expires":
+                # A null (REST passes JSON null through) would store a park
+                # that never lapses, past the default and the cap: refused.
+                if (value is None or isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value <= 0):
+                    raise CoordinationError("invalid_park")
+                fields[key] = float(value)
             else:
                 raise CoordinationError("invalid_update")
         return fields
@@ -1067,9 +1165,32 @@ class CoordinationStore:
         if expect is not None and (type(expect) is not int
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
             raise CoordinationError("invalid_expect")
+        park_update = any(key in fields for key in PARK_FIELDS)
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
+            parked = row.get("park_reason") is not None
+            # The park record (v49). A null reason clears the whole record;
+            # any other park field re-stamps it, and needs a reason unless
+            # the row is already parked; a status without park fields is a
+            # session working again, which is not parked.
+            if park_update:
+                if "park_reason" in fields and fields["park_reason"] is None:
+                    fields.update(_PARK_CLEARED)
+                elif "park_reason" not in fields and not parked:
+                    raise CoordinationError("invalid_park")
+                else:
+                    fields["park_set_at"] = now
+                    # Only a park that would have no expiry gets the default:
+                    # a refinement, or a new reason, keeps the standing one.
+                    standing = row.get("park_expires") if parked else None
+                    if "park_expires" not in fields and standing is None:
+                        fields["park_expires"] = now + PARK_DEFAULT_TTL
+                    expires = fields.get("park_expires")
+                    if expires is not None and expires > now + PARK_MAX_TTL:
+                        raise CoordinationError("invalid_park")
+            elif "status" in fields and parked:
+                fields.update(_PARK_CLEARED)
             # Only a real change reaches the row and the log, so a status
             # update that never used an expectation logs what it always did.
             if "children" in fields:
@@ -1485,9 +1606,16 @@ class CoordinationStore:
         return {"pending_count": self._pending_count(agent_id),
                 "pending_preview": self._pending_preview(agent_id)}
 
-    def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False):
+    def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False,
+               ring=None):
+        """Take or renew the adapter lease. ``ring`` (v49) says whether a
+        ring the daemon decides reaches this session without a live channel
+        (the Claude Stop hook's .ring marker, the Codex doorbell); it is
+        kept in ``capabilities`` and counts as a wake path."""
         _string(attachment_id, 120, "attachment_id", empty=False)
         self._fields(wake_enabled=wake_enabled)
+        if ring is not None and not isinstance(ring, bool):
+            raise CoordinationError("invalid_capabilities")
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
@@ -1508,14 +1636,19 @@ class CoordinationStore:
                 "wake_enabled=%s,lifecycle='attached' WHERE agent_id=%s",
                 (attachment_id, generation, now + ATTACHMENT_LEASE, started, now,
                  wake_enabled, agent_id))
+            if ring is not None:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET capabilities=capabilities || %s "
+                    "WHERE agent_id=%s", (Jsonb({"ring": ring}), agent_id))
             mailbox = self._mailbox_state(agent_id)
+            ring = self._serve_wake(agent_id, now)
             self._append([self._event(
                 "attach", {"generation": generation, "lease_until": now + ATTACHMENT_LEASE,
                            "wake_enabled": wake_enabled, "renewed": alive},
                 principal=principal, agent_id=agent_id, project=row["project"],
                 task=row["task"])], now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
-                **mailbox}
+                **mailbox, "wake": ring}
 
     def _attachment(self, row, attachment_id, generation):
         if (row["attachment_id"] != attachment_id or row["generation"] != generation
@@ -1546,8 +1679,146 @@ class CoordinationStore:
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
             mailbox = self._mailbox_state(agent_id)
+            ring = self._serve_wake(agent_id, now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
-                **mailbox}
+                **mailbox, "wake": ring}
+
+    def _serve_wake(self, agent_id, now):
+        """Hand the recipient's adapter every ring decided since its last
+        attach or heartbeat, once: the daemon decides, the shim rings. One
+        answer covers them all, the newest ring's reason and the latest
+        ``ring_at`` (a burst staggers them); ``None`` when nothing is due."""
+        self.storage.conn.execute(
+            "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
+            "AND served_at IS NULL", (now, agent_id))
+        # A ring rides the answers of one heartbeat interval: a lost answer
+        # that the adapter retries still carries it, and the adapter takes
+        # each ring once.
+        rows = self._all(
+            "SELECT decision,reason,ring_at,created_at,wake_id FROM coordination_wakes "
+            "WHERE recipient_agent_id=%s AND served_at>%s",
+            (agent_id, now - WAKE_SERVE_REPEAT))
+        if not rows:
+            return None
+        newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
+        return {"decision": newest["decision"], "reason": newest["reason"],
+                "ring_at": max(r["ring_at"] for r in rows)}
+
+    def _live_park(self, row, now):
+        """The row's park record while it stands: a reason set, and no
+        ``park_expires`` in the past."""
+        reason = row.get("park_reason")
+        expires = row.get("park_expires")
+        if reason is None or (expires is not None and expires <= now):
+            return None
+        return {key: row.get(key, default) for key, default in _PARK_CLEARED.items()}
+
+    def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id):
+        """Decide at send whether the recipient's shim should ring (v49).
+
+        The decision table (Coordination v2 design, decided 2026-09-28):
+        ``hinted`` for a recipient active within ``active_seconds`` (its
+        next tool result carries the mail); ``not_needed`` for one parked
+        done; ``no_path`` for one without a wake path (its need rides
+        along); parked with a need, ``rung`` when the sender is the clearer,
+        ``park_clear_by`` is ``anyone``, ``clears`` names the need, or the
+        sender set ``urgent`` (each within its cap), else ``withheld`` with
+        the need so the sender knows what would wake it; idle with no park,
+        ``nudged`` at most once per ``nudge_interval_seconds``, else
+        ``capped``. Every ring is bounded per recipient per hour and by the
+        nightly total, and rings from one sender's burst are staggered by
+        ``fan_out_stagger_seconds``. Chatter never rings."""
+        policy = self.wake
+        park = self._live_park(recipient, now)
+        need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
+                if park and park["park_reason"] != "done" else {})
+        # A parked session has stopped: its last board action (the park
+        # itself) is no sign a tool result will carry the mail, so only an
+        # unparked session counts as active (review, 2026-09-28).
+        if park is None and recipient["last_activity"] > now - policy.active_seconds:
+            return {"decision": "hinted", "reason": "active"}
+        if park and park["park_reason"] == "done":
+            return {"decision": "not_needed", "reason": "parked_done"}
+        # A wake path is a live channel, or a ring path the adapter declared
+        # at attach (the Stop hook's .ring marker, the Codex doorbell).
+        capabilities = recipient.get("capabilities") or {}
+        if not recipient["wake_enabled"] and capabilities.get("ring") is not True:
+            return {"decision": "no_path", "reason": "wake_disabled", **need}
+        hour, day = now - 3600, now - 86400
+        if park:
+            how = None
+            if park["park_clear_by"] == sender["agent_id"]:
+                how = "clearer"
+            elif park["park_clear_by"] == "anyone":
+                how = "anyone"
+            elif clears is not None and _need_matches(clears, park["park_needs"]):
+                how = "clears"
+            elif urgent:
+                sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                                 "sender_agent_id=%s AND urgent AND created_at>%s",
+                                 (sender["agent_id"], hour))["n"]
+                if sent >= policy.urgent_per_sender_per_hour:
+                    return {"decision": "capped", "reason": "urgent_sender_hour", **need}
+                how = "urgent"
+            if how is None:
+                return {"decision": "withheld", "reason": "need_not_cleared", **need}
+            decision, reason = "rung", how
+        else:
+            nudged = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                               "recipient_agent_id=%s AND decision='nudged' AND created_at>%s",
+                               (recipient["agent_id"], now - policy.nudge_interval_seconds))["n"]
+            if nudged:
+                return {"decision": "capped", "reason": "nudge_hour"}
+            decision, reason = "nudged", "no_park"
+        counts = self._one(
+            "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
+            "count(*) FILTER (WHERE created_at>%s) AS night,"
+            "max(ring_at) FILTER (WHERE sender_agent_id=%s AND ring_at>%s) AS burst "
+            "FROM coordination_wakes",
+            (recipient["agent_id"], hour, day, sender["agent_id"],
+             now - policy.fan_out_stagger_seconds))
+        if counts["recipient"] >= policy.per_recipient_per_hour:
+            return {"decision": "capped", "reason": "recipient_hour", **need}
+        if counts["night"] >= policy.nightly_total:
+            return {"decision": "capped", "reason": "nightly", **need}
+        ring_at = now
+        if counts["burst"] is not None:
+            ring_at = max(now, counts["burst"] + policy.fan_out_stagger_seconds)
+        self.storage.conn.execute(
+            "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+            "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
+             reason == "urgent", ring_at, now))
+        return {"decision": decision, "reason": reason, "ring_at": ring_at}
+
+    def park_gate(self, agent_id, principal, *, since=None):
+        """What the Stop hook asks when a turn ends (v49): ``block`` when the
+        session should first record a park, ``allow`` otherwise. Blocked
+        when its row carries no live park record and its status is not
+        done-shaped, or, given the turn's start ``since``, when it set no
+        status or park during the turn. An address the caller's principal
+        does not own, or none at all, is allowed: there is nothing to ask."""
+        row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                        "AND credential_hash IS NOT NULL", (agent_id, principal))
+        if row is None:
+            return {"gate": "allow", "reason": "unknown_agent"}
+        now = self.clock()
+        if since is not None:
+            # Status and park changes are update events whose fields name
+            # them; the CASE keeps the cast off other events' payloads.
+            updated = self._one(
+                "SELECT 1 AS hit FROM coordination_events WHERE agent_id=%s AND created_at>%s "
+                "AND CASE event WHEN 'register' THEN true WHEN 'update' THEN "
+                "(payload::jsonb->'fields') ?| array['status','park_reason','park_needs',"
+                "'park_clear_by','park_resume','park_expires'] ELSE false END LIMIT 1",
+                (agent_id, since))
+            if updated is None:
+                return {"gate": "block", "reason": "not_updated_this_turn"}
+        if self._live_park(row, now) is not None:
+            return {"gate": "allow", "reason": "parked"}
+        if DONE_STATUS.search(row["status"] or ""):
+            return {"gate": "allow", "reason": "done"}
+        return {"gate": "block", "reason": "no_park"}
 
     def detach(self, principal, agent_id, credential, *, attachment_id, generation):
         with self.storage._txn():
@@ -1611,7 +1882,8 @@ class CoordinationStore:
         return self._one("SELECT count(*) AS n FROM coordination_agents WHERE " + where,
                          params)["n"]
 
-    def _replayed(self, existing, *, to, fanout, text, reply_to, expires_at, now):
+    def _replayed(self, existing, *, to, fanout, text, reply_to, expires_at, now,
+                  clears=None, urgent=False):
         """The result of a send whose request id already has rows: the same
         receipts when ``to``, ``reply_to`` (each in full or as a prefix of
         what the first attempt resolved), the text and the expiry match it,
@@ -1625,9 +1897,9 @@ class CoordinationStore:
                     parent and is_id_prefix(reply_to) and parent.startswith(reply_to)):
                 raise CoordinationError("request_conflict")
             fingerprint = _fingerprint(target, text, None if reply_to is None else parent,
-                                       expires_at)
+                                       expires_at, clears, urgent)
         else:
-            fingerprint = _fingerprint(to, text, reply_to, expires_at)
+            fingerprint = _fingerprint(to, text, reply_to, expires_at, clears, urgent)
         if any(row["fingerprint"] != fingerprint for row in existing):
             raise CoordinationError("request_conflict")
         agents = {r["agent_id"]: r for r in self._all(
@@ -1644,9 +1916,12 @@ class CoordinationStore:
 
     def _send_result(self, to, fanout, rows, agents, now):
         """A direct send's receipt, naming the recipient the address resolved
-        to and the wake decision; a burst's per-recipient receipts."""
+        to, the wake decision stored with the message (v49; ``None`` for one
+        sent before) and ``path``, whether the recipient's adapter holds a
+        live channel; a burst's per-recipient receipts."""
         receipts = [{**self._receipt(row), "recipient_agent_id": row["recipient_agent_id"],
-                     "wake": self._wake(agents[row["recipient_agent_id"]], now)
+                     "wake": row.get("wake"),
+                     "path": self._wake(agents[row["recipient_agent_id"]], now)
                      if row["recipient_agent_id"] in agents else "pull"}
                     for row in sorted(rows, key=lambda r: r["recipient_agent_id"])]
         if fanout is None:
@@ -1663,7 +1938,7 @@ class CoordinationStore:
 
     def send(self, principal, agent_id, credential, *, to, text, request_id,
              reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
-             enforce_writer_epoch=False):
+             enforce_writer_epoch=False, clears=None, urgent=False):
         """Queue ``text`` for ``to``: one agent (a full id, or a unique
         prefix of at least ID_PREFIX_MIN hex characters), or a burst,
         ``project:<name>`` or ``all`` (see ``_fanout_rows``), at most
@@ -1673,10 +1948,20 @@ class CoordinationStore:
         its own message row and its own ``send`` event, with its own body
         and salt, so the log needs no new event kind; a burst's events
         carry ``fanout`` in their payload. A burst counts once against the
-        sender's rate. A reply cannot ride a burst."""
+        sender's rate. A reply cannot ride a burst.
+
+        Each recipient gets its own wake decision (v49, ``_wake_decision``),
+        on its row as the message arrives; ``clears`` says which parked need
+        the message answers, ``urgent`` asks for a ring whatever the need,
+        within the sender's cap. A retry repeats the first decisions."""
         _string(to, 120, "recipient", empty=False)
         _string(request_id, 120, "request_id", empty=False)
         _string(hlc, 120, "hlc")
+        if clears is not None:
+            _string(clears, MAX_CLEARS, "clears", empty=False)
+            _refuse_secret(clears)
+        if not isinstance(urgent, bool):
+            raise CoordinationError("invalid_urgent")
         stamp = None
         if hlc:
             try:
@@ -1719,7 +2004,8 @@ class CoordinationStore:
                                  "AND request_id=%s", (agent_id, request_id))
             if existing:
                 return self._replayed(existing, to=to, fanout=fanout, text=text,
-                                      reply_to=reply_to, expires_at=expires_at, now=now)
+                                      reply_to=reply_to, expires_at=expires_at, now=now,
+                                      clears=clears, urgent=urgent)
             # The recipients are read before any lock so that every row can
             # be locked in one global order, including the sender's own
             # rate/idempotency state; a burst re-reads its set under the
@@ -1745,7 +2031,7 @@ class CoordinationStore:
             # spells the recipient or the parent by prefix is the same
             # request as one that spells it in full.
             fingerprint = _fingerprint(to if fanout is not None else targets[0], text,
-                                       reply_to, expires_at)
+                                       reply_to, expires_at, clears, urgent)
             self._all("SELECT agent_id FROM coordination_agents WHERE agent_id=ANY(%s) "
                       "ORDER BY agent_id FOR UPDATE", (sorted({agent_id, *targets}),))
             sender = self._auth(principal, agent_id, credential)
@@ -1754,7 +2040,8 @@ class CoordinationStore:
             if existing:
                 # A concurrent first attempt committed while this one resolved.
                 return self._replayed(existing, to=to, fanout=fanout, text=text,
-                                      reply_to=reply_to, expires_at=expires_at, now=now)
+                                      reply_to=reply_to, expires_at=expires_at, now=now,
+                                      clears=clears, urgent=urgent)
             if enforce_writer_epoch:
                 if (type(expected_writer_epoch) is not int
                         or expected_writer_epoch < 1):
@@ -1810,16 +2097,21 @@ class CoordinationStore:
             for recipient in recipients:
                 seq = recipient["next_sequence"] + 1
                 message_id = uuid.uuid4().hex
+                # Decided on the recipient row as the message arrives (the row
+                # is locked above); a burst's earlier rings are visible here,
+                # so the fan-out stagger spaces them.
+                wake = self._wake_decision(sender, recipient, now, clears=clears,
+                                           urgent=urgent, message_id=message_id)
                 self.storage.conn.execute("UPDATE coordination_agents SET next_sequence=%s "
                                           "WHERE agent_id=%s", (seq, recipient["agent_id"]))
                 rows.append(self._one(
                     "INSERT INTO coordination_messages (message_id,sender_agent_id,recipient_agent_id,"
                     "sender_principal,project,task,text,reply_to,request_id,fingerprint,"
-                    "recipient_sequence,hlc,created_at,expires_at) VALUES "
-                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+                    "recipient_sequence,hlc,created_at,expires_at,wake) VALUES "
+                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
                     (message_id, agent_id, recipient["agent_id"], principal, sender["project"],
                      sender["task"], text, reply_to, request_id, fingerprint, seq, hlc, now,
-                     expiry)))
+                     expiry, Jsonb(wake))))
                 # The body lives on in the event's body column after prune
                 # blanks the live copy. The hashed payload holds a salted
                 # commitment to it, not the text (v46), so ``redact`` can
@@ -1829,7 +2121,8 @@ class CoordinationStore:
                 events.append(self._event(
                     "send", {"text_commitment": body_commitment(salt, text),
                              "reply_to": reply_to, "request_id": request_id,
-                             "recipient_sequence": seq, "expires_at": expiry, **marker},
+                             "recipient_sequence": seq, "expires_at": expiry,
+                             "wake": wake["decision"], **marker},
                     principal=principal, agent_id=agent_id, recipient=recipient["agent_id"],
                     project=sender["project"], task=sender["task"], message_id=message_id,
                     hlc=hlc, body=text, body_salt=salt))
@@ -1854,10 +2147,14 @@ class CoordinationStore:
     def receive(self, principal, agent_id, credential, *, after=None, limit=50,
                 for_delivery=False):
         """Page pending mail. ``for_delivery`` is the adapter's live path: it
-        skips messages whose attempts are exhausted, which an explicit receive
-        still returns. The first time a message is served, by either path, its
-        ``first_read_at`` is stamped and a ``read`` event logged; a replay of
-        unacknowledged mail writes nothing."""
+        skips messages whose attempts are exhausted, and (v49) messages the
+        daemon decided not to ring: every message it yields becomes a turn in
+        a live-channel recipient, so it carries only mail decided ``rung``,
+        ``nudged`` or ``hinted`` (and mail from before v49, which has no
+        decision). An explicit receive still returns all of it. The first
+        time a message is served, by either path, its ``first_read_at`` is
+        stamped and a ``read`` event logged; a replay of unacknowledged mail
+        writes nothing."""
         row = self._auth(principal, agent_id, credential)
         self._limit(limit)
         seq = 0
@@ -1869,7 +2166,8 @@ class CoordinationStore:
                     raise ValueError
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
-        attempt_clause = " AND attempts<%s" if for_delivery else ""
+        attempt_clause = (" AND attempts<%s AND (wake IS NULL OR "
+                          "wake->>'decision' IN ('rung','nudged','hinted'))" if for_delivery else "")
         now = self.clock()
         params = [agent_id, seq, now] + ([MAX_ATTEMPTS] if for_delivery else []) + [limit]
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -2032,6 +2330,10 @@ class CoordinationStore:
             removed = sorted(r["message_id"] for r in self._all(
                 "DELETE FROM coordination_messages WHERE created_at<=%s "
                 "AND expires_at<=%s RETURNING message_id", (now - DEDUPE_RETENTION, now)))
+            # Rings older than the caps look back (a day) plus the request-key
+            # window; not logged, the send event already names the decision.
+            self.storage.conn.execute("DELETE FROM coordination_wakes WHERE created_at<=%s",
+                                      (now - WAKE_RETENTION,))
             # The retention window runs from the later of the address's own
             # last action and its last lease. A lapsed lease may belong to a
             # live shim cut off by a restart or a host sleep, whose recovery

@@ -19,6 +19,7 @@ stall the event loop (and the concurrent ``/mcp`` traffic).
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import mimetypes
@@ -431,6 +432,32 @@ def build_console_app(
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store",
                               [(b"x-pl-board", state.encode("ascii"))])
+            return
+
+        # 4d) plugin Stop hook: the park gate (v49). "allow" or "block" plus
+        # the message, for the address the hook names; an empty body for a
+        # bearer that cannot use the board, which the hook reads as allow.
+        # 200 always; the daemon call is the hook's one request.
+        if path == "/api/hook/park-gate":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import park_gate
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(park_gate, service, headers,
+                                            agent=params.get("agent"), since=params.get("since"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
             return
 
         # 5) console REST API (token-gated like /mcp)

@@ -97,6 +97,8 @@ EXCLUDED_TABLES = (
     "coordination_events",
     # v45: who holds or queues for each lease, by this bank's agent ids.
     "coordination_leases", "coordination_lease_waiters",
+    # v49: the rings the daemon decided, by this bank's agent and message ids.
+    "coordination_wakes",
 )
 
 # Columns of an exported table that are serving telemetry under the same

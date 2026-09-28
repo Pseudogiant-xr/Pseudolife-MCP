@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v48). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v49). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -52,10 +52,31 @@ coordination:
   awareness_limit: 5
   allowed_principals: [editor, reviewer]
   audit_retention_days: 90
+  wake:
+    per_recipient_per_hour: 20
+    urgent_per_sender_per_hour: 6
+    nightly_total: 200
+    fan_out_stagger_seconds: 30
+    active_seconds: 60
+    nudge_interval_seconds: 3600
 ```
 
 `audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
 a whole number of days, default 90, and `0` keeps the log forever.
+
+`wake` caps the rings the daemon decides at send (schema v49; see
+[park records and the wake decision](#park-records-and-the-wake-decision)).
+Every ring is an unattended model turn in the recipient, so each is bounded:
+`per_recipient_per_hour` counts every ring to one address (20, the figure the
+Claude Code Stop hook already used); `urgent_per_sender_per_hour` (6) bounds
+the `urgent` flag; `nightly_total` (200) is a rolling day of rings across the
+bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
+`active_seconds` (60) is the window in which a recipient's own last board
+action makes new mail `hinted` rather than rung; `nudge_interval_seconds`
+(3600) bounds the ring that asks an idle, unparked session to park. The
+values are whole numbers; a cap of 0 rings nobody (or never honours
+`urgent`), and the two windows are at least 1. Over a cap the send answers
+`capped` with the cap's name.
 
 `awareness_limit` must be an integer from 1 to 20 and caps peer summaries. Existing
 episodes have no trustworthy project/task or principal fields, so unregistered
@@ -679,9 +700,17 @@ default home's queue, which no app-server of the task's home reads.
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
   only when new addressed mail has arrived, the task has made no Pseudolife call
   for 30 seconds, neither a tool-result hint nor the prompt hook has shown that
-  mail, and no earlier doorbell is still unanswered. A successful
+  mail, no earlier doorbell is still unanswered, and (v49) the daemon decided
+  a ring for it ([the wake decision](#park-records-and-the-wake-decision)):
+  the adapter offers the decision once its `ring_at` has come, and the
+  doorbell takes it only at the moment it would ring, so an active or
+  informed task never spends it. Without a decision (chatter to a parked
+  task, or a daemon older than v49) the arrival stays owed and nothing
+  rings; a later decision for the task covers it. A successful
   `memory_message receive` from the task answers it, and so does an emptied
-  mailbox. An idle task gets one doorbell per batch of mail.
+  mailbox. An idle task gets one doorbell per batch of mail. A `nudged`
+  ring (an idle task that never parked) adds one fixed sentence to the
+  notice asking for a park record.
 - **What it says.** Codex delivers queued text as a user message, so the doorbell
   never carries peer text, sender labels or excerpts. The notice is fixed and
   only the count varies:
@@ -699,7 +728,8 @@ default home's queue, which no app-server of the task's home reads.
   kill, as before. A missing
   CLI, a non-zero exit or a timeout turns the doorbell off for that shim process
   with one stderr line; pull delivery and hints continue unchanged. Each queued
-  doorbell appends a `bell` line to `ledger.log` in the digest directory.
+  doorbell appends a `bell` line to `ledger.log` in the digest directory, with
+  the ring's decision and reason as its sixth column.
 - **Limits.** A task is watched from its first Pseudolife call after the MCP
   server starts: one that has made none since a reconnect cannot be rung until it
   does. Tasks the WebSocket bridge above serves are not rung; if the bridge stops
@@ -1143,10 +1173,82 @@ most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 the next update carries over. Omitting `children` leaves it unchanged and `[]`
 clears it; a children-only update does not move `status_set_at`.
 
+### Park records and the wake decision
+
+A session that stops records why, so a peer's mail can wake it only when the
+mail clears what it is waiting for (schema v49, maintainer decision
+2026-09-28: on 2026-09-27 a session sat all night on a blocker that had
+cleared, while any message could wake a session with nothing to wait for).
+The **park record** lives on the agent row and is set through
+`memory_agents(action="update", ...)`:
+
+| Field | Meaning |
+| --- | --- |
+| `park_reason` | `done`, `blocked`, `needs_approval`, `needs_info`, `needs_resource` or `waiting_peer`; `""` (REST: `null`) clears the whole record |
+| `park_needs` | What would clear it, one line (120 characters) |
+| `park_clear_by` | Who can: an agent id, `maintainer`, a lease name, or `anyone` (120) |
+| `park_resume` | What to do once cleared (240) |
+| `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
+
+An omitted field stays; a refinement or a new reason keeps the standing
+expiry. A plain status update while parked clears the record,
+since a session that is working is not parked; a task or `children` update
+leaves it. A park field on its own refines a standing park and is refused
+(`invalid_park`) on an unparked row, as are an unknown reason and a bad
+expiry; credential-shaped text is `secret_like_body`. Every peer row in
+`memory_agents(action="list")`, and the caller's own row in the update result,
+carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
+`memory_agents`' description asks sessions to park when they stop, and the
+[Stop hook park gate](#waking-an-idle-claude-code-session-the-stop-hook) asks
+once when a turn ends without one. (The served check-in does not say it yet:
+it is the text the check-in bench measured, and changes only with a new run.)
+
+**The daemon decides, the shim rings.** `memory_message(action="send")` takes
+two optional fields, `clears` (which parked need the message answers, 120
+characters) and `urgent`, and returns `wake` beside the receipt:
+
+| `wake.decision` | When | Extra fields |
+| --- | --- | --- |
+| `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
+| `not_needed` | the recipient is parked `done` | |
+| `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
+| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by`, `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
+| `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
+| `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
+
+`reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
+`clearer`, `anyone`, `clears`, `urgent`, `need_not_cleared`, `no_park`, or a
+cap). Chatter never rings. A retry of the same `request_id` repeats the first
+decision, and the audit log's `send` event names it. Rings from one sender's
+burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
+is a `coordination_wakes` row; the recipient's attach and heartbeat answers
+carry the newest for one heartbeat interval after it is first served
+(`wake`, with the latest `ring_at`), so a retried heartbeat still gets it,
+and the adapter takes each ring once. A wake path is a live channel or a
+**ring path**: an adapter declares at register and at every attach whether
+a ring reaches it without a channel (`ring`, kept in `capabilities`; the
+Claude shim when it has a digest for the Stop hook, a Codex thread the
+doorbell watches). A daemon older than v49 refuses the attach parameter
+once, and the adapter stops sending it. The shim rings through its client's
+path: the Claude adapter writes
+`<key>.ring` beside the digest (line 1 the digest watermark, line 2 the
+decision and reason) at `ring_at` for the Stop hook, and the Codex doorbell
+asks the adapter for a due ring at the moment it would otherwise run
+`codex queue` (an offer whose mail the session has already seen, or that
+has nothing pending, is dropped). Every ring's ledger line (`ring` from the adapter, `wait` from
+the Stop hook, `bell` from the doorbell) carries the decision and reason as a
+sixth column. Against a daemon older than v49 nothing rings; pull delivery,
+tool-result hints and the prompt-hook digest are unchanged.
+
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
-Only addressed messages may wake an opted-in recipient. Board/status activity
+Only addressed messages may wake an opted-in recipient, and since v49 the
+live channel carries only mail the daemon decided to ring (`rung`,
+`nudged`) or hinted to an active session, plus mail sent before v49; mail
+it withheld, or found not needed, waits for an explicit `receive`, which
+still returns everything. Board/status activity
 and receipts do not produce conversational wake-ups. Each live event carries a
 fixed agent-origin header, built from daemon-verified sender fields, ahead of
 the peer's text. Explicit receive labels each message with `origin: agent` and
@@ -1203,7 +1305,7 @@ The lock file remains on disk; lock ownership is released when the process exits
 including a crash. Do not delete it while an adapter might be using it.
 
 Full database backups contain coordination mail and the audit log. Portable `export`/`import`
-archives omit the coordination tables (agents, mail and the audit log) and their clock metadata so moving
+archives omit the coordination tables (agents, mail, leases, rings and the audit log) and their clock metadata so moving
 knowledge cannot clone live mailboxes or instance credentials. Follow the
 [offline mailbox recovery procedure](coordination-recovery.md) after a database
 restore. See the [experimental design](../specs/2026-09-11-agent-coordination-design.md)
@@ -1235,17 +1337,45 @@ sessions can keep waking each other, so wakes are capped (below).
   labels the delivery "Stop hook blocking error"; that label is the wake, not
   a failure. The reminder is one line saying so, then the digest, which reads
   as agent-origin, not user authority.
-- It fires when the digest's watermark is past the `.seen` marker and the
-  digest lists mail. Mail that arrived during the turn fires at once; a digest
-  the session already saw (through the prompt hook, the tool-result hint or an
-  earlier wake) does not fire again at the next turn end. Firing advances
-  `.seen` and appends a `wait` line to `ledger.log`; if the marker cannot be
+- It fires on a ring the daemon decided (v49): when the shim's `<key>.ring`
+  marker is past the `.seen` marker, the digest's watermark is past it too
+  and the digest lists mail. The shim writes the marker for `rung` and
+  `nudged` mail only ([the wake decision](#park-records-and-the-wake-decision)),
+  so chatter to a parked session, mail the daemon withheld, and a digest
+  that merely changed (an acknowledgement, an expiry) do not wake the
+  session. A ring for mail that arrived during the turn fires at once; a
+  digest the session already saw (through the prompt hook, the tool-result
+  hint or an earlier wake) does not fire again at the next turn end. A
+  nudge adds one sentence to the wake text asking for a park record. Firing
+  advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
+  column is the ring's decision and reason; if the marker cannot be
   written, the hook does not wake at all. SessionStart clears `.seen` on
-  resume and compact, and any change to the digest while mail is pending
-  (acknowledging some of it, a message expiring) is a new digest, so either
-  can wake the session once more.
-- At most 20 wakes per session in any hour. Mail over the cap waits for the
-  window to free up; it is delayed, not dropped.
+  resume and compact, so a pending ring can wake the session once more.
+- At most 20 wakes per session in any hour, the same figure the daemon now
+  applies per recipient before it decides a ring. A ring over the hook's
+  cap waits for the window to free up; it is delayed, not dropped.
+- **The park gate.** Before arming the wait, when the turn that ended is not
+  itself a Stop-hook continuation (`stop_hook_active` is false) and the shim
+  has named this session's board address in `<key>.agent`, the hook asks the
+  daemon once, `GET /api/hook/park-gate?agent=<id>&since=<turn start>` (2 s,
+  the start from the `<key>.turn` stamp the prompt hook leaves), whether
+  the session parked. The daemon answers `block` when the row has no live
+  park record and its status is not done-shaped (it does not start with
+  done, complete, finished or merged), or when the session set no status or
+  park during the turn; the hook then ends the turn at once with "Before
+  ending: update your board status with why you stopped and what you need
+  (memory_agents update park_reason=... park_needs=... park_clear_by=...
+  park_resume=...)" as the wake text and a `gate` ledger line. Once: the
+  continuation's Stop carries `stop_hook_active: true` and is not asked
+  (Claude Code also caps stop-hook continuations at eight in a row). An
+  async Stop hook cannot use the `decision: "block"` JSON, so the block
+  rides the same exit-2 rewake as the mail wake. No answer (a daemon that
+  is down, a bearer it refuses, no address) is allow: the gate never holds
+  a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
+  private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
+  as the other hooks; Git Bash cannot show an NTFS file is owner-only, so
+  on Windows use the variable), the URL from
+  `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other hooks.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
   the watch starts is waited for; one that vanishes during it (the shim
@@ -1260,10 +1390,19 @@ sessions can keep waking each other, so wakes are capped (below).
   a minute on Windows, where it lists the process through `ps -W` at arm
   time and then once a minute (a Windows PID is invisible to `kill -0`). In
   `claude -p` runs, Claude Code ends a waiting hook at teardown.
-- Codex loads the same `hooks.json`. The `Stop` entry is a no-op there: the
-  native command (`lifecycle.ps1 -Event Stop`) exits at once; the bash
-  command stops at the flag check, and the script exits unless Claude Code
-  started it.
+- Codex loads the same `hooks.json`. Its native command
+  (`lifecycle.ps1 -Event Stop`) runs only the park gate: the same one
+  request, through the managed connection file or the explicit daemon
+  settings, and a block is returned the way Codex documents for `Stop`,
+  `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
+  which Codex turns into a continuation prompt; allow, no address, a
+  continuation's Stop, or no answer prints nothing. The wake itself stays
+  Claude Code's: the bash command stops at the flag check, and the script
+  exits unless Claude Code started it. Codex runs the native command only
+  on Windows (`commandWindows`), so the Codex gate is Windows-only; an
+  explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or `PSEUDOLIFE_AGENT_COORDINATION`
+  of `0`, `false`, `no` or `off` turns it off. Whether Codex honours the decision
+  of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 
@@ -2190,7 +2329,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v48**; migrations are additive
+The current Postgres meta version is **v49**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -2244,6 +2383,7 @@ The milestones:
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
 | v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
+| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

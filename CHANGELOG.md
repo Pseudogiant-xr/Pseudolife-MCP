@@ -6,6 +6,108 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — sessions park with what they need, and board mail wakes a session only when it clears that need, schema v49)
+- A session that ended its turn on a cleared blocker sat there all night on
+  2026-09-27 because no message could reach it, while any message at all
+  could wake a session that had nothing to wait for. The maintainer decided
+  (2026-09-28) that wake is policy-gated on a **park record**: a session's
+  standing statement of why it stopped and what would clear it. Schema v49
+  adds it to the agent row: `memory_agents(action="update", park_reason=...,
+  park_needs=..., park_clear_by=..., park_resume=..., park_expires=...)`.
+  `park_reason` is one of `done`, `blocked`, `needs_approval`, `needs_info`,
+  `needs_resource`, `waiting_peer`; `park_needs` (120 characters) says what,
+  `park_clear_by` (120) an agent id, `maintainer`, a lease name or `anyone`,
+  `park_resume` (240) what to do once cleared, `park_expires` an epoch
+  (a park set without one expires after 12 hours, and none may be set more
+  than 7 days ahead, so a park whose clearer vanished cannot withhold mail
+  forever: the board orchestrator's call on review, awaiting the
+  maintainer's). An
+  omitted field stays; `park_reason=""` (REST: `null`) clears the record,
+  and so does a plain status update, since a session that is working is
+  not parked; a park field alone refines a standing park (`invalid_park`
+  otherwise, and for an unknown reason or a bad expiry; credential-shaped
+  text is `secret_like_body`). Every peer row in `memory_agents(action=
+  "list")`, and the caller's own in the update result, carries the six
+  `park_*` fields (`park_set_at` is the daemon's stamp). `memory_agents`'
+  description and the Stop hook's park gate ask sessions to park when they
+  stop. The check-in sentence the decision asked for is written
+  (`PARK_CHECKIN_SENTENCE`) but not served: the check-in is pinned to the
+  text its bench measured (#435), so it joins with the next bench run.
+- **The daemon decides, the shim rings.** Every `memory_message(action=
+  "send")` now returns `wake` beside the receipt: `hinted` (an unparked
+  recipient acted within the last 60 s, so its next tool result carries the
+  mail; a parked one has stopped, and is decided on its park however
+  recently it parked); `not_needed` (parked `done`); `no_path` (neither a
+  live channel nor a ring path, with the parked need); `rung` (parked with
+  a need the mail plausibly clears: the sender is `park_clear_by`,
+  `park_clear_by` is `anyone`, the send's new `clears` names the need in
+  whole words, including one of four letters or more, or the sender set
+  `urgent`), with `ring_at`; `withheld`
+  (parked with a need the mail does not clear) with `park_needs` and
+  `park_clear_by`, so the sender knows what would wake it; `nudged` (idle,
+  no park record: rung at most once an hour, with a request to park);
+  `capped`. Chatter never rings. A retry repeats its decision, and the
+  audit log's `send` event names it. The rings the daemon decides are
+  `coordination_wakes` rows (left out of portable `export`, like the other
+  board tables). A live-channel recipient's delivery receive yields only
+  mail decided `rung`, `nudged` or `hinted` (and mail from before v49);
+  the rest waits for an explicit receive. The recipient's next attach or heartbeat
+  carries the newest as `wake` for one heartbeat interval (so a retried
+  heartbeat still gets it; the adapter takes each ring once). An adapter
+  declares at register and every attach whether a ring reaches it without
+  a live channel (`ring`: the Claude shim when it has a digest for the Stop
+  hook, a Codex thread the doorbell watches), and the daemon counts that as
+  a wake path; a daemon older than v49 refuses the attach parameter once
+  and the adapter stops sending it. The Claude adapter writes
+  `<key>.ring` beside the digest (the digest watermark, then the decision
+  and reason) at `ring_at`, while the Codex doorbell asks the adapter for a
+  due ring at the moment it would otherwise run `codex queue`; an offer
+  whose mail the session has already seen is dropped. The Stop
+  hook fires only on a ring past `.seen`, a nudge adds one sentence asking
+  for a park record, and every ring's ledger line (`wait`, `bell`, `ring`)
+  carries the decision and reason. Against a daemon older than v49 nothing
+  rings; pull delivery, hints and the prompt-hook digest are unchanged.
+- **Caps**, in `config.yaml` under `coordination.wake`: `per_recipient_per_hour`
+  (20, the figure the Stop hook already used, now counting every ring),
+  `urgent_per_sender_per_hour` (6), `nightly_total` (200, a rolling day
+  across the bank), `fan_out_stagger_seconds` (30 between rings from one
+  sender's burst), `active_seconds` (60, the `hinted` window) and
+  `nudge_interval_seconds` (3600). Over a cap the send answers `capped`
+  with the cap's name as its reason.
+- **The Stop-hook park gate.** When a turn ends, `stop-wake.sh` (Claude
+  Code) and `lifecycle.ps1 -Event Stop` (Codex, which was a no-op) ask the
+  daemon once, `GET /api/hook/park-gate?agent=<id>&since=<turn start>`,
+  whether this session parked: the shim names the address in `<key>.agent`
+  and the prompt hook stamps the turn's start in `<key>.turn`. The daemon
+  answers `block` when the row has no live park record and its status is
+  not done-shaped, or when it set no status or park during the turn, and
+  the hook ends the turn once with "Before ending: update your board status
+  with why you stopped and what you need (memory_agents update
+  park_reason=... park_needs=... park_clear_by=... park_resume=...)"; the
+  continuation's Stop carries `stop_hook_active` and is not asked. Claude
+  Code's async Stop hook blocks through the same exit-2 rewake path as the
+  mail wake (async hooks cannot use `decision`); Codex gets the documented
+  `{"decision": "block", "reason": ...}` on stdout. No answer is allow.
+  The Codex gate runs only on Windows (Codex runs the native
+  `commandWindows`; elsewhere it runs the bash command, which exits unless
+  Claude Code started it), and an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off` turns it off.
+  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when it is private
+  (the sibling hooks' check), so under Git Bash, which cannot show an NTFS
+  file is owner-only, it needs `PSEUDOLIFE_MCP_TOKEN`.
+- `memory_agents` and `memory_message` grew by 199 characters after each
+  docstring was tightened to pay for its own line; the core and full
+  description budgets move deliberately (11,500 -> 11,750, 17,800 ->
+  18,000) rather than cut the decision table.
+- **Upgrading:** a schema bump (v49, additive) plus a shim and plugin
+  change: deploy with `ops/update.ps1 -All` and restart the clients. The
+  Stop hook still runs only with `PSEUDOLIFE_AGENT_WAKE_HOOK=1` and the
+  Codex doorbell with `PSEUDOLIFE_CODEX_DOORBELL=1`; once on, they ring
+  only on the daemon's decision, so a v49 shim beside a pre-v49 daemon
+  never rings. Upgrade the plugin and the shim together (`-All`): the new
+  `stop-wake.sh` fires only on the `.ring` marker, which only a v49 shim
+  writes, so an updated plugin beside an older shim never wakes. The `wait`
+  and `bell` ledger lines gain a sixth column, the ring's reason.
 ### Added (2026-09-28 — the full-suite lock and the bench server's GPU show on the board as leases, and tell the peers concerned)
 - On the night of 2026-09-27 two full suites and three GPU cells ran while
   the agent board's lease list stayed empty: `tests/suite_lock.py` took its

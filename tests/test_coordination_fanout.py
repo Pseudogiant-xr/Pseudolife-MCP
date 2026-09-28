@@ -166,13 +166,17 @@ def test_the_audit_log_keeps_one_send_event_per_recipient_and_still_verifies(sto
 
 
 def test_the_wake_decision_names_live_delivery_only_for_a_wake_enabled_peer(store):
+    """``path`` says whether the recipient's adapter holds a live channel;
+    since v49 ``wake`` is the daemon's ring decision (every peer here acted
+    just now, so each is hinted)."""
     sender = attached(store, "p")
     live, pull = attached(store, "p", wake=True), attached(store, "p")
     out = store.send(*creds(sender), to="project:p", text="fix", request_id="r")
-    assert {r["recipient_agent_id"]: r["wake"] for r in out["receipts"]} == {
+    assert {r["recipient_agent_id"]: r["path"] for r in out["receipts"]} == {
         live["agent_id"]: "live", pull["agent_id"]: "pull"}
+    assert {r["wake"]["decision"] for r in out["receipts"]} == {"hinted"}
     direct = store.send(*creds(sender), to=live["agent_id"], text="you", request_id="r2")
-    assert direct["recipient_agent_id"] == live["agent_id"] and direct["wake"] == "live"
+    assert direct["recipient_agent_id"] == live["agent_id"] and direct["path"] == "live"
 
 
 def test_a_reply_cannot_ride_a_broadcast(store):

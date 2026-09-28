@@ -323,6 +323,9 @@ class CodexCoordinationRegistry:
                     # The Codex prompt hook receives the thread id as its
                     # session_id and reads the digest under the same name.
                     digest_path=digest_path_for(thread_id, self.digest_dir),
+                    # A ring reaches a Codex thread only through the doorbell
+                    # (v49): without one the daemon must answer no_path.
+                    ring_path=self._doorbell is not None,
                     label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "codex"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""),

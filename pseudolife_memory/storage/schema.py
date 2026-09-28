@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 48
+SCHEMA_META_VERSION = 49
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -655,6 +655,54 @@ BEGIN
         EXECUTE format('ALTER TABLE coordination_messages DROP CONSTRAINT %I', stale_key);
     END LOOP;
 END $$;
+-- v49: the park record, a session's standing statement of why it stopped
+-- and what would clear it (maintainer decision 2026-09-28). park_reason
+-- NULL means not parked; the other fields describe the park. Guarded like
+-- the v46 and v47 columns: one probe, then the ALTER only when missing.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_agents'::regclass
+                     AND attname = 'park_reason' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_agents
+            ADD COLUMN IF NOT EXISTS park_reason TEXT,
+            ADD COLUMN IF NOT EXISTS park_needs TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS park_clear_by TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS park_resume TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS park_expires DOUBLE PRECISION,
+            ADD COLUMN IF NOT EXISTS park_set_at DOUBLE PRECISION;
+    END IF;
+    -- The wake decision a send returned, kept on the message so a retry
+    -- repeats it; NULL on messages sent before v49.
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_messages'::regclass
+                     AND attname = 'wake' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_messages ADD COLUMN IF NOT EXISTS wake JSONB;
+    END IF;
+END $$;
+-- v49: every ring the daemon decided at send (rung or nudged), for the
+-- caps (per recipient per hour, urgent per sender per hour, the nightly
+-- total), the fan-out stagger (ring_at) and the hand-off to the shim
+-- (served_at: the recipient's next attach or heartbeat carried it). No
+-- foreign keys, like the audit log: a ring outlives the mail it was for.
+CREATE TABLE IF NOT EXISTS coordination_wakes (
+    wake_id BIGSERIAL PRIMARY KEY,
+    recipient_agent_id TEXT NOT NULL,
+    sender_agent_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    urgent BOOLEAN NOT NULL DEFAULT FALSE,
+    ring_at DOUBLE PRECISION NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL,
+    served_at DOUBLE PRECISION
+);
+CREATE INDEX IF NOT EXISTS coordination_wakes_recipient_idx
+    ON coordination_wakes (recipient_agent_id, created_at);
+CREATE INDEX IF NOT EXISTS coordination_wakes_sender_idx
+    ON coordination_wakes (sender_agent_id, created_at);
+CREATE INDEX IF NOT EXISTS coordination_wakes_time_idx
+    ON coordination_wakes (created_at);
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.
@@ -695,7 +743,7 @@ BENCH_RESET_TABLES = (
     "retrieval_events", "retrieval_uses", "slot_reads", "curation_judgments",
     "store_decisions",
     "coordination_agents", "coordination_messages", "coordination_events",
-    "coordination_leases", "coordination_lease_waiters",
+    "coordination_leases", "coordination_lease_waiters", "coordination_wakes",
 )
 
 # A test or bench reset reaps every other backend on its database, applies

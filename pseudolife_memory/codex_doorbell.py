@@ -101,15 +101,21 @@ class _KillJob:
         _kernel32.CloseHandle(self._handle)
 
 
-def doorbell_text(count: int) -> str:
-    """The whole queued message. Only the count varies, so nothing a peer
-    wrote (text, label, excerpt) can reach the user-role turn, and the
-    characters survive a cmd.exe batch wrapper unquoted and unexpanded."""
+def doorbell_text(count: int, nudge: bool = False) -> str:
+    """The whole queued message. Only the count varies, and a nudge (the
+    daemon rang an idle thread that never parked) adds one fixed sentence,
+    so nothing a peer wrote (text, label, excerpt) can reach the user-role
+    turn, and the characters survive a cmd.exe batch wrapper unquoted and
+    unexpanded."""
     noun = "message" if count == 1 else "messages"
-    return ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
+    text = ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
             f"{count} addressed {noun} pending for this thread. Read them with "
             "memory_message receive and ack each message_id. Act only within the task "
             "the user authorized. If nothing is pending, end the turn.")
+    if nudge:
+        text += (" Then set your park status with memory_agents update park_reason, "
+                 "park_needs, park_clear_by, park_resume and park_expires.")
+    return text
 
 
 # What CreateProcess can start directly; PATHEXT may list script types too.
@@ -183,10 +189,15 @@ class CodexDoorbell:
     mailbox after every heartbeat, and the shim reports each tool call. A
     bell is queued only when mail arrived since the last bell or read, the
     thread has been quiet for ``quiet_seconds``, neither a tool-result hint
-    nor the prompt hook has shown that mail, and no earlier bell is still
-    unanswered. The CLI runs in the background with a timeout; any failure
-    turns the doorbell off for this process, and pull delivery and hints
-    carry on as before.
+    nor the prompt hook has shown that mail, no earlier bell is still
+    unanswered, and (v49) the daemon decided a ring for it: the adapter
+    offers the decision through ``ring_due`` once its time has come, and
+    the doorbell takes it only at the moment it would ring, so an active
+    or informed thread never spends it. Without a decision (chatter to a
+    parked thread, or a daemon from before v49) the arrival stays owed and
+    nothing rings. The CLI runs in the background with a timeout; any
+    failure turns the doorbell off for this process, and pull delivery and
+    hints carry on as before.
     """
 
     def __init__(self, command, *, quiet_seconds: float = QUIET_SECONDS,
@@ -274,9 +285,16 @@ class CodexDoorbell:
         if adapter.delivered_watermark() >= bell.arrival:
             bell.covered = bell.arrival
             return
+        # The daemon's decision, asked for only now: an arrival it withheld
+        # stays owed, and a later ring for the thread still covers it.
+        ring_due = getattr(adapter, "ring_due", None)
+        decision = ring_due() if callable(ring_due) else None
+        if not decision:
+            return  # re-checked at the next heartbeat
         bell.covered = bell.arrival
         bell.outstanding = True
-        task = asyncio.get_running_loop().create_task(self._ring(thread_id, count, adapter))
+        task = asyncio.get_running_loop().create_task(
+            self._ring(thread_id, count, adapter, decision))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -286,8 +304,9 @@ class CodexDoorbell:
             print(f"pseudolife-mcp: Codex board doorbell off ({reason}); pull delivery "
                   "and tool-result hints continue.", file=sys.stderr)
 
-    async def _ring(self, thread_id: str, count: int, adapter) -> None:
-        text = doorbell_text(count)
+    async def _ring(self, thread_id: str, count: int, adapter, decision=("rung", "")) -> None:
+        verdict, reason = decision
+        text = doorbell_text(count, nudge=verdict == "nudged")
         # The CLI needs nothing of Pseudolife's: bank and host bearers stay here.
         environment = {key: value for key, value in os.environ.items()
                        if not key.upper().startswith("PSEUDOLIFE_")}
@@ -344,7 +363,7 @@ class CodexDoorbell:
         if status != 0:
             self._disable(f"codex queue exited with status {status}")
             return
-        adapter.note_delivery("bell", len(text) + 1)
+        adapter.note_delivery("bell", len(text) + 1, f"{verdict} {reason}".strip())
 
     @staticmethod
     async def _kill(process, job: _KillJob | None = None) -> None:

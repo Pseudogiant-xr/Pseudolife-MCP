@@ -1306,6 +1306,45 @@ class MemoryPolicyConfig:
 
 
 @dataclass
+class WakeConfig:
+    """Caps on the rings the daemon decides at send (schema v49).
+
+    A ring is an unattended model turn in the recipient, so every one is
+    bounded. The four caps come from the 2026-09-23/24 messageboard trial
+    (ten, then fifteen sessions over two evenings): the Claude Stop hook
+    already capped wakes at 20 an hour per session, and the busiest session
+    received 32 messages in an evening; no sender-recipient pair exchanged
+    more than 10 messages in an hour, so 20 rings per recipient per hour
+    is above any pair the trial saw; no request or hand-off thread ran to
+    more than 6 messages, so 6 urgent rings per sender per hour covers a
+    whole thread of them; fan-out bursts were 2.8% of the traffic, so a
+    30 s stagger between one sender's rings delays little. The nightly
+    total (200) is the design's starting value, not a measurement: about
+    the trial's whole evening of messages, every one rung. A cap of 0
+    rings nobody (or never honours ``urgent``). ``active_seconds`` is the
+    window in which a recipient's own last board action makes new mail
+    ``hinted`` (its next tool result carries it) rather than rung, and
+    ``nudge_interval_seconds`` bounds the ring that asks an idle, unparked
+    session for a park record; both are judgment calls, at least 1.
+    """
+
+    per_recipient_per_hour: int = 20
+    urgent_per_sender_per_hour: int = 6
+    nightly_total: int = 200
+    fan_out_stagger_seconds: int = 30
+    active_seconds: int = 60
+    nudge_interval_seconds: int = 3600
+
+    def __post_init__(self) -> None:
+        for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
+                     "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"):
+            value = getattr(self, name)
+            floor = 1 if name in {"active_seconds", "nudge_interval_seconds"} else 0
+            if type(value) is not int or value < floor:
+                raise ValueError(f"coordination.wake.{name} must be a whole number of at least {floor}")
+
+
+@dataclass
 class CoordinationConfig:
     """Peer awareness and addressed mail; limits bound injected session context.
 
@@ -1334,10 +1373,16 @@ class CoordinationConfig:
     # bounded. The log is cut on UTC day boundaries, so an event stays up to
     # a day longer than this.
     audit_retention_days: int = 90
+    # The wake caps (schema v49); see WakeConfig.
+    wake: WakeConfig = field(default_factory=WakeConfig)
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
+        if isinstance(self.wake, dict):
+            self.wake = WakeConfig(**self.wake)
+        if not isinstance(self.wake, WakeConfig):
+            raise ValueError("coordination.wake must be a mapping of wake caps")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:
             raise ValueError("coordination.awareness_limit must be an integer in 1..20")
         if type(self.audit_retention_days) is not int or self.audit_retention_days < 0:

@@ -342,3 +342,49 @@ def test_authenticated_mcp_binding_still_checks_the_bank(monkeypatch):
         (b"x-pl-bank", b"fixture-bank"), (b"x-pl-principal", b"default")])
     assert calls == [("context", "default")]
     assert status == 501  # through to the stub MCP app
+
+
+
+# --- the Stop-hook park gate route (v49) -----------------------------------
+
+def test_park_gate_route_serves_the_daemons_answer(monkeypatch):
+    """``GET /api/hook/park-gate?agent=<id>&since=<epoch>`` answers the
+    Stop hook in two lines: the gate, then the message to show. Only a
+    bearer that can use the board gets an answer; anyone else gets an
+    empty body, which the hook reads as allow."""
+    from pseudolife_memory import coordination
+    seen = []
+
+    def park_gate(service, headers, *, agent, since, token_map=None, token=None):
+        seen.append((agent, since, headers.get("authorization")))
+        return "block\nBefore ending: update your board status\n"
+    monkeypatch.setattr(coordination, "park_gate", park_gate)
+    app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, _board_service())
+    bearer = [(b"authorization", b"Bearer fixture-secret")]
+    status, body = call(app, "GET", "/api/hook/park-gate", headers=bearer,
+                        query="agent=" + "a" * 32 + "&since=1700000000")
+    assert (status, body) == (200, b"block\nBefore ending: update your board status\n")
+    assert seen == [("a" * 32, "1700000000", "Bearer fixture-secret")]
+    status, body = call(app, "GET", "/api/hook/park-gate", query="agent=" + "a" * 32)
+    assert (status, body) == (200, b"")
+    assert len(seen) == 1
+    status, _ = call(app, "POST", "/api/hook/park-gate", headers=bearer)
+    assert status == 405
+    # GET only and browser-gated, like the check-in route.
+    open_app = build_console_app(stub_mcp, None, lambda: {}, _board_service())
+    status, _ = call(open_app, "GET", "/api/hook/park-gate",
+                     headers=[(b"origin", b"http://evil.example")])
+    assert status == 403
+
+
+def test_park_gate_is_open_where_the_board_is_not(monkeypatch):
+    """The same gates as the check-in: no board, no question."""
+    from pseudolife_memory.coordination import park_gate
+    headers = {"authorization": "Bearer fixture-secret"}
+    assert park_gate(_board_service(enabled=False), headers, agent="a" * 32, since=None,
+                     token="fixture-secret") == "allow\n"
+    assert park_gate(_board_service(), {}, agent="a" * 32, since=None,
+                     token="fixture-secret") == "allow\n"
+    # A malformed address is not looked up.
+    assert park_gate(_board_service(), headers, agent="not-an-id", since=None,
+                     token="fixture-secret") == "allow\n"

@@ -384,7 +384,16 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 2026-09-27: memory_agents gained update's children (v47), paid for by
     # trimming the same docstring, caps unchanged: minimal 5,232, core
     # 11,496, full 17,784.
-    budgets = {"minimal": 5250, "core": 11500, "full": 17800}
+    # 2026-09-28: the park record (five update fields) landed on
+    # memory_agents and the send's wake decision (its seven values, clears
+    # and urgent) on memory_message, both core-tier tools, +199 after each
+    # docstring was tightened to pay for its own line; with the park
+    # expiry's default and cap (review fix, same day), then merged with
+    # #430's fan-out/prefix sentences in one tightened send docstring:
+    # minimal 5,232, core 11,706, full 17,994. Core and full move
+    # deliberately, 11,500 -> 11,750 and 17,800 -> 18,000, rather than cut
+    # the decision table that tells a sender what would wake a parked peer.
+    budgets = {"minimal": 5250, "core": 11750, "full": 18000}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"

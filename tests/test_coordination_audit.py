@@ -697,10 +697,13 @@ def test_a_send_event_commits_to_its_salted_body_outside_the_hash(store):
     assert isinstance(salt, str) and len(salt) == 32 and int(salt, 16) >= 0
     # No byte count either: a length left in the chain would settle a guess
     # between candidates of different lengths ("yes" or "no").
+    # v49: the send event also names the wake decision (the recipient
+    # registered just now, so it was active: hinted).
     assert sent["payload"] == {"text_commitment": hashlib.sha256(bytes.fromhex(salt) + raw)
                                .hexdigest(),
                                "reply_to": None, "request_id": "r",
-                               "recipient_sequence": 1, "expires_at": 1000.0 + DAY}
+                               "recipient_sequence": 1, "expires_at": 1000.0 + DAY,
+                               "wake": "hinted"}
     # Not the bare digest a guess could be checked against.
     assert sent["payload"]["text_commitment"] != hashlib.sha256(raw).hexdigest()
     assert sent["body"] == text
