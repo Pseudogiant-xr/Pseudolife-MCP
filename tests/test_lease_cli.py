@@ -258,14 +258,18 @@ def lease_env(tmp_path, monkeypatch):
     return tmp_path / "locks"
 
 
-def _command(tmp_path, *, exit_code=0, sleep=0.0, ready=None):
+def _command(tmp_path, *, exit_code=0, sleep=0.0, ready=None, wait_for=None):
     """A child that records when it ran and what PSEUDOLIFE_LEASES_HELD it
     saw, then exits with ``exit_code``. With ``ready`` it first creates that
-    file, to say it is up."""
+    file, to say it is up; with ``wait_for`` it does not exit until that
+    file exists (or START_TIMEOUT has passed)."""
     marker = tmp_path / "ran.json"
     code = (
         "import json, os, sys, time\n"
         + (f"open({str(ready)!r}, 'w').close()\n" if ready else "")
+        + (f"deadline = time.monotonic() + {START_TIMEOUT!r}\n"
+           f"while not os.path.exists({str(wait_for)!r}) and time.monotonic() < deadline:\n"
+           "    time.sleep(0.01)\n" if wait_for else "")
         + f"time.sleep({sleep!r})\n"
         f"with open({str(marker)!r}, 'w', encoding='utf-8') as f:\n"
         "    json.dump({'held': os.environ.get('PSEUDOLIFE_LEASES_HELD'),"
@@ -672,10 +676,17 @@ def test_the_local_lock_is_freed_as_soon_as_the_command_ends(lease_env, tmp_path
     """A renewal stuck on a slow daemon must not keep the resource locked
     after the work is done: the OS lock goes first, the board after."""
     path = lease_env / "lease-gpu.lock"
-    command, marker = _command(tmp_path, sleep=0.1)
+    # The command exits only once the renewal below is on the wire, so it is
+    # in flight, not merely due, when the cleanup starts. Left to a timer, the
+    # first renewal (0.05 s after the lease is held) raced the command's
+    # lifetime, and a slow runner (macOS CI, 2026-09-28) ended the command
+    # first: no renewal ever ran and ``seen`` stayed empty.
+    renewing = tmp_path / "renewing"
+    command, marker = _command(tmp_path, wait_for=renewing)
     seen = []
 
     def slow_renewal(request):
+        renewing.touch()
         deadline = time.monotonic() + START_TIMEOUT
         while not marker.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
