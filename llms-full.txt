@@ -2833,8 +2833,11 @@ an unrelated, never-adopted 2026-08-02 lineage.
 Existing installs pick v5 up when the shim is restarted on the new file:
 set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
 and unit read it at every start) and run `python ops/shim_autostart.py
-restart claude` — no re-registration, no elevation. Rebuilding the daemon
-image alone does **not** reach the shim path.
+restart claude` — no re-registration, no elevation, once the task or unit
+runs the runner (an install registered before 2026-09-29 still carries
+the prompt file on its command line: `show claude` says so, and one more
+run of the autostart installer, elevated on Windows, switches it).
+Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
 
@@ -3074,10 +3077,17 @@ steps:
      a block the installers write from their flags) at every start. To
      change any of them later, edit that line and run
      `python ops/shim_autostart.py restart claude` — the elevated shell is
-     needed only once, to register the task. `python ops/shim_autostart.py
-     show claude` prints what the next start would run; the Codex shim is
-     the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*` (`…_HEALTH_TTL`
-     instead of a prompt file).
+     needed only once, to register the task. On Windows `restart` stops
+     the shim and starts it itself (the task still starts it at logon);
+     on Linux it is `systemctl --user restart`. `python
+     ops/shim_autostart.py show claude` prints what the next start would
+     run, and warns when the registered task or unit predates the runner
+     and still carries the values on its command line (re-run the
+     installer once, elevated on Windows, to switch it). The Codex shim
+     is the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*`
+     (`…_HEALTH_TTL` instead of a prompt file). When no `…_CLI` is set the
+     shim's own lookup applies (`PSEUDOLIFE_SHIM_CLAUDE_CLI` /
+     `PSEUDOLIFE_SHIM_CODEX_CLI`, then `PATH`).
 2. Set in `ops/.env` (both vars must flip together — pointing only one at
    the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,

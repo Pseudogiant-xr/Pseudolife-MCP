@@ -77,18 +77,18 @@ if (-not $PythonExe) {
 }
 $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
-# Absolute up front: the task's cmd.exe would otherwise resolve a relative
-# -LogFile against its WorkingDirectory ($repo) while the verification below
-# resolves it against this shell's location.
+# Absolute up front: the runner would otherwise resolve a relative -LogFile
+# against its WorkingDirectory ($repo) while the verification below resolves
+# it against this shell's location.
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Every process whose command line names claude_shim.py AND this --port. The
-# task launches a three-layer tree (cmd.exe running the `>> log` redirect ->
-# the .venv python.exe launcher -> the base interpreter that owns the socket)
-# and no layer's death propagates to the others, so the whole set is what
-# "the running shim" means here. Keyed on the port too: an A/B shim serving
-# another port from the same script must survive an install.
+# shim is a two-layer tree (the .venv python.exe launcher -> the base
+# interpreter that owns the socket) and neither layer's death propagates to
+# the other, so the whole set is what "the running shim" means here. Keyed
+# on the port too: an A/B shim serving another port from the same script
+# must survive an install.
 function Get-ShimProcess {
     param([int]$ShimPort)
     $pattern = "claude_shim\.py.*--port\s+$ShimPort(\s|$)"
@@ -127,31 +127,25 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # console allocation entirely, so WT has nothing to attach a tab to —
 # validated standalone (detached long-running child survives its spawner
 # exiting; redirected output confirmed correct) before wiring in here.
-# The scheduled task launches this tiny spawner, which starts the real
-# python.exe chain fully detached (CreateNoWindow, own console-less
-# session) and returns immediately, so the Task-Scheduler-owned window is
-# at most a sub-second flash rather than persisting for the shim's whole
-# runtime.
+# The scheduled task launches this tiny spawner, which starts the runner
+# with CreateNoWindow (a hidden console the shim inherits) and returns
+# immediately, so the Task-Scheduler-owned window is at most a sub-second
+# flash rather than persisting for the shim's whole runtime.
 #
-# cmd.exe's `/c` argument parsing mishandles a command line containing
-# MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
-# arg) unless the whole thing is wrapped in one extra redundant pair of
-# quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-# The task's only argument is the runner: the values live in ops/.env.
-# The runner opens the log itself and starts the shim detached with no
-# console, so there is no `cmd >> log` layer any more (the process tree
-# is the runner, gone in a second, then the shim's python).
+# The task's only argument is the runner: the values live in ops/.env. The
+# runner opens the log itself and starts the shim with the same hidden
+# console (no `cmd >> log` layer: the process tree is the runner, gone in
+# a second, then the shim's python).
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
     --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
-$innerCmd = "`"$PythonExe`" `"$repo\ops\shim_autostart.py`" run claude"
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($PythonExe -replace "'", "''")'
 `$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run claude") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
-`$psi.WorkingDirectory = '$repo'
+`$psi.WorkingDirectory = '$($repo -replace "'", "''")'
 [System.Diagnostics.Process]::Start(`$psi) | Out-Null
 "@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -186,7 +180,7 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
 # http.server listener BINDS beside the first (allow_reuse_address is
 # SO_REUSEADDR, which shares a port in LISTEN), so the new interpreter never
 # hit an error to log, and its startup lines were then overwritten by the old
-# shim's next log write (two `cmd >> log` opens keep independent file
+# shim's next log write (two appending opens keep independent file
 # pointers). Both probed 2026-09-07. This runs only after registration
 # succeeded: stopping the live shim and then failing to register would leave
 # the box with no extractor at all.

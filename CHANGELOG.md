@@ -16,15 +16,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`-Model` / `--model`, `-Port`, `-PromptFile`, `-HealthTtl`, `-CodexCli`,
   ...) keep working: `ops/install-*-shim-autostart.*` write them into a
   managed block of `ops/.env` (`shim_autostart.py config`) before
-  registering. Changing a value later is an edit plus
-  `python ops/shim_autostart.py restart claude|codex` (stops the shim on
-  its port and starts the task or unit again), with no elevation: the
-  elevated shell remains a one-time step to register the task. On
-  2026-09-28 a model change needed a Start-menu elevated PowerShell only
-  because the model sat in the task's command line. `show` prints the
-  resolved settings; `run --dry-run` the command line. The runner opens
-  the log itself and starts the shim with no console, so the Windows task
-  no longer goes through `cmd >> log`. [Dreaming](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+  registering; `config` changes only the keys it is given and moves a
+  hand-written `PSEUDOLIFE_*_SHIM_*` line from elsewhere in the file into
+  the block, which is read last. Changing a value later is an edit plus
+  `python ops/shim_autostart.py restart claude|codex`, with no elevation:
+  on Windows it stops the shim (on its configured port and on the port it
+  was last started on) and starts it again itself, then waits for the
+  port, since running a scheduled task is not a right its owner always
+  holds unelevated and a disabled task would leave no shim; on Linux it
+  is `systemctl --user restart`. The elevated shell remains a one-time
+  step to register the task. On 2026-09-28 a model change needed a
+  Start-menu elevated PowerShell only because the model sat in the task's
+  command line. `show` prints the resolved settings and warns when the
+  registered task or unit predates the runner (its command line still
+  carries the values, which is what starts at logon until the installer
+  runs once more, elevated on Windows); `run --dry-run` prints the
+  command line. The runner opens the log itself, writes a failed start
+  (a bad port, a missing prompt file) into it, and starts the shim under
+  the hidden console it inherits from the task, so the Windows task no
+  longer goes through `cmd >> log`. When no `…_CLI` is set the shims'
+  own `PSEUDOLIFE_SHIM_CLAUDE_CLI` / `PSEUDOLIFE_SHIM_CODEX_CLI` lookup
+  applies, as before. [Dreaming](docs/guide/dreaming.md#claude-primary-with-local-fallback)
 
 ### Added (2026-09-29 — `pseudolife-mcp update`: the whole install updates from a release, with no checkout)
 - `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`) updates a

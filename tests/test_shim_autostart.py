@@ -39,7 +39,7 @@ def repo(tmp_path, monkeypatch):
     (root / "evals" / "prompts" / "sonnet_extractor_v5.md").write_text("prompt\n", encoding="utf-8")
     (root / "ops" / ".env.example").write_text("# example\n#POSTGRES_PASSWORD=change-me\n", encoding="utf-8")
     monkeypatch.setattr(sa, "default_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(sa.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sa.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
     monkeypatch.setattr(sa.sys, "executable", str(tmp_path / "py" / "python"))
     return root
 
@@ -59,7 +59,7 @@ def test_settings_come_from_defaults_then_env_then_flags(repo):
     assert defaults["model"] == "claude-opus-5-5" and defaults["port"] == "8082"
     assert defaults["prompt_file"] == str(repo / "evals" / "prompts" / "sonnet_extractor_v5.md")
     assert defaults["python"] == sa.sys.executable and defaults["host"] == "127.0.0.1"
-    assert "cli" not in defaults                                    # nothing on PATH: the shim's own default
+    assert "cli" not in defaults              # a CLI on PATH is the shim's own lookup, never passed as --cli
     (repo / "ops" / ".env").write_text(
         "PSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8090\n"
         "PSEUDOLIFE_CLAUDE_SHIM_CLI=/opt/claude\nPSEUDOLIFE_CODEX_SHIM_MODEL=gpt-6-sol\n", encoding="utf-8")
@@ -105,8 +105,8 @@ def test_the_shim_command_lines(repo):
 
 
 def test_config_writes_a_managed_block_and_merges_later_edits(repo):
-    path = sa.write_config(repo, "claude", {"model": "claude-sonnet-5", "port": "8090"})
-    assert path == repo / "ops" / ".env"
+    path, moved = sa.write_config(repo, "claude", {"model": "claude-sonnet-5", "port": "8090"})
+    assert path == repo / "ops" / ".env" and moved == []
     text = path.read_text(encoding="utf-8")
     assert text.startswith("# example\n#POSTGRES_PASSWORD=change-me\n")        # scaffolded from the example
     assert sa.BLOCK_BEGIN in text and sa.BLOCK_END in text
@@ -117,12 +117,35 @@ def test_config_writes_a_managed_block_and_merges_later_edits(repo):
     sa.write_config(repo, "claude", {"port": "8091"})
     values = sa.read_env(path)
     assert values["POSTGRES_PASSWORD"] == "mine"
-    assert values["PSEUDOLIFE_CLAUDE_SHIM_PORT"] == "8091" and "PSEUDOLIFE_CLAUDE_SHIM_MODEL" not in values
+    # only the given key changes: the model written before survives a port-only config
+    assert values["PSEUDOLIFE_CLAUDE_SHIM_PORT"] == "8091" and values["PSEUDOLIFE_CLAUDE_SHIM_MODEL"] == "claude-sonnet-5"
     assert values["PSEUDOLIFE_CODEX_SHIM_MODEL"] == "gpt-6-sol" and values["PSEUDOLIFE_CODEX_SHIM_HEALTH_TTL"] == "600"
     assert path.read_text(encoding="utf-8").count(sa.BLOCK_BEGIN) == 1
-    # a value with spaces is quoted and read back
+    # a value with spaces is quoted and read back; so is one with quotes and backslashes
     sa.write_config(repo, "claude", {"cli": r"C:\Program Files\claude\claude.exe"})
     assert sa.read_env(path)["PSEUDOLIFE_CLAUDE_SHIM_CLI"] == r"C:\Program Files\claude\claude.exe"
+    assert "'C:\\Program Files\\claude\\claude.exe'" in path.read_text(encoding="utf-8")
+    odd = 'C:\\it\'s "here"\\'
+    sa.write_config(repo, "claude", {"cli": odd})
+    assert sa.read_env(path)["PSEUDOLIFE_CLAUDE_SHIM_CLI"] == odd
+
+
+def test_config_moves_a_key_written_outside_the_block_into_it(repo):
+    """The block sits at the end of the file and is read last, so a
+    hand-written line above it would be shadowed silently; config moves
+    it in, keeping its value unless the same key is given."""
+    path = repo / "ops" / ".env"
+    path.write_text("PSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5\nPSEUDOLIFE_CLAUDE_SHIM_PORT=8090\n"
+                    "#PSEUDOLIFE_CLAUDE_SHIM_HOST=127.0.0.1\nPSEUDOLIFE_CODEX_SHIM_MODEL=gpt-6-sol\n",
+                    encoding="utf-8")
+    _, moved = sa.write_config(repo, "claude", {"port": "8091"})
+    assert moved == ["PSEUDOLIFE_CLAUDE_SHIM_MODEL", "PSEUDOLIFE_CLAUDE_SHIM_PORT"]
+    text = path.read_text(encoding="utf-8")
+    before, after = text.split(sa.BLOCK_BEGIN)
+    assert "PSEUDOLIFE_CLAUDE_SHIM_MODEL" not in before and "#PSEUDOLIFE_CLAUDE_SHIM_HOST" in before
+    assert "PSEUDOLIFE_CODEX_SHIM_MODEL=gpt-6-sol" in before          # the other kind's line is not touched
+    assert "PSEUDOLIFE_CLAUDE_SHIM_MODEL=claude-sonnet-5" in after and "PSEUDOLIFE_CLAUDE_SHIM_PORT=8091" in after
+    assert sa.resolve("claude", repo)["model"] == "claude-sonnet-5"
 
 
 def test_check_names_what_would_stop_a_start(repo):
@@ -131,19 +154,66 @@ def test_check_names_what_would_stop_a_start(repo):
     assert any("prompt file not found" in p for p in problems)
     assert any("CLI not found" in p for p in problems)
     assert any("interpreter not found" in p for p in problems)
+    with pytest.raises(ValueError, match="PSEUDOLIFE_CLAUDE_SHIM_PORT must be a number"):
+        sa.resolve("claude", repo, {"port": "eighty"})
 
 
-def test_the_restart_plan_needs_no_elevation():
-    settings = {"port": "8082", "model": "x"}
+def test_the_restart_plan_needs_no_elevation(tmp_path, monkeypatch):
+    monkeypatch.setattr(sa, "state_dir", lambda: tmp_path / "state")
+    settings = {"port": "8082", "model": "x", "host": "127.0.0.1"}
     plan = sa.restart_plan("claude", settings)
     if os.name == "nt":
-        assert plan[0][0] == "powershell.exe" and "claude_shim" in plan[0][-1] and "8082" in plan[0][-1]
-        assert plan[1] == ["schtasks", "/Run", "/TN", "Pseudolife Claude Shim"]
-        assert not any("Register-ScheduledTask" in " ".join(c) for c in plan)
+        assert plan[0][0] == "powershell.exe" and "claude_shim" in plan[0][-1] and "(8082)" in plan[0][-1]
+        assert plan[1] == ["<start detached>"]                 # started here, not through the scheduler
+        assert not any("schtasks" in " ".join(c) or "Register-ScheduledTask" in " ".join(c) for c in plan)
     elif sa.shutil.which("systemctl"):
         assert plan == [["systemctl", "--user", "restart", "pseudolife-sonnet-shim.service"]]
     else:
-        assert plan[0][:2] == ["pkill", "-f"]
+        assert plan[0][:2] == ["pkill", "-f"] and plan[1] == ["<start detached>"]
+
+
+def test_restart_stops_the_shim_on_the_port_it_was_last_started_on(tmp_path, monkeypatch):
+    """A port change in ops/.env must not leave the old shim serving the
+    old port: the pid file from the last start names it."""
+    monkeypatch.setattr(sa, "state_dir", lambda: tmp_path / "state")
+    sa._write_pid("claude", 4242, "8090")
+    assert sa.previous_start("claude") == (4242, "8090")
+    plan = sa.restart_plan("claude", {"port": "8082", "model": "x", "host": "127.0.0.1"})
+    if os.name == "nt":
+        stop = plan[0][-1]
+        assert "(8082|8090)" in stop and "@(4242)" in stop and "claude_shim" in stop
+    elif not sa.shutil.which("systemctl"):
+        assert "(8082|8090)" in plan[0][-1]
+    (tmp_path / "state" / "claude-shim.pid").write_text("garbage\n", encoding="utf-8")
+    assert sa.previous_start("claude") is None
+
+
+def test_the_shim_starts_under_a_hidden_console_not_detached():
+    """CREATE_NO_WINDOW is ignored beside DETACHED_PROCESS, and a console
+    program started from a console-less process opens a visible console:
+    the blank Windows Terminal tab of 2026-07-12."""
+    detached = getattr(sa.subprocess, "DETACHED_PROCESS", 0x8)
+    no_window = getattr(sa.subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    flags = sa._creation_flags(False)
+    if os.name == "nt":
+        assert flags & no_window and not flags & detached
+        assert sa._creation_flags(True) & getattr(sa.subprocess, "CREATE_BREAKAWAY_FROM_JOB")
+    else:
+        assert flags == 0
+
+
+def test_registration_note_says_when_the_task_still_carries_the_values(monkeypatch):
+    monkeypatch.setattr(sa, "_registered_command", lambda kind: "python.exe evals/claude_shim.py --model x --port 8082")
+    note = sa.registration_note("claude")
+    assert "still carries the model" in note and "ops/install-shim-autostart" in note
+    monkeypatch.setattr(sa, "_registered_command", lambda kind: "... ops/shim_autostart.py run claude ...")
+    assert sa.registration_note("claude") == ""
+    monkeypatch.setattr(sa, "_registered_command", lambda kind: None)
+    note = sa.registration_note("codex")
+    if os.name == "nt" or sa.shutil.which("systemctl"):
+        assert "not registered" in note and "ops/install-codex-shim-autostart" in note
+    else:
+        assert note == ""
 
 
 # ── the script itself ───────────────────────────────────────────────────────
@@ -179,6 +249,26 @@ def test_run_dry_run_prints_the_resolved_command(tmp_path):
     assert proc.returncode == 0 and proc.stdout.strip()
 
 
+def test_a_detached_run_writes_a_failed_start_into_the_log(tmp_path):
+    """The scheduled task has no console anyone reads: a mistyped port or a
+    missing prompt file must show in the shim's log, not vanish."""
+    root = tmp_path / "checkout"
+    (root / "evals" / "prompts").mkdir(parents=True)
+    (root / "ops").mkdir()
+    (root / "evals" / "claude_shim.py").write_text("# shim\n", encoding="utf-8")
+    log = tmp_path / "logs" / "claude-shim.log"
+    (root / "ops" / ".env").write_text(f"PSEUDOLIFE_CLAUDE_SHIM_LOG={log.as_posix()}\n"
+                                       "PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE=evals/prompts/nope.md\n", encoding="utf-8")
+    proc = _run_script(root, "run", "claude", "--python", sys.executable)
+    assert proc.returncode == 1 and "prompt file not found" in proc.stderr
+    assert "prompt file not found" in log.read_text(encoding="utf-8")
+    proc = _run_script(root, "run", "claude", "--python", sys.executable, "--port", "80x")
+    assert proc.returncode == 2                                         # argparse: --port takes an int
+    (root / "ops" / ".env").write_text("PSEUDOLIFE_CLAUDE_SHIM_PORT=eighty\n", encoding="utf-8")
+    proc = _run_script(root, "run", "claude", "--dry-run")
+    assert proc.returncode == 1 and "PSEUDOLIFE_CLAUDE_SHIM_PORT must be a number" in proc.stderr
+
+
 # ── the installers register the runner, not a baked command line ────────────
 
 def test_the_task_and_the_unit_run_the_runner_with_no_baked_values():
@@ -187,12 +277,17 @@ def test_the_task_and_the_unit_run_the_runner_with_no_baked_values():
     cps = (ROOT / "ops" / "install-codex-shim-autostart.ps1").read_text(encoding="utf-8")
     csh = (ROOT / "ops" / "install-codex-shim-autostart.sh").read_text(encoding="utf-8")
     # the registered action names the runner and the kind, and no model/port/prompt
-    assert re.search(r'\$innerCmd = "`"\$PythonExe`" `"\$repo\\ops\\shim_autostart\.py`" run claude"', ps)
-    assert re.search(r'\$innerCmd = "`"\$PythonExe`" `"\$repo\\ops\\shim_autostart\.py`" run codex"', cps)
+    for text, kind in ((ps, "claude"), (cps, "codex")):
+        assert "`$psi.FileName = '$($PythonExe -replace \"'\", \"''\")'" in text
+        assert ("`$psi.Arguments = '$((\"`\"$repo\\ops\\shim_autostart.py`\" run " + kind
+                + "\") -replace \"'\", \"''\")'") in text
+        assert "`$psi.CreateNoWindow = `$true" in text
+        assert "$innerCmd" not in text
     assert "ExecStart=$PYTHON_EXE $repo/ops/shim_autostart.py run claude --foreground" in sh
     assert "ExecStart=$PYTHON_EXE $repo/ops/shim_autostart.py run codex --foreground" in csh
     for text in (ps, cps):
-        assert "--model $Model" not in text.split("$innerCmd", 1)[1].split("\n", 1)[0]
+        spawner = text.split("$inner = @\"", 1)[1].split("\"@", 1)[0]
+        assert "--model" not in spawner and "--port" not in spawner and "--system-prompt-file" not in spawner
     # the flags are written into ops/.env before the task or unit is registered
     for text, kind in ((ps, "claude"), (cps, "codex")):
         assert '(Join-Path $repo "ops\\shim_autostart.py") ' in text

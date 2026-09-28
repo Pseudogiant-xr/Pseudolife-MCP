@@ -85,14 +85,13 @@ $configArgs = @("config", "codex", "--model", $Model, "--port", "$Port", "--heal
 if ($CodexCli) { $configArgs += @("--cli", $CodexCli) }
 & $PythonExe (Join-Path $repo "ops\shim_autostart.py") @configArgs 2>&1 | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
-$innerCmd = "`"$PythonExe`" `"$repo\ops\shim_autostart.py`" run codex"
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
 `$psi.FileName = '$($PythonExe -replace "'", "''")'
 `$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run codex") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
-`$psi.WorkingDirectory = '$repo'
+`$psi.WorkingDirectory = '$($repo -replace "'", "''")'
 [System.Diagnostics.Process]::Start(`$psi) | Out-Null
 "@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
