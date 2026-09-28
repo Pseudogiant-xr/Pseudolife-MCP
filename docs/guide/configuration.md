@@ -1431,22 +1431,24 @@ also capped (below, and by the daemon's `wake` caps under
   park during the turn; the hook then ends the turn at once with "Before
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
-  park_resume=...)" as the wake text and a `gate` ledger line. Once: the
-  continuation's Stop carries `stop_hook_active: true` and is not asked
-  (Claude Code also caps stop-hook continuations at eight in a row). An
-  async Stop hook cannot use the `decision: "block"` JSON, so the block
+  park_resume=...)" as the wake text and a `gate` ledger line (its fifth
+  column is the message's length in UTF-8 bytes plus one, on every client).
+  Once: the continuation's Stop carries `stop_hook_active: true` and is not
+  asked (Claude Code also caps stop-hook continuations at eight in a row).
+  An async Stop hook cannot use the `decision: "block"` JSON, so the block
   rides the same exit-2 rewake as the mail wake. No answer (a daemon that
-  is down, a bearer it refuses, no address) is allow: the gate never holds
-  a turn on an error. The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a
-  private `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check
-  as the other hooks), the URL from `PSEUDOLIFE_MCP_DAEMON_URL`. On Windows,
-  Git Bash uses the native ACL rules: current-user ownership, a protected
-  DACL, and allow rules only for the owner or OWNER RIGHTS; reparse points
-  in the file or its parents are rejected. A token file rejected by the
-  Stop gate or coordination-start hook leaves a `token` line with value
-  `rejected` in the digest directory's `ledger.log`, without a path or
-  token. OneDrive-redirected profiles using reparse points are rejected:
-  move the token file outside the redirected folder and update
+  is down, a bearer it refuses, a redirect, an answer cut off at the time
+  limit, no address) is allow: the gate never holds a turn on an error.
+  The bearer comes from `PSEUDOLIFE_MCP_TOKEN` or a private
+  `PSEUDOLIFE_MCP_TOKEN_FILE` (owner-only, one link, the same check as the
+  other hooks), the URL from `PSEUDOLIFE_MCP_DAEMON_URL`, as for the other
+  hooks. On Windows, Git Bash uses the native ACL rules: current-user
+  ownership, a protected DACL, and allow rules only for the owner or OWNER
+  RIGHTS; reparse points in the file or its parents are rejected. A token
+  file rejected by the Stop gate or coordination-start hook leaves a `token`
+  line with value `rejected` in the digest directory's `ledger.log`, without
+  a path or token. OneDrive-redirected profiles using reparse points are
+  rejected: move the token file outside the redirected folder and update
   `PSEUDOLIFE_MCP_TOKEN_FILE`.
 - One watcher per session: each turn end takes the lease in `<key>.wake`, and
   the previous watcher exits within one poll (5 s). A digest file absent when
@@ -1462,19 +1464,29 @@ also capped (below, and by the daemon's `wake` caps under
   a minute on Windows, where it lists the process through `ps -W` at arm
   time and then once a minute (a Windows PID is invisible to `kill -0`). In
   `claude -p` runs, Claude Code ends a waiting hook at teardown.
-- Codex loads the same `hooks.json`. Its native command
-  (`lifecycle.ps1 -Event Stop`) runs only the park gate: the same one
-  request, through the managed connection file or the explicit daemon
-  settings, and a block is returned the way Codex documents for `Stop`,
-  `{"decision": "block", "reason": <the message>}` on stdout with exit 0,
-  which Codex turns into a continuation prompt; allow, no address, a
+- Codex loads the same `hooks.json` and gets only the park gate, on every
+  platform: on Windows through the entry's native command
+  (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash
+  script, which recognises Codex context the way the other bash hooks do
+  (`PSEUDOLIFE_CODEX_HOOK=1`, or `PLUGIN_ROOT` equal to
+  `CLAUDE_PLUGIN_ROOT`), unless Claude Code started the hook for its own
+  session (`CLAUDECODE=1` and `CLAUDE_CODE_SESSION_ID` equal to the
+  payload's id), which always stays Claude's. This is the plugin install:
+  a manual Codex install (`ops/setup-codex-hooks.py` without the plugin)
+  has no `Stop` hook, so no gate. Either path makes the same one request,
+  through the managed connection file under the Codex home or the explicit
+  daemon
+  settings (with the other hooks' checks: an explicit URL may not disagree
+  with the managed one, the bearer file must be private), and returns a
+  block the way Codex documents for `Stop`, `{"decision": "block",
+  "reason": <the message>}` on stdout with exit 0, which Codex turns into a
+  continuation prompt, plus the `gate` ledger line; allow, no address, a
   continuation's Stop, or no answer prints nothing. The wake itself stays
-  Claude Code's: the bash script exits unless Claude Code started it. Codex
-  runs the native command only on Windows (`commandWindows`), so the Codex
-  gate is Windows-only; an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
-  `PSEUDOLIFE_AGENT_COORDINATION` of `0`, `false`, `no` or `off` turns it
-  off. Whether Codex honours the decision
-  of a hook declared `async` has not been probed on a live install.
+  Claude Code's: in Codex context the script exits after the gate and never
+  arms the wait (the [doorbell](#codex-doorbell) is Codex's wake path). An
+  explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or `PSEUDOLIFE_AGENT_COORDINATION`
+  of `0`, `false`, `no` or `off` turns it off. Whether Codex honours the
+  decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
 

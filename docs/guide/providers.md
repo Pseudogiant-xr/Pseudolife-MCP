@@ -245,15 +245,15 @@ policy restrictions remain in place.
 
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
-fourth PseudoLife hook (earlier releases skip async hooks there). On Windows,
-where Codex runs the native command, it runs only the
+fourth PseudoLife hook (earlier releases skip async hooks there). In Codex
+it runs only the
 [Stop-hook park gate](configuration.md#waking-an-idle-claude-code-session-the-stop-hook):
 one request asking the daemon whether the thread parked, answered with
 Codex's documented `{"decision": "block", "reason": ...}` when it did not,
 and nothing otherwise (an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK=0` turns it
-off). Elsewhere Codex runs the bash command, whose script exits unless
-Claude Code started it, so there is no gate; the wake itself is Claude
-Code's. Codex's own wake path is the
+off). On Windows the native command runs it; on macOS and Linux the bash
+script does, in Codex context, through the managed connection file. The
+wake itself is Claude Code's. Codex's own wake path is the
 [doorbell](configuration.md#codex-doorbell), also on by default when a
 `codex` CLI is found; a woken task needs `memory_message` approved, or it
 stalls on a prompt. Setup approves it with the other three, and disabling it in

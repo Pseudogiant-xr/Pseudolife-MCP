@@ -101,6 +101,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`PSEUDOLIFE_SUITE_LOCK=off`, a suite without a bearer, a GPU launch
   outside `Start-Qwen`, any other saturating window), as the project
   `CLAUDE.md` already says.
+### Changed (2026-09-28 — a Codex thread is asked to park at turn end on macOS and Linux too)
+- The Stop-hook park gate (the v49 entry below) reached Codex only on
+  Windows, where Codex runs the plugin's native command
+  (`lifecycle.ps1 -Event Stop`); on macOS and Linux Codex runs the bash
+  command, and `stop-wake.sh` exited unless Claude Code had started it, so
+  a Codex thread there was never asked to park when it stopped (its only
+  prompts were `memory_agents`' description and the doorbell's nudge, which
+  needs mail to arrive). Maintainer call flagged in #433, decided
+  2026-09-28: parity. In Codex context (`PSEUDOLIFE_CODEX_HOOK=1`, or
+  `PLUGIN_ROOT` equal to `CLAUDE_PLUGIN_ROOT`, as the sibling bash hooks
+  read it) the script now runs the same gate: one 2 s request to
+  `GET /api/hook/park-gate` for the thread the payload names, the daemon
+  and bearer resolved the way `coordination-start.sh` resolves them (the
+  managed connection file under the Codex home, else the explicit settings,
+  with the same URL-conflict and private-file checks), a block answered the
+  way Codex documents for `Stop` (`{"decision":"block","reason":...}` on
+  stdout, exit 0, the reason JSON-escaped; a message carrying a control
+  character the script does not escape is replaced by the fixed text), and
+  then exit without arming Claude's wake wait. Allow, no address, a
+  continuation's Stop (`stop_hook_active`) or no answer prints nothing. The
+  explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
+  This is the plugin install: a manual Codex install
+  (`ops/setup-codex-hooks.py` without the plugin) carries no `Stop` hook,
+  so it gets no gate on any platform, as before. Both Codex paths now
+  append the `gate` ledger line Claude's gate writes, so a block is
+  auditable in `ledger.log` on every client, and every client records its
+  length column in the same unit, UTF-8 bytes plus one (bash counted
+  characters under a UTF-8 locale, PowerShell UTF-16 units). A hook Claude
+  Code started for its own session (`CLAUDECODE=1` and
+  `CLAUDE_CODE_SESSION_ID` equal to the payload's id) stays Claude's
+  whatever Codex marker its environment carries, so a leaked marker cannot
+  cost it the wake. The gate's request, on both clients, now treats a
+  redirect as a failure (`curl -L --max-redirs 0`, as the sibling hooks do)
+  and drops whatever a failed request printed, so neither a 3xx body nor an
+  answer cut off at the 2 s limit can block. Whether Codex honours the
+  decision of a hook declared `async` is still unprobed on a live install,
+  on every platform.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

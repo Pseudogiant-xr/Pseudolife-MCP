@@ -4,8 +4,10 @@
 # with PSEUDOLIFE_AGENT_WAKE_HOOK=1): hooks.json skips it when
 # PSEUDOLIFE_AGENT_WAKE_HOOK is 0/false/no/off or PSEUDOLIFE_AGENT_COORDINATION
 # is set to anything but a yes (both checked again here), refuses a copy that
-# does not parse, and it is a no-op anywhere but Claude Code (Codex loads the
-# same hooks.json).
+# does not parse. Codex loads the same hooks.json: on Windows it runs the
+# entry's native command (lifecycle.ps1 -Event Stop), on macOS and Linux this
+# script, which in Codex context runs only the park gate below and never the
+# wake (the doorbell is Codex's wake path). Anywhere else it is a no-op.
 #
 # hooks.json registers it with "async": true and "asyncRewake": true, so it
 # waits in the background after each turn, and exit code 2 starts a new turn
@@ -44,6 +46,17 @@
 # refuses) is allow too, so the gate never holds a turn on an error. It
 # appends a "gate" line to the ledger when it blocks.
 #
+# In Codex context (PSEUDOLIFE_CODEX_HOOK=1, or PLUGIN_ROOT equal to
+# CLAUDE_PLUGIN_ROOT, as the sibling bash hooks read it) the same gate runs
+# for the thread whose id the payload carries, with the daemon and bearer
+# resolved as coordination-start.sh resolves them (the managed connection
+# file under CODEX_HOME, or the explicit settings), and a block is answered
+# the way Codex documents for Stop: {"decision":"block","reason":...} on
+# stdout with exit 0, which Codex turns into a continuation prompt. Allow,
+# no address, a continuation's Stop or no answer prints nothing, and the
+# script exits without arming the wait: the same behaviour lifecycle.ps1
+# gives Codex on Windows.
+#
 # One watcher per session: every firing writes a fresh token to <key>.wake,
 # and an older watcher that finds another token there exits quietly at its
 # next poll, so the newest turn end always owns the wait.
@@ -79,7 +92,13 @@ setting() {
 OFF=""
 case "$(setting "${PSEUDOLIFE_AGENT_WAKE_HOOK:-}")" in 0|false|no|off) OFF=1 ;; esac
 case "$(setting "${PSEUDOLIFE_AGENT_COORDINATION:-}")" in ''|1|true|yes|on) ;; *) OFF=1 ;; esac
-if [ -n "$OFF" ] || [ "${CLAUDECODE:-}" != "1" ]; then
+CODEX_HOOK_CONTEXT=""
+if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
+        { [ -n "${PLUGIN_ROOT:-}" ] &&
+          [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
+    CODEX_HOOK_CONTEXT=1
+fi
+if [ -n "$OFF" ] || { [ -z "$CODEX_HOOK_CONTEXT" ] && [ "${CLAUDECODE:-}" != "1" ]; }; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done
     exit 0
@@ -98,8 +117,14 @@ case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 [ "${#SID}" -le 128 ] || exit 0
 # A Codex run nested inside a Claude Bash tool inherits CLAUDECODE; Claude
 # Code sets CLAUDE_CODE_SESSION_ID in a hook's environment to the payload's
-# session_id, updated on /clear.
-[ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] || exit 0
+# session_id, updated on /clear. Codex names its thread in the payload only.
+# A hook Claude Code started for this very session stays Claude's whatever
+# Codex marker its environment carries: taken for Codex it would lose the
+# wake, and its block would go to a stdout an async hook cannot use.
+if [ "${CLAUDECODE:-}" = "1" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; then
+    CODEX_HOOK_CONTEXT=""
+fi
+[ -n "$CODEX_HOOK_CONTEXT" ] || [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] || exit 0
 
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
 KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
@@ -110,6 +135,8 @@ KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null;
 # record the new id's digest never appears. The key is followed only when
 # line 2 names this session, so a reused PID's record cannot wake it for a
 # dead process's mail. A symlinked, CRLF or upper-case record is refused.
+# Codex has no such record: its shim keys the digest by the thread id.
+[ -n "$CODEX_HOOK_CONTEXT" ] && CLAUDE_PID=""
 case "${CLAUDE_PID:-}" in
     ''|*[!0123456789]*) ;;
     *)  HOST="$DIGEST_DIR/claude-$CLAUDE_PID.host"
@@ -194,19 +221,21 @@ private_regular() {
     [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
 }
 
-# The park gate's one request. The daemon URL and bearer come from the
-# hook's environment the way the other hooks read them (PSEUDOLIFE_MCP_TOKEN,
-# or a private PSEUDOLIFE_MCP_TOKEN_FILE); Codex's managed connection file
-# is lifecycle.ps1's concern, which runs this gate for Codex on Windows.
-# Prints the body; any failure prints nothing, which is allow.
-gate_answer() {
-    local url="${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}" token="" rest
-    local file="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
-    url=${url%/}
-    case "$url" in http://*|https://*) ;; *) return 1 ;; esac
-    case "$url" in *\?*|*\#*|*@*) return 1 ;; esac
-    rest=${url#*://}
+# Sets GATE_URL to $1 without its trailing slash when it is a bare http(s)
+# origin (no path, query, fragment or userinfo).
+gate_url() {
+    local rest
+    GATE_URL=${1%/}
+    case "$GATE_URL" in http://*|https://*) ;; *) return 1 ;; esac
+    case "$GATE_URL" in *\?*|*\#*|*@*) return 1 ;; esac
+    rest=${GATE_URL#*://}
     case "$rest" in ''|*/*) return 1 ;; esac
+}
+
+# Sets GATE_AUTH from $1 (a bearer, or empty) or, when $2 names a file, its
+# one line, which must be a private file holding a token with no spaces.
+gate_auth() {
+    local token="$1" file="$2"
     if [ -n "$file" ]; then
         if ! private_regular "$file" 4096; then
             printf '%s\ttoken\t%s\t0\t0\trejected\n' "$(date +%s)" "${KEY:0:8}" \
@@ -216,13 +245,101 @@ gate_answer() {
         token=$(cat "$file")
         token=${token//[$'\r\n']/}
         case "$token" in ''|*[[:space:]]*) return 1 ;; esac
-    else
-        token="${PSEUDOLIFE_MCP_TOKEN:-}"
     fi
-    local auth=()
-    [ -n "$token" ] && auth=(-H "Authorization: Bearer $token")
-    curl -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
-        "${auth[@]}" "$url/api/hook/park-gate?$1"
+    GATE_AUTH=()
+    [ -n "$token" ] && GATE_AUTH=(-H "Authorization: Bearer $token")
+    return 0
+}
+
+# Claude Code's daemon: the hook's environment the way the other hooks read
+# it (PSEUDOLIFE_MCP_DAEMON_URL, PSEUDOLIFE_MCP_TOKEN or a private
+# PSEUDOLIFE_MCP_TOKEN_FILE).
+claude_connection() {
+    gate_url "${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}" || return 1
+    gate_auth "${PSEUDOLIFE_MCP_TOKEN:-}" "${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
+}
+
+decode_connection_value() {
+    local value
+    if value=$(printf '%s' "$1" | base64 --decode 2>/dev/null); then
+        printf '%s' "$value"
+    else
+        printf '%s' "$1" | base64 -D 2>/dev/null
+    fi
+}
+
+# Codex's daemon: the managed connection file setup writes under the Codex
+# home (a canonical five-line record naming the daemon URL and a rotatable
+# bearer file, base64), else the explicit settings, with the same checks
+# coordination-start.sh and session-end.sh make: an explicit URL may not
+# disagree with the managed one, an explicit credential file needs the
+# matching managed URL, and a tokenless managed connection ignores both.
+codex_connection() {
+    local home="${CODEX_HOME:-${HOME}/.codex}" connection managed="" managed_url=""
+    local managed_token_file="" url_b64 token_b64 tokenless="" explicit_url="" token_file=""
+    connection="$home/pseudolife/connection.json"
+    if [ -e "$connection" ]; then
+        private_regular "$connection" 16384 || return 1
+        [ "$(wc -l < "$connection")" -eq 5 ] &&
+            [ "$(sed -n '1p' "$connection")" = '{' ] &&
+            [ "$(sed -n '2p' "$connection")" = '  "version": 1,' ] &&
+            [ "$(sed -n '5p' "$connection")" = '}' ] || return 1
+        url_b64=$(sed -n '3s/^  "daemon_url": "\([A-Za-z0-9+\/=]*\)",$/\1/p' "$connection")
+        token_b64=$(sed -n '4s/^  "token_file": "\([A-Za-z0-9+\/=]*\)"$/\1/p' "$connection")
+        managed_url=$(decode_connection_value "$url_b64")
+        managed_token_file=$(decode_connection_value "$token_b64")
+        [ -n "$managed_url" ] || return 1
+        managed=1
+    fi
+    if [ -n "$managed" ] && [ -z "$managed_token_file" ]; then
+        tokenless=1
+    else
+        explicit_url="${PSEUDOLIFE_MCP_DAEMON_URL:-}"
+        token_file="${PSEUDOLIFE_MCP_TOKEN_FILE:-$managed_token_file}"
+    fi
+    if [ -n "$explicit_url" ] && [ -n "$managed_url" ] &&
+            [ "${explicit_url%/}" != "${managed_url%/}" ]; then
+        return 1
+    fi
+    if [ -z "$tokenless" ] && [ -n "$managed_url" ] &&
+            [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ] &&
+            { [ -z "$explicit_url" ] ||
+              [ "${explicit_url%/}" != "${managed_url%/}" ]; }; then
+        return 1
+    fi
+    gate_url "${explicit_url:-${managed_url:-http://127.0.0.1:8765}}" || return 1
+    if [ -n "$tokenless" ]; then
+        gate_auth "" ""
+    else
+        gate_auth "${PSEUDOLIFE_MCP_TOKEN:-}" "$token_file"
+    fi
+}
+
+# The park gate's one request, to the client's daemon. Prints the body; any
+# failure is allow, and the caller drops what a failed request printed (a
+# body cut off at the time limit). -L with no redirects allowed makes a 3xx
+# a failure: without it curl -f passes a redirect's body through.
+gate_answer() {
+    if [ -n "$CODEX_HOOK_CONTEXT" ]; then
+        codex_connection || return 1
+    else
+        claude_connection || return 1
+    fi
+    curl -L -sf --max-redirs 0 --connect-timeout 1 --max-time 2 \
+        "${GATE_AUTH[@]}" "$GATE_URL/api/hook/park-gate?$1"
+}
+
+# Prints $1 as a JSON string literal (backslash, quote, newline and tab
+# escaped); false for text carrying any other control character, which the
+# caller replaces with the fixed message rather than emit invalid JSON.
+json_string() {
+    local text="$1"
+    text=${text//\\/\\\\}
+    text=${text//\"/\\\"}
+    text=${text//$'\n'/\\n}
+    text=${text//$'\t'/\\t}
+    case "$text" in *[[:cntrl:]]*) return 1 ;; esac
+    printf '"%s"' "$text"
 }
 
 ACTIVE=$(printf '%s' "$INPUT" |
@@ -243,22 +360,37 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
         [ "${#SINCE}" -le 12 ] || SINCE=""
         QUERY="agent=$AGENT_ID"
         [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
-        ANSWER=$(gate_answer "$QUERY")
+        ANSWER=$(gate_answer "$QUERY") || ANSWER=""
         ANSWER=${ANSWER//$'\r'/}
         case "$ANSWER" in
             block|block$'\n'*)
                 MESSAGE=""
                 case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
                 while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
-                [ -n "$MESSAGE" ] || MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
-                printf '%s\n' "$MESSAGE" >&3
+                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...)"
+                [ -n "$MESSAGE" ] || MESSAGE=$DEFAULT_MESSAGE
+                if [ -n "$CODEX_HOOK_CONTEXT" ]; then
+                    # Codex reads the decision from stdout (exit 0).
+                    if ! REASON=$(json_string "$MESSAGE"); then
+                        MESSAGE=$DEFAULT_MESSAGE
+                        REASON=$(json_string "$MESSAGE")
+                    fi
+                    printf '{"decision":"block","reason":%s}\n' "$REASON"
+                else
+                    printf '%s\n' "$MESSAGE" >&3
+                fi
+                # UTF-8 bytes plus the newline, on every client: ${#MESSAGE}
+                # counts characters under a UTF-8 locale.
                 printf '%s\tgate\t%s\t0\t%s\tblock\n' "$(date +%s)" "${KEY:0:8}" \
-                    "$(( ${#MESSAGE} + 1 ))" >> "$DIGEST_DIR/ledger.log"
+                    "$(( $(printf '%s' "$MESSAGE" | wc -c) + 1 ))" >> "$DIGEST_DIR/ledger.log"
+                [ -n "$CODEX_HOOK_CONTEXT" ] && exit 0
                 exit 2
                 ;;
         esac
     fi
 fi
+# The wake is Claude Code's; Codex's is the doorbell.
+[ -z "$CODEX_HOOK_CONTEXT" ] || exit 0
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
 case "$WAIT" in ''|*[!0123456789]*) WAIT=$MAX_WAIT ;; esac

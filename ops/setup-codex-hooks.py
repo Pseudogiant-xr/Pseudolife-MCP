@@ -48,11 +48,11 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
                 "userPromptSubmit": ("UserPromptSubmit", "CoordinationPrompt"),
                 "sessionEnd": ("SessionEnd",)}
 # The plugin's hooks.json also carries Claude Code's Stop wake hook (on by
-# default since 2026-09-28), which Codex lists too. In Codex it is a no-op
-# (lifecycle.ps1 -Event Stop exits at once; stop-wake.sh exits unless Claude
-# Code started it), approved with the three lifecycle hooks. Optional: Codex
-# before 0.148 skips async hooks outside SessionEnd and lists three. Manual
-# installs keep EVENTS.
+# default since 2026-09-28), which Codex lists too. In Codex it runs only the
+# park gate (v49; lifecycle.ps1 -Event Stop on Windows, stop-wake.sh in Codex
+# context elsewhere), never the wake, approved with the three lifecycle
+# hooks. Optional: Codex before 0.148 skips async hooks outside SessionEnd
+# and lists three. Manual installs keep EVENTS.
 PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
 # A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
