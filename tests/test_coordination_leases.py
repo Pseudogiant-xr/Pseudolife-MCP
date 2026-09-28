@@ -577,18 +577,20 @@ def test_a_release_notice_clears_a_park_on_that_lease(store):
 
 
 def test_no_lease_stands_in_for_the_maintainer_or_a_peer(store):
-    """Any string is a lease name, so a lease called ``maintainer`` or
-    after a peer's agent id, taken and released, clears no park that names
-    the human or that peer."""
+    """Any string is a lease name, so a lease called ``maintainer``, or
+    after a peer's agent id or the 8-hex prefix every surface shows of it,
+    taken and released, clears no park that names the human or that peer."""
     sender, peer = store.register("alice"), store.register("alice")
     on_human = _parked_on(store, "maintainer")
     on_peer = _parked_on(store, peer["agent_id"])
-    for name in ("maintainer", peer["agent_id"]):
+    on_prefix = _parked_on(store, peer["agent_id"][:8])
+    for name in ("maintainer", peer["agent_id"], peer["agent_id"][:8]):
         store.acquire_lease(*creds(sender), name=name, ttl=600)
         store.release_lease(*creds(sender), name=name)
     store.test_time[0] = 1010.0
     assert _notice(store, sender, on_human, "human")["decision"] == "withheld"
     assert _notice(store, sender, on_peer, "peer")["decision"] == "withheld"
+    assert _notice(store, sender, on_prefix, "prefix")["decision"] == "withheld"
 
 
 def test_a_hold_that_lapsed_moments_ago_still_clears(store):

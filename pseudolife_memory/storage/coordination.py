@@ -238,7 +238,6 @@ LEASE_LIST_QUEUE = 10
 # RELEASE_BUDGET (20 s) doing both. Three times that, so a slow daemon still
 # counts the notice; not a measurement.
 LEASE_CLEAR_GRACE = 60
-_AGENT_ID = re.compile(r"[0-9a-f]{32}")
 HLC_META_KEY = "coordination_hlc_highwater"
 WRITER_EPOCH_META_KEY = "writer_lease_epoch"
 BANK_ID_META_KEY = "coordination_bank_id"
@@ -1725,10 +1724,13 @@ class CoordinationStore:
         or an expiry the daemon logged against it) at most LEASE_CLEAR_GRACE
         ago: a park waiting for a lease is cleared when it frees, never when
         someone takes it (review, 2026-09-28). Read from the audit log, never
-        from anything the sender says. ``maintainer`` and an agent id are
-        never lease names here, so no lease can stand in for the human or a
-        peer."""
-        if name == "maintainer" or _AGENT_ID.fullmatch(name):
+        from anything the sender says. ``maintainer``, an agent id and an
+        id prefix (8 or more of its hex characters, as every surface shows
+        it) are never lease names here, so no lease can stand in for the
+        human or a peer. ``maintainer`` is compared exactly, as everywhere
+        else on the board."""
+        if name == "maintainer" or (ID_PREFIX_MIN <= len(name) <= ID_LENGTH
+                                    and set(name) <= _ID_HEX):
             return False
         # The CASE keeps the cast off other events' payloads, as park_gate's.
         return self._one(

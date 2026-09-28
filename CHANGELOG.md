@@ -18,7 +18,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   own records, never a string the sender supplies; the receipt's reason
   stays `clearer`. Taking a lease clears nothing, so the acquire notice
   and mail from a current holder are still held, and no lease stands in
-  for `maintainer` or an agent id. Found in the review of #443.
+  for `maintainer`, an agent id or an id prefix (8 or more hex
+  characters). Found in the review of #443.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
