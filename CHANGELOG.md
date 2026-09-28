@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — park guidance distinguishes completion from review waits)
+- The Stop-hook prompt and configuration guide now state that `done` means
+  no follow-up is expected and nothing will ring the session. Awaiting a merge
+  click or a review that may bring fixes uses `needs_approval` with
+  `park_clear_by` set to the reviewer's agent id or `maintainer`, or
+  `waiting_peer`. The wake decision is unchanged.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
