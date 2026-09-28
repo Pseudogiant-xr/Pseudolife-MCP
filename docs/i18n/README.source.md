@@ -1,4 +1,4 @@
-<!-- i18n-source: v12 (2026-09-25) — canonical English text for the translated
+<!-- i18n-source: v13 (2026-09-28) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -134,6 +134,7 @@ with the canonical fact store, so corrected answers win over stale ones.
 The canonical, always-current documentation is in English:
 
 - [README](../../README.md) — full install, wiring, tools, troubleshooting
+- [Updating](../../README.md#updating) — installer migration, client refresh, and restarting sessions
 - [Configuration](../guide/configuration.md) · [Retrieval](../guide/retrieval.md)
   · [Dreaming](../guide/dreaming.md) · [Episodes](../guide/episodes.md)
   · [Memory model](../guide/memory-model.md) · [Benchmarks](../guide/benchmarks.md)

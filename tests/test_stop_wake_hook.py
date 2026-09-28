@@ -10,7 +10,9 @@ reminder, so stderr carries the shim's digest and nothing else.
 It fires when the digest's watermark is past ``<key>.seen`` and the body is
 non-empty. That makes mail which landed during the turn fire at once, while
 mail the session already saw does not re-fire at the next turn end. Codex
-loads the same hooks.json, so the hook is a no-op anywhere but Claude Code.
+loads the same hooks.json: in Codex context (Windows runs lifecycle.ps1,
+macOS and Linux this script) only the park gate runs, answered the way Codex
+documents for Stop; anywhere else the hook is a no-op.
 """
 import hashlib
 import json
@@ -718,9 +720,11 @@ GATE_MESSAGE = ("Before ending: update your board status with why you stopped an
                 "park_resume=...)")
 
 
-def _gate_daemon(answer):
-    """A fixture daemon answering the park gate with ``answer`` and
-    recording each request's path and bearer."""
+def _gate_daemon(answer, status=200, stall=0):
+    """A fixture daemon answering the park gate with ``answer`` (and
+    ``status``) and recording each request's path and bearer. ``stall``
+    promises more body than it sends and holds the connection that many
+    seconds, so the client's time limit cuts the answer off."""
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -730,13 +734,19 @@ def _gate_daemon(answer):
         def do_GET(self):
             requests.append((self.path, self.headers.get("Authorization")))
             body = answer.encode("utf-8")
-            self.send_response(200)
+            self.send_response(status)
+            if 300 <= status < 400:
+                self.send_header("Location", "http://127.0.0.1:1/elsewhere")
             self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(body) + (100 if stall else 0)))
             self.end_headers()
             self.wfile.write(body)
+            if stall:
+                self.wfile.flush()
+                time.sleep(stall)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
     Thread(target=server.serve_forever, daemon=True).start()
     return server, requests
 
@@ -822,9 +832,7 @@ def test_a_gate_the_daemon_does_not_answer_is_open(tmp_path):
     assert (result.returncode, result.stderr) == (0, "")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
-                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
-                    "coordination-start.sh, the file is refused there")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; Windows ACLs tested separately")
 def test_the_gate_reads_a_private_token_file(tmp_path):
     server, requests = _gate_daemon("allow\n")
     try:
@@ -842,6 +850,157 @@ def test_the_gate_reads_a_private_token_file(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("private", [True, False])
+def test_windows_gate_validates_the_installer_token_file(tmp_path, private):
+    from pseudolife_memory.credentials import _write_token_file
+    token_file = tmp_path / "token ' with spaces"
+    if private:
+        _write_token_file(token_file, "file-token")
+    else:
+        token_file.write_bytes(b"file-token\n")
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _env(tmp_path, wait=0,
+                   PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                   PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert result.returncode == (2 if private else 0)
+        assert [bearer for _, bearer in requests] == (["Bearer file-token"] if private else [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("guard", ["owner", "protected", "shared", "links", "size", "empty"])
+def test_windows_private_file_guards_are_load_bearing(tmp_path, guard):
+    from pseudolife_memory.credentials import _secure_windows_file, _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _secure_windows_file(directory)
+    token_file = directory / "token"
+    _write_token_file(token_file, "fixture-token")
+    function = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
+                         HOOK.read_text(encoding="utf-8"))[0]
+    edits = {
+        "owner": ("$owner -ne $current", "$false"),
+        "protected": ("-not $acl.AreAccessRulesProtected", "$false"),
+        "shared": ('$sid -notin $owner, "S-1-3-4"', "$false"),
+        "links": ('[ "${3:-0}" = 1 ] || return 1', ":"),
+        "size": ('[ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1', ":"),
+        "empty": ("$item.Length -lt 1", "$false"),
+    }
+    if guard == "owner":
+        # A different caller identity, without requiring host privileges to
+        # transfer fixture ownership to another account.
+        function = function.replace(
+            "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value", '"S-1-5-18"')
+    elif guard in ("protected", "shared"):
+        import ctypes
+        from ctypes import wintypes
+        # Apply only the DACL. Set-Acl can also try to write the SACL, which
+        # requires SeSecurityPrivilege even for a file the caller owns.
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        convert = advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW
+        convert.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                            ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+        apply = advapi.SetFileSecurityW
+        apply.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
+        descriptor = ctypes.c_void_p()
+        sddl = "D:(A;;FA;;;OW)" if guard == "protected" else "D:P(A;;FA;;;OW)(A;;FR;;;WD)"
+        assert convert(sddl, 1, ctypes.byref(descriptor), None)
+        try:
+            flags = 0x20000004 if guard == "protected" else 0x80000004
+            assert apply(str(token_file), flags, descriptor)
+        finally:
+            kernel = ctypes.WinDLL("kernel32")
+            kernel.LocalFree.argtypes = [ctypes.c_void_p]
+            kernel.LocalFree(descriptor)
+    elif guard == "links":
+        os.link(token_file, directory / "alias")
+    else:
+        token_file.write_bytes(b"" if guard == "empty" else b"x" * 4097)
+    env = _env(tmp_path, PSEUDOLIFE_TEST_FILE=str(token_file))
+    try:
+        for mutated, expected in ((False, 1), (True, 0)):
+            candidate = function.replace(*edits[guard]) if mutated else function
+            result = subprocess.run(
+                [bash_exe(), "-c", candidate + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
+                env=env, capture_output=True, text=True, timeout=DEADLINE)
+            assert result.returncode == expected, (guard, mutated, result.stderr)
+    finally:
+        _secure_windows_file(token_file)
+
+
+def test_windows_acl_blocks_are_byte_identical():
+    pattern = rb"(?ms)^        PSEUDOLIFE_PRIVATE_FILE=.*?^        return \$\?"
+    expected = re.search(pattern, HOOK.read_bytes())[0]
+    for name in ("coordination-start.sh", "session-start.sh", "session-end.sh"):
+        assert re.search(pattern, (HOOK.parent / name).read_bytes())[0] == expected, name
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+def test_windows_gate_records_a_rejected_junction_token_without_a_request(tmp_path):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _write_token_file(directory / "token", "fixture-token")
+    junction = tmp_path / "junction"
+    server, requests = _gate_daemon("allow\n")
+    env = _gate_env(tmp_path, server, PSEUDOLIFE_MCP_TOKEN_FILE=str(junction / "token"))
+    env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory),
+               PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT="0")
+    try:
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+        lines = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert len(lines) == 1
+        stamp, *fields = lines[0].split("\t")
+        assert stamp.isdigit() and fields == ["token", _key()[:8], "0", "0", "rejected"]
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove only the junction, preserving its target.
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("unsafe", ["junction", "missing-validator"])
+def test_windows_private_file_fails_closed(tmp_path, unsafe):
+    from pseudolife_memory.credentials import _write_token_file
+    directory = tmp_path / "private"
+    directory.mkdir()
+    token_file = directory / "token"
+    _write_token_file(token_file, "fixture-token")
+    env = _env(tmp_path, PSEUDOLIFE_TEST_FILE=str(token_file))
+    function = re.search(r"(?ms)^private_regular\(\) \{.*?^\}",
+                         HOOK.read_text(encoding="utf-8"))[0]
+    junction = tmp_path / "junction"
+    if unsafe == "junction":
+        env.update(PSEUDOLIFE_TEST_JUNCTION=str(junction), PSEUDOLIFE_TEST_TARGET=str(directory))
+        pwsh_run("-Command", 'New-Item -ItemType Junction -Path $env:PSEUDOLIFE_TEST_JUNCTION '
+                 '-Target $env:PSEUDOLIFE_TEST_TARGET -ErrorAction Stop | Out-Null', env=env)
+        env["PSEUDOLIFE_TEST_FILE"] = str(junction / "token")
+    else:
+        function = 'powershell.exe() { return 1; }\n' + function
+    try:
+        result = subprocess.run(
+            [bash_exe(), "-c", function + '\nprivate_regular "$PSEUDOLIFE_TEST_FILE" 4096'],
+            env=env, capture_output=True, text=True, timeout=DEADLINE)
+        assert result.returncode == 1 and result.stdout == "" and result.stderr == ""
+    finally:
+        if junction.exists():
+            os.rmdir(junction)  # Remove the junction itself, never its target.
 
 
 def test_the_prompt_hook_stamps_the_turn_start(tmp_path):
@@ -880,6 +1039,9 @@ def test_lifecycle_ps1_stop_asks_an_unparked_codex_thread_to_park(tmp_path):
         assert json.loads(result.stdout) == {"decision": "block", "reason": GATE_MESSAGE}
         assert requests == [("/api/hook/park-gate?agent=" + "a" * 32 + "&since=1700000000",
                              "Bearer fixture-token")]
+        ledger = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert [line.split("\t")[1:2] + line.split("\t")[5:] for line in ledger] == [
+            ["gate", "block"]]
         result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
                           input=_payload(stop_hook_active=True), env=env)
         assert (result.returncode, result.stdout, len(requests)) == (0, "", 1)
@@ -939,6 +1101,338 @@ def test_the_codex_park_gate_honours_an_explicit_opt_out(tmp_path, setting):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- the Codex gate in the bash hook (macOS and Linux) ----------------------
+
+def _codex_env(tmp_path, **extra):
+    """The environment Codex gives the bash Stop command on macOS and
+    Linux: the plugin root, no Claude Code identity, and the marker the
+    sibling bash hooks read for Codex context."""
+    env = _env(tmp_path, wait=8, **extra)
+    for name in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID"):
+        env.pop(name, None)
+    env["PSEUDOLIFE_CODEX_HOOK"] = "1"
+    return env
+
+
+def test_stop_wake_sh_asks_an_unparked_codex_thread_to_park(tmp_path):
+    """Codex on macOS and Linux runs the bash command, not lifecycle.ps1.
+    In Codex context the script runs the same park gate the native command
+    runs on Windows: one request, Codex's documented Stop decision on
+    stdout (exit 0) for a block, nothing otherwise, and never Claude's
+    wake wait (no lease, no marker, an exit well inside the wait)."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, BODY, ring=False)
+        _agent(tmp_path)
+        _turn(tmp_path, 1700000000)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        result, elapsed = _run(env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert json.loads(result.stdout) == {"decision": "block", "reason": GATE_MESSAGE}
+        assert elapsed < 8
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32 + "&since=1700000000",
+                             "Bearer fixture-token")]
+        assert not (tmp_path / "digests" / f"{_key()}.wake").exists()
+        assert _read_seen(tmp_path) is None
+        ledger = (tmp_path / "digests" / "ledger.log").read_text().splitlines()
+        assert [line.split("\t")[1:2] + line.split("\t")[5:] for line in ledger] == [
+            ["gate", "block"]]
+        result, _ = _run(env, _payload(stop_hook_active=True))
+        assert (result.returncode, result.stdout, result.stderr, len(requests)) == (0, "", "", 1)
+    finally:
+        server.shutdown()
+        server.server_close()
+    server, requests = _gate_daemon("allow\n")
+    try:
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32 + "&since=1700000000",
+                             "Bearer fixture-token")]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("message, reason", [
+    ('say "park" \\ now', 'say "park" \\ now'),
+    ("line one\nline two\n\n", "line one\nline two"),
+    ("", GATE_MESSAGE),
+    ("tab\there \x01 control", GATE_MESSAGE),
+])
+def test_the_codex_bash_gate_quotes_the_daemons_message_as_json(tmp_path, message, reason):
+    """The reason is the daemon's text as a JSON string: quotes and
+    backslashes escaped, newlines kept; an empty message, or one carrying
+    a control character the script does not escape, gets the fixed text."""
+    server, _ = _gate_daemon("block\n" + message + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        result, _ = _run(env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert json.loads(result.stdout) == {"decision": "block", "reason": reason}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("setting", [("PSEUDOLIFE_AGENT_WAKE_HOOK", "0"),
+                                     ("PSEUDOLIFE_AGENT_WAKE_HOOK", "off"),
+                                     ("PSEUDOLIFE_AGENT_COORDINATION", "0")])
+def test_the_codex_bash_gate_honours_an_explicit_opt_out(tmp_path, setting):
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, BODY, ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env[setting[0]] = setting[1]
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("agent", ["", "not an id\n", "A" * 32 + "\n"])
+def test_the_codex_bash_gate_needs_a_board_address(tmp_path, agent):
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        if agent:
+            (tmp_path / "digests" / f"{_key()}.agent").write_text(agent)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_codex_bash_gate_is_open_without_an_answer(tmp_path):
+    server, _ = _gate_daemon("allow\n")
+    port = server.server_port
+    server.shutdown()
+    server.server_close()
+    _digest(tmp_path, 3, "", ring=False)
+    _agent(tmp_path)
+    env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+    result, elapsed = _run(env)
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert elapsed < 8
+
+
+def test_codex_context_is_read_from_the_plugin_root_codex_sets(tmp_path):
+    """The plugin's Stop entry carries no marker: Codex is recognised, as
+    in the sibling hooks, by PLUGIN_ROOT equal to CLAUDE_PLUGIN_ROOT."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                         PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        del env["PSEUDOLIFE_CODEX_HOOK"]
+        env["PLUGIN_ROOT"] = env["CLAUDE_PLUGIN_ROOT"]
+        result, _ = _run(env)
+        assert (result.returncode, result.stderr) == (0, "")
+        assert json.loads(result.stdout) == {"decision": "block", "reason": GATE_MESSAGE}
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("marker", [("PLUGIN_ROOT", None), ("PSEUDOLIFE_CODEX_HOOK", "1")])
+def test_claude_codes_own_session_is_never_taken_for_codex(tmp_path, marker):
+    """A hook Claude Code started for this session (CLAUDECODE=1 and its
+    session id in the environment) stays Claude's, whatever Codex marker
+    leaks into it: the wake still fires, on stderr with exit 2."""
+    _digest(tmp_path, 3, BODY)
+    env = _env(tmp_path)
+    env[marker[0]] = marker[1] or env["CLAUDE_PLUGIN_ROOT"]
+    result, _ = _run(env)
+    assert result.returncode == 2 and result.stdout == ""
+    assert _woke(result.stderr)
+
+
+@pytest.mark.parametrize("codex", [False, True])
+def test_a_gate_answer_that_is_not_a_plain_success_is_open(tmp_path, codex):
+    """A redirect is not the daemon's answer: its body must not block, on
+    either client (curl -f passes a 3xx through unless -L is set)."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n", status=302)
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env = _codex_env(tmp_path, **extra) if codex else _gate_env(tmp_path, server)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("codex", [False, True])
+def test_an_answer_cut_off_at_the_time_limit_is_open(tmp_path, codex):
+    """curl prints what arrived before its 2 s limit and then fails: a
+    truncated "block" is not the daemon's answer and must not block."""
+    server, requests = _gate_daemon("block\n" + GATE_MESSAGE + "\n", stall=4)
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        env = _codex_env(tmp_path, **extra) if codex else _gate_env(tmp_path, server)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("client", ["claude", "codex", "codex-windows"])
+def test_the_gate_ledger_counts_the_message_in_utf8_bytes(tmp_path, client):
+    """Every client's gate line records the same unit: the message's UTF-8
+    length plus one (the newline), not characters or UTF-16 code units."""
+    message = "Park now: café ☃ \U0001f600 please"
+    server, _ = _gate_daemon("block\n" + message + "\n")
+    try:
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        extra = dict(PSEUDOLIFE_MCP_DAEMON_URL=f"http://127.0.0.1:{server.server_port}",
+                     PSEUDOLIFE_MCP_TOKEN="fixture-token")
+        # A UTF-8 locale, as on macOS and most Linux desktops: there bash's
+        # ${#var} counts characters, not bytes.
+        utf8 = {"LC_ALL": "C.UTF-8"}
+        if client == "claude":
+            result, _ = _run(_gate_env(tmp_path, server, **utf8))
+            assert result.returncode == 2
+        elif client == "codex":
+            result, _ = _run(_codex_env(tmp_path, **extra, **utf8))
+            assert json.loads(result.stdout) == {"decision": "block", "reason": message}
+        else:
+            result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "Stop",
+                              input=_payload(), env=_env(tmp_path, **extra))
+            assert json.loads(result.stdout) == {"decision": "block", "reason": message}
+        [line] = (tmp_path / "digests" / "ledger.log").read_text(encoding="utf-8").splitlines()
+        fields = line.split("\t")
+        assert (fields[1], fields[5]) == ("gate", "block")
+        assert int(fields[4]) == len(message.encode("utf-8")) + 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _managed_connection(tmp_path, url, token_file):
+    from tests.test_codex_hooks import connection_payload
+    connection = tmp_path / "home" / "pseudolife" / "connection.json"
+    connection.parent.mkdir(parents=True, exist_ok=True)
+    connection.write_text(json.dumps(connection_payload(url, token_file), indent=2) + "\n")
+    connection.chmod(0o600)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the managed files are refused there")
+def test_a_tokenless_managed_connection_sends_no_bearer(tmp_path):
+    """Setup records an empty token file for a daemon without auth; the gate
+    then sends no bearer and ignores the explicit settings, as the sibling
+    hooks do."""
+    server, requests = _gate_daemon("allow\n")
+    try:
+        _managed_connection(tmp_path, f"http://127.0.0.1:{server.server_port}", "")
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_TOKEN="ambient-token",
+                         PSEUDOLIFE_MCP_DAEMON_URL="http://127.0.0.1:1")
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, None)]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the managed files are refused there")
+def test_an_explicit_token_file_needs_the_matching_managed_url(tmp_path):
+    """Beside a managed connection, an explicit PSEUDOLIFE_MCP_TOKEN_FILE is
+    honoured only with the managed URL named explicitly too; otherwise the
+    gate asks nothing (a credential must not go to a daemon it was not
+    recorded for)."""
+    server, requests = _gate_daemon("allow\n")
+    try:
+        url = f"http://127.0.0.1:{server.server_port}"
+        managed_token = tmp_path / "home" / "pseudolife" / "token"
+        managed_token.parent.mkdir(parents=True, exist_ok=True)
+        managed_token.write_text("managed-token\n")
+        managed_token.chmod(0o600)
+        _managed_connection(tmp_path, url, managed_token.as_posix())
+        explicit = tmp_path / "explicit-token"
+        explicit.write_text("explicit-token\n")
+        explicit.chmod(0o600)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path, PSEUDOLIFE_MCP_TOKEN_FILE=str(explicit))
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr, requests) == (0, "", "", [])
+        env["PSEUDOLIFE_MCP_DAEMON_URL"] = url
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, "Bearer explicit-token")]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics require a POSIX host: "
+                    "Git Bash cannot show an NTFS file is owner-only, so, as in "
+                    "coordination-start.sh, the managed files are refused there")
+def test_the_codex_bash_gate_uses_the_managed_connection(tmp_path):
+    """Setup records the daemon URL and a rotatable bearer file in the Codex
+    home's connection file; the gate reads them the way the sibling bash
+    hooks do, and an explicit daemon URL that disagrees stops the request."""
+    from tests.test_codex_hooks import connection_payload
+    server, requests = _gate_daemon("allow\n")
+    try:
+        home = tmp_path / "home"
+        token_file = home / "pseudolife" / "token"
+        token_file.parent.mkdir(parents=True)
+        token_file.write_text("file-token\n")
+        token_file.chmod(0o600)
+        connection = token_file.with_name("connection.json")
+        connection.write_text(json.dumps(connection_payload(
+            f"http://127.0.0.1:{server.server_port}", token_file.as_posix()), indent=2) + "\n")
+        connection.chmod(0o600)
+        _digest(tmp_path, 3, "", ring=False)
+        _agent(tmp_path)
+        env = _codex_env(tmp_path)
+        env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert requests == [("/api/hook/park-gate?agent=" + "a" * 32, "Bearer file-token")]
+        env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:1"
+        result, _ = _run(env)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+        assert len(requests) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="the Windows PID probe")
 def test_exits_when_claude_code_is_gone_on_windows(tmp_path):
     """Under Git Bash CLAUDE_PID is a Windows PID that kill -0 cannot see

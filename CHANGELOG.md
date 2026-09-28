@@ -11,6 +11,140 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus current-merge-ref CI; required local full runs queue after review
   fixes. One slot, CPU-only, PostgreSQL preflight and fingerprint guards stay.
 
+### Changed (2026-09-28 — Codex hook approval names the board check-in and mail hint)
+- `ops/setup-codex-hooks.py` asked to approve hooks for "briefings,
+  reminders, and session cleanup", but since the coordination hooks landed
+  the same approval also runs `coordination-start.sh` (the agent-board
+  check-in at session start) and `coordination-prompt.sh` (the per-prompt
+  new-mail hint). The setup menu, the yes/no prompt, and the verification
+  failure message now name both. `--trust` and `--instructions` behave as
+  before; the JSON report's shape is unchanged. README and the providers
+  guide say the same.
+### Fixed (2026-09-28 — a park set after a lapsed one stands again)
+- A session that parked again after its park had lapsed (past its
+  `park_expires`), without naming a new expiry, kept the lapsed one, so the
+  new park was expired the moment it was set: mail that cleared its need
+  did not ring it, and the Stop-hook park gate answered `no_park` and asked
+  it to park again. `memory_agents(action="update")` now treats only a live
+  park as standing: a new `park_reason` over a lapsed park is a new park,
+  with the 12-hour default counted from then, `park_set_at` restamped and
+  the lapsed `park_needs`, `park_clear_by` and `park_resume` not carried
+  over (with a fresh expiry they would be live again, and the old clearer's
+  chatter would ring for 12 hours); a park field on its own (including `park_expires` alone) is refused
+  with `invalid_park` on a lapsed park as on an unparked row, since its need
+  may be stale and the session restates it with a reason. A plain status
+  update still clears a lapsed record as it clears a live one. Found by the
+  review of the `board-audit stats` PR (#441), whose `park_outcomes`
+  mirrors the old rule.
+### Fixed (2026-09-28 — a lease notice skips a session whose park has lapsed)
+- The full-suite and GPU lease notices (the lease-mirror entry below) no
+  longer go to a peer whose park has lapsed. A peer parked with
+  `park_clear_by` naming the lease counts only while its park stands, by
+  the daemon's own rule (`CoordinationStore._live_park`): `park_reason`
+  set, and `park_expires` unset or still ahead. The peer list returns a
+  lapsed park's fields as they were stored, and the daemon ignores that
+  park everywhere else, so the notice was an extra message the session
+  had stopped waiting for. A lapsed peer whose status says
+  `suite=running|queued` or `gpu=` is still told, like any live peer.
+  Found in review of #442 (a park set after a lapsed one stands), 2026-09-28.
+### Fixed (2026-09-28 — a session parked on a lease is rung when the lease frees)
+- A session parked with `park_clear_by` naming a lease (`full-suite`,
+  `gpu`) slept through the release notice the lease CLI sends it: the
+  notice comes from the hold's own `lease-hold@` address, never equal to
+  the lease name, so the wake decision withheld it as chatter
+  (`need_not_cleared`). The daemon now counts the sender as the clearer
+  when its audit log shows the sender's hold on that lease released or
+  expired within the last 60 seconds (`LEASE_CLEAR_GRACE`); the CLI frees
+  the board lease before it mails the notice. It reads only the daemon's
+  own records, never a string the sender supplies; the receipt's reason
+  stays `clearer`. Taking a lease clears nothing, so the acquire notice
+  and mail from a current holder are still held, and no lease stands in
+  for `maintainer`, an agent id or an id prefix (8 or more hex
+  characters). Found in the review of #443.
+### Fixed (2026-09-28 — Codex hook readiness distinguishes mailbox approval and bundle presence)
+- Successful Codex hook setup now prints the documented `memory_message`
+  approval choice for unattended receive, ack and send, and includes it in
+  its JSON report; setup continues to leave tool approvals unchanged.
+- Client updates report a matching manual hook bundle as present with trust
+  and execution unchecked, and show the setup command to verify with consent.
+### Fixed (2026-09-28 — Windows plugin hooks read installer-created token files)
+- The Bash Stop gate, board check-in, SessionStart and SessionEnd hooks now
+  validate Windows token files with the native ACL rules used by
+  `lifecycle.ps1`: current-user ownership, a protected DACL, and allow rules
+  only for the owner or OWNER RIGHTS. They retain regular-file, link and
+  size checks and reject reparse points in the file or its parents. Git
+  Bash's POSIX mode check previously rejected the installer's private NTFS
+  file, so a fresh install's hooks could silently skip their requests.
+  POSIX hosts retain the existing permission check. The installer summary
+  distinguishes saving the setting from verifying hook authentication.
+  A token file rejected by the Stop gate or coordination-start hook leaves
+  a `token` / `rejected` digest-ledger line without a path or credential,
+  so a refused file can be diagnosed while its daemon request stays suppressed.
+### Changed (2026-09-28 — the Codex setup check names the wake path the shim will take)
+- `ops/setup-codex-coordination.py --check` reported no wake path, and
+  `--enable` reported `wake: pull-only` for every registration without the
+  live-delivery bridge, while since the entry below the Codex doorbell rings
+  by default. The report
+  now carries the wake path the shim would take, read the way
+  `pseudolife_memory/shim.py` reads the switches and `pseudolife-mcp doctor`
+  reports them: `wake` is `live` (`PSEUDOLIFE_AGENT_WAKE` with the app-server
+  bridge and a bridge credential distinct from the bearer the shim sends,
+  read from `PSEUDOLIFE_MCP_TOKEN_FILE` when one is configured), `doorbell`
+  (the codex writer with a bearer and a `codex` CLI found through the
+  server's `env` over the launching environment, unless
+  `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes) or `pull-only`,
+  and `wake_reason` names the gate that decided it
+  (`PSEUDOLIFE_AGENT_COORDINATION=0`, `PSEUDOLIFE_CODEX_DOORBELL=0`, `no
+  codex CLI`, `no bearer token`, `PSEUDOLIFE_WRITER_ID is not codex`, a
+  fixed `PSEUDOLIFE_AGENT_STATE`, a server disabled in Codex, or the board
+  question the daemon answered no to). `--disable` reports `pull-only` with the master switch.
+- `examples/hook-instructions.md` (the maintainer host's dialect for
+  `<data_dir>/hook-instructions.md`) no longer asks every full suite for a
+  hand-sent `SUITE-START`/`SUITE-END`: a run that takes the lock mirrors
+  itself as the `full-suite` lease and mails the peers concerned (the lease
+  entry below). The hand-sent note stays for what the mirror does not cover
+  (`PSEUDOLIFE_SUITE_LOCK=off`, a suite without a bearer, a GPU launch
+  outside `Start-Qwen`, any other saturating window), as the project
+  `CLAUDE.md` already says.
+### Changed (2026-09-28 — a Codex thread is asked to park at turn end on macOS and Linux too)
+- The Stop-hook park gate (the v49 entry below) reached Codex only on
+  Windows, where Codex runs the plugin's native command
+  (`lifecycle.ps1 -Event Stop`); on macOS and Linux Codex runs the bash
+  command, and `stop-wake.sh` exited unless Claude Code had started it, so
+  a Codex thread there was never asked to park when it stopped (its only
+  prompts were `memory_agents`' description and the doorbell's nudge, which
+  needs mail to arrive). Maintainer call flagged in #433, decided
+  2026-09-28: parity. In Codex context (`PSEUDOLIFE_CODEX_HOOK=1`, or
+  `PLUGIN_ROOT` equal to `CLAUDE_PLUGIN_ROOT`, as the sibling bash hooks
+  read it) the script now runs the same gate: one 2 s request to
+  `GET /api/hook/park-gate` for the thread the payload names, the daemon
+  and bearer resolved the way `coordination-start.sh` resolves them (the
+  managed connection file under the Codex home, else the explicit settings,
+  with the same URL-conflict and private-file checks), a block answered the
+  way Codex documents for `Stop` (`{"decision":"block","reason":...}` on
+  stdout, exit 0, the reason JSON-escaped; a message carrying a control
+  character the script does not escape is replaced by the fixed text), and
+  then exit without arming Claude's wake wait. Allow, no address, a
+  continuation's Stop (`stop_hook_active`) or no answer prints nothing. The
+  explicit opt-outs (`PSEUDOLIFE_AGENT_WAKE_HOOK` or
+  `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off`) hold as before.
+  This is the plugin install: a manual Codex install
+  (`ops/setup-codex-hooks.py` without the plugin) carries no `Stop` hook,
+  so it gets no gate on any platform, as before. Both Codex paths now
+  append the `gate` ledger line Claude's gate writes, so a block is
+  auditable in `ledger.log` on every client, and every client records its
+  length column in the same unit, UTF-8 bytes plus one (bash counted
+  characters under a UTF-8 locale, PowerShell UTF-16 units). A hook Claude
+  Code started for its own session (`CLAUDECODE=1` and
+  `CLAUDE_CODE_SESSION_ID` equal to the payload's id) stays Claude's
+  whatever Codex marker its environment carries, so a leaked marker cannot
+  cost it the wake. The gate's request, on both clients, now treats a
+  redirect as a failure (`curl -L --max-redirs 0`, as the sibling hooks do)
+  and drops whatever a failed request printed, so neither a 3xx body nor an
+  answer cut off at the 2 s limit can block. Whether Codex honours the
+  decision of a hook declared `async` is still unprobed on a live install,
+  on every platform.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
@@ -153,9 +287,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `commandWindows`; elsewhere it runs the bash command, which exits unless
   Claude Code started it), and an explicit `PSEUDOLIFE_AGENT_WAKE_HOOK` or
   `PSEUDOLIFE_AGENT_COORDINATION` of `0`/`false`/`no`/`off` turns it off.
-  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when it is private
-  (the sibling hooks' check), so under Git Bash, which cannot show an NTFS
-  file is owner-only, it needs `PSEUDOLIFE_MCP_TOKEN`.
+  The bash gate reads `PSEUDOLIFE_MCP_TOKEN_FILE` only when its private-file
+  check passes (the sibling hooks' check): native Windows ACLs under Git
+  Bash since the 2026-09-28 fix above, POSIX owner and mode elsewhere.
+  A configured file that fails validation suppresses the gate request;
+  it does not fall back to `PSEUDOLIFE_MCP_TOKEN`. Saving the setting alone
+  does not verify hook authentication.
 - `memory_agents` and `memory_message` grew by 199 characters after each
   docstring was tightened to pay for its own line; the core and full
   description budgets move deliberately (11,500 -> 11,750, 17,800 ->
@@ -215,8 +352,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message each to the peers of the same project that it concerns: live
   agents (attached, or registered without an adapter) whose status says
   `suite=running`, `suite=queued` or `gpu=`, and agents parked with
-  `park_clear_by` naming the lease, attached or not (read where present; a
-  sibling change defines it). At most 20 per event, with pid, worktree and
+  `park_clear_by` naming the lease, attached or not (while that park stands;
+  see the lapsed-park entry above). At most 20 per event, with pid, worktree and
   expected end. `CLAUDE.md`'s full-suite rule and
   `docs/guide/configuration.md` now say to read `lease check` instead of
   hand-announcing.

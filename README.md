@@ -248,7 +248,9 @@ stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
 support. Codex setup offers one choice to enable automatic memory briefings,
-reminders, and session cleanup, use standing instructions only, or skip.
+reminders, and session cleanup (plus, where the agent board is on, a board
+check-in at session start and a new-mail hint per prompt), use standing
+instructions only, or skip.
 Automatic setup reuses an enabled PseudoLife plugin or installs the three
 lifecycle hooks, backs up configuration, approves only their exact current
 definitions, and verifies execution. If verification fails, the same approval
@@ -549,6 +551,18 @@ logon autostart task:
 
 ## Updating
 
+**Upgrading from before the agent board (no bearer token yet):** this
+migration step applies to installer-managed Docker installations. Rerun
+`ops/install.ps1` (Windows) or `ops/install.sh` (Linux / macOS) with the
+same client selection (close sessions first on Windows, as below).
+The installer creates a bearer token for the default shim install and
+migrates the environment of the installer-managed `pseudolife-memory`
+stdio registration for Claude Code in place. Custom registrations are
+preserved; follow the installer's printed credential warnings for Gemini
+or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
+create the token or migrate the registration environment. Then refresh clients
+with the **Everything at once** recipe below and restart them.
+
 **Lite tier:** one command, bank untouched:
 
 ```bash
@@ -593,6 +607,11 @@ commit has not changed.
 your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the
 daemon is healthy:
+
+On Windows, close every Claude Code, Codex and Claude Desktop session
+using the shim first (quit Desktop from the tray). If an in-use shim was
+skipped, the daemon deploy has already succeeded; after closing those
+sessions, retry only the shim: `python ops/update_clients.py --only shim`.
 
 ```powershell
 .\ops\update.ps1 -All   # Windows
@@ -933,7 +952,8 @@ start).
 For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
 The helper asks once, detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
-reminder, and session cleanup. The Docker installer runs this step for you.
+reminder, and session cleanup, plus the agent-board check-in where the board
+is on. The Docker installer runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy
