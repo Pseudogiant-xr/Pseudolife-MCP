@@ -1323,6 +1323,25 @@ def test_start_hook_prints_the_checkin_the_daemon_serves(shell, source, checkin_
     assert checkin_daemon.requests == [("/api/hook/coordination-start", "Bearer fixture-token")]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
+@pytest.mark.parametrize("private", [True, False])
+def test_windows_start_hook_validates_the_installer_token_file(private, checkin_daemon, tmp_path):
+    from pseudolife_memory.credentials import _write_token_file
+    token_file = tmp_path / "token ' with spaces"
+    if private:
+        _write_token_file(token_file, "fixture-token")
+    else:
+        token_file.write_bytes(b"fixture-token\n")
+    env, _ = _digest_env(tmp_path)
+    env.update(PSEUDOLIFE_MCP_DAEMON_URL=checkin_daemon.url,
+               PSEUDOLIFE_MCP_TOKEN_FILE=str(token_file))
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    env.pop("PSEUDOLIFE_AGENT_COORDINATION", None)
+    assert _run_start_hook("bash", env) == (CHECKIN + "\n" if private else "")
+    assert checkin_daemon.requests == (
+        [("/api/hook/coordination-start", "Bearer fixture-token")] if private else [])
+
+
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
 def test_start_hook_prints_nothing_when_the_board_is_unavailable(shell, checkin_daemon, tmp_path):
     """No bearer here, so the daemon serves an empty body: no check-in."""

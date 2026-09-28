@@ -5,11 +5,14 @@
 # serves the separate memory-policy output, and with `memory-changes`
 # (sourced by user-prompt-submit.sh) the per-turn memory-change note.
 #
-# Runs under Git Bash on Windows and bash/sh everywhere else. curl only —
-# no pip package, no node, no python on the host.
+# Runs under Git Bash on Windows and bash/sh everywhere else. curl, plus
+# native PowerShell for Windows ACL checks; no pip, node or Python needed.
 
 private_regular() {
     local path="$1" maximum="$2" current parent meta
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        path=$(cygpath -u "$path") || return 1 ;;
+    esac
     [ -f "$path" ] && [ ! -L "$path" ] || return 1
     current=$(dirname "$path")
     while [ "$current" != "." ] && [ "$current" != "/" ]; do
@@ -21,6 +24,41 @@ private_regular() {
     meta=$(stat -c '%u %a %h' "$path" 2>/dev/null ||
            stat -f '%u %Lp %l' "$path" 2>/dev/null) || return 1
     set -- $meta
+    # Git Bash modes do not describe an NTFS DACL. Keep the regular-file,
+    # single-link and size checks, then apply lifecycle.ps1's native ACL rules.
+    case "$OSTYPE" in msys*|mingw*|cygwin*)
+        [ "${3:-0}" = 1 ] || return 1
+        [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ] || return 1
+        PSEUDOLIFE_PRIVATE_FILE="$(cygpath -w "$path")" powershell.exe -NoProfile -NonInteractive -Command '
+            $ErrorActionPreference = "Stop"
+            try {
+                # Git Bash can hide this module by converting PSModulePath.
+                Import-Module "$PSHOME/Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1"
+                $item = Get-Item -LiteralPath $env:PSEUDOLIFE_PRIVATE_FILE -Force
+                if ($item.PSIsContainer -or $item.Length -lt 1 -or
+                    ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 }
+                $parent = $item.Directory
+                while ($parent) {
+                    if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }
+                    $parent = $parent.Parent
+                }
+                $acl = Get-Acl -LiteralPath $item.FullName
+                $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate(
+                    [Security.Principal.SecurityIdentifier]).Value
+                $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+                $allowed = @($acl.Access | Where-Object AccessControlType -eq Allow)
+                if (-not $acl.AreAccessRulesProtected -or $owner -ne $current -or -not $allowed) { exit 1 }
+                foreach ($rule in $allowed) {
+                    $sid = $rule.IdentityReference.Translate(
+                        [Security.Principal.SecurityIdentifier]).Value
+                    if ($sid -notin $owner, "S-1-3-4") { exit 1 }
+                }
+                exit 0
+            } catch { exit 1 }
+        ' </dev/null >/dev/null 2>&1
+        return $?
+        ;;
+    esac
     case "${2:-}" in *00) ;; *) return 1 ;; esac
     [ "${1:-x}" = "$(id -u)" ] && [ "${3:-0}" = 1 ] || return 1
     [ "$(wc -c < "$path" 2>/dev/null || echo $((maximum + 1)))" -le "$maximum" ]
