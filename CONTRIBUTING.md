@@ -97,7 +97,32 @@ use it locally for changes to retrieval, ranking or embedding, since the
 default run exercises those only in the marked tests (CI's `test` lane
 always runs them on the real weights).
 
-All tests must pass. CI's two full-suite lanes run this exact invocation
+Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against the
+measures in the maintainer's private suite-gate memo of 2026-09-28.
+Ordinary code changes run touched and dependent test files locally; they
+do not require a local full suite. Select dependent tests through reverse
+imports, fixture dependencies and references to changed paths, commands
+and configuration keys, including relevant guards and platform tests.
+Record the tested head, selection, dependency reasoning and result in the
+PR. A missing PostgreSQL service or an unexpected platform/database skip
+is not a pass for the affected behavior.
+
+A local full suite remains required for schema/DDL/migration changes;
+shared test infrastructure, conftest, fixtures, suite lock or imported test
+helpers; daemon process creation, ownership, shutdown or recovery changes;
+and dependent coverage that cannot be bounded confidently. Finish review
+fixes and targeted validation before queueing a required full run. Keep
+the suite lock, one local slot, CPU-only execution, PostgreSQL preflight
+and fingerprint guard, and avoid overlapping saturating work. Follow
+[the project validation rules](CLAUDE.md#running-tests-exit-code-discipline)
+for docs-only and test-only changes and merges from master.
+
+All tests must pass. Every PR requires fresh CI for its current head
+integrated with current master, including the full PostgreSQL, lite Linux,
+Windows, macOS and required analysis checks. If master moves, update the
+branch and wait for fresh CI; rerunning an old job tests its old merge
+commit. Independent review remains required, and the maintainer owns the
+merge. CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
 module-scoped fixtures keep their semantics): the `test` lane with
 `PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real

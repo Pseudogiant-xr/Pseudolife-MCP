@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — merge gate trial: CI gates ordinary code; the local full suite is reserved for schema, test-infrastructure and process-model changes)
+- Through 2026-10-12, ordinary code uses touched and dependent local tests
+  plus current-merge-ref CI; required local full runs queue after review
+  fixes. One slot, CPU-only, PostgreSQL preflight and fingerprint guards stay.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook
