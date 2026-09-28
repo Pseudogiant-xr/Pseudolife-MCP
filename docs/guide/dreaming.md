@@ -198,9 +198,11 @@ same way, v4 vs v5
 and v4 stay in the tree as the gates' pre arms; `sonnet_extractor_v3.md` is
 an unrelated, never-adopted 2026-08-02 lineage.
 
-Existing installs pick v5 up when the shim autostart is re-installed
-(`ops/install-shim-autostart.ps1`) or the shim is restarted with the new
-file. Rebuilding the daemon image alone does **not** reach the shim path.
+Existing installs pick v5 up when the shim is restarted on the new file:
+set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
+and unit read it at every start) and run `python ops/shim_autostart.py
+restart claude` — no re-registration, no elevation. Rebuilding the daemon
+image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
 
@@ -433,6 +435,17 @@ steps:
      `--model` choice; binds the docker bridge IP so the daemon container
      can reach it — `host-gateway` routes container→host traffic to the
      bridge, where a loopback bind is invisible).
+   - Both register `python ops/shim_autostart.py run claude` and nothing
+     else: the model, prompt file, port, host, CLI path, interpreter and
+     log file are read from `ops/.env` (`PSEUDOLIFE_CLAUDE_SHIM_MODEL`,
+     `…_PROMPT_FILE`, `…_PORT`, `…_HOST`, `…_CLI`, `…_PYTHON`, `…_LOG`, in
+     a block the installers write from their flags) at every start. To
+     change any of them later, edit that line and run
+     `python ops/shim_autostart.py restart claude` — the elevated shell is
+     needed only once, to register the task. `python ops/shim_autostart.py
+     show claude` prints what the next start would run; the Codex shim is
+     the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*` (`…_HEALTH_TTL`
+     instead of a prompt file).
 2. Set in `ops/.env` (both vars must flip together — pointing only one at
    the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,

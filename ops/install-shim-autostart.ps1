@@ -19,6 +19,13 @@
 #
 #   ops\install-shim-autostart.ps1              # default port 8082, v5 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
+#
+# The task runs `ops\shim_autostart.py run claude`, which reads the model,
+# prompt file, port, host, CLI path, interpreter and log file from ops/.env
+# (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
+# into that file. Changing a value later is an edit plus
+# `python ops\shim_autostart.py restart claude` — no elevation. Elevation
+# is needed only here, to register the task, once.
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
 #   claude-haiku-4-5, claude-fable-5 (the list ops\install.ps1 offers; any other
 #   claude-* id passes to the shim unchanged)
@@ -130,13 +137,18 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
 # arg) unless the whole thing is wrapped in one extra redundant pair of
 # quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-$innerCmd = "`"$PythonExe`" `"$repo\evals\claude_shim.py`" --port $Port " +
-            "--model $Model --system-prompt-file `"$promptPath`""
-$cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+# The task's only argument is the runner: the values live in ops/.env.
+# The runner opens the log itself and starts the shim detached with no
+# console, so there is no `cmd >> log` layer any more (the process tree
+# is the runner, gone in a second, then the shim's python).
+& $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
+    --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
+$innerCmd = "`"$PythonExe`" `"$repo\ops\shim_autostart.py`" run claude"
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = 'cmd.exe'
-`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.FileName = '$($PythonExe -replace "'", "''")'
+`$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run claude") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
 `$psi.WorkingDirectory = '$repo'
@@ -245,6 +257,7 @@ if ($startup.Count -eq 0) {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), log $LogFile)."
+Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude (no elevation)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

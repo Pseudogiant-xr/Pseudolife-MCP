@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-29 — the extractor shims start from ops/.env; changing a model is an edit plus a restart, not an elevated re-registration)
+- The Claude and Codex shim autostart task (Windows) and units (Linux)
+  now run `python ops/shim_autostart.py run claude|codex` and nothing
+  else; the runner reads the model, prompt file (Claude), health TTL
+  (Codex), port, host, CLI path, interpreter and log file from `ops/.env`
+  (`PSEUDOLIFE_CLAUDE_SHIM_*` / `PSEUDOLIFE_CODEX_SHIM_*`) at every start,
+  falling back to the defaults the installers name. The installers' flags
+  (`-Model` / `--model`, `-Port`, `-PromptFile`, `-HealthTtl`, `-CodexCli`,
+  ...) keep working: `ops/install-*-shim-autostart.*` write them into a
+  managed block of `ops/.env` (`shim_autostart.py config`) before
+  registering. Changing a value later is an edit plus
+  `python ops/shim_autostart.py restart claude|codex` (stops the shim on
+  its port and starts the task or unit again), with no elevation: the
+  elevated shell remains a one-time step to register the task. On
+  2026-09-28 a model change needed a Start-menu elevated PowerShell only
+  because the model sat in the task's command line. `show` prints the
+  resolved settings; `run --dry-run` the command line. The runner opens
+  the log itself and starts the shim with no console, so the Windows task
+  no longer goes through `cmd >> log`. [Dreaming](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
 ### Added (2026-09-29 — `pseudolife-mcp update`: the whole install updates from a release, with no checkout)
 - `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`) updates a
   Docker-tier install from a published release: it pulls the pinned GHCR

@@ -212,7 +212,7 @@ def test_the_scan_finds_examples_in_every_prompt_family():
     assert any(_shingles(n) for n in _notes(c["dream._SYSTEM_PROMPT"]))
 
 
-_LAUNCHERS = ("install-shim-autostart.ps1", "install-shim-autostart.sh",
+_LAUNCHERS = ("install-shim-autostart.ps1", "install-shim-autostart.sh", "shim_autostart.py",
               "install.ps1", "install.sh")
 
 
