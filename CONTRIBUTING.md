@@ -101,8 +101,10 @@ All tests must pass. CI's two full-suite lanes run this exact invocation
 (`-n 2 --dist loadfile` shards whole files across two workers so
 module-scoped fixtures keep their semantics): the `test` lane with
 `PSEUDOLIFE_TEST_EMBEDDER=real`, so every test also runs on the real
-weights for each PR, and `test-lite-linux` with the default. A third lane
-(`test-lite-windows`) runs a narrower fixed file list. If you add
+weights for each PR, and `test-lite-linux` with the default. Two more
+lanes run narrower fixed file lists: `test-lite-windows`, and
+`test-lite-macos` for the plugin hooks and installers under macOS's
+bash 3.2 and BSD tools. If you add
 behavior, add a test; if you fix a bug, add the test that would have
 caught it.
 

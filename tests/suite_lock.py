@@ -62,6 +62,22 @@ own: pytest sets ``config.args``, which decide whether a run is full, only
 after importing conftest.py, and this module must be imported to take the
 lock at all.
 
+The board mirrors the lock. On the night of 2026-09-27 two full suites and
+three GPU cells ran while the agent board's lease list stayed empty, and the
+SUITE-START/SUITE-END notes the rule asked for were status overwrites that no
+peer was sent. A full run now puts a board lease named ``full-suite`` behind
+its OS lock (``pseudolife_memory.lease_cli.BoardMirror``): while it queues it
+is a board waiter, once it holds the lock it holds the lease, renewed in the
+background, with the run's pid and worktree as its purpose and the expected
+end from the median of the last EXPECT_SAMPLE recorded run times (or
+DEFAULT_EXPECT_SECONDS); the peers whose status says ``suite=running``,
+``suite=queued`` or ``gpu=``, or who are parked until the lease clears, are
+sent one notice on acquire and one on release. The OS lock stays the truth:
+a board that is unreachable, refuses, or shows another holder costs one
+line on stderr and never delays or stops the run; ``PSEUDOLIFE_SUITE_LOCK=off``
+(CI) takes neither. conftest snapshots the bearer and daemon URL at import
+(``board_environment``), before tests/client_environment.py strips them.
+
 Configuration:
 
 ``PSEUDOLIFE_SUITE_LOCK``
@@ -97,6 +113,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -122,6 +139,22 @@ SLOTS_FILE = "full-suite.slots"
 MAX_SLOTS = 8  # a sanity bound: each slot is a ~20 GB full suite
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
+# How long each full run held the lock, one JSON line per run, newest last;
+# the board's expected end is the median of the last EXPECT_SAMPLE. Passing
+# suites measured 16:40 to 17:26 on the maintainer's host (2026-09-24/25);
+# the default leaves room for a loaded one until five runs are on record.
+DURATIONS_FILE = "full-suite.durations.jsonl"
+DURATIONS_KEEP = 50
+EXPECT_SAMPLE = 5
+DEFAULT_EXPECT_SECONDS = 25 * 60
+# What the board mirror reads from the environment conftest imports in:
+# the bearer, its file form, the daemon URL and the project for the notices.
+BOARD_ENVIRONMENT = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE",
+                     "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_AGENT_PROJECT")
+SUITE_LEASE = "full-suite"
+# How long a run that leaves the queue without the lock (refused, stale
+# tree, Ctrl-C) waits for the board to drop its place.
+ABORT_BUDGET = 5.0
 
 # A waiter creates its ticket, then locks it, so for a moment a new ticket
 # looks abandoned. A free ticket younger than this is passed over but not
@@ -165,6 +198,9 @@ class HeldLock:
     file: IO[bytes]
     directory: Path
     slot: int = 0
+    worktree: str = ""
+    taken_at: float = 0.0  # time.monotonic() at acquisition
+    mirror: object | None = None  # the board's view of this lock, if any
 
 
 def _slot_file(name: str, slot: int) -> str:
@@ -444,17 +480,32 @@ def _take_a_slot(directory: Path, handles: dict[int, IO[bytes]],
     return None
 
 
+def _mirror_call(mirror, method: str, out: IO[str], *args) -> None:
+    """One call on the board mirror; whatever it raises is one line, never
+    the run's problem. The mirror does its board traffic on its own thread,
+    so ``waiting`` and ``hold`` return at once and ``release`` within its
+    budget."""
+    try:
+        getattr(mirror, method)(*args)
+    except Exception as exc:  # noqa: BLE001 — the board never stops a run
+        print(f"full-suite lock: the board mirror failed on {method} "
+              f"({type(exc).__name__}); the run continues", file=out, flush=True)
+
+
 def acquire(directory: Path, mode: str, *, worktree: str,
             slots: int | Callable[[], int] = 1,
             poll: float = 2.0, notice_every: float = 60.0,
             out: IO[str] | None = None,
-            check: Callable[[], None] | None = None) -> HeldLock:
+            check: Callable[[], None] | None = None,
+            mirror=None) -> HeldLock:
     """Take one of ``slots`` lock slots in arrival order, waiting (``wait``)
     or raising :class:`SuiteLockBusy` (``fail``) while every slot is held
     or another process queued first. A callable ``slots`` is read again on
     every poll, so a changed count reaches runs already queued. ``check``
     runs on every poll, just before each try for the lock; whatever it
-    raises abandons the wait."""
+    raises abandons the wait. ``mirror`` (see :func:`board_mirror`) is told
+    ``waiting()`` on every poll spent queued and ``hold()`` once the lock is
+    taken; :func:`release` tells it ``release()``."""
     count = slots() if callable(slots) else slots
     if count < 1:
         raise ValueError(f"slots={count}: at least one is needed")
@@ -495,12 +546,18 @@ def acquire(directory: Path, mode: str, *, worktree: str,
                     print(f"waiting for the full-suite lock {situation}{hint}",
                           file=out, flush=True)
                     next_notice = now + notice_every
+                if mirror is not None:
+                    _mirror_call(mirror, "waiting", out)
                 time.sleep(poll)
         finally:
             _leave(ticket)  # taken, refused or interrupted: out of the queue
     except BaseException:  # refused, a lock error, or Ctrl-C while queued
         for handle in handles.values():
             handle.close()
+        if mirror is not None:
+            # Out of the board's queue too, or give back an early grant:
+            # otherwise `lease check` shows a run that is not there.
+            _mirror_call(mirror, "release", out, ABORT_BUDGET)
         raise
     for index, handle in handles.items():
         if index != slot:
@@ -520,19 +577,111 @@ def acquire(directory: Path, mode: str, *, worktree: str,
         which = f" (slot {slot + 1} of {count})" if count > 1 else ""
         print(f"full-suite lock acquired{which} after waiting "
               f"{minutes}m{seconds:02d}s", file=out, flush=True)
-    return HeldLock(handles[slot], directory, slot)
+    held = HeldLock(handles[slot], directory, slot, worktree=str(worktree),
+                    taken_at=time.monotonic(), mirror=mirror)
+    if mirror is not None:
+        _mirror_call(mirror, "hold", out)
+    return held
 
 
-def release(held: HeldLock) -> None:
+def release(held: HeldLock, *, record: bool = True) -> None:
+    """Free the lock, then tell the board. ``record`` times the run for the
+    next one's expected end: conftest passes False for a run that did not
+    run its tests (interrupted, a collection or usage error), so aborts do
+    not drag the median down."""
+    if record and held.taken_at:
+        try:
+            record_duration(held.directory, time.monotonic() - held.taken_at,
+                            worktree=held.worktree)
+        except (OSError, ValueError):
+            pass  # a record for the next run's estimate; the lock is what counts
     # Drop the record before unlocking, so it never describes a successor.
-    record = read_holder(held.directory, held.slot)
-    if record is not None and record.get("pid") == os.getpid():
+    holder = read_holder(held.directory, held.slot)
+    if holder is not None and holder.get("pid") == os.getpid():
         try:
             (held.directory / _slot_file(HOLDER_FILE, held.slot)).unlink()
         except OSError:
             pass  # a waiter is reading it; the next holder overwrites it
     _unlock(held.file)
     held.file.close()
+    # The board last, as `lease run` does: a slow daemon must never keep the
+    # lock from the next run. The mirror waits at most its release budget.
+    if held.mirror is not None:
+        _mirror_call(held.mirror, "release", sys.stderr)
+
+
+def record_duration(directory: Path, seconds: float, *, worktree: str) -> None:
+    """Append how long a run held the lock, keeping the last DURATIONS_KEEP."""
+    path = directory / DURATIONS_FILE
+    line = json.dumps({"seconds": round(seconds, 1), "worktree": worktree,
+                       "ended": datetime.now().astimezone().isoformat(timespec="seconds")})
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    lines = [*lines, line][-DURATIONS_KEEP:]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def expected_seconds(directory: Path) -> int:
+    """How long the next full run should take: the median of the last
+    EXPECT_SAMPLE recorded runs, else DEFAULT_EXPECT_SECONDS."""
+    try:
+        lines = (directory / DURATIONS_FILE).read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):  # ValueError: not UTF-8
+        return DEFAULT_EXPECT_SECONDS
+    seconds = []
+    for line in lines:
+        try:
+            value = json.loads(line).get("seconds")
+        except (ValueError, AttributeError):
+            continue
+        # Bounded as well as finite: json reads Infinity, NaN and 1e400.
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and 0 < value <= 7 * 86400):
+            seconds.append(float(value))
+    recent = sorted(seconds[-EXPECT_SAMPLE:])
+    if not recent:
+        return DEFAULT_EXPECT_SECONDS
+    middle = len(recent) // 2
+    median = recent[middle] if len(recent) % 2 else (recent[middle - 1] + recent[middle]) / 2
+    return max(1, int(round(median)))
+
+
+class _BoardEnvironment(dict):
+    """A dict whose repr names its keys only: it carries the bearer, and a
+    traceback shown with locals (pytest -l) must not print it."""
+
+    def __repr__(self) -> str:
+        return f"<board environment: {', '.join(sorted(self))}>"
+
+    __str__ = __repr__
+
+
+def board_environment(environ) -> dict[str, str]:
+    """The environment the board mirror needs, copied before the suite's
+    client isolation strips it (tests/client_environment.py)."""
+    return _BoardEnvironment(
+        {name: environ[name] for name in BOARD_ENVIRONMENT if name in environ})
+
+
+def board_mirror(directory: Path, worktree, board_environ, *, transport=None):
+    """The board's view of this run's lock, or None when the package that
+    talks to the board cannot be imported. The lease is ``full-suite``; its
+    purpose names the run, and its expected end comes from the recorded run
+    times in ``directory``. Nothing is contacted until the lock is waited
+    for or taken."""
+    try:
+        from pseudolife_memory.lease_cli import BoardMirror
+    except ImportError as exc:
+        print(f"full-suite lock: no board mirror ({exc}); the run continues",
+              file=sys.stderr, flush=True)
+        return None
+    worktree = Path(worktree)
+    return BoardMirror(
+        SUITE_LEASE, purpose=f"pytest pid {os.getpid()} in {worktree.name}",
+        expect=expected_seconds(directory), worktree=str(worktree),
+        environ=board_environ, transport=transport, lock_dir=directory)
 
 
 def _digest(path: Path) -> str | None:
@@ -592,34 +741,58 @@ class TreeChanged(RuntimeError):
     """Files a queued run already read changed on disk while it waited."""
 
 
+def session_kind(config, environ, tests_root: Path) -> str:
+    """What this session is to the lock: ``worker`` (an xdist worker, whose
+    controller holds it), ``off`` (the lock is off, as on GitHub Actions),
+    ``full`` or ``targeted`` (:func:`is_full_run`). ``ValueError`` for a bad
+    ``PSEUDOLIFE_SUITE_LOCK``, whatever the run."""
+    if hasattr(config, "workerinput"):
+        # An xdist worker: its controller already holds the lock, and a
+        # worker queued behind its own controller would never start.
+        return "worker"
+    if lock_mode(environ) == "off":
+        return "off"
+    option = config.option
+    full = is_full_run(
+        config.args, config.invocation_params.dir, tests_root,
+        keyword=getattr(option, "keyword", "") or "",
+        markexpr=getattr(option, "markexpr", "") or "",
+        listing_only=any(getattr(option, name, False)
+                         for name in LISTING_OPTIONS))
+    return "full" if full else "targeted"
+
+
 def take_for_session(config, environ, tests_root: Path,
-                     read_files=()) -> HeldLock | None:
+                     read_files=(), preflight: Callable[[str], None] | None = None,
+                     mirror=None) -> HeldLock | None:
     """The conftest entry point: the held lock, or None when this session
     does not take it (targeted run, ``off``, or an xdist worker). A usage
     error, without ever taking the lock, when tree code this process
     imported, its ini file, or one of ``read_files`` (files conftest read
-    at import) changed on disk while it queued."""
+    at import) changed on disk while it queued. ``preflight``, when given,
+    is called with ``"full"`` or ``"targeted"`` once the run is classified
+    and before a full run queues; never for a worker or with the lock off.
+    Whatever it raises ends the session with the lock untouched. ``mirror``
+    is the board's view of the lock (:func:`board_mirror`), or a callable
+    that builds it, called only for a full run past the preflight, before
+    the fingerprint, so the modules it imports are fingerprinted with the
+    rest."""
     import pytest
 
-    if hasattr(config, "workerinput"):
-        # An xdist worker: its controller already holds the lock, and a
-        # worker queued behind its own controller would never start.
-        return None
     try:
-        mode = lock_mode(environ)
+        kind = session_kind(config, environ, tests_root)
     except ValueError as exc:
         raise pytest.UsageError(str(exc)) from None
-    if mode == "off":
+    if kind in ("worker", "off"):
         return None
-    option = config.option
-    if not is_full_run(
-            config.args, config.invocation_params.dir, tests_root,
-            keyword=getattr(option, "keyword", "") or "",
-            markexpr=getattr(option, "markexpr", "") or "",
-            listing_only=any(getattr(option, name, False)
-                             for name in LISTING_OPTIONS)):
+    if preflight is not None:
+        preflight(kind)
+    if kind == "targeted":
         return None
+    mode = lock_mode(environ)  # wait or fail: session_kind validated it
     directory = lock_dir(environ)
+    if callable(mirror):
+        mirror = mirror()
     # What this process already runs or read from the tree, fingerprinted
     # before it can wait: the module docstring has the 2026-09-25 run that
     # went stale. pytest read the ini file before conftest was imported.
@@ -642,7 +815,7 @@ def take_for_session(config, environ, tests_root: Path,
         slot_count(environ, directory)  # a bad count fails before queueing
         return acquire(directory, mode, worktree=str(worktree),
                        slots=lambda: slot_count(environ, directory),
-                       check=unchanged)
+                       check=unchanged, mirror=mirror)
     except (SuiteLockBusy, TreeChanged, ValueError) as exc:
         raise pytest.UsageError(str(exc)) from None  # busy (fail), stale, bad count
     except OSError as exc:

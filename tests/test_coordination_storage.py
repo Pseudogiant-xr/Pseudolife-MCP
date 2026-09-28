@@ -423,7 +423,7 @@ def test_credential_shaped_child_label_is_refused(store):
         store.update(*creds(a), children=[shaped])
 
 
-# --- park records (schema v48) ---------------------------------------------
+# --- park records (schema v49) ---------------------------------------------
 
 def _park(row):
     return {key: row[key] for key in ("park_reason", "park_needs", "park_clear_by",
@@ -889,3 +889,55 @@ def test_clears_needs_a_distinctive_word(store):
     for filler in ("the", "of the", "diff"[:3]):
         assert _wake(store, a, b, clears=filler)["decision"] == "withheld", filler
     assert _wake(store, a, b, clears="the storage")["decision"] == "rung"
+
+
+def test_a_burst_to_parked_peers_decides_and_staggers_each_ring(store):
+    """A ``to: "all"`` burst (#430) gets one wake decision per recipient, and
+    the rings of that one send are spaced by the fan-out stagger; a retry of
+    the burst repeats every decision and writes no new ring."""
+    a = store.register("alice")
+    peers = [_wake_capable(store) for _ in range(3)]
+    for agent in peers:
+        store.update(*creds(agent), park_reason="blocked", park_needs="x", park_clear_by="anyone")
+        _idle(store, agent)
+    out = store.send(*creds(a), to="all", text="the GPU is free", request_id="burst")
+    assert {r["wake"]["decision"] for r in out["receipts"]} == {"rung"}
+    assert sorted(r["wake"]["ring_at"] for r in out["receipts"]) == [1000.0, 1030.0, 1060.0]
+    again = store.send(*creds(a), to="all", text="the GPU is free", request_id="burst")
+    assert [r["wake"] for r in again["receipts"]] == [r["wake"] for r in out["receipts"]]
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (3,)
+
+
+def test_live_delivery_carries_only_mail_the_daemon_rang_or_hinted(store):
+    """A recipient with a live channel is woken by every message its
+    adapter's delivery receive yields, so that receive yields only mail the
+    daemon decided to ring (or hinted to an active session, and mail from
+    before v49): chatter withheld from a parked session waits for an
+    explicit receive, which still returns it."""
+    a = store.register("alice")
+    b = _wake_capable(store)
+    store.update(*creds(b), park_reason="waiting_peer", park_needs="the review",
+                 park_clear_by="maintainer")
+    _idle(store, b)
+    withheld = store.send(*creds(a), to=b["agent_id"], text="fyi", request_id="chatter")
+    rung = store.send(*creds(a), to=b["agent_id"], text="review done", request_id="clears",
+                      clears="the review")
+    assert (withheld["wake"]["decision"], rung["wake"]["decision"]) == ("withheld", "rung")
+    live = store.receive(*creds(b), for_delivery=True)["messages"]
+    assert [m["message_id"] for m in live] == [rung["message_id"]]
+    pulled = store.receive(*creds(b))["messages"]
+    assert [m["message_id"] for m in pulled] == [withheld["message_id"], rung["message_id"]]
+    # A message from before v49 carries no decision and keeps live delivery.
+    store.storage.conn.execute("UPDATE coordination_messages SET wake=NULL WHERE message_id=%s",
+                               (withheld["message_id"],))
+    live = store.receive(*creds(b), for_delivery=True)["messages"]
+    assert {m["message_id"] for m in live} == {withheld["message_id"], rung["message_id"]}
+
+
+def test_a_null_park_expiry_is_refused(store):
+    """REST passes a JSON null through; a park stored without an expiry
+    would never lapse, past the default and the cap."""
+    a = store.register("alice")
+    with pytest.raises(CoordinationError, match="invalid_park"):
+        store.update(*creds(a), park_reason="blocked", park_needs="GPU", park_expires=None)
+    assert store.authenticate(*creds(a))["park_reason"] is None

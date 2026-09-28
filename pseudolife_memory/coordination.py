@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from pseudolife_memory.principals import parse_token_map, resolve_principal
-from pseudolife_memory.storage.coordination import CoordinationClockChanged
+from pseudolife_memory.storage.coordination import CoordinationClockChanged, CoordinationError
 
 
 _PARAMETERS = {
@@ -74,9 +74,27 @@ PUBLIC_ERROR_CODES = frozenset({
     "lease_not_held", "lease_queue_full",
     # v46: a body, status or lease purpose shaped like a credential (a 400).
     "secret_like_body",
-    # v48: the park record and the send's wake fields.
+    # v48: an id prefix that matches several ids (the detail names them),
+    # and a burst (``to: "project:<name>"`` or ``"all"``) that would reach
+    # nobody or more than FANOUT_MAX peers.
+    "ambiguous_recipient", "ambiguous_message_id", "ambiguous_reply",
+    "fanout_too_large", "no_recipients",
+    # v49: the park record and the send's wake fields.
     "invalid_park", "invalid_clears", "invalid_urgent",
 })
+
+
+class CoordinationRefused(ValueError):
+    """What ``dispatch`` raises: a stable public code and, for some
+    refusals, a short public ``detail`` the caller can act on (the
+    candidates an ambiguous prefix matched, the size of a refused burst).
+    Its text is ``code`` or ``code: detail``, which is what the MCP tool
+    surfaces; the REST route sends the two as separate fields."""
+
+    def __init__(self, code: str, detail: str | None = None):
+        self.code = code
+        self.detail = detail
+        super().__init__(code if detail is None else f"{code}: {detail}")
 
 
 # Travels with every receive result so the caution is beside the text, not
@@ -89,6 +107,40 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # Served by ``GET /api/hook/coordination-start`` to the plugin's startup hook,
 # and only to a caller that can use the board: a check-in that must fail would
 # cost every session start a failed tool call.
+#
+# The mechanical steps come first. The "when to send" part after them dates
+# from 2026-09-27/28: a review of six sessions found 15 status updates, 9 peer
+# lists and 7 receives against 0 sends until a human told one session to
+# broadcast; the text named the verbs and never said when a message is due.
+# Five candidate rules were measured with evals/coordination_checkin_bench.py
+# (four field-neutral teams x five rules x send/no-send, claude-sonnet-5; the
+# artifacts are evals/results/coordination-checkin-bench-checkin-rules-
+# 20260928*.json). Two moved decisions and are kept: the shared-resource rule
+# and keep-your-status-true. The shared-resource rule took three wordings.
+# The first ("check who holds it and message them") moved nothing: the model
+# read a holder's posted ETA as making a message pointless. The second added
+# "you are next ... a status line is not a queue ... do not guess that they
+# are idle"; it won on the situations it was reworded against but, on eight
+# held-out ones, messaged holders who had already released the thing. The
+# third, served here, bounds it: message a current holder or booker, and
+# when the board shows the thing free, use it and say so in your status.
+# Its unbiased check is the second held-out set, frozen in its own commit
+# before this wording was scored: there it beat the old check-in by +0.062
+# [-0.062, +0.208] over 48 pairs, which cannot be told apart from zero, and
+# the second wording by +0.167; keep-your-status-true scored 1.00 in every
+# arm there, so only the main set supports it (artifact -final). Three rules were cut because removing them
+# changed no decision in 120 pairs: "a message is what a peer must act on",
+# "tell every active peer before debugging what you did not break", and
+# "message everyone waiting when you clear something". The model followed
+# the first two with no check-in at all, and the third with the old
+# check-in's mechanical steps, so the bench cannot say they are useless,
+# only that it could not see them help. An install's own words for
+# its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
+# hook-instructions.md is one host's), served after the memory core. The
+# closing subagent sentence (#425) is about who may write, not when to send;
+# the -final run scored this whole constant, that sentence included, and
+# tests pin it byte for byte to evals/results/coordination-checkin-arms/
+# rules-v3-20260928.txt.
 CHECKIN_TEXT = (
     "Pseudolife coordination: at the first task and on resume, use "
     "memory_agents(action=list) to check peers and memory_agents(action=update, "
@@ -97,10 +149,24 @@ CHECKIN_TEXT = (
     "memory_message(action=ack, message_id=<id>) after reading. On a "
     "pending-message hint, receive again. Changed-message alerts are brief; "
     "receive is the source of full messages. If coordination tools are "
-    "unavailable, say so and continue independently. A subagent shares its "
+    "unavailable, say so and continue independently. When to send: Before using "
+    "something shared (anything only one of you can use at a time, or that slows "
+    "down for everyone), look for whoever holds it or has it booked. If someone "
+    "does, message them that you are next and what you need, even when their "
+    "status says when they expect to finish: a status line is not a queue. If "
+    "the board shows it free, use it and say so in your status. Keep your "
+    "status true: what you hold, what you are waiting on, when you expect to "
+    "finish. A peer may not see mail until its next turn. A subagent shares its "
     "parent's board address, so it only reads the board (list, receive without "
     "ack, memory_search); status, ack and send belong to the parent, which can "
-    "name its subagents with memory_agents(action=update, children=[...]). "
+    "name its subagents with memory_agents(action=update, children=[...]).")
+# The check-in sentence the v49 park-record decision asked for (maintainer,
+# 2026-09-28). NOT served yet: CHECKIN_TEXT is pinned byte for byte to the
+# text evals/coordination_checkin_bench.py measured (#435), so this sentence
+# joins it only with a new bench run. Until then the park request reaches a
+# session through memory_agents' description, the Stop hook's park gate and
+# the nudge text.
+PARK_CHECKIN_SENTENCE = (
     "When you stop, park: memory_agents(action=update, park_reason=<done|blocked|"
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
     "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
@@ -109,14 +175,25 @@ CHECKIN_TEXT = (
 # its adapter (or, for Codex, the daemon) confirms the board is usable. The
 # daemon's own instructions cannot know whether a client injects instance
 # credentials, and a client that does not can never update or receive.
-# Daemon text plus this stays within Codex's 512-character budget.
+# Daemon text plus this stays within Codex's 512-character budget (508). It
+# carries the shared-resource rule with its boundary ("Free? Use it"). Four
+# Codex wordings were scored (2026-09-28, evals/coordination_checkin_
+# bench.py): a form carrying the two cut rules scored the pre-rules text's
+# accuracy (-ablation); two unbounded forms, "message its holder you're
+# next; status isn't a queue" (-ablation2) and "Need a shared thing someone
+# holds? Message them you're next; status isn't a queue" (-codex), gained on
+# the main set, and the second, like the full text's second wording,
+# messaged holders who had let go on the first held-out set; this bounded
+# form gains nothing on the main set and gains on both held-out sets, never
+# over-sending (-codex4). Over-sending is the costlier failure. Each was
+# scored without the closing "Subagents only read the board." (#425).
 CHECKIN_INSTRUCTION = (
-    "Agent board at task start: memory_agents update project, task, status, "
-    "then list peers; memory_message receive, then ack after reading. "
+    "Board: memory_agents update, list; memory_message receive, ack. Need what a "
+    "peer holds? Message them you're next. Free? Use it, update status. "
     "Subagents only read the board.")
 
 
-# What the Stop hook shows when a turn ends without a park record (v48).
+# What the Stop hook shows when a turn ends without a park record (v49).
 # Served by ``GET /api/hook/park-gate`` behind the word ``block``; the hook
 # ends the turn with it once (``stop_hook_active`` then holds it back).
 PARK_GATE_MESSAGE = (
@@ -179,10 +256,19 @@ def unavailable_reason(service, headers: Mapping[str, str], *,
 
 
 def public_error(exc: Exception) -> str:
-    code = str(exc)
+    code = exc.code if isinstance(exc, CoordinationRefused) else str(exc)
     if code in PUBLIC_ERROR_CODES:
         return code
     return "invalid_request" if isinstance(exc, (ValueError, TypeError)) else "coordination_unavailable"
+
+
+def public_detail(exc: Exception) -> str | None:
+    """The refusal's detail, only beside its own public code: never the
+    text of an unexpected exception."""
+    if not isinstance(exc, (CoordinationError, CoordinationRefused)):
+        return None
+    detail = exc.detail
+    return detail if isinstance(detail, str) and exc.code in PUBLIC_ERROR_CODES else None
 
 
 def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token=None) -> str:
@@ -388,8 +474,18 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
     if action in {"send", "attach", "detach"}:
         notify = getattr(service, "_coordination_notifier", None)
         if notify is not None:
-            notify(parameters["to"] if action == "send" else agent_id)
+            # The receipts name the recipients: the address may have been a
+            # prefix, or a project or the whole board.
+            for recipient in (send_recipients(result) if action == "send" else [agent_id]):
+                notify(recipient)
     return result
+
+
+def send_recipients(result) -> list[str]:
+    """The agent ids a send result says were reached: one, or a burst's."""
+    if "receipts" in result:
+        return [receipt["recipient_agent_id"] for receipt in result["receipts"]]
+    return [result["recipient_agent_id"]]
 
 
 def dispatch(service, action: str, parameters: dict, *, headers=None,
@@ -410,7 +506,7 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
                 service._ensure_init()
             return _dispatch(service, action, parameters, headers=headers, principal=principal)
     except Exception as exc:
-        raise ValueError(public_error(exc)) from None
+        raise CoordinationRefused(public_error(exc), public_detail(exc)) from None
 
 
 # How long a model's claim holds between renewals. A model renews by claiming
@@ -435,7 +531,7 @@ def agents(service, *, action="list", project=None, task=None, status=None, leas
 
     ``claim`` and ``release`` are session-held resource leases (v45): a
     claim's ``status`` is its purpose, ``expect`` its expected duration.
-    The ``park_*`` fields are the park record (v48); an empty
+    The ``park_*`` fields are the park record (v49); an empty
     ``park_reason`` is the tool's way to send null, which clears it."""
     park = _present(park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
                     park_expires=park_expires)

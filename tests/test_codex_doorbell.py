@@ -157,7 +157,7 @@ class Mailbox:
         if ids:
             self.set(*ids, notify=False)
 
-    # The daemon's decision the adapter offers (v48): standing by default,
+    # The daemon's decision the adapter offers (v49): standing by default,
     # so the arrival tests keep their meaning; a test clears it to show the
     # gate holds.
     ring = ("rung", "anyone")
@@ -1154,7 +1154,7 @@ def test_shim_arms_the_doorbell_by_default_and_names_a_bad_configured_path(monke
     assert "PSEUDOLIFE_CODEX_BIN is not an absolute path to an existing file" in missing
 
 
-# --- the daemon decides, the doorbell rings (v48) --------------------------
+# --- the daemon decides, the doorbell rings (v49) --------------------------
 
 def test_without_a_daemon_decision_the_doorbell_holds(tmp_path):
     """New mail alone no longer rings: the daemon's wake decision, offered

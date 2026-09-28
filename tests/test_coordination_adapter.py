@@ -959,13 +959,17 @@ def test_pull_adapter_renew_failure_reports_degraded_hint_once(monkeypatch, caps
     asyncio.run(asyncio.wait_for(drive(), 4))
 
 
-@pytest.mark.parametrize("status,code", [
-    (401, "unauthorized"),
-    (403, "invalid_credential"),
-    (404, "instance_not_found"),
+# An auth failure is fixed by correcting access or rebinding the saved
+# identity. A missing address is not: rebind refuses a missing row, and the
+# next start retires the state and registers a new address, so the advice
+# names a restart and never suggests rebind.
+@pytest.mark.parametrize("status,code,advice,never", [
+    (401, "unauthorized", "restore/rebind", "restart"),
+    (403, "invalid_credential", "restore/rebind", "restart"),
+    (404, "instance_not_found", "restart the session", "rebind"),
 ])
 def test_permanent_background_identity_failure_stops_retrying_and_preserves_state(
-        monkeypatch, tmp_path, capsys, status, code):
+        monkeypatch, tmp_path, capsys, status, code, advice, never):
     async def drive():
         from pseudolife_memory.coordination_adapter import CoordinationAdapter
         monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
@@ -987,7 +991,8 @@ def test_permanent_background_identity_failure_stops_retrying_and_preserves_stat
         await asyncio.sleep(0.05)
         assert len(daemon.calls) == calls
         assert instance._failure.code == code
-        assert "restore/rebind" in instance.unread_hint
+        assert advice in instance.unread_hint
+        assert never not in instance.unread_hint
         assert state.read_bytes() == original
         assert not state.with_name(state.name + ".stale").exists()
         await instance.__aexit__(None, None, None)
@@ -995,6 +1000,9 @@ def test_permanent_background_identity_failure_stops_retrying_and_preserves_stat
     asyncio.run(asyncio.wait_for(drive(), 4))
     stderr = capsys.readouterr().err
     assert stderr.count("background delivery stopped") == 1
+    stopped = next(line for line in stderr.splitlines() if "background delivery stopped" in line)
+    assert advice in stopped
+    assert never not in stopped
     assert "fixture-key" not in stderr
 
 
@@ -1270,7 +1278,7 @@ def test_saved_identity_survives_a_failed_attach(tmp_path):
     asyncio.run(asyncio.wait_for(drive(), 4))
 
 
-# --- the daemon decides, the shim rings (v48) ------------------------------
+# --- the daemon decides, the shim rings (v49) ------------------------------
 
 def _preview(*ids):
     return [{"message_id": message_id, "sender_agent_id": "f" * 32, "sender_label": "peer",
@@ -1377,7 +1385,7 @@ def test_a_malformed_wake_answer_rings_nothing(tmp_path):
 def test_an_adapter_with_a_ring_path_says_so_at_attach(tmp_path):
     """A Claude shim with a digest (the Stop hook reads its .ring) or a
     Codex adapter the doorbell watches declares ``ring: true`` at attach;
-    a daemon older than v48 refuses the parameter once, and the adapter
+    a daemon older than v49 refuses the parameter once, and the adapter
     attaches without it from then on."""
     daemon = FakeDaemon()
     refused = []

@@ -75,7 +75,7 @@ def _payload(session_id=SESSION, **extra):
 
 
 def _ring(tmp_path, watermark, reason="rung anyone", key=None):
-    """The marker the shim writes for a ring the daemon decided (v48)."""
+    """The marker the shim writes for a ring the daemon decided (v49)."""
     directory = tmp_path / "digests"
     directory.mkdir(exist_ok=True)
     target = directory / f"{key or _key()}.ring"
@@ -86,7 +86,7 @@ def _ring(tmp_path, watermark, reason="rung anyone", key=None):
 
 def _digest(tmp_path, watermark, body, key=None, ring=True):
     """A digest as the shim writes it, with (by default) a ring marker for
-    the same watermark: since v48 the hook fires only on a decided ring."""
+    the same watermark: since v49 the hook fires only on a decided ring."""
     directory = tmp_path / "digests"
     directory.mkdir(exist_ok=True)
     # The shim replaces the file atomically; do the same so a polling hook
@@ -634,9 +634,9 @@ def test_a_symlinked_host_record_is_refused(tmp_path):
     assert result.returncode == 2 and _woke(result.stderr)
 
 
-# --- parent liveness (POSIX only: a Windows PID is not visible to kill -0) ---
+# --- parent liveness -------------------------------------------------------
 
-@pytest.mark.skipif(os.name == "nt", reason="Git Bash cannot probe a Windows PID cheaply")
+@pytest.mark.skipif(os.name == "nt", reason="kill -0 cannot see a Windows PID; see the test below")
 def test_exits_when_claude_code_is_gone(tmp_path):
     _digest(tmp_path, 3, BODY)
     _seen(tmp_path, 3)
@@ -654,7 +654,7 @@ def test_exits_when_claude_code_is_gone(tmp_path):
 
 
 
-# --- the daemon decides, the hook rings (v48) ------------------------------
+# --- the daemon decides, the hook rings (v49) ------------------------------
 
 def test_a_digest_change_without_a_ring_does_not_wake(tmp_path):
     """New mail alone no longer wakes the session: the shim writes
@@ -939,3 +939,21 @@ def test_the_codex_park_gate_honours_an_explicit_opt_out(tmp_path, setting):
     finally:
         server.shutdown()
         server.server_close()
+@pytest.mark.skipif(os.name != "nt", reason="the Windows PID probe")
+def test_exits_when_claude_code_is_gone_on_windows(tmp_path):
+    """Under Git Bash CLAUDE_PID is a Windows PID that kill -0 cannot see
+    (hooks ran under Git Bash /usr/bin/bash on 2.1.280, 2026-09-27). The hook
+    lists it through `ps -W` at arm time and then once a minute, so an
+    orphaned watcher ends within that minute instead of running its hour."""
+    _digest(tmp_path, 3, BODY)
+    _seen(tmp_path, 3)
+    parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    try:
+        process = _start(_env(tmp_path, wait=3540, CLAUDE_PID=str(parent.pid)))
+        time.sleep(3)
+        assert process.poll() is None
+    finally:
+        parent.kill()
+        parent.wait()
+    code, out, err = _finish(process, timeout=_constant("PARENT_CHECK") + DEADLINE)
+    assert (code, out, err) == (0, "", "")

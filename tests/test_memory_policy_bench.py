@@ -367,6 +367,10 @@ def test_every_known_policy_text_is_found():
     assert set(texts) == {"core", "full_block", "onboarding",
                           "memory_changes_tail", "coordination_line"}
     assert all(t.strip() for t in texts.values()), texts
+    # The coordination marker is the whole served check-in, its "when to
+    # send" rules included (2026-09-28): a split of the constant into a
+    # mechanics half and a rules half would leave the rules unscanned.
+    assert "a status line is not a queue" in texts["coordination_line"]
 
 
 def test_a_leaked_coordination_checkin_is_named(tmp_path):

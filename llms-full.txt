@@ -408,7 +408,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`; unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send`, non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval. `send` returns the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `nudged`, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `nudged`, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -952,7 +952,10 @@ verification. Session episodes also work without hooks through the daemon:
 **Current Codex runtimes enable hooks by default, including Windows.**
 Availability depends on the application/runtime and policy, not the model.
 If `[features] hooks = false` is intentional, keep it and use the standing
-`AGENTS.md` block. Windows plugin hooks use native PowerShell 7 commands.
+`AGENTS.md` block. Codex runs the plugin's Windows hooks as native
+PowerShell 7 commands; Claude Code runs their Bash commands through Git
+Bash, so it needs Git for Windows installed (see
+[plugin/README.md](plugin/README.md#windows)).
 See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
@@ -1139,7 +1142,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v48 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v49 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -3785,7 +3788,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v48). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v49). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -3841,7 +3844,7 @@ coordination:
 `audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
 a whole number of days, default 90, and `0` keeps the log forever.
 
-`wake` caps the rings the daemon decides at send (schema v48; see
+`wake` caps the rings the daemon decides at send (schema v49; see
 [park records and the wake decision](#park-records-and-the-wake-decision)).
 Every ring is an unattended model turn in the recipient, so each is bounded:
 `per_recipient_per_hour` counts every ring to one address (20, the figure the
@@ -3921,7 +3924,37 @@ client that opted out only in its MCP env block (set the opt-out where the
 hooks see it too, since they cannot read that block); and a Docker install
 wired by `ops/install-hook.*`, whose `docker exec` check-in asks with the
 daemon container's own token. The check-in tells the agent to say so and
-continue when the tools are unavailable. Optional
+continue when the tools are unavailable.
+
+Since 2026-09-28 the check-in also says when a message is due, not only
+how to send one (a review of six sessions had found 15 status updates, 9
+peer lists and 7 receives against no sends until a human asked for one). It
+carries two field-neutral rules, the two of five candidates that changed
+decisions in `evals/coordination_checkin_bench.py` (see `evals/README.md`):
+before using something shared, look for whoever holds it or has it
+booked, and if someone does, message them that you are next, even when
+their status says when they expect to finish, because a status line is not
+a queue (if the board shows it free, use it and say so in your status); and
+keep your status true (what you hold, what you wait on, when you expect to
+finish). The Codex form, inside its
+512-character MCP-instructions budget, carries the first, bounded the same
+way. An install's own
+words for its shared things (a suite lock, a GPU, a style guide, an API
+quota) belong in the daemon's `<data_dir>/hook-instructions.md`, which the
+memory hook serves after its core (3.5 KB cap, see
+[Startup memory policy](#startup-memory-policy-memory_policy) below);
+[`examples/hook-instructions.md`](../../examples/hook-instructions.md) is
+one host's copy (suite and GPU status words, the lease holder, a
+pre-flight before a full run). For the Docker install the file goes into
+the daemon's data volume (`/data` in the container). The hook reads it at
+every session start, so no restart is needed:
+
+```bash
+docker cp examples/hook-instructions.md pseudolife-mcp-daemon:/data/hook-instructions.md
+```
+
+`evals/coordination_checkin_bench.py` measures whether the text moves the
+send/no-send decision (see `evals/README.md`). Optional
 `PSEUDOLIFE_AGENT_LABEL`, `PSEUDOLIFE_AGENT_PROJECT` and `PSEUDOLIFE_AGENT_TASK`
 provide explicit display and relevance fields. For clients other than Codex,
 set `PSEUDOLIFE_AGENT_STATE` to a
@@ -3942,7 +3975,8 @@ process's startup id instead of the resumed one, and the session then gets a
 new address. A state-backed address registers as resumable and is kept for
 seven days after its last activity or lease (longer while a retained message
 names it), so the board holds about a week of sessions; a session resumed
-after its address was removed gets none. Without a state file or directory,
+after its address was removed registers a new one and keeps the old state
+file with a `.stale` suffix. Without a state file or directory,
 each launch gets a new address, registered as not resumable and retired an
 hour after it goes quiet. Never infer recovery from a
 title, checkout directory or implicit host resume. Credentials stay in that
@@ -4115,6 +4149,8 @@ expiring hold on a shared resource, taken around any command.
 
 ```sh
 pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--no-board] [--timeout DURATION] -- COMMAND [ARGS...]
+pseudolife-mcp lease hold NAME --while-pid PID [--expect DURATION] [--ttl SECONDS] [--purpose TEXT] [--worktree PATH] [--no-board] [--timeout DURATION]
+pseudolife-mcp lease check NAME [--json]
 pseudolife-mcp lease list [NAME] [--json]
 ```
 
@@ -4159,6 +4195,77 @@ the lock, not the command: kill it outright (SIGKILL, Task Manager) and the
 lock goes while the command may run on. On a case-insensitive filesystem,
 names that differ only in case share one lock file, which can only make one
 wait for the other.
+
+`lease hold NAME --while-pid PID` is the lease for a process the command did
+not start and cannot wrap: a launcher starts a detached server, then starts a
+hold that lasts as long as the server's pid does. The order is the reverse of
+`run`, because the process already owns the resource: the OS lock first (a
+lock another process holds is waited for, or given up on at once with
+`--timeout 0`, exit `75`), the board second, and both are released when PID
+exits, or when the hold is stopped (`128+N`), which leaves PID running.
+`--worktree` names the checkout in the notices below, by its name, never its path (a path names the OS user); `--expect` is the
+expected end the board shows. All board traffic (the lease, its renewals, the
+notices below, the release) runs on a thread of its own after the OS lock has
+moved, so a slow or failing daemon never delays the lock; the release side gets
+20 seconds, after which the board record is left to lapse at its ttl.
+`evals/qwen_server.ps1` uses it around the bench server: `Start-Qwen` refuses to
+launch while `lease check gpu` says the lease is held (beside its VRAM
+busy-check, which stays the guard against anything that takes no lease), and
+right after it launches a server it holds `gpu` for that server's pid, so the
+lease covers the model load. It checks the hold a moment later and says so if
+the hold could not take the lock (another process got it since the check) or
+could not run. It runs the CLI from the checkout (`$env:PSEUDOLIFE_LEASE_PYTHON`,
+else the checkout's `.venv`, else `python` on PATH, each as
+`-m pseudolife_memory.cli`), and only then a `pseudolife-mcp` on PATH.
+
+`lease check NAME` is the launch gate for an orchestrator, in place of watching
+process CPU: it prints the local lock's state and the board's holder with the
+expected end, and exits `0` when the lease is free, `1` when it is held, and
+`70` when the check itself failed, which a gate must not read as held
+(`--json` for one report). It is held when the local lock is held, or when the
+board shows a holder. The one exception: a `lease hold` or suite mirror whose
+board label carries this lock directory's instance id (`lease-hold@<id>`; the
+id is 12 random hex digits in `instance.id` beside the locks, so no host or
+user name reaches the board) beside a free local lock outlived its process
+(killed outright), is shown as stale, and lapses at its ttl. Any other board
+holder, such as a session that claimed the lease with `memory_agents`, a
+`lease run`, or a hold from WSL or another machine or account, counts as held
+until it is released or lapses, since no local lock can speak for it.
+For `full-suite` it probes the test suite's own lock (`full-suite.lock` and its
+slots, with the holder record's pid, worktree and start time), since that file,
+not `lease-full-suite.lock`, is the truth for a full run. A run with
+`PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
+
+The test suite's lock is mirrored the same way. A full `pytest` run
+(`tests/conftest.py`, `tests/suite_lock.py`) holds the board lease `full-suite`
+behind its OS lock: while it queues it is a board waiter, once it holds the lock
+it holds the lease, with the run's pid and worktree as its purpose and an
+expected end from the median of the last five timed runs
+(`~/.pseudolife-mcp/locks/full-suite.durations.jsonl`; 25 minutes until five
+are on record). Only a run that ran its tests, passed or failed, is timed: an
+interrupted run or a collection error would drag the median down. The lock is
+freed first and the board told after, and a run that leaves the queue without
+the lock (refused, a changed tree, Ctrl-C) gives its board place back. When the
+lock's holder is a run the board does not show (older code, no bearer), the
+board grants the lease to the first waiter; that waiter hands it back and asks
+no more until it holds the lock, so the board never names a queued run as the
+holder. The OS lock stays the truth: a board that is unreachable, refuses, or shows another
+holder costs one line and never delays or stops the run, and
+`PSEUDOLIFE_SUITE_LOCK=off` (CI) takes neither. The run's bearer and daemon URL
+are read when conftest is imported, before the suite's own client isolation
+strips them, and the mirror is built only for a run that takes the lock.
+
+Acquiring and releasing `hold` and the suite's mirror send one notice each
+(`LEASE NAME acquired: pid, worktree, expected end` / `LEASE NAME released:
+pid, worktree, held for`) by board mail to the peers the lease concerns, in
+the same project (compared without case; every project when the sender has
+none set): live agents (attached, or registered without an adapter) whose
+status says `suite=running`, `suite=queued` or `gpu=`, and any agent parked
+with `park_clear_by` naming the lease, attached or not, since mail waits for a
+parked session. Both leases go to both status groups on purpose: a GPU server
+beside a full suite is the contention. At most 20 peers are told per event; one
+refused send does not stop the rest. The notices are automatic and need no
+reply; they replace hand-written SUITE-START/SUITE-END notes.
 
 `lease list` shows each board lease (holder, purpose, age, expected end,
 queue) beside the local lock files, each probed held or free, and whether the
@@ -4285,7 +4392,33 @@ acknowledge; use `action="ack"` after reading, with one `message_id` or
 several comma-separated (at most 50; a JSON array of strings, the form a
 host that stringifies list parameters sends, is read as that list): a batch
 returns the receipts in the order given and lists the ids that were not this
-mailbox's, instead of failing whole.
+mailbox's, instead of failing whole. An ambiguous prefix in a batch refuses
+the whole call, since acknowledging the wrong message cannot be undone.
+
+A send names its recipient by agent id, or by a unique prefix of it of at
+least 8 hex characters, the length every surface shows: a prefix that matches
+several ids is refused with `ambiguous_recipient` and the candidates cut to
+the shortest prefixes that tell them apart, and one that matches none fails
+as the full id would (`recipient_not_found`). `reply_to` and `ack` take
+prefixes the same way, resolved among the caller's own mail
+(`ambiguous_reply`, `ambiguous_message_id`), so another mailbox's ids
+neither resolve nor make a prefix ambiguous. A direct send's receipt names
+the `recipient_agent_id` it resolved to. `to: "project:<name>"` sends to
+every attached, non-idle agent in that project except the sender, and
+`to: "all"` to every attached, non-idle agent on the board except the
+sender: the peers the list shows with `adapter_available`. One request id
+covers the burst, so a retry with it returns the same result: `recipients`
+and one receipt per recipient with its `message_id`, `recipient_agent_id`
+and a `wake` decision (`live` for an attached peer that opted into wake,
+which the daemon rings; `pull` for one that reads at its next receive or
+digest). The burst is atomic and refused whole, writing nothing, above 50
+recipients (`fanout_too_large`), when nobody is reachable
+(`no_recipients`) or when one mailbox is full (`queue_full`, naming that
+mailbox's prefix); it counts once against the sender's rate, and a reply
+cannot ride it. Each recipient gets its own message and its own audit event.
+A refusal that carries such a detail surfaces it after the code in the MCP
+tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
+separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
 Setup leaves Codex tool approvals unchanged. A recipient running with approval
 policy `never` cannot execute a tool that still requires approval. To authorize
@@ -4382,12 +4515,12 @@ approval a woken task stalls on an approval prompt until someone answers it
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
   only when new addressed mail has arrived, the task has made no Pseudolife call
   for 30 seconds, neither a tool-result hint nor the prompt hook has shown that
-  mail, no earlier doorbell is still unanswered, and (v48) the daemon decided
+  mail, no earlier doorbell is still unanswered, and (v49) the daemon decided
   a ring for it ([the wake decision](#park-records-and-the-wake-decision)):
   the adapter offers the decision once its `ring_at` has come, and the
   doorbell takes it only at the moment it would ring, so an active or
   informed task never spends it. Without a decision (chatter to a parked
-  task, or a daemon older than v48) the arrival stays owed and nothing
+  task, or a daemon older than v49) the arrival stays owed and nothing
   rings; a later decision for the task covers it. A successful
   `memory_message receive` from the task answers it, and so does an emptied
   mailbox. An idle task gets one doorbell per batch of mail. A `nudged`
@@ -4439,7 +4572,9 @@ Every board mutation appends one row in the same database transaction as the
 mutation itself, so a refused or rolled-back call leaves no event and no event
 exists without its change. The events are `register`, `update` (the new values
 and the ones they replaced, which is the status history), `attach`, `detach`,
-`send` (with the full body), `read`, `ack`, `attempt`, the prune pass's
+`send` (with the full body; a burst to a project or the whole board writes one
+per recipient, each with its own body and salt and `fanout: {to, recipients}`
+in its payload), `read`, `ack`, `attempt`, the prune pass's
 `expire` (bodies blanked) and `prune` (messages and addresses removed),
 `bank_identity`, the lease events, the operator's restore `recover` and
 `rebind`, and the operator's `redact` ([below](#redacting-a-body)). A `read`
@@ -4512,7 +4647,10 @@ pseudolife-mcp board-audit verify
 the payload parsed, and `body` and `body_salt` (`null` except on a v46
 `send` that has not been redacted). Prefer `--out` for anything you keep: a
 PowerShell 5 `>` redirect writes UTF-16. The filters are `--project`, `--task`,
-`--agent` (the acting agent or a message's recipient), and `--since` / `--until`
+`--agent` (the acting agent or a message's recipient: a full id, or a unique
+prefix of 8 or more characters, resolved against registered addresses and
+the log's own ids, so an address the prune pass removed still resolves; an
+ambiguous prefix is refused naming the candidates), and `--since` / `--until`
 (epoch seconds or ISO 8601; a time without an offset is local). The daemon's
 `expire`, `prune` and `audit_prune` rows and the operator's `recover` carry no
 project or task and name agents only in their payload, so a filtered export
@@ -4583,7 +4721,11 @@ tool or REST route for it.
 pseudolife-mcp board-audit redact --message-id <id> --reason "pasted a credential"
 ```
 
-In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
+`--message-id` takes the full id or a unique prefix of 8 or more characters
+(an ambiguous one is refused naming the candidates). A message sent to a
+project or to `all` is one copy per recipient: redacting one leaves the
+others, so the result lists them as `other_copies` (and says so on stderr);
+redact each. In one transaction it blanks the `send` row's `body` and `body_salt`, blanks
 the live copy in the mailbox if prune has not already and ends its delivery,
 and appends a
 chained `redact` row (actor `operator`, the message's agents, project and task,
@@ -4763,7 +4905,9 @@ cortex, graph, retrieval or dream input by the messaging APIs. Store a useful
 decision explicitly as ordinary memory if it should become durable knowledge.
 
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
-60 new sends per sender per minute and 50 messages per receive page. Bodies stop
+60 new sends per sender per minute (a send to a project or to `all` counts as
+one, so a sender can reach at most 60 × 50 mailboxes a minute) and 50 messages
+per receive page. Bodies stop
 being served after 24 hours; request-key metadata is retained for seven days.
 The [audit log](#audit-log) keeps its own copy of every body for
 `audit_retention_days`, unless the operator [redacts](#redacting-a-body) it.
@@ -4816,15 +4960,16 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. A
-legacy adapter registers a fresh address on its next start only when the authenticated
-daemon explicitly confirms that the saved address no longer exists. It keeps
+write that carries no instance credential. An
+adapter with saved state registers a fresh address on its next start only when the authenticated
+daemon explicitly confirms that the saved address no longer exists (pruned
+after seven idle days with no retained mail, or absent from a restored
+database, where `rebind` cannot restore it either). A bank-bound client first
+verifies that the daemon is still its saved bank and principal. It keeps
 the old state file beside it with a `.stale` suffix. A rejected bearer or instance
-credential preserves the saved address and requires corrected authentication
-or the deliberate restore/rebind procedure; an HTTP status alone never proves
-that an address should be replaced.
-Bank-bound clients preserve their address even when it is missing on the server;
-use deliberate recovery rather than silently registering a replacement.
+credential, or a different bank or principal, preserves the saved address and
+requires corrected authentication or the deliberate restore/rebind procedure;
+an HTTP status alone never proves that an address should be replaced.
 
 A subagent that a Claude Code session spawns with its Agent tool runs in the
 same shim process, so its board calls carry the parent's identity (probed
@@ -4846,7 +4991,7 @@ clears it; a children-only update does not move `status_set_at`.
 ### Park records and the wake decision
 
 A session that stops records why, so a peer's mail can wake it only when the
-mail clears what it is waiting for (schema v48, maintainer decision
+mail clears what it is waiting for (schema v49, maintainer decision
 2026-09-28: on 2026-09-27 a session sat all night on a blocker that had
 cleared, while any message could wake a session with nothing to wait for).
 The **park record** lives on the agent row and is set through
@@ -4867,10 +5012,11 @@ leaves it. A park field on its own refines a standing park and is refused
 (`invalid_park`) on an unparked row, as are an unknown reason and a bad
 expiry; credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
-carries the six `park_*` fields, `park_set_at` being the daemon's stamp. The
-served check-in asks sessions to park when they stop, and the [Stop hook park
-gate](#waking-an-idle-claude-code-session-the-stop-hook) asks once when a turn
-ends without one.
+carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
+`memory_agents`' description asks sessions to park when they stop, and the
+[Stop hook park gate](#waking-an-idle-claude-code-session-the-stop-hook) asks
+once when a turn ends without one. (The served check-in does not say it yet:
+it is the text the check-in bench measured, and changes only with a new run.)
 
 **The daemon decides, the shim rings.** `memory_message(action="send")` takes
 two optional fields, `clears` (which parked need the message answers, 120
@@ -4898,7 +5044,7 @@ and the adapter takes each ring once. A wake path is a live channel or a
 **ring path**: an adapter declares at register and at every attach whether
 a ring reaches it without a channel (`ring`, kept in `capabilities`; the
 Claude shim when it has a digest for the Stop hook, a Codex thread the
-doorbell watches). A daemon older than v48 refuses the attach parameter
+doorbell watches). A daemon older than v49 refuses the attach parameter
 once, and the adapter stops sending it. The shim rings through its client's
 path: the Claude adapter writes
 `<key>.ring` beside the digest (line 1 the digest watermark, line 2 the
@@ -4907,14 +5053,17 @@ asks the adapter for a due ring at the moment it would otherwise run
 `codex queue` (an offer whose mail the session has already seen, or that
 has nothing pending, is dropped). Every ring's ledger line (`ring` from the adapter, `wait` from
 the Stop hook, `bell` from the doorbell) carries the decision and reason as a
-sixth column. Against a daemon older than v48 nothing rings; pull delivery,
+sixth column. Against a daemon older than v49 nothing rings; pull delivery,
 tool-result hints and the prompt-hook digest are unchanged.
 
 `pseudolife-mcp channel` is the optional Claude Code preview transport. Host
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
-Only addressed messages may wake an opted-in recipient, and since v48 only
-when the daemon decided a ring for them. Board/status activity
+Only addressed messages may wake an opted-in recipient, and since v49 the
+live channel carries only mail the daemon decided to ring (`rung`,
+`nudged`) or hinted to an active session, plus mail sent before v49; mail
+it withheld, or found not needed, waits for an explicit `receive`, which
+still returns everything. Board/status activity
 and receipts do not produce conversational wake-ups. Each live event carries a
 fixed agent-origin header, built from daemon-verified sender fields, ahead of
 the peer's text. Explicit receive labels each message with `origin: agent` and
@@ -4946,7 +5095,12 @@ generation's replay cursor. An explicit authentication or identity rejection
 preserves state and stops retries with the rejected credential. File-backed
 clients observe the credential source and resume after a replacement authenticates
 to the saved bank and principal. An authority mismatch remains closed until the
-credential again matches the saved authority; it never creates a replacement address. Do not
+credential again matches the saved authority; it never creates a replacement address. A
+saved address the daemon reports missing while the shim runs (the host slept or
+the daemon was unreachable past the seven-day retention) also stops background
+delivery and keeps the state file, but the notice says to restart the session:
+`rebind` cannot restore a missing address, and the next start retires the state
+and registers a new one. Do not
 infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before
@@ -5008,7 +5162,7 @@ also capped (below, and by the daemon's `wake` caps under
   labels the delivery "Stop hook blocking error"; that label is the wake, not
   a failure. The reminder is one line saying so, then the digest, which reads
   as agent-origin, not user authority.
-- It fires on a ring the daemon decided (v48): when the shim's `<key>.ring`
+- It fires on a ring the daemon decided (v49): when the shim's `<key>.ring`
   marker is past the `.seen` marker, the digest's watermark is past it too
   and the digest lists mail. The shim writes the marker for `rung` and
   `nudged` mail only ([the wake decision](#park-records-and-the-wake-decision)),
@@ -5056,9 +5210,11 @@ also capped (below, and by the daemon's `wake` caps under
 - A watcher waits at most 3540 s after the turn that armed it; the hook's
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer is not woken; its mail still appears on its next prompt. On Linux and
-  macOS the watcher also stops when Claude Code exits. In `claude -p` runs,
-  Claude Code ends a waiting hook at teardown.
+  longer is not woken; its mail still appears on its next prompt. The watcher
+  also stops when Claude Code exits: at once on Linux and macOS, and within
+  a minute on Windows, where it lists the process through `ps -W` at arm
+  time and then once a minute (a Windows PID is invisible to `kill -0`). In
+  `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json`. Its native command
   (`lifecycle.ps1 -Event Stop`) runs only the park gate: the same one
   request, through the managed connection file or the explicit daemon
@@ -5998,7 +6154,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v48**; migrations are additive
+The current Postgres meta version is **v49**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -6051,7 +6207,8 @@ The milestones:
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
-| v48 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
+| v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
+| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -6136,7 +6293,7 @@ credentials and requires deliberate rebinds.
    original principal, which must appear in `coordination.allowed_principals`:
 
    ```console
-   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id> --principal <principal> --bank-url http://127.0.0.1:8765 --state <new-private-state.json>
+   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id, or a unique prefix of 8 or more characters> --principal <principal> --bank-url http://127.0.0.1:8765 --state <new-private-state.json>
    ```
 
    Use an existing private directory outside any Git repository and a **new**
@@ -6552,8 +6709,10 @@ still write briefing and reminder definitions, but do not perform the new
 trust and readiness workflow.
 
 The Windows installer and plugin supply
-`commandWindows` overrides; Claude
-keeps its Bash plugin commands. Plugin SessionEnd on Windows uses a bounded
+`commandWindows` overrides, which Codex runs; Claude Code ignores the field
+and runs its Bash plugin commands through Git Bash, which it must find on
+the machine (see the plugin README's
+[Windows](../../plugin/README.md#windows) section). Plugin SessionEnd on Windows uses a bounded
 request inside Codex's three-second maximum, with idle reaping as fallback.
 SessionStart retries one transient failure within its 15-second budget. The
 native command escapes non-ASCII context so redirected JSON stays valid under

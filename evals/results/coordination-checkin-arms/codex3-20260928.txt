@@ -1,0 +1,1 @@
+Board: memory_agents update, list; memory_message receive, ack. Need a shared thing someone holds? Message them you're next; status isn't a queue.

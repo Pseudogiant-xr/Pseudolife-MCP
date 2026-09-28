@@ -175,6 +175,56 @@ def test_context_mismatch_never_transmits_key_or_replaces_state(tmp_path, field,
     asyncio.run(run())
 
 
+def test_bound_address_the_bank_no_longer_has_is_retired_and_replaced(tmp_path):
+    """A resumed session whose address the bank pruned (idle past
+    AGENT_RETENTION, so no retained mail named it) gets a fresh address. The
+    bank and principal were verified first, and the old file stays beside
+    the new one."""
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            old = first.instance_headers["X-PL-Agent"]
+        bank.agent = None
+        bank.calls.clear()
+        client, resumed = instance(bank, provider, path)
+        async with client, resumed:
+            assert resumed.instance_headers["X-PL-Agent"] == bank.agent != old
+        assert [a for a, _, _ in bank.calls if a != "context"][:3] == ["attach", "register", "attach"]
+        assert bank.registered == 2
+        state = json.loads(path.read_text())
+        assert state["agent_id"] == bank.agent and state["bank_id"] == bank.bank_id
+        assert json.loads(path.with_name(path.name + ".stale").read_text())["agent_id"] == old
+    asyncio.run(run())
+
+
+def test_bound_address_with_a_rejected_key_is_preserved(tmp_path):
+    async def run():
+        provider, bank = Provider(), Bank()
+        path = tmp_path / "state.json"
+        client, first = instance(bank, provider, path)
+        async with client, first:
+            pass
+        original = path.read_bytes()
+
+        async def rejecting(request):
+            if request.url.path.endswith("/attach"):
+                return httpx.Response(401, json={"error": "invalid_credential"})
+            return await bank(request)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(rejecting))
+        resumed = CoordinationAdapter(URL, provider.token, client=client,
+                                      provider=provider, state_path=path)
+        async with client:
+            with pytest.raises(AdapterError) as caught:
+                await resumed.__aenter__()
+        assert caught.value.code == "invalid_credential"
+        assert path.read_bytes() == original and bank.registered == 1
+        assert not path.with_name(path.name + ".stale").exists()
+    asyncio.run(run())
+
+
 def test_legacy_migration_proves_server_ownership_without_sending_key(tmp_path):
     async def run():
         provider, bank = Provider(), Bank()

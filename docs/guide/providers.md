@@ -307,8 +307,10 @@ still write briefing and reminder definitions, but do not perform the new
 trust and readiness workflow.
 
 The Windows installer and plugin supply
-`commandWindows` overrides; Claude
-keeps its Bash plugin commands. Plugin SessionEnd on Windows uses a bounded
+`commandWindows` overrides, which Codex runs; Claude Code ignores the field
+and runs its Bash plugin commands through Git Bash, which it must find on
+the machine (see the plugin README's
+[Windows](../../plugin/README.md#windows) section). Plugin SessionEnd on Windows uses a bounded
 request inside Codex's three-second maximum, with idle reaping as fallback.
 SessionStart retries one transient failure within its 15-second budget. The
 native command escapes non-ASCII context so redirected JSON stays valid under

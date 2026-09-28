@@ -203,11 +203,11 @@ class CodexDoorbell:
     bell is queued only when mail arrived since the last bell or read, the
     thread has been quiet for ``quiet_seconds``, neither a tool-result hint
     nor the prompt hook has shown that mail, no earlier bell is still
-    unanswered, and (v48) the daemon decided a ring for it: the adapter
+    unanswered, and (v49) the daemon decided a ring for it: the adapter
     offers the decision through ``ring_due`` once its time has come, and
     the doorbell takes it only at the moment it would ring, so an active
     or informed thread never spends it. Without a decision (chatter to a
-    parked thread, or a daemon from before v48) the arrival stays owed and
+    parked thread, or a daemon from before v49) the arrival stays owed and
     nothing rings. The CLI runs in the background with a timeout; any
     failure turns the doorbell off for this process, and pull delivery and
     hints carry on as before.

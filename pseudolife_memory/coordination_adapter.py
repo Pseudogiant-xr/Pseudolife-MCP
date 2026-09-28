@@ -216,7 +216,7 @@ class CoordinationAdapter:
         self._delivered_watermark = 0
         self._hint_calls_since = 0
         self._digest_write_reported = False
-        # The daemon decides, the shim rings (v48). A heartbeat or attach
+        # The daemon decides, the shim rings (v49). A heartbeat or attach
         # answer may carry one ``wake``: ``(decision, reason, ring_at)``.
         # ``_ring_timer`` writes the ``.ring`` marker the Stop hook fires
         # on at ``ring_at``; ``_ring_offer`` is the same ring for the Codex
@@ -229,7 +229,7 @@ class CoordinationAdapter:
         # Whether a ring reaches this session without a live channel: the
         # Stop hook reads ``.ring`` beside the digest, the Codex doorbell
         # asks ``ring_due``. Declared at register and every attach so the
-        # daemon counts it as a wake path; a daemon older than v48 refuses
+        # daemon counts it as a wake path; a daemon older than v49 refuses
         # the attach parameter once, and the adapter stops sending it.
         self.ring_path = (self.digest_path is not None) if ring_path is None else ring_path is True
         self._ring_attach_supported = True
@@ -283,8 +283,7 @@ class CoordinationAdapter:
     def unread_hint(self) -> str | None:
         """The digest from the last adapter check; reading it does no I/O or ACK."""
         if self._permanent_failure:
-            return ("Coordination: background delivery stopped; check bearer access or "
-                    "restore/rebind the saved identity.")
+            return f"Coordination: background delivery stopped; {self._stop_advice()}."
         if self._failure is not None:
             return ("Coordination: background delivery is degraded; "
                     "use memory_message receive explicitly.")
@@ -332,7 +331,7 @@ class CoordinationAdapter:
 
     def _note_wake(self, result) -> None:
         """Take a ``wake`` off an attach or heartbeat answer. Anything but a
-        well-formed ring is ignored: a daemon from before v48 sends none,
+        well-formed ring is ignored: a daemon from before v49 sends none,
         and nothing here may ring on a guess."""
         wake = result.get("wake")
         if not isinstance(wake, dict):
@@ -488,7 +487,7 @@ class CoordinationAdapter:
         return self.digest_path.with_suffix(".turn") if self.digest_path is not None else None
 
     async def _post_attach(self, wake_enabled):
-        """Attach, declaring the ring path (v48). A daemon that predates
+        """Attach, declaring the ring path (v49). A daemon that predates
         the parameter refuses it with unexpected_parameter; the adapter
         drops it for good and attaches again, as the heartbeat does for
         ``active``."""
@@ -618,8 +617,7 @@ class CoordinationAdapter:
             self._degraded.set()
             if not already_reported:
                 print("pseudolife-mcp: live coordination background delivery stopped; "
-                      "check bearer access or restore/rebind the saved identity.",
-                      file=sys.stderr)
+                      f"{self._stop_advice()}.", file=sys.stderr)
             return
         if self._failure is not None:
             return
@@ -628,6 +626,15 @@ class CoordinationAdapter:
         self._degraded.set()
         print("pseudolife-mcp: live coordination delivery unavailable; retrying in the "
               "background, use explicit receive meanwhile.", file=sys.stderr)
+
+    def _stop_advice(self) -> str:
+        """What the operator can do once background delivery has stopped. A
+        missing address cannot be rebound (rebind refuses a missing row), but
+        the next start retires the saved state and registers a new address."""
+        if self._failure is not None and self._failure.code == "instance_not_found":
+            return ("the board address no longer exists on this bank; restart the session "
+                    "to register a new one")
+        return "check bearer access or restore/rebind the saved identity"
 
     @staticmethod
     def _is_permanent_identity_error(error: AdapterError) -> bool:
@@ -1009,11 +1016,14 @@ class CoordinationAdapter:
             try:
                 result = await self._post_attach(self.wake_enabled)
             except AdapterError as error:
-                if not (resumed and self._provider is None and error.code == "instance_not_found"):
+                if not (resumed and error.code == "instance_not_found"):
                     raise
                 # The saved address is unknown to this bank: pruned after long
                 # idleness, or absent from a restored snapshot. The old file stays beside
-                # the new one for diagnosis; a fresh address is registered.
+                # the new one for diagnosis; a fresh address is registered. A bound
+                # identity reaches this only after _post re-verified the saved bank and
+                # principal, and the daemon says instance_not_found only for a missing
+                # row, which rebind cannot restore either.
                 self._retire_stale_state()
                 reservation = self._load_or_reserve()
                 await self._register(reservation)

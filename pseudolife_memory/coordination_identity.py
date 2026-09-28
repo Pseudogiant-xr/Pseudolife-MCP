@@ -68,6 +68,8 @@ def resolve_digest_path(session_id: str, root: Path | None = None, *,
         if os.path.islink(record) or not stat.S_ISREG(os.fstat(fd).st_mode):
             return path
         # Two 64-hex lines fit in 130 bytes; anything longer fails the match.
+        # Lines 3-4 (the hooks' cached process identity and its expiry, about
+        # 85 bytes) fit too and are not read here.
         lines = os.read(fd, 256).split(b"\n")
     except OSError:
         return path

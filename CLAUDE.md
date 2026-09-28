@@ -28,7 +28,15 @@ exactly; they exist because each one was violated at least once.
    `llms-full.txt`). The v30 bump found the last two the hard way.
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
-   without it, which is not a pass. Three exemptions, spelled out under
+   without it, which is not a pass. **A full run the bench Postgres rejects
+   refuses to start** (conftest asks the server before queueing for the
+   suite lock): a fresh worktree has no `ops/.env`, or the `.example` copy,
+   so the suite resolves the compose default password and every PG-backed
+   test would ERROR on setup (1,424 in one 2026-09-27 run). The refusal
+   names the fix: copy `ops/.env` from the main checkout into the
+   worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD` for the
+   pytest process. Targeted runs print one line and start. Three
+   exemptions, spelled out under
    "One full suite at a time per machine" below: **docs-only changes** run
    the doc guards instead, **test-only changes** run the touched test
    files, and **merging origin/master into a branch that already passed**,
@@ -111,19 +119,47 @@ took 143 CUDA OOMs.
   and the waiting notice names every holder.
 - The suite sets `CUDA_VISIBLE_DEVICES=-1` itself (`PSEUDOLIFE_TEST_CUDA=1`
   opts back in). Never `""`: on Windows an empty value leaves the GPU usable.
-- With several sessions active, still announce `SUITE-START` / `SUITE-END` on
-  the coordination board (`memory_agents` / `memory_message`) and keep
-  `suite=running|idle` in your status: the lock queues runs, the board lets
-  peers plan around the queue.
+- The lock is mirrored on the board as the lease `full-suite` (since
+  2026-09-28): a queued run is a board waiter, a running one the holder,
+  with pid, worktree and expected end, and acquiring or releasing sends one
+  notice to every peer whose status says `suite=running|queued` or `gpu=`
+  (and any peer parked with `park_clear_by: full-suite`). That replaces
+  hand-written `SUITE-START` / `SUITE-END` messages: keep
+  `suite=running|queued|idle` in your status so the notices reach you, and
+  read `pseudolife-mcp lease check full-suite` (or `lease list`) rather
+  than asking. The mirror needs the session's bearer in the environment
+  pytest starts in; without one it says so once and the lock alone rules.
+- **An announcement is a message, not a status line** (2026-09-28), for
+  what the lease mirror does not cover: a suite run with
+  `PSEUDOLIFE_SUITE_LOCK=off` or without a bearer, a GPU launch outside
+  `Start-Qwen`, or any other saturating window. Send it with
+  `memory_message` to every peer whose status shows the resource
+  (`suite=running`, `suite=queued`, `gpu=`), with your pid, worktree and
+  ETA; keep `suite=running|queued|idle` in your own status as well. The
+  status is what a peer sees when it looks; the message is what it acts
+  on, and a peer may not look until its next turn. Never infer that a
+  holder is idle from process stats, a quiet board or an old timestamp:
+  ask them. This host's dialect for the served check-in's rules is
+  `examples/hook-instructions.md`.
+- **A host-shaped symptom is broadcast before it is debugged**: a hung
+  interpreter, os error 1455, a database refusing its password, a daemon
+  that stopped answering, or anything else that fails in a way unrelated to
+  your change. Message every active peer first, then debug: on this host it
+  is usually breaking their run too (2026-09-28: several sessions timed out
+  on one hung `python3` alias and each investigated it alone).
 - **CPU- or memory-saturating work never overlaps a full suite**
   (maintainer rule 2026-09-25). That means load or stress repros (CPU
   burners, memory hogs), benchmark sweeps, parallel stress loops, and
   anything else that pegs the CPU or commits several GB (a model server, a
   large in-memory eval) on the maintainer's host. First check no full suite
-  is running: no `~/.pseudolife-mcp/locks/full-suite*.holder.json`, and no
-  `suite=running` in `memory_agents` list. A run with
-  `PSEUDOLIFE_SUITE_LOCK=off` leaves no holder file, so the board check is
-  not optional. Announce the window on the board, bound it with a fixed
+  is running: `pseudolife-mcp lease check full-suite` exits 1 while one
+  holds the lock (any slot), naming its pid, worktree and expected end, and
+  `lease check gpu` does the same for the bench server; gate scripts on
+  that exit code (0 free; anything else means the check itself failed). A
+  run with `PSEUDOLIFE_SUITE_LOCK=off` takes neither the lock nor the
+  lease, so no check sees it: also look for `suite=running` in
+  `memory_agents` list, which is why that status still matters.
+  Announce the window on the board, bound it with a fixed
   duration and a stop switch (a sentinel file), and stop at once if a suite
   starts. On 2026-09-25 a 16-worker × 25-min burner ran at 100% CPU beside
   two full-suite gate runs. Timing flakes, or os error 1455 when commit

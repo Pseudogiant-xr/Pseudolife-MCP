@@ -42,7 +42,7 @@ credentials and requires deliberate rebinds.
    original principal, which must appear in `coordination.allowed_principals`:
 
    ```console
-   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id> --principal <principal> --bank-url http://127.0.0.1:8765 --state <new-private-state.json>
+   pseudolife-mcp coordination-recovery rebind --config <config.yaml> --confirm-daemon-stopped --agent <agent-id, or a unique prefix of 8 or more characters> --principal <principal> --bank-url http://127.0.0.1:8765 --state <new-private-state.json>
    ```
 
    Use an existing private directory outside any Git repository and a **new**

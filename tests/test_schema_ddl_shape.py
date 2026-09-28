@@ -106,7 +106,7 @@ _REQUIRED_COLUMNS = [
      {"entity_norm", "attribute_norm", "read_count", "last_read_at"}),
     # v38 — durable dream acknowledgement state, per entry.
     ("entries", {"dream_state"}),
-    # v48 — the park record on the agent row, the wake decision kept on the
+    # v49 — the park record on the agent row, the wake decision kept on the
     # message for retries, and the rings the daemon decided.
     ("coordination_agents", {"park_reason", "park_needs", "park_clear_by", "park_resume",
                              "park_expires", "park_set_at"}),

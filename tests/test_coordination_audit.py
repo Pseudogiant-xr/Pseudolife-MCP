@@ -697,7 +697,7 @@ def test_a_send_event_commits_to_its_salted_body_outside_the_hash(store):
     assert isinstance(salt, str) and len(salt) == 32 and int(salt, 16) >= 0
     # No byte count either: a length left in the chain would settle a guess
     # between candidates of different lengths ("yes" or "no").
-    # v48: the send event also names the wake decision (the recipient
+    # v49: the send event also names the wake decision (the recipient
     # registered just now, so it was active: hinted).
     assert sent["payload"] == {"text_commitment": hashlib.sha256(bytes.fromhex(salt) + raw)
                                .hexdigest(),
@@ -819,7 +819,7 @@ def test_redact_removes_a_body_from_the_log_and_the_mailbox_and_logs_why(store):
     assert result == {"message_id": oops["message_id"], "seq": sent["seq"], "redact_seq": 5,
                       "redact_hash": redact_row["hash"],
                       "expect_head": f"5:{redact_row['hash']}",
-                      "live_body_cleared": True, "audit_copy": "removed"}
+                      "live_body_cleared": True, "audit_copy": "removed", "other_copies": []}
     # The new head, recorded outside the bank, catches a later removal of
     # the redact row itself.
     assert verify(store, expect_head=(5, redact_row["hash"]))["ok"]

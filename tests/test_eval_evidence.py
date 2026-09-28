@@ -9941,6 +9941,169 @@ for _cid, _needle, _value, _stated, _places in (
                         value=_value, stated=_stated, places=_places))
 
 
+# ── the coordination check-in rules (evals/README.md + CHANGELOG, 2026-09-28) ──
+# evals/coordination_checkin_bench.py: seven runs. The -final run carries the
+# shipped wording on all three scenario sets; the others explain the three
+# cut rules and the shared-resource rule's three wordings. Send-side figures
+# are computed from the runs themselves, never from ``per_rule`` (which mixes
+# send and no-send situations: the review of #435 caught a doc that did).
+_CCB = RESULTS + "coordination-checkin-bench-checkin-rules-20260928"
+CCB_BOARD, CCB_TASK = _CCB + ".json", _CCB + "-task.json"
+CCB_ABL, CCB_ABL2 = _CCB + "-ablation.json", _CCB + "-ablation2.json"
+CCB_V2, CCB_HELD, CCB_FINAL = _CCB + "-shipped.json", _CCB + "-heldout.json", _CCB + "-final.json"
+CCB_CODEX, CCB_CODEX4 = _CCB + "-codex.json", _CCB + "-codex4.json"
+
+
+def _ccb_delta(key, field="delta", i=None, part=None):
+    def value(d):
+        comps = d["by_set"][part]["comparisons"] if part else d["comparisons"]
+        v = comps[key][field]
+        return v if i is None else v[i]
+    return value
+
+
+def _ccb_arm(arm, metric, rule=None, part=None):
+    def value(d):
+        a = (d["by_set"][part]["summary"] if part else d["summary"])["per_arm"][arm]
+        return a[metric] if rule is None else a[metric][rule]
+    return value
+
+
+def _ccb_runs(arm, rule, expect, part=None):
+    """Accuracy over one arm's runs of one rule and expectation."""
+    def value(d):
+        xs = [r["grade"]["correct"] for r in d["runs"]
+              if r["arm"] == arm and r["rule"] == rule and r["expect"] == expect
+              and (part is None or r.get("set", "main") == part)]
+        return sum(xs) / len(xs)
+    return value
+
+
+_USD = lambda d: d["total_usd"]  # noqa: E731
+
+for _cid, _doc, _needle, _art, _value, _stated, _places in (
+        # 1. board frame
+        ("ccb-board-spend", EVALS, "(no suffix, $2.01)", CCB_BOARD, _USD, 2.01, 2),
+        ("ccb-board-new-old", EVALS, "+0.000 over 120 pairs. Every arm", CCB_BOARD,
+         _ccb_delta("new - old"), 0.0, 3),
+        # 2. task frame, five rules
+        ("ccb-task-spend", EVALS, "(`-task`, $2.32): new minus old", CCB_TASK, _USD, 2.32, 2),
+        ("ccb-task-new-old", EVALS, "+0.100 [+0.025, +0.200], all of it", CCB_TASK,
+         _ccb_delta("new - old"), 0.100, 3),
+        ("ccb-task-rule2", EVALS, "(+0.375) and keep-your-status-true (+0.125)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["shared_resource"]["delta"],
+         0.375, 3),
+        ("ccb-task-rule5", EVALS, "(+0.375) and keep-your-status-true (+0.125)", CCB_TASK,
+         lambda d: d["comparisons"]["new - old"]["per_rule"]["status_true"]["delta"],
+         0.125, 3),
+        ("ccb-task-waiting-none", EVALS, "(no check-in: 0.92)", CCB_TASK,
+         _ccb_arm("none", "per_rule", "waiting"), 0.92, 2),
+        ("ccb-task-waiting-old", EVALS, "(no check-in: 0.92)", CCB_TASK,
+         _ccb_arm("old", "per_rule", "waiting"), 1.0, 2),
+        # 3-4. ablations
+        ("ccb-ablation-cut13", EVALS, "decided exactly like the full text (+0.000 over 120 pairs)",
+         CCB_ABL, _ccb_delta("cut13 - new"), 0.0, 3),
+        ("ccb-ablation-codex", EVALS, "form carrying only them scored 0.90", CCB_ABL,
+         _ccb_arm("codex", "accuracy"), 0.90, 2),
+        ("ccb-ablation2-cut134", EVALS, "changed nothing (+0.000 over 120 pairs)", CCB_ABL2,
+         _ccb_delta("cut134 - cut13"), 0.0, 3),
+        ("ccb-ablation2-codex2", EVALS, "shared-resource rule instead scored 0.97", CCB_ABL2,
+         _ccb_arm("codex2", "accuracy"), 0.97, 2),
+        # 5. wording 2 with the two kept rules
+        ("ccb-v2-spend", EVALS, "(`-shipped`, $2.23;", CCB_V2, _USD, 2.23, 2),
+        ("ccb-v2-new-old", EVALS, "+0.108 [+0.025, +0.208] over", CCB_V2,
+         _ccb_delta("new - old"), 0.108, 3),
+        ("ccb-v2-rule2-send-old", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("old", "shared_resource", "send"), 0.25, 2),
+        ("ccb-v2-rule2-send-new", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("new", "shared_resource", "send"), 1.0, 2),
+        ("ccb-v2-rule5-send-old", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("old", "status_true", "send"), 0.67, 2),
+        ("ccb-v2-rule5-send-new", EVALS, "0.25 to 1.00 and keep-your-status-true from 0.67 to 1.00",
+         CCB_V2, _ccb_runs("new", "status_true", "send"), 1.0, 2),
+        # 6. first held-out set
+        ("ccb-held-spend", EVALS, "(`-heldout`, $0.46)", CCB_HELD, _USD, 0.46, 2),
+        ("ccb-held-new-old", EVALS, "old -0.208 [-0.500, +0.000] over 24 pairs", CCB_HELD,
+         _ccb_delta("new - old"), -0.208, 3),
+        ("ccb-held-hold-new", EVALS, "(no-send held 0.50 against the old", CCB_HELD,
+         _ccb_arm("new", "no_send_specificity"), 0.50, 2),
+        ("ccb-held-hold-old", EVALS, "text's 0.92)", CCB_HELD,
+         _ccb_arm("old", "no_send_specificity"), 0.92, 2),
+        # 7. the shipped wording on every set
+        ("ccb-final-spend", EVALS, "(`-final`, $4.74, 960 runs)", CCB_FINAL, _USD, 4.74, 2),
+        ("ccb-final-valid", EVALS, "(`-final`, $4.74, 960 runs)", CCB_FINAL,
+         lambda d: d["summary"]["valid_runs"], 960, 0),
+        *((f"ccb-final-{_part}-{_arm}", EVALS, _row, CCB_FINAL,
+           _ccb_arm(_arm, "accuracy", part=_part), _v, 2)
+          for _part, _row, _vals in (
+              ("main", "| main (40 situations) | 0.87 | 0.91 | 0.98 | 0.98 |",
+               (0.87, 0.91, 0.98, 0.98)),
+              ("heldout", "| first held-out (8, used for wording 3) | 0.88 | 0.92 | 0.83 | 1.00 |",
+               (0.88, 0.92, 0.83, 1.00)),
+              ("heldout2", "| second held-out (16, frozen first) | 0.96 | 0.92 | 0.81 | 0.98 |",
+               (0.96, 0.92, 0.81, 0.98)))
+          for _arm, _v in zip(("none", "old", "v2", "new"), _vals)),
+        ("ccb-final-main-delta", EVALS, "main +0.075 [-0.008, +0.175] (120 pairs)", CCB_FINAL,
+         _ccb_delta("new - old", part="main"), 0.075, 3),
+        ("ccb-final-held-delta", EVALS, "first held-out +0.083 [+0.000, +0.292] (24)", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout"), 0.083, 3),
+        ("ccb-final-held2-delta", EVALS, "held-out +0.062", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout2"), 0.062, 3),
+        ("ccb-final-held2-lo", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new - old", "ci95", 0, part="heldout2"), -0.062, 3),
+        ("ccb-final-held2-hi", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new - old", "ci95", 1, part="heldout2"), 0.208, 3),
+        ("ccb-final-held2-aa", EVALS, "[-0.062, +0.208] (48), A/A -0.021", CCB_FINAL,
+         _ccb_delta("new@aa - new", part="heldout2"), -0.021, 3),
+        ("ccb-final-held2-v2", EVALS, "held-out set: +0.167 [+0.000, +0.375]", CCB_FINAL,
+         _ccb_delta("new - v2", part="heldout2"), 0.167, 3),
+        ("ccb-final-held2-none", EVALS, "over no check-in at all (0.96)", CCB_FINAL,
+         _ccb_arm("none", "accuracy", part="heldout2"), 0.96, 2),
+        ("ccb-final-held2-r2-send-old", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("old", "shared_resource", "send", "heldout2"), 0.75, 2),
+        ("ccb-final-held2-r2-send-new", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("new", "shared_resource", "send", "heldout2"), 1.0, 2),
+        ("ccb-final-held2-r2-hold-new", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("new", "shared_resource", "no_send", "heldout2"), 0.92, 2),
+        ("ccb-final-held2-r2-hold-old", EVALS, "0.75 to 1.00 while holding no-send at 0.92",
+         CCB_FINAL, _ccb_runs("old", "shared_resource", "no_send", "heldout2"), 0.92, 2),
+        # 8-9. the Codex forms, and two re-scorings of the frozen set
+        ("ccb-codex-spend", EVALS, "(`-codex`, $2.54)", CCB_CODEX, _USD, 2.54, 2),
+        ("ccb-codex-main", EVALS, "+0.067 [-0.017,", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="main"), 0.067, 3),
+        ("ccb-codex-held", EVALS, "-0.167 [-0.417, +0.000], no-send", CCB_CODEX,
+         _ccb_delta("codex3 - old", part="heldout"), -0.167, 3),
+        ("ccb-codex-held-hold", EVALS, "held 0.50.", CCB_CODEX,
+         _ccb_arm("codex3", "no_send_specificity", part="heldout"), 0.50, 2),
+        ("ccb-codex4-spend", EVALS, "(`-codex4`, $2.56)", CCB_CODEX4, _USD, 2.56, 2),
+        ("ccb-codex4-main", EVALS, "(+0.000 [-0.058, +0.058])", CCB_CODEX4,
+         _ccb_delta("codex4 - old", part="main"), 0.0, 3),
+        ("ccb-codex4-held", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout"), 0.083, 3),
+        ("ccb-codex4-held2", EVALS, "+0.083 [+0.000, +0.292] and +0.062 [+0.000, +0.188]",
+         CCB_CODEX4, _ccb_delta("codex4 - old", part="heldout2"), 0.062, 3),
+        *((f"ccb-codex4-hold-{_part}", EVALS, "holding every no-send situation", CCB_CODEX4,
+           _ccb_arm("codex4", "no_send_specificity", part=_part), 1.0, 2)
+          for _part in ("main", "heldout", "heldout2")),
+        ("ccb-rescore-codex", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-rescore-codex4", EVALS, "+0.042 [-0.104, +0.208] and +0.042 [-0.062, +0.188]",
+         CCB_CODEX4, _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        ("ccb-changelog-rescore", CHANGELOG, "frozen set at +0.042 each", CCB_CODEX4,
+         _ccb_delta("new - old", part="heldout2"), 0.042, 3),
+        # CHANGELOG
+        ("ccb-changelog-held", CHANGELOG, "over-sent on held-out ones (-0.208 against the", CCB_HELD,
+         _ccb_delta("new - old"), -0.208, 3),
+        ("ccb-changelog-held2", CHANGELOG, "[-0.062, +0.208] over 48 pairs", CCB_FINAL,
+         _ccb_delta("new - old", part="heldout2"), 0.062, 3),
+        ("ccb-changelog-main", CHANGELOG, "+0.075 [-0.008, +0.175] over 120 pairs", CCB_FINAL,
+         _ccb_delta("new - old", part="main"), 0.075, 3),
+        ("ccb-changelog-v2", CHANGELOG, "by +0.167 [+0.000, +0.375] on the frozen set", CCB_FINAL,
+         _ccb_delta("new - v2", part="heldout2"), 0.167, 3)):
+    CLAIMS.append(Claim(id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+                        value=_value, stated=_stated, places=_places))
+
+
 # ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
 # evals/seed_bench.py before and after the _mentions boundary change, plus
 # a control that patches the old matcher back in on the new tree (it

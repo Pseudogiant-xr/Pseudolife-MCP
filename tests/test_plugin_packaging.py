@@ -260,6 +260,10 @@ def test_coordination_has_independent_start_and_prompt_handlers():
     budget = next(h["timeout"] for group in hooks["SessionStart"] for h in group["hooks"]
                   if "coordination-start.sh" in h["command"])
     assert max_time <= budget - 2  # headroom for the record work before it
+    # The record work measures the process identity with `ps -W` on Windows,
+    # 1.6-3.5 s a call on a loaded host (2026-09-23): the request and that
+    # must both fit, or the check-in is lost (code review of #429).
+    assert budget >= max_time + 4
     assert "memory_agents" not in start
     from pseudolife_memory.coordination import CHECKIN_TEXT
     for phrase in ("memory_agents(action=list)", "memory_agents(action=update",
@@ -474,3 +478,45 @@ def test_memory_loop_block_explains_replacement_currency():
     from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
     text = " ".join(MEMORY_LOOP_BLOCK.split())
     assert "`current: false`" in text and "search again" in text
+
+
+# Host-shaped vocabulary that belongs in a per-install hook-instructions.md,
+# never in the served core (2026-09-27 review: a research lab, an agency, a
+# data team and a solo developer must all read the check-in naturally).
+_HOST_WORDS = ("suite=", "gpu=", "SUITE-START", "SUITE-END", "pytest", "Postgres",
+               "worktree", "VRAM", "ops/.env", "conftest")
+
+
+def test_checkin_says_when_to_send_not_only_how():
+    """Six sessions reviewed on 2026-09-27 made 15 status updates, 9 lists and
+    7 receives and sent nothing until a human told one to. The check-in
+    listed the verbs and never said when a message is due. It keeps its
+    mechanical steps and adds the two field-neutral rules that moved
+    decisions in evals/coordination_checkin_bench.py (2026-09-28); three
+    others that moved nothing were cut. Both texts are served exactly as
+    measured: the check-in equals its arm file byte for byte (the -final
+    run scored that text; test_coordination_checkin_bench ties the file to
+    the artifact's hash), and the Codex form's measured part must stay
+    inside it, so a reword means a new bench run."""
+    from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
+    arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
+    measured = (arms / "rules-v3-20260928.txt").read_text(encoding="utf-8").strip()
+    assert CHECKIN_TEXT == measured
+    assert (arms / "codex4-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
+    for phrase in ("look for whoever holds it or has it booked",
+                   "message them that you are next", "a status line is not a queue",
+                   "If the board shows it free, use it", "Keep your status true"):
+        assert phrase in CHECKIN_TEXT, phrase
+    # Cut: three rules the bench could not see help, and the clause that
+    # made the shared-resource rule over-send on held-out situations.
+    for cut in ("a message is what a peer must act on", "before you debug it",
+                "message everyone waiting on it", "do not guess that they are idle"):
+        assert cut not in CHECKIN_TEXT, cut
+    # The mechanical steps stay, in front of the rules.
+    assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")
+    assert "Message them you're next. Free? Use it" in CHECKIN_INSTRUCTION
+    for verb in ("update", "list", "receive", "ack"):
+        assert verb in CHECKIN_INSTRUCTION
+    for text in (CHECKIN_TEXT, CHECKIN_INSTRUCTION):
+        for word in _HOST_WORDS:
+            assert word.lower() not in text.lower(), word

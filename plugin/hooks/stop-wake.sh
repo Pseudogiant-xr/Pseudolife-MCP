@@ -15,7 +15,7 @@
 # stderr carries one line saying what this is, then the shim's digest, which
 # already reads as agent-origin, not user authority.
 #
-# The daemon decides, this hook rings (schema v48, maintainer decision
+# The daemon decides, this hook rings (schema v49, maintainer decision
 # 2026-09-28). Every send gets a wake decision in the daemon; for a ring
 # (rung: mail that clears what the parked recipient declared it needs, or
 # nudged: an idle session that never parked) the shim writes <key>.ring
@@ -66,6 +66,9 @@ POLL=5
 # a wake happens only while the session is idle.
 MAX_WAKES=20
 WAKE_WINDOW=3600
+# Under Git Bash the parent is a Windows PID that only `ps -W` lists; it is
+# checked at arm time and then this often (seconds), not at every poll.
+PARENT_CHECK=60
 
 # Read the two settings the way the shim and doctor do: trimmed and
 # lower-cased, blank meaning unset. Only a non-empty value costs a spawn.
@@ -88,7 +91,10 @@ INPUT=$(cat)
 # Only a top-level "session_id" counts (see coordination-prompt.sh).
 SID=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"session_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' |
       head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
-case "$SID" in ''|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+# Character sets are spelled out, never ranges: macOS's bash 3.2 matches
+# a range by locale collation, where a-f takes upper case and 0-9 takes
+# digits such as the superscript two (tests/test_hook_glob_ranges.py).
+case "$SID" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*) exit 0 ;; esac
 [ "${#SID}" -le 128 ] || exit 0
 # A Codex run nested inside a Claude Bash tool inherits CLAUDECODE; Claude
 # Code sets CLAUDE_CODE_SESSION_ID in a hook's environment to the payload's
@@ -105,14 +111,14 @@ KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null;
 # line 2 names this session, so a reused PID's record cannot wake it for a
 # dead process's mail. A symlinked, CRLF or upper-case record is refused.
 case "${CLAUDE_PID:-}" in
-    ''|*[!0-9]*) ;;
+    ''|*[!0123456789]*) ;;
     *)  HOST="$DIGEST_DIR/claude-$CLAUDE_PID.host"
         if [ -f "$HOST" ] && [ ! -L "$HOST" ]; then
             RECORDED=""
             CONFIRMED=""
             { IFS= read -r RECORDED; IFS= read -r CONFIRMED; } < "$HOST"
             case "$RECORDED$CONFIRMED" in
-                *[!0-9a-f]*) ;;
+                *[!0123456789abcdef]*) ;;
                 *) [ "${#RECORDED}" -eq 64 ] && [ "$CONFIRMED" = "$KEY" ] && KEY=$RECORDED ;;
             esac
         fi ;;
@@ -181,7 +187,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
     AGENT_ID=""
     IFS= read -r AGENT_ID < "$AGENT"
     AGENT_ID=${AGENT_ID%$'\r'}
-    case "$AGENT_ID" in *[!0-9a-f]*) AGENT_ID="" ;; esac
+    case "$AGENT_ID" in *[!0123456789abcdef]*) AGENT_ID="" ;; esac
     [ "${#AGENT_ID}" -eq 32 ] || AGENT_ID=""
     if [ -n "$AGENT_ID" ]; then
         SINCE=""
@@ -189,7 +195,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
             IFS= read -r SINCE < "$TURN"
             SINCE=${SINCE%$'\r'}
         fi
-        case "$SINCE" in ''|*[!0-9]*) SINCE="" ;; esac
+        case "$SINCE" in ''|*[!0123456789]*) SINCE="" ;; esac
         [ "${#SINCE}" -le 12 ] || SINCE=""
         QUERY="agent=$AGENT_ID"
         [ -n "$SINCE" ] && QUERY="$QUERY&since=$SINCE"
@@ -211,7 +217,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
 fi
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
-case "$WAIT" in ''|*[!0-9]*) WAIT=$MAX_WAIT ;; esac
+case "$WAIT" in ''|*[!0123456789]*) WAIT=$MAX_WAIT ;; esac
 [ "${#WAIT}" -le 5 ] || WAIT=$MAX_WAIT
 WAIT=$((10#$WAIT))
 [ "$WAIT" -le "$MAX_WAIT" ] || WAIT=$MAX_WAIT
@@ -225,21 +231,48 @@ still_owner() {
     [ "$current" = "$TOKEN" ]
 }
 
-# Claude Code going away ends the wait, where kill -0 can see it. Under Git
-# Bash CLAUDE_PID is a Windows PID that only tasklist or ps -W can probe, at
-# 1.6-3.5 s a call on the 2026-09-23 test machine, so there the budget bounds
-# an orphaned watcher.
-PARENT=""
+# Claude Code going away ends the wait. kill -0 sees a POSIX parent at every
+# poll. Under Git Bash CLAUDE_PID is a Windows PID that only `ps -W` (Git's
+# own) lists, at 65 ms a call on the idle maintainer host (2026-09-27) and
+# 1.6-3.5 s on the loaded 2026-09-23 test machine, so there it runs at arm
+# time and then every PARENT_CHECK seconds. Returns 0 while the PID is
+# listed, 1 once a listing lacks it, 2 when there is no listing to judge by
+# (the watch then goes on as if unchecked).
+windows_pid_listed() {  # $1 = a Windows PID
+    local listing
+    listing=$(ps -W 2>/dev/null) || return 2
+    [ -n "$listing" ] || return 2
+    printf '%s\n' "$listing" |
+        awk -v p="$1" '$4 == p || ($1 ~ /^[A-Za-z]$/ && $5 == p) { found = 1; exit } END { exit found ? 0 : 1 }'
+}
+PARENT="" WINDOWS_PARENT="" PARENT_CHECKED=0
 case "${CLAUDE_PID:-}" in
-    ''|*[!0-9]*) ;;
-    *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
+    ''|*[!0123456789]*) ;;
+    *)  case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                windows_pid_listed "$CLAUDE_PID"
+                [ $? -eq 0 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
+                ;;
+            *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
+        esac ;;
 esac
+# True while the parent is (as far as this host can tell) still running.
+parent_alive() {
+    if [ -z "$WINDOWS_PARENT" ]; then
+        kill -0 "$PARENT"
+        return
+    fi
+    [ $((SECONDS - PARENT_CHECKED)) -ge "$PARENT_CHECK" ] || return 0
+    PARENT_CHECKED=$SECONDS
+    windows_pid_listed "$PARENT"
+    [ $? -ne 1 ]
+}
 
 read_seen() {
     SEEN_AT=0
     [ -f "$SEEN" ] && IFS= read -r SEEN_AT < "$SEEN"
     SEEN_AT=${SEEN_AT//[$'\r\n ']/}
-    case "$SEEN_AT" in ''|*[!0-9]*) SEEN_AT=0 ;; esac
+    case "$SEEN_AT" in ''|*[!0123456789]*) SEEN_AT=0 ;; esac
 }
 
 # Sets RING_AT and RING_REASON from the shim's ring marker; true when the
@@ -253,10 +286,10 @@ ring_past_seen() {
     { IFS= read -r RING_AT; IFS= read -r RING_REASON; } < "$RING"
     RING_AT=${RING_AT//[$'\r\n ']/}
     RING_REASON=${RING_REASON%$'\r'}
-    case "$RING_AT" in ''|*[!0-9]*) return 1 ;; esac
+    case "$RING_AT" in ''|*[!0123456789]*) return 1 ;; esac
     [ "${#RING_AT}" -le 12 ] || return 1
     RING_AT=$((10#$RING_AT))
-    case "$RING_REASON" in ''|*[!-A-Za-z0-9_\ ]*) return 1 ;; esac
+    case "$RING_REASON" in ''|*[!-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\ ]*) return 1 ;; esac
     [ "$RING_AT" -gt "$SEEN_AT" ]
 }
 
@@ -271,7 +304,7 @@ wake_budget_ok() {
     [ -f "$WAKES" ] || return 0
     while IFS= read -r t || [ -n "$t" ]; do
         t=${t%$'\r'}
-        case "$t" in ''|*[!0-9]*) continue ;; esac
+        case "$t" in ''|*[!0123456789]*) continue ;; esac
         [ "${#t}" -le 12 ] || continue
         # Decimal, whatever the padding: bash reads 089 as bad octal.
         t=$((10#$t))
@@ -289,8 +322,9 @@ wake_budget_ok() {
 # mail this session has not seen and the wake cap allows it, 3 on timeout, a
 # lost lease or a gone parent, 2 when the digest turns into a symlink or
 # vanishes. A digest absent at arm time is waited for (the shim writes it on
-# its first heartbeat); one that vanishes mid-watch means the shim exited,
-# the only sign of that under Git Bash, so the watch ends rather than fire
+# its first heartbeat); one that vanishes mid-watch means the shim exited
+# (a crash that takes the shim down with Claude Code leaves it, which the
+# parent check above catches), so the watch ends rather than fire
 # into a later session. The wait-mail command being built beside this hook
 # has the same fire-and-mark contract; it can replace the loop once it
 # ships, keeping the lease, parent and cap checks beside it.
@@ -299,7 +333,7 @@ wait_for_mail() {
     local deadline=$WAIT snapshot present=0
     while :; do
         still_owner || return 3
-        if [ -n "$PARENT" ] && ! kill -0 "$PARENT"; then return 3; fi
+        if [ -n "$PARENT" ] && ! parent_alive; then return 3; fi
         [ -L "$FILE" ] && return 2
         if [ ! -f "$FILE" ] && [ "$present" = 1 ]; then return 2; fi
         if [ -f "$FILE" ]; then
@@ -314,7 +348,7 @@ wait_for_mail() {
             while [ "${BODY%$'\n'}" != "$BODY" ]; do BODY=${BODY%$'\n'}; done
             read_seen
             case "$WATERMARK" in
-                ''|*[!0-9]*) ;;
+                ''|*[!0123456789]*) ;;
                 *) if [ -n "$BODY" ] && [ "$WATERMARK" -gt "$SEEN_AT" ] && ring_past_seen \
                         && wake_budget_ok; then
                        return 0
