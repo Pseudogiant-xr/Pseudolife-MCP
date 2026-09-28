@@ -56,6 +56,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and mail from a current holder are still held, and no lease stands in
   for `maintainer`, an agent id or an id prefix (8 or more hex
   characters). Found in the review of #443.
+### Fixed (2026-09-28 — Codex hook readiness distinguishes mailbox approval and bundle presence)
+- Successful Codex hook setup now prints the documented `memory_message`
+  approval choice for unattended receive, ack and send, and includes it in
+  its JSON report; setup continues to leave tool approvals unchanged.
+- Client updates report a matching manual hook bundle as present with trust
+  and execution unchecked, and show the setup command to verify with consent.
 
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the

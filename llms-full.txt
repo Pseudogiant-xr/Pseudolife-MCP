@@ -4424,8 +4424,9 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged. A recipient running with approval
-policy `never` cannot execute a tool that still requires approval. To authorize
+Setup leaves Codex tool approvals unchanged and prints the approval choice at the
+end of successful hook setup. A recipient running with approval policy `never`
+cannot execute a tool that still requires approval. To authorize
 unattended mailbox operations specifically, configure the installed server's
 `tools.memory_message.approval_mode = "approve"` in Codex. This permits that
 tool's send, receive and acknowledgment actions; it does not approve file writes,

@@ -1029,6 +1029,12 @@ def setup(args):
                             report["verified"] = verify(
                                 executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"
+                        report["mailbox_approval_notice"] = (
+                            'Hooks ready; setup leaves tool approvals unchanged. '
+                            'For unattended receive, ack and send, choose approval_mode = "approve" '
+                            'under [mcp_servers.pseudolife-memory.tools.memory_message] in Codex config.toml. '
+                            'Without that approval, a woken thread can stall on an approval prompt.\n'
+                            'See docs/guide/configuration.md (Experimental agent coordination).')
         except SetupError as exc:
             report.update(status="unavailable", recovery=str(exc))
         except Exception as exc:
@@ -1053,6 +1059,8 @@ def main():
         report = {"source": "skip" if args.source == "auto" else args.source, "status": "unavailable", "instructions": "skipped",
                   "recovery": f"Setup could not write fallback instructions ({type(exc).__name__}); check file permissions."}
     print(json.dumps(report, indent=2))
+    if report["status"] == "ready":
+        print(report.get("mailbox_approval_notice", ""), file=sys.stderr)
     return 0 if report["status"] == "ready" or report["instructions"] in ("present", "appended") else 1
 
 
