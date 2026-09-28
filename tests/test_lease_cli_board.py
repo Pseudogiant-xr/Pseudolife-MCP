@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 
 import httpx
 import pytest
@@ -23,6 +24,7 @@ from pseudolife_memory.web.fixtures import FixtureService
 from pseudolife_memory.web.api import build_console_app
 
 BEARER = "fixture-bearer"
+START_TIMEOUT = 60.0
 
 
 class _Bridge(httpx.BaseTransport):
@@ -99,17 +101,48 @@ def _events(storage, *kinds):
     return [(event, json.loads(payload)) for event, payload in rows]
 
 
+@pytest.fixture
+def followed_process(monkeypatch):
+    """End the followed PID after the mirror has sent all acquire notices."""
+    child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.readline()"],
+                             stdin=subprocess.PIPE)
+    threading.Thread(target=child.wait, daemon=True).start()
+    announce = lease_cli.BoardMirror._announce
+
+    def finish(self, event, deadline):
+        announce(self, event, deadline)
+        if event == "acquired":
+            child.stdin.close()
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "_announce", finish)
+    try:
+        yield child
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=START_TIMEOUT)
+        if not child.stdin.closed:
+            child.stdin.close()
+
+
 def test_a_run_holds_the_lease_on_the_board_and_releases_it(board, tmp_path):
     bridge, storage = board
     seen = {}
     marker = tmp_path / "running"
-    child = ("import pathlib, time; pathlib.Path(r'%s').write_text('x'); time.sleep(1.5)"
-             % marker)
+    observed = tmp_path / "observed"
+    child = ("import pathlib, time\n"
+             f"pathlib.Path({str(marker)!r}).touch()\n"
+             f"deadline = time.monotonic() + {START_TIMEOUT!r}\n"
+             f"while not pathlib.Path({str(observed)!r}).exists():\n"
+             "    assert time.monotonic() < deadline, 'lease observer never ran'\n"
+             "    time.sleep(0.02)\n")
 
     def watch():
-        for _ in range(200):
+        deadline = time.monotonic() + START_TIMEOUT
+        while time.monotonic() < deadline:
             if marker.exists():
                 seen["leases"] = _post(bridge, "leases", {})["leases"]
+                observed.touch()
                 return
             threading.Event().wait(0.02)
 
@@ -117,7 +150,7 @@ def test_a_run_holds_the_lease_on_the_board_and_releases_it(board, tmp_path):
     watcher.start()
     code = lease_cli.main(["run", "gpu", "--expect", "60", "--purpose", "bench smoke",
                            "--", sys.executable, "-c", child], transport=bridge)
-    watcher.join(10)
+    watcher.join(START_TIMEOUT)
     assert code == 0
     [lease] = seen["leases"]
     assert lease["name"] == "gpu"
@@ -194,8 +227,8 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     assert "no bank found" in capsys.readouterr().err
 
 
-def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypatch, capsys,
-                                                                 tmp_path):
+def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(
+        board, monkeypatch, capsys, tmp_path, followed_process):
     """``lease hold`` against the real store: the lease is held under the
     hold's own address while the followed process lives, the peers whose
     status says they work around the suite or the GPU get the acquire and
@@ -206,24 +239,23 @@ def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypat
     runner = _post(bridge, "register", {"label": "suite-runner", "status": "SUITE-START; suite=running"})
     quiet = _post(bridge, "register", {"label": "quiet", "status": "reviewing a PR"})
     as_ = lambda a: {"X-PL-Agent": a["agent_id"], "X-PL-Agent-Key": a["credential"]}
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
-    threading.Thread(target=child.wait, daemon=True).start()
+    child = followed_process
     seen = {}
 
-    def watch():
-        for _ in range(400):
-            leases = _post(bridge, "leases", {"name": "gpu"})["leases"]
-            if leases:
-                seen["lease"] = leases[0]
-                return
-            threading.Event().wait(0.02)
+    observed = threading.Event()
+    announce = lease_cli.BoardMirror._announce
 
-    watcher = threading.Thread(target=watch)
-    watcher.start()
+    def observe(self, event, deadline):
+        if event == "acquired":
+            seen["lease"] = _post(bridge, "leases", {"name": "gpu"})["leases"][0]
+            observed.set()
+        return announce(self, event, deadline)
+
+    monkeypatch.setattr(lease_cli.BoardMirror, "_announce", observe)
     code = lease_cli.main(["hold", "gpu", "--while-pid", str(child.pid), "--expect", "10m",
                            "--purpose", "bench server", "--worktree", "wt-bench"],
                           transport=bridge)
-    watcher.join(10)
+    assert observed.wait(START_TIMEOUT), "the held lease was never observed"
     assert code == 0
     # Stamped with the lock directory's instance id, which the real board
     # accepts (it is no secret-shaped value).
@@ -242,7 +274,8 @@ def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(board, monkeypat
     assert "board skipped" not in capsys.readouterr().err
 
 
-def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch):
+def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch,
+                                                          followed_process):
     """A session parked until the ``gpu`` lease clears (``park_clear_by:
     gpu``) gets both of the hold's notices and is rung by the release. The
     notice comes from the hold's own address after the board lease is
@@ -258,8 +291,7 @@ def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch
                              "park_clear_by": "gpu"}, as_)
     storage.conn.execute("UPDATE coordination_agents SET wake_enabled=true WHERE agent_id=%s",
                          (parked["agent_id"],))
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.0)"])
-    threading.Thread(target=child.wait, daemon=True).start()
+    child = followed_process
     code = lease_cli.main(["hold", "gpu", "--while-pid", str(child.pid), "--worktree", "wt"],
                           transport=bridge)
     assert code == 0
