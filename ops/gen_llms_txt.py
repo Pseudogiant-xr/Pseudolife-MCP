@@ -63,6 +63,10 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/security-posture.md",
      "Memory poisoning (ASI06): the threat model, every shipped "
      "mitigation mapped to it, and what is not defended"),
+    ("docs/guide/remote-bank.md",
+     "One daemon, many machines: exposing the daemon over a tailnet, a LAN "
+     "or a proxy; per-machine principals; board admission; client-only "
+     "installs"),
 ]
 
 

@@ -380,6 +380,7 @@ deep material lives in the user guide:
 | [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
 | [Comparison](docs/guide/comparison.md) | Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — the axes, and when to use something else |
 | [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
+| [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -540,6 +541,12 @@ Claude Code in via the stdio shim (installer default) or directly over
 HTTP (both below). Where the data actually lives, and
 how to back it up:
 [Configuration — data layout](docs/guide/configuration.md#data-layout).
+
+**Other machines, one bank:** sessions on a laptop, a server or a container
+can use this daemon too, through a client-only install that runs just the
+shim. Exposing the daemon (Tailscale Serve, a LAN publish or a reverse
+proxy), per-machine tokens and board admission:
+[Sharing one bank across machines](docs/guide/remote-bank.md).
 
 **Host-process install (Windows, for GPU / dev):** run Postgres in Docker
 but the daemon on host Python — for hacking on the daemon or running the
@@ -872,7 +879,7 @@ Preferring stdio (this is what the installer wires by default, for
 per-session identity)? A thin torch-free **shim** proxies stdio to the
 daemon:
 [stdio shim](docs/guide/configuration.md#stdio-shim-per-session-identity)
-· [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
+· [sharing one bank across machines](docs/guide/remote-bank.md)
 · [backups & restore rehearsal](docs/guide/configuration.md#backups)
 · [agent mailbox recovery](docs/guide/coordination-recovery.md).
 

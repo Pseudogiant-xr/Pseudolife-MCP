@@ -2165,21 +2165,13 @@ change.
 
 ## Sharing memory on the LAN
 
-Run the daemon with `PSEUDOLIFE_MCP_HOST=0.0.0.0` and a
-`PSEUDOLIFE_MCP_TOKEN`; remote clients set the same
-`PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`. The daemon **refuses
-to bind a non-loopback host without a token**, and Postgres itself stays
-loopback-only — the LAN only ever sees the daemon.
-
-The token is also what relaxes the MCP endpoint's DNS-rebinding guard. With
-a token set, `/mcp` accepts any `Host` header — a LAN address, a
-reverse-proxy hostname, a Tailscale name, a compose service name — because
-`Authorization` already proves intent. Tokenless (loopback use, or a
-container published to 127.0.0.1 via `PSEUDOLIFE_MCP_TRUST_BIND`), `/mcp`
-serves loopback `Host` values only and answers anything else with
-`421 Invalid Host header`; that is the guard against a rebinding browser
-reaching an unauthenticated bank. So: fronting the daemon with a reverse
-proxy under a real hostname means setting a token.
+Moved to its own page: [Sharing one bank across machines](remote-bank.md).
+In short, the daemon **refuses to bind a non-loopback host without a token**
+(`PSEUDOLIFE_MCP_TOKEN` or a `PSEUDOLIFE_MCP_TOKENS` map), a configured token
+lets `/mcp` accept a LAN, tailnet or reverse-proxy `Host` header, and
+Postgres stays loopback-only. That page covers the exposure recipes
+(Tailscale Serve, LAN publish, reverse proxy), per-machine principals, board
+admission, and client-only installs.
 
 ## Data layout
 

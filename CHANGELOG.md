@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-28 — one bank shared across machines: client-only install, a shim that never spawns for a remote daemon)
+- The installers take `--daemon-url <url>`, `--token-file <path>` and
+  `--client-only` (`-DaemonUrl`, `-TokenFile`, `-ClientOnly` on Windows) to
+  wire a machine that has no daemon of its own to a daemon elsewhere,
+  typically over a tailnet. A daemon URL whose host is not loopback implies
+  client-only. That mode skips everything a local daemon needs (Docker
+  preflight, volumes, `ops/.env`, token minting, the extractor, `compose
+  up`, shim autostart) and still installs the shim, registers every chosen
+  client with the URL, the token file and `PSEUDOLIFE_MCP_NO_SPAWN=1`,
+  installs the Claude Code plugin and Codex hooks, and writes the standing
+  instructions. It never mints a token: the token file must already exist
+  (owner-only on POSIX), and the preflight refuses a daemon that does not
+  answer `/health` or answers with auth off over a non-loopback host. A
+  plain-`http` URL to another machine gets one warning that the link itself
+  is unencrypted, so it belongs inside a tailnet or behind TLS. The
+  2026-09-28 dogfood of a Linux container against the maintainer's daemon
+  did all of this by hand; the new guide page
+  `docs/guide/remote-bank.md` walks through exposure (Tailscale Serve in
+  TCP mode, HTTPS, LAN or a reverse proxy), per-machine principals, board
+  admission via `coordination.allowed_principals`, and what was measured.
+- The shim never starts a local daemon for a daemon URL that is not
+  loopback, whether or not `PSEUDOLIFE_MCP_NO_SPAWN` is set. Before, a
+  remote client whose link was down spawned a host-side daemon with an
+  empty bank while the shim kept probing the remote URL, then gave up three
+  minutes later. Now it waits 15 s for the remote daemon and exits 1 with a
+  message that says the address is another machine and names what to
+  check (the link, the host's exposure, the daemon's `/health`), instead of
+  the local Docker remedy. Loopback forms (`127.0.0.1`, `localhost`,
+  `[::1]`) keep today's autostart.
+- `mcp` is capped below 2.2 in `pyproject.toml`: a shim on mcp 2.2.0 fails
+  every `tools/list` against a daemon on 2.1.x with "unhandled errors in a
+  TaskGroup" (its upstream initialize gets an error response) while the
+  same bearer over curl succeeds, which the first remote client hit on a
+  fresh pipx install. The lock already pins 2.1.0; a guard test keeps the
+  cap and the lock on the same minor line. A shim installed from an older
+  release fixes itself with `pipx runpip pseudolife-mcp install
+  "mcp==2.1.1"` or a reinstall from the daemon's checkout.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

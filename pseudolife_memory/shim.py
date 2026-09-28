@@ -31,7 +31,8 @@ from typing import NoReturn
 from pseudolife_memory import __version__
 from pseudolife_memory.coordination_identity import default_digest_dir, digest_path_for
 from pseudolife_memory.daemon_url import (  # noqa: F401 — re-exported
-    DEFAULT_URL, _daemon_url, _NoRedirectHandler, _validated_daemon_url)
+    DEFAULT_URL, _daemon_url, _is_loopback_url, _NoRedirectHandler,
+    _validated_daemon_url)
 
 try:
     from builtins import BaseExceptionGroup as _BaseExceptionGroup
@@ -63,6 +64,14 @@ _SPAWN_WAIT_ALIVE_S = 180.0
 # a cold Docker Desktop start is typically tens of seconds to a couple of
 # minutes, so the spawn ceiling above is a comfortable cap for this too.
 _NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
+# How long the shim waits for a daemon on ANOTHER machine (a non-loopback
+# daemon URL) before giving up. A remote daemon that does not answer the
+# first probe is down or unreachable, not booting beside this session, so
+# the wait is a design bound for a flapping link, not a measured boot time:
+# the 2026-09-28 remote-client dogfood measured a healthy tailnet /health
+# round trip at 7-10 ms, and a session should not stall three minutes on a
+# link that is simply not there.
+_REMOTE_WAIT_S = 15.0
 # Cancel optional coordination startup after 3s (experimental, 2026-09-11).
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
@@ -509,11 +518,42 @@ def _exit_unreachable(url: str) -> NoReturn:
     sys.exit(1)
 
 
+def _exit_unreachable_remote(url: str) -> NoReturn:
+    print(
+        f"[shim] FAILED to reach the memory daemon at {url}.\n"
+        f"  That address is another machine, so no local daemon was started:\n"
+        f"  a daemon spawned here could never be that one.\n"
+        f"  Check the link to the daemon host (tailnet up? LAN route?), that\n"
+        f"  the host exposes the port to this machine (e.g. `tailscale serve "
+        f"status` there), and that the daemon is running there (GET /health).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def ensure_daemon(url: str) -> dict:
     url = _validated_daemon_url(url)
     health = probe_health(url)
     if health is not None:
         return _accept_health(url, health)
+    if not _is_loopback_url(url):
+        # The daemon is on another machine: a host-side fallback would bind
+        # loopback with an empty bank while the shim kept probing the remote
+        # URL, then give up three minutes later (2026-09-28 dogfood). Wait
+        # briefly for the link and never spawn, PSEUDOLIFE_MCP_NO_SPAWN or not.
+        print(
+            f"[shim] no daemon answering at {url} (another machine) — waiting "
+            f"up to {_REMOTE_WAIT_S:.0f}s for it; this shim never starts a "
+            f"local daemon for a remote URL...",
+            file=sys.stderr,
+        )
+        start = time.time()
+        while time.time() - start < _REMOTE_WAIT_S:
+            time.sleep(0.5)
+            health = probe_health(url, timeout=0.5)
+            if health is not None:
+                return _accept_health(url, health)
+        _exit_unreachable_remote(url)
     if _spawn_disabled():
         # Docker-tier install: the daemon is external (compose), so wait
         # for it instead of racing its port bind with a fallback spawn.

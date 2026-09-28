@@ -1137,3 +1137,103 @@ def test_run_shim_stops_before_daemon_traffic_when_it_holds_no_credential(
         shim.run_shim()
     assert exc.value.code == 1
     assert "auth" in capsys.readouterr().err.lower()
+
+
+def test_non_loopback_daemon_url_never_spawns_a_local_daemon(monkeypatch):
+    """A daemon URL that is not loopback names a daemon on ANOTHER machine
+    (a tailnet or LAN address, a reverse-proxy name). A host-side fallback
+    could never be that daemon: it would bind 127.0.0.1 with an empty bank
+    while the shim kept probing the remote URL, and give up three minutes
+    later having spawned a process for nothing (2026-09-28 remote-client
+    dogfood). So the shim waits briefly for the remote daemon and never
+    spawns, whether or not PSEUDOLIFE_MCP_NO_SPAWN is set."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+
+    calls = {"n": 0}
+
+    def fake_probe(url, timeout=0.25):
+        calls["n"] += 1
+        return {"status": "ok"} if calls["n"] >= 3 else None
+
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+    for url in ("http://100.64.0.2:8765", "https://daemon.example.invalid"):
+        calls["n"] = 0
+        health = shim.ensure_daemon(url)
+        assert health["status"] == "ok"
+
+
+def test_non_loopback_daemon_url_times_out_with_the_remote_remedy(
+        monkeypatch, capsys):
+    """When the remote daemon never answers, the shim exits 1 with a message
+    that says the daemon is on another machine and names what to check (the
+    link to it and the daemon host's exposure), not the local Docker remedy
+    that cannot apply."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn for a non-loopback daemon URL"))
+    monkeypatch.setattr(shim, "probe_health", lambda url, timeout=0.25: None)
+    monkeypatch.setattr(shim, "_REMOTE_WAIT_S", 0.0, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        shim.ensure_daemon("http://100.64.0.2:8765")
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "100.64.0.2:8765" in err
+    assert "another machine" in err
+    assert "docker compose" not in err
+
+
+def test_loopback_daemon_url_forms_still_spawn(monkeypatch, tmp_path):
+    """The refusal is keyed on the URL's host, not on its spelling: every
+    loopback form keeps today's autostart, so a local install is unchanged."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "_spawn_lock_path", lambda url: tmp_path / "spawn.lock",
+        raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+    for url in ("http://127.0.0.1:8765", "http://localhost:8765",
+                "http://[::1]:8765"):
+        spawned = []
+
+        class _Child:
+            returncode = None
+
+            def poll(self):
+                return None
+
+        monkeypatch.setattr(shim, "spawn_daemon",
+                            lambda: (spawned.append(1), _Child())[1])
+        monkeypatch.setattr(
+            shim, "probe_health",
+            lambda url, timeout=0.25: {"status": "ok"} if spawned else None)
+        assert shim.ensure_daemon(url)["status"] == "ok"
+        assert len(spawned) == 1, url
+
+
+def test_shim_mcp_dependency_stays_on_the_daemon_line():
+    """The shim and the daemon are installed separately, and a shim on mcp
+    2.2.0 fails every tools/list against a daemon on 2.1.x (its upstream
+    initialize gets an error response; the same bearer over curl succeeds).
+    The 2026-09-28 remote-client dogfood hit this on a fresh pipx install.
+    pyproject caps the range at the lock's minor line; raise both together."""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+    mcp_spec = next(d for d in deps if re.match(r"mcp\b", d))
+    assert "<2.2" in mcp_spec, mcp_spec
+    lock = (Path(__file__).resolve().parents[1] / "ops" / "requirements.lock.txt"
+            ).read_text(encoding="utf-8")
+    locked = re.search(r"^mcp==(\d+)\.(\d+)\.", lock, re.M)
+    assert locked and (locked.group(1), locked.group(2)) == ("2", "1"), lock
