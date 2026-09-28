@@ -5009,11 +5009,15 @@ The **park record** lives on the agent row and is set through
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
 An omitted field stays; a refinement or a new reason keeps the standing
-expiry. A plain status update while parked clears the record,
+expiry. A park past its `park_expires` no longer stands: a new reason over
+it is a new park, with the 12-hour default counted from then and none of
+the lapsed park's `park_needs`, `park_clear_by` or `park_resume` carried
+over. A plain status
+update while parked clears the record,
 since a session that is working is not parked; a task or `children` update
 leaves it. A park field on its own refines a standing park and is refused
-(`invalid_park`) on an unparked row, as are an unknown reason and a bad
-expiry; credential-shaped text is `secret_like_body`. Every peer row in
+(`invalid_park`) on an unparked row or a lapsed park, as are an unknown
+reason and a bad expiry; credential-shaped text is `secret_like_body`. Every peer row in
 `memory_agents(action="list")`, and the caller's own row in the update result,
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the
