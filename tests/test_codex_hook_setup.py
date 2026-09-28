@@ -92,6 +92,17 @@ def test_explicit_source_skip_does_not_prompt(monkeypatch):
     assert setup.sys.stdin.tell() == 0
 
 
+@pytest.mark.parametrize("instructions", ["auto", "append"])
+def test_consent_prompt_names_the_board_check_in_and_mail_hint(monkeypatch, capsys, instructions):
+    # The same approval covers coordination-start.sh and coordination-prompt.sh,
+    # so both the menu and the yes/no prompt must say what they do.
+    monkeypatch.setattr(setup.sys, "stdin", Terminal("n\n"))
+    setup.consent(options(instructions=instructions))
+    prompt = capsys.readouterr().err
+    assert "agent-board check-in" in prompt
+    assert "new-mail hint" in prompt
+
+
 def report():
     return {"backups": []}
 

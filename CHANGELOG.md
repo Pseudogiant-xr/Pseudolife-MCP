@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-28 — Codex hook approval names the board check-in and mail hint)
+- `ops/setup-codex-hooks.py` asked to approve hooks for "briefings,
+  reminders, and session cleanup", but since the coordination hooks landed
+  the same approval also runs `coordination-start.sh` (the agent-board
+  check-in at session start) and `coordination-prompt.sh` (the per-prompt
+  new-mail hint). The setup menu, the yes/no prompt, and the verification
+  failure message now name both. `--trust` and `--instructions` behave as
+  before; the JSON report's shape is unchanged. README and the providers
+  guide say the same.
+
 ### Changed (2026-09-28 — board mail wakes idle sessions by default, policy-gated and capped)
 - Wake is on by default (maintainer decision 2026-09-28, superseding the
   2026-09-25 line "Wake, the Codex doorbell and the Claude stop-wake hook

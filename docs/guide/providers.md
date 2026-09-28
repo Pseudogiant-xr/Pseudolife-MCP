@@ -220,8 +220,10 @@ This is runtime support, not a model capability or a promise about ordinary
 ChatGPT conversations. See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 The Docker installer defaults to automatic hook-source detection. One setup
-choice enables automatic memory briefings, reminders, and session cleanup,
-uses standing instructions only, or skips this integration. The automatic
+choice enables automatic memory briefings, reminders, and session cleanup
+(plus, where the agent board is on, a board check-in at session start and a
+new-mail hint when a peer's message is waiting), uses standing instructions
+only, or skips this integration. The automatic
 choice approves just PseudoLife's exact current hook definitions and permits
 the standing memory block as a fallback if verification fails. It does not
 approve unrelated hooks or turn off Codex's trust checks.

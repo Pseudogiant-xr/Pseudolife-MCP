@@ -248,7 +248,9 @@ stdio shim by default, with a per-provider writer id; direct HTTP via
 `--transport http`), and health-checks the daemon — finishing with a
 per-agent ladder of what got wired and what that agent's platform cannot
 support. Codex setup offers one choice to enable automatic memory briefings,
-reminders, and session cleanup, use standing instructions only, or skip.
+reminders, and session cleanup (plus, where the agent board is on, a board
+check-in at session start and a new-mail hint per prompt), use standing
+instructions only, or skip.
 Automatic setup reuses an enabled PseudoLife plugin or installs the three
 lifecycle hooks, backs up configuration, approves only their exact current
 definitions, and verifies execution. If verification fails, the same approval
@@ -933,7 +935,8 @@ start).
 For an existing Codex installation, run `python ops/setup-codex-hooks.py`.
 The helper asks once, detects the hook source, backs up changed configuration,
 persists scoped trust through Codex, and verifies startup briefing, prompt
-reminder, and session cleanup. The Docker installer runs this step for you.
+reminder, and session cleanup, plus the agent-board check-in where the board
+is on. The Docker installer runs this step for you.
 See [Codex setup options and fallback](docs/guide/providers.md#codex-specifics).
 
 For Claude Code, use the [plugin](plugin/README.md), or the legacy
