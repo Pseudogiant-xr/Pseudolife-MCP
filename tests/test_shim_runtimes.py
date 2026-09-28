@@ -766,7 +766,9 @@ def test_a_given_venv_interpreter_is_reduced_to_its_base(tmp_path):
     venv = tmp_path / "dev-venv"
     python = _real_venv(venv)
     base = rt.base_interpreter(str(python))
-    assert Path(base).resolve() != python.resolve()
+    # not compared through resolve(): on POSIX the venv's python is a
+    # symlink to the base, which is exactly the file the base must be
+    assert not Path(base).is_relative_to(venv), base
     assert Path(base).is_file() and (tmp_path / "dev-venv" / "pyvenv.cfg").is_file()
     # a venv made from that venv still resolves to the real base
     inner = tmp_path / "inner"
