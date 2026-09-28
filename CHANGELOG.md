@@ -7,13 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed (2026-09-28 — the Codex setup check names the wake path the shim will take)
-- `ops/setup-codex-coordination.py --check` (and `--enable`) reported
-  `wake: pull-only` for every registration without the live-delivery bridge,
-  while since the entry below the Codex doorbell rings by default. The report
+- `ops/setup-codex-coordination.py --check` reported no wake path, and
+  `--enable` reported `wake: pull-only` for every registration without the
+  live-delivery bridge, while since the entry below the Codex doorbell rings
+  by default. The report
   now carries the wake path the shim would take, read the way
   `pseudolife_memory/shim.py` reads the switches and `pseudolife-mcp doctor`
   reports them: `wake` is `live` (`PSEUDOLIFE_AGENT_WAKE` with the app-server
-  bridge and a bridge credential distinct from the bank bearer), `doorbell`
+  bridge and a bridge credential distinct from the bearer the shim sends,
+  read from `PSEUDOLIFE_MCP_TOKEN_FILE` when one is configured), `doorbell`
   (the codex writer with a bearer and a `codex` CLI found through the
   server's `env` over the launching environment, unless
   `PSEUDOLIFE_CODEX_DOORBELL` is set to anything but a yes) or `pull-only`,

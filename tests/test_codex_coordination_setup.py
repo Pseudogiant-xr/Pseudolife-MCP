@@ -637,6 +637,30 @@ def test_check_reports_live_delivery_over_the_doorbell(tmp_path, monkeypatch):
     assert result["wake"] == "live"
 
 
+@pytest.mark.parametrize("file_token, literal, expected", [
+    ("bridge-fixture", None, "doorbell"),   # the file's bearer is the bridge's
+    ("file-bearer", "bridge-fixture", "live"),  # a stale literal is not the bearer
+])
+def test_live_delivery_compares_the_bridge_with_the_bearer_the_shim_sends(
+        tmp_path, monkeypatch, file_token, literal, expected):
+    """The shim refuses a bridge credential equal to its bank bearer, and its
+    bearer comes from PSEUDOLIFE_MCP_TOKEN_FILE when one is configured (the
+    --credentials setup), not from the literal (review of #439)."""
+    client = Client(tmp_path)
+    env = _ready_default_on(client, monkeypatch)
+    token_file = tmp_path / "token"
+    setup.hooks._write_token_file(token_file, file_token)
+    env.pop("PSEUDOLIFE_MCP_TOKEN")
+    if literal:
+        env["PSEUDOLIFE_MCP_TOKEN"] = literal
+    env.update({"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file),
+                "PSEUDOLIFE_AGENT_WAKE": "1",
+                "PSEUDOLIFE_CODEX_SERVER_URL": "ws://127.0.0.1:4500",
+                "PSEUDOLIFE_CODEX_SERVER_TOKEN": "bridge-fixture"})
+    assert setup.configure(client, tmp_path, tmp_path, "check")["wake"] == expected
+    assert setup.configure(client, tmp_path, tmp_path, "enable")["wake"] == expected
+
+
 @pytest.mark.parametrize("change, reason", [
     ({"PSEUDOLIFE_CODEX_DOORBELL": "0"}, "PSEUDOLIFE_CODEX_DOORBELL=0"),
     ({"PSEUDOLIFE_CODEX_DOORBELL": "off"}, "PSEUDOLIFE_CODEX_DOORBELL=off"),
@@ -700,7 +724,7 @@ def test_codex_cli_lookup_reads_the_servers_env_over_the_process_env(monkeypatch
     monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", "from-process")
     server_env = {"PSEUDOLIFE_WRITER_ID": "codex", "PSEUDOLIFE_MCP_TOKEN": "private-fixture",
                   "PSEUDOLIFE_CODEX_BIN": "from-server"}
-    path, _ = setup.wake_path(server_env.get, server_env, True, "")
+    path, _ = setup.wake_path(server_env.get, server_env, True, "", "private-fixture")
     assert path == "doorbell"
     assert seen == [{**dict(__import__("os").environ), **server_env}]
 

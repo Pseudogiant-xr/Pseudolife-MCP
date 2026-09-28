@@ -91,11 +91,13 @@ def codex_cli(lookup):
     return resolve_codex_command(lookup)
 
 
-def wake_path(effective, env, board, board_reason):
+def wake_path(effective, env, board, board_reason, bank_token):
     """``(path, reason)`` for how board mail reaches this Codex shim: ``live``
     (the app-server bridge), ``doorbell`` (``codex queue``, on by default
     since 2026-09-28) or ``pull-only``, read the way ``pseudolife_memory.shim``
-    reads the switches and ``pseudolife-mcp doctor`` reports them."""
+    reads the switches and ``pseudolife-mcp doctor`` reports them.
+    ``bank_token`` is the bearer the shim would send, from the token file
+    when one is configured, which is what it compares the bridge's with."""
     def value(key):
         return str(effective(key) or "").strip()
 
@@ -106,9 +108,8 @@ def wake_path(effective, env, board, board_reason):
     if value("PSEUDOLIFE_AGENT_STATE"):
         return "pull-only", ("PSEUDOLIFE_AGENT_STATE is set, which turns Codex "
                              "coordination off")
-    if not (value("PSEUDOLIFE_MCP_TOKEN") or value("PSEUDOLIFE_MCP_TOKEN_FILE")):
+    if not bank_token:
         return "pull-only", "no bearer token"  # the board registry needs one
-    bank_token = value("PSEUDOLIFE_MCP_TOKEN")
     bridge_token = value("PSEUDOLIFE_CODEX_SERVER_TOKEN")
     if (value("PSEUDOLIFE_AGENT_WAKE").lower() in TRUTHY
             and value("PSEUDOLIFE_CODEX_SERVER_URL") and bridge_token
@@ -207,7 +208,7 @@ def configure(client, home, cwd, action):
             board_reason = "the daemon is unreachable or refuses this bearer"
         else:
             board_reason = "the daemon does not serve the board to this bearer"
-        report["wake"], report["wake_reason"] = wake_path(effective, env, board, board_reason)
+        report["wake"], report["wake_reason"] = wake_path(effective, env, board, board_reason, token)
         return report
     if action == "enable":
         if server.get("enabled") is False:
@@ -251,7 +252,7 @@ def configure(client, home, cwd, action):
         return written.get(key, effective(key))
 
     if action == "enable":
-        wake, wake_reason = wake_path(effective_after, written, True, "")
+        wake, wake_reason = wake_path(effective_after, written, True, "", token)
     else:
         wake, wake_reason = "pull-only", "PSEUDOLIFE_AGENT_COORDINATION=0"
     report.update(status="enabled" if action == "enable" else "disabled",
