@@ -3079,7 +3079,10 @@ steps:
      `python ops/shim_autostart.py restart claude` — the elevated shell is
      needed only once, to register the task. On Windows `restart` stops
      the shim and starts it itself (the task still starts it at logon);
-     on Linux it is `systemctl --user restart`. `python
+     on Linux it is `systemctl --user restart`. Run the Windows restart
+     from a plain terminal: the shim starts with that shell's environment
+     (a Claude Code session's own `CLAUDE_CODE_*` variables are dropped,
+     the rest is passed through). `python
      ops/shim_autostart.py show claude` prints what the next start would
      run, and warns when the registered task or unit predates the runner
      and still carries the values on its command line (re-run the

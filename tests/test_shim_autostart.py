@@ -161,7 +161,7 @@ def test_check_names_what_would_stop_a_start(repo):
 def test_the_restart_plan_needs_no_elevation(tmp_path, monkeypatch):
     monkeypatch.setattr(sa, "state_dir", lambda: tmp_path / "state")
     settings = {"port": "8082", "model": "x", "host": "127.0.0.1"}
-    plan = sa.restart_plan("claude", settings)
+    plan = sa.restart_plan("claude", settings, tmp_path)
     if os.name == "nt":
         assert plan[0][0] == "powershell.exe" and "claude_shim" in plan[0][-1] and "(8082)" in plan[0][-1]
         assert plan[1] == ["<start detached>"]                 # started here, not through the scheduler
@@ -176,16 +176,30 @@ def test_restart_stops_the_shim_on_the_port_it_was_last_started_on(tmp_path, mon
     """A port change in ops/.env must not leave the old shim serving the
     old port: the pid file from the last start names it."""
     monkeypatch.setattr(sa, "state_dir", lambda: tmp_path / "state")
-    sa._write_pid("claude", 4242, "8090")
-    assert sa.previous_start("claude") == (4242, "8090")
-    plan = sa.restart_plan("claude", {"port": "8082", "model": "x", "host": "127.0.0.1"})
+    repo = tmp_path / "checkout"
+    sa._write_pid("claude", repo, 4242, "8090")
+    assert sa.previous_start("claude", repo) == (4242, "8090")
+    assert sa.previous_start("claude", tmp_path / "other-checkout") is None      # per checkout
+    plan = sa.restart_plan("claude", {"port": "8082", "model": "x", "host": "127.0.0.1"}, repo)
     if os.name == "nt":
         stop = plan[0][-1]
         assert "(8082|8090)" in stop and "@(4242)" in stop and "claude_shim" in stop
     elif not sa.shutil.which("systemctl"):
         assert "(8082|8090)" in plan[0][-1]
-    (tmp_path / "state" / "claude-shim.pid").write_text("garbage\n", encoding="utf-8")
-    assert sa.previous_start("claude") is None
+    sa.pid_file("claude", repo).write_text("garbage\n", encoding="utf-8")
+    assert sa.previous_start("claude", repo) is None
+
+
+def test_the_shim_does_not_inherit_a_claude_code_sessions_environment():
+    """A restart from a Claude Code shell must not hand the shim (and every
+    CLI call it makes) that session's identity; the scheduled task starts
+    it with the logon environment, which has none of these."""
+    env = {"PATH": "/usr/bin", "HOME": "/home/u", "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "abc",
+           "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_PID": "7", "CLAUDE_EFFORT": "high",
+           "CLAUDE_AGENT_SDK_VERSION": "1", "ANTHROPIC_API_KEY": "kept-on-purpose", "PSEUDOLIFE_MCP_TOKEN": "t"}
+    child = sa.child_environment(env)
+    assert child == {"PATH": "/usr/bin", "HOME": "/home/u", "ANTHROPIC_API_KEY": "kept-on-purpose",
+                     "PSEUDOLIFE_MCP_TOKEN": "t"}
 
 
 def test_the_shim_starts_under_a_hidden_console_not_detached():
@@ -208,6 +222,12 @@ def test_registration_note_says_when_the_task_still_carries_the_values(monkeypat
     assert "still carries the model" in note and "ops/install-shim-autostart" in note
     monkeypatch.setattr(sa, "_registered_command", lambda kind: "... ops/shim_autostart.py run claude ...")
     assert sa.registration_note("claude") == ""
+    monkeypatch.setattr(sa, "_registered_command",
+                        lambda kind: "<Settings><Enabled>false</Enabled></Settings> ... ops/shim_autostart.py run claude")
+    if os.name == "nt":
+        assert "is disabled" in sa.registration_note("claude")
+    else:
+        assert sa.registration_note("claude") == ""
     monkeypatch.setattr(sa, "_registered_command", lambda kind: None)
     note = sa.registration_note("codex")
     if os.name == "nt" or sa.shutil.which("systemctl"):

@@ -87,8 +87,15 @@ KINDS = {
 # then PATH) applies when no `cli` is set here: the runner passes --cli only
 # for a value from ops/.env or a flag.
 
-# Seconds `restart` waits for the new shim to accept a connection on its port.
-START_WAIT_SECONDS = 15.0
+# Seconds `restart` waits for the new shim to accept a connection on its
+# port: the Claude shim's health warm-up before it binds runs 10-30 s.
+START_WAIT_SECONDS = 60.0
+# Variables of the shell that runs `restart` that must not reach the shim
+# and, through it, every CLI call: a Claude Code session's own identity
+# (its session id, messaging socket, effort). The scheduled task starts the
+# shim with the logon environment, which has none of these.
+_SESSION_ENV_PREFIXES = ("CLAUDE_CODE_", "CLAUDE_AGENT_SDK_")
+_SESSION_ENV_NAMES = ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT")
 
 
 # ── ops/.env ────────────────────────────────────────────────────────────────
@@ -315,25 +322,39 @@ def state_dir() -> Path:
     return Path(os.path.expanduser("~")) / ".pseudolife-mcp"
 
 
-def pid_file(kind: str) -> Path:
-    return state_dir() / f"{kind}-shim.pid"
+def pid_file(kind: str, repo: Path) -> Path:
+    """Per checkout: a second checkout's shim on another port must not be
+    what the production checkout's next ``restart`` stops."""
+    import hashlib
+
+    digest = hashlib.sha256(str(repo.resolve()).encode("utf-8")).hexdigest()[:8]
+    return state_dir() / f"{kind}-shim-{digest}.pid"
 
 
-def _write_pid(kind: str, pid: int, port: str) -> None:
+def _write_pid(kind: str, repo: Path, pid: int, port: str) -> None:
     try:
-        pid_file(kind).parent.mkdir(parents=True, exist_ok=True)
-        pid_file(kind).write_text(f"{pid} {port}\n", encoding="utf-8")
+        pid_file(kind, repo).parent.mkdir(parents=True, exist_ok=True)
+        pid_file(kind, repo).write_text(f"{pid} {port}\n", encoding="utf-8")
     except OSError:
         pass
 
 
-def previous_start(kind: str) -> tuple[int, str] | None:
-    """The pid and port of the last detached start, from the pid file."""
+def previous_start(kind: str, repo: Path) -> tuple[int, str] | None:
+    """The pid and port of the last detached start from this checkout,
+    from the pid file."""
     try:
-        parts = pid_file(kind).read_text(encoding="utf-8").split()
+        parts = pid_file(kind, repo).read_text(encoding="utf-8").split()
         return int(parts[0]), str(int(parts[1]))
     except (OSError, ValueError, IndexError):
         return None
+
+
+def child_environment(environ: dict | None = None) -> dict:
+    """The environment the shim starts with: the caller's, minus a Claude
+    Code session's own variables (see ``_SESSION_ENV_PREFIXES``)."""
+    source = os.environ if environ is None else environ
+    return {name: value for name, value in source.items()
+            if name not in _SESSION_ENV_NAMES and not name.startswith(_SESSION_ENV_PREFIXES)}
 
 
 def _registered_command(kind: str) -> str | None:
@@ -383,6 +404,10 @@ def registration_note(kind: str) -> str:
     if "shim_autostart.py" not in text:
         return (f"{where} still carries the model and the rest on its command line: at logon it starts "
                 f"those, not ops/.env. Run {installer} once{elevated} to switch it to ops/.env")
+    if os.name == "nt" and re.search(r"<Enabled>\s*false\s*</Enabled>", text, re.IGNORECASE):
+        return (f"{where} is disabled: it will not start the shim at logon "
+                f"(Enable-ScheduledTask -TaskName '{spec['task']}' from an elevated PowerShell, "
+                f"or run {installer} again)")
     return ""
 
 
@@ -421,7 +446,8 @@ def start(kind: str, repo: Path, settings: dict, *, foreground: bool) -> int:
         os.execvp(argv[0], argv)
     _log(log, f"starting {' '.join(argv)}")
     handle = open(log, "ab")
-    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": handle, "stderr": subprocess.STDOUT, "cwd": str(repo)}
+    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": handle, "stderr": subprocess.STDOUT, "cwd": str(repo),
+                    "env": child_environment()}
     try:
         if os.name == "nt":
             # Out of any job object a harness put this runner in (which would
@@ -435,7 +461,7 @@ def start(kind: str, repo: Path, settings: dict, *, foreground: bool) -> int:
             proc = subprocess.Popen(argv, start_new_session=True, **kwargs)
     finally:
         handle.close()
-    _write_pid(kind, proc.pid, settings["port"])
+    _write_pid(kind, repo, proc.pid, settings["port"])
     line = (f"started {KINDS[kind]['script']} (pid {proc.pid}, {settings['model']}, "
             f"{settings['host']}:{settings['port']}, log {log})")
     _log(log, line)
@@ -459,14 +485,14 @@ def _windows_stop_command(kind: str, ports: list[str], pids: list[int]) -> list[
             f"| ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"]
 
 
-def restart_plan(kind: str, settings: dict) -> list[list[str]]:
+def restart_plan(kind: str, settings: dict, repo: Path = ROOT) -> list[list[str]]:
     """The commands ``restart`` runs, in order. On Windows the shim is
     stopped and started here, not through the scheduler: running a task
     needs a right the task's owner does not always hold unelevated, and a
     task that is disabled or missing would leave no shim after the stop.
     The task still starts the shim at logon."""
     spec = KINDS[kind]
-    previous = previous_start(kind)
+    previous = previous_start(kind, repo)
     ports = [settings["port"]] + ([previous[1]] if previous else [])
     if os.name == "nt":
         return [_windows_stop_command(kind, ports, [previous[0]] if previous else []), ["<start detached>"]]
@@ -474,6 +500,18 @@ def restart_plan(kind: str, settings: dict) -> list[list[str]]:
         return [["systemctl", "--user", "restart", spec["unit"]]]
     script = spec["script"].rsplit("/", 1)[-1]
     return [["pkill", "-f", f"{script}.*--port ({'|'.join(dict.fromkeys(ports))})( |$)"], ["<start detached>"]]
+
+
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        proc = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
+                              timeout=30, check=False)
+        return str(pid) in proc.stdout
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
 
 def _port_open(host: str, port: str, deadline: float) -> bool:
@@ -488,7 +526,7 @@ def _port_open(host: str, port: str, deadline: float) -> bool:
 
 
 def restart(kind: str, repo: Path, settings: dict, *, dry_run: bool) -> int:
-    plan = restart_plan(kind, settings)
+    plan = restart_plan(kind, settings, repo)
     if dry_run:
         for command in plan:
             print(" ".join(command))
@@ -506,6 +544,11 @@ def restart(kind: str, repo: Path, settings: dict, *, dry_run: bool) -> int:
     if _port_open(settings["host"], settings["port"], time.time() + START_WAIT_SECONDS):
         print(f"restarted the {kind} shim ({settings['model']}, {settings['host']}:{settings['port']}); "
               f"it reads ops/.env at every start")
+        started = previous_start(kind, repo)
+        if os.name == "nt" and started and not _pid_alive(started[0]):
+            print(f"note: the shim started by this restart (pid {started[0]}) has exited; what listens on "
+                  f"{settings['host']}:{settings['port']} is another process. See {settings['log']}",
+                  file=sys.stderr)
     else:
         print(f"the {kind} shim was started but is not yet listening on {settings['host']}:{settings['port']} "
               f"after {START_WAIT_SECONDS:.0f}s; see {settings['log']}", file=sys.stderr)

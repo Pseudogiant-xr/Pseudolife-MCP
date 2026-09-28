@@ -24,7 +24,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   was last started on) and starts it again itself, then waits for the
   port, since running a scheduled task is not a right its owner always
   holds unelevated and a disabled task would leave no shim; on Linux it
-  is `systemctl --user restart`. The elevated shell remains a one-time
+  is `systemctl --user restart`. The Windows restart starts the shim with
+  the calling shell's environment minus a Claude Code session's own
+  variables (`CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
+  `CLAUDE_AGENT_SDK_*`), so restart from a plain terminal; the scheduled
+  task keeps the logon environment. The elevated shell remains a one-time
   step to register the task. On 2026-09-28 a model change needed a
   Start-menu elevated PowerShell only because the model sat in the task's
   command line. `show` prints the resolved settings and warns when the
