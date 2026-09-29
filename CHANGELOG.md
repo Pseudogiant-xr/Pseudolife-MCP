@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-29 — delete filters narrow the match, and a bulk delete needs confirming)
+- `memory_forget(scope="memory")`, `POST /api/delete` and
+  `MemoryService.delete` combine their `text` / `substring` / `source` /
+  `episode` / `tag` filters with AND across kinds, the way
+  `memory_search`'s `sources` / `bands` / `tags` do: `text="probe",
+  source="status"` removes the probe entry in that source. Before, the
+  filters OR-combined and that call removed every entry in the source
+  (1,399 status entries on 2026-09-29, restored from backup). At least one
+  filter is still required.
+- A delete that would remove more than `memory.delete_confirm_threshold`
+  entries (new, default 20, `0` disables) is refused unless the call
+  carries `confirm_bulk=true`: nothing is removed and the response is
+  `{deleted_count: 0, error: "bulk_confirm_required", would_delete,
+  threshold, sample_texts}`. The guard is count-based whatever the filters
+  (a broad substring is as dangerous as a bare source). The default equals
+  the `deleted_texts` sample cap, so an unconfirmed delete always lists
+  everything it removed. `CMS.delete_entries` takes the bound as
+  `max_removed` and raises `BulkDeleteRefused` before touching any band or
+  row. The Console's Delete deletes by exact text, and identical texts are
+  not deduplicated, so a click can match more than the threshold: it then
+  asks a second time with the count and resends with `confirm_bulk`,
+  instead of reporting "Deleted 0". [Built-in defaults](docs/guide/configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+
 ### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
 - The one-shot installers' extractor modes are renamed from the models that
   were current when they were written: `claude-only` / `claude-fallback`

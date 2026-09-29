@@ -1212,6 +1212,14 @@ class MemoryConfig:
     # up to 18 points on the LongMemEval naive-RAG arm. Flip to True to
     # restore the pre-2026-07-25 ranking.
     recency_boost_enabled: bool = False
+    # ``delete`` refuses to remove more than this many entries unless the
+    # caller passes ``confirm_bulk=True``; the refusal reports how many
+    # would go. 20 is the ``deleted_texts`` sample cap, so every unguarded
+    # delete lists all of its removed texts in its response. 0 disables the
+    # guard. Added 2026-09-29 after a ``{"text": ..., "source": "status"}``
+    # delete removed 1399 status entries under the OR-combination then in
+    # force (restored from backup).
+    delete_confirm_threshold: int = 20
     # v0.5 store gate is novelty-based (1 - max cos to existing entries). 0.0 =
     # permissive (store everything; novelty still scores eviction/promotion);
     # raise to dedup near-duplicate stores.
@@ -1476,6 +1484,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
             recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),
             slot_index_shadow_rate=mem_raw.get("slot_index_shadow_rate", 0.01),
+            delete_confirm_threshold=mem_raw.get("delete_confirm_threshold", 20),
         )
         if "miras" in mem_raw:
             miras_raw = mem_raw["miras"]

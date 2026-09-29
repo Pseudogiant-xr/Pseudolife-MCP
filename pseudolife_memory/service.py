@@ -47,7 +47,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from pseudolife_memory.memory.cms import ContinuumMemorySystem
+from pseudolife_memory.memory.cms import (
+    BulkDeleteRefused,
+    ContinuumMemorySystem,
+)
 from pseudolife_memory.memory.consolidation import (
     Cluster,
     cluster_candidates,
@@ -3249,25 +3252,51 @@ class MemoryService(DreamOps):
         source: str | None = None,
         episode: str | None = None,
         tag: str | None = None,
+        confirm_bulk: bool = False,
     ) -> dict[str, Any]:
-        """Remove memories matching any of the provided filters.
+        """Remove memories matching every provided filter.
 
-        At least one filter is required — bare ``delete()`` raises
-        ``ValueError`` so accidental "delete everything" is impossible.
-        For a wholesale wipe use ``CMS.clear()`` via the maintenance path,
-        not this tool.
+        Filters narrow the match (AND across kinds, like ``search``'s
+        ``sources`` / ``bands`` / ``tags``): ``text="probe",
+        source="status"`` removes the probe entry in that source, not the
+        whole source. At least one filter is required — bare ``delete()``
+        raises ``ValueError`` so accidental "delete everything" is
+        impossible. For a wholesale wipe use ``CMS.clear()`` via the
+        maintenance path, not this tool.
+
+        A match larger than ``memory.delete_confirm_threshold`` (default
+        20; ``0`` disables) is refused unless ``confirm_bulk=True``:
+        nothing is removed and the response says how many would be —
+        ``{"deleted_count": 0, "error": "bulk_confirm_required",
+        "would_delete": M, "threshold": N, "sample_texts": [...]}``. The
+        guard counts matches whatever the filters are: a broad substring
+        is as dangerous as a bare source.
 
         Returns ``{"deleted_count": N, "deleted_texts": [...]}``. The
         sample of deleted texts is capped at 20 so MCP responses stay
-        small even on large purges.
+        small even on large purges; the default threshold is that same
+        20, so an unconfirmed delete always lists everything it removed.
         """
+        threshold = int(getattr(
+            self.config.memory, "delete_confirm_threshold", 20) or 0)
+        max_removed = None if (confirm_bulk or threshold <= 0) else threshold
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            removed = self._cms.delete_entries(
-                text=text, substring=substring, source=source,
-                episode=episode, tag=tag,
-            )
+            try:
+                removed = self._cms.delete_entries(
+                    text=text, substring=substring, source=source,
+                    episode=episode, tag=tag, max_removed=max_removed,
+                )
+            except BulkDeleteRefused as refused:
+                return {
+                    "deleted_count": 0,
+                    "error": "bulk_confirm_required",
+                    "would_delete": refused.count,
+                    "threshold": refused.limit,
+                    "sample_texts": refused.texts[:20],
+                    "hint": "pass confirm_bulk=true to remove them",
+                }
             return {
                 "deleted_count": len(removed),
                 "deleted_texts": removed[:20],

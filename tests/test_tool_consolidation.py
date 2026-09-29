@@ -133,6 +133,36 @@ def test_forget_scope_memory_deletes_matching_entries(tmp_path: Path, monkeypatc
     assert "Junk" not in texts and "Keep" in texts
 
 
+def test_forget_scope_memory_filters_narrow(tmp_path: Path, monkeypatch) -> None:
+    """text + source over MCP deletes the intersection, never the union
+    (the 2026-09-29 status-source wipe)."""
+    _reload(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "probe", "source": "status"})
+    _invoke("memory_store", {"text": "probe", "source": "notes"})
+    _invoke("memory_store", {"text": "status line", "source": "status"})
+    out = _invoke("memory_forget",
+                  {"scope": "memory", "text": "probe", "source": "status"})
+    assert out["deleted_count"] == 1
+    left = {(e["text"], e["source"])
+            for e in _invoke("memory_recent", {"n": 10})["entries"]}
+    assert left == {("probe", "notes"), ("status line", "status")}
+
+
+def test_forget_scope_memory_bulk_needs_confirm_bulk(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod.service.config.memory, "delete_confirm_threshold", 2)
+    for i in range(3):
+        _invoke("memory_store", {"text": f"bulk {i}", "source": "bulk"})
+    out = _invoke("memory_forget", {"scope": "memory", "source": "bulk"})
+    assert out["error"] == "bulk_confirm_required"
+    assert out["would_delete"] == 3 and out["deleted_count"] == 0
+    assert len(_invoke("memory_recent", {"n": 10})["entries"]) == 3
+    out = _invoke("memory_forget",
+                  {"scope": "memory", "source": "bulk", "confirm_bulk": True})
+    assert out["deleted_count"] == 3
+    assert _invoke("memory_recent", {"n": 10})["entries"] == []
+
+
 def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)
     _invoke("memory_world_set", {"entity": "acme", "attribute": "ceo",
@@ -393,7 +423,12 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # minimal 5,232, core 11,706, full 17,994. Core and full move
     # deliberately, 11,500 -> 11,750 and 17,800 -> 18,000, rather than cut
     # the decision table that tells a sender what would wake a parked peer.
-    budgets = {"minimal": 5250, "core": 11750, "full": 18000}
+    # 2026-09-29: memory_forget's filters now narrow (AND) and a match over
+    # memory.delete_confirm_threshold needs confirm_bulk, after a text +
+    # source delete under the old OR removed a whole source; +160 on a
+    # full-tier tool after tightening its docstring: minimal 5,232, core
+    # 11,706, full 18,154. Full moves deliberately, 18,000 -> 18,250.
+    budgets = {"minimal": 5250, "core": 11750, "full": 18250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
@@ -436,6 +471,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 2026-09-24: memory_search's top_k gained the min(5, top_k) rule its
     # description dropped (+13): minimal 2,494, core 5,248, full 8,845 —
     # core has 2 chars left.
+    # 2026-09-29: memory_forget's confirm_bulk (full tier only) was paid
+    # for by trimming the same tool's five memory-scope filter descriptions
+    # ("delete entries ..." to "entries ...", the docstring already says
+    # they delete); caps unchanged: minimal 2,494, core 5,248, full 8,909.
     param_budgets = {"minimal": 2600, "core": 5250, "full": 8925}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))

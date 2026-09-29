@@ -194,6 +194,19 @@ def _entry_slot_tokens(entry: "MemoryEntry") -> set[str]:
     return tokens
 
 
+class BulkDeleteRefused(Exception):
+    """``delete_entries`` matched more entries than its ``max_removed``
+    bound and removed none of them. ``count`` is the match size,
+    ``limit`` the bound, ``texts`` the matched entries' texts."""
+
+    def __init__(self, count: int, limit: int, texts: list[str]) -> None:
+        super().__init__(
+            f"delete would remove {count} entries, over the {limit} bound")
+        self.count = count
+        self.limit = limit
+        self.texts = texts
+
+
 class ContinuumMemorySystem:
     """Multi-band MIRAS memory system with frequency-based updates.
 
@@ -2604,14 +2617,22 @@ class ContinuumMemorySystem:
         source: str | None = None,
         episode: str | None = None,
         tag: str | None = None,
+        max_removed: int | None = None,
     ) -> list[str]:
-        """Remove entries from every band matching any provided filter.
+        """Remove entries from every band matching every provided filter.
 
         At least one of ``text`` / ``substring`` / ``source`` /
         ``episode`` / ``tag`` must be provided — refuses to
-        delete-everything implicitly. Filters combine with OR (an entry
-        matching any filter is dropped). Returns the list of removed
-        entry texts.
+        delete-everything implicitly. Filters combine with AND across
+        kinds (an entry must satisfy each one given), the same way
+        ``retrieve``'s ``sources`` / ``bands`` / ``tags`` filters narrow a
+        search. Before 2026-09-29 they OR-combined, and a ``text`` +
+        ``source`` call meant to remove one entry removed the whole
+        source. Returns the list of removed entry texts.
+
+        ``max_removed`` bounds the match: when more entries match than
+        that, nothing is removed and :class:`BulkDeleteRefused` reports
+        the count. ``None`` sets no bound.
 
         Marks each affected band's pattern matrix dirty so the next
         retrieve rebuilds without the gone entries.
@@ -2626,34 +2647,43 @@ class ContinuumMemorySystem:
         tag_norm = tag.strip().lower() if isinstance(tag, str) else None
 
         def _matches(entry: MemoryEntry) -> bool:
-            if text is not None and entry.text == text:
-                return True
-            if substring is not None and substring in entry.text:
-                return True
-            if source is not None and entry.source == source:
-                return True
-            if episode is not None and entry.episode_id == episode:
-                return True
-            if tag_norm is not None and tag_norm in entry.tags:
-                return True
-            return False
+            if text is not None and entry.text != text:
+                return False
+            if substring is not None and substring not in entry.text:
+                return False
+            if source is not None and entry.source != source:
+                return False
+            if episode is not None and entry.episode_id != episode:
+                return False
+            if tag_norm is not None and tag_norm not in entry.tags:
+                return False
+            return True
+
+        # Match first, mutate second: a refused bulk delete must leave
+        # every band and the storage rows exactly as they were.
+        doomed: list[tuple[MIRASBand, list[MemoryEntry]]] = []
+        matched = 0
+        for band in self.bands:
+            hits = [entry for entry in band.entries if _matches(entry)]
+            if hits:
+                doomed.append((band, hits))
+                matched += len(hits)
+        if max_removed is not None and matched > max_removed:
+            raise BulkDeleteRefused(
+                matched, max_removed,
+                [entry.text for _, hits in doomed for entry in hits],
+            )
 
         removed: list[str] = []
         removed_ids: list[int] = []
-        for band in self.bands:
-            kept: list[MemoryEntry] = []
-            band_changed = False
-            for entry in band.entries:
-                if _matches(entry):
-                    removed.append(entry.text)
-                    if entry.db_id is not None:
-                        removed_ids.append(entry.db_id)
-                    band_changed = True
-                else:
-                    kept.append(entry)
-            if band_changed:
-                band.entries = kept
-                band._dirty = True
+        for band, hits in doomed:
+            gone = set(map(id, hits))
+            for entry in hits:
+                removed.append(entry.text)
+                if entry.db_id is not None:
+                    removed_ids.append(entry.db_id)
+            band.entries = [e for e in band.entries if id(e) not in gone]
+            band._dirty = True
         if removed:
             self._slot_index_dirty = True
         if self.storage is not None and removed_ids:

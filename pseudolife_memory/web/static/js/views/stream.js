@@ -175,7 +175,18 @@ async function doDelete(e) {
   if (!(await confirmDialog({ title: "Delete this memory?", danger: true, confirmLabel: "Delete",
     message: `Permanently remove: “${truncate(e.text, 120)}”.` }))) return;
   try {
-    const r = await api.post("/api/delete", { text: e.text });
+    let r = await api.post("/api/delete", { text: e.text });
+    // Identical texts are not deduplicated, so an exact-text delete can
+    // match more entries than memory.delete_confirm_threshold; the daemon
+    // then refuses (HTTP 200 + error) and says how many would go.
+    if (r.error === "bulk_confirm_required") {
+      if (!(await confirmDialog({ title: `Delete all ${r.would_delete} copies?`, danger: true,
+        confirmLabel: `Delete ${r.would_delete}`,
+        message: `${r.would_delete} memories have exactly this text, more than the bulk-delete threshold of ${r.threshold}. Delete every one?` }))) {
+        toast(`Not deleted: ${r.would_delete} memories match this text`, "warn"); return;
+      }
+      r = await api.post("/api/delete", { text: e.text, confirm_bulk: true });
+    }
     toast(`Deleted ${r.deleted_count ?? 1}`, "ok"); viewCtx?.refresh?.();
   } catch (err) { toast("Delete failed: " + err.message, "bad"); }
 }
