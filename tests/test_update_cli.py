@@ -920,3 +920,72 @@ def test_the_builtin_backup_rotates_only_its_own_old_files(world, clients, tmp_p
     assert recent.exists() and foreign.exists()
     # states: the run's own plus the two old ones are three; nothing goes
     assert all(p.exists() for p in old_states)
+
+
+# ── the step lines and a streamed child interleave on a redirected stdout ────
+
+_STREAM_ORDER_DRIVER = '''
+"""The update entry point with this file's fakes, in its own interpreter,
+so stdout is the pipe the test reads: block-buffered, as a log file is."""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+root, tests, tmp = (Path(p) for p in sys.argv[1:4])
+sys.path[:0] = [str(root), str(tests)]
+import test_update_cli as t  # noqa: E402
+from pseudolife_memory import client_updates, update_cli as up  # noqa: E402
+
+world = t.World(tmp)
+
+
+def run_cli(argv, **kw):
+    code, out = world.run_cli(argv, **kw)
+    if kw.get("stream"):
+        # what docker does with ``stream``: a child writing straight to fd 1,
+        # past this interpreter's stdout buffer
+        subprocess.run([sys.executable, "-c", "import sys; print('<<child>> ' + ' '.join(sys.argv[1:]))",
+                        *[str(a) for a in argv[1:3]]], check=True)
+        return code, ""
+    return code, out
+
+
+up.run_cli = run_cli
+up.fetch_json = world.fetch_json
+up.sleep = lambda s: world.slept.append(s)
+up.data_dir = lambda: tmp / "data"
+up.which = lambda name: {"git": "git", "bash": "bash", "pwsh": "pwsh", "pipx": None}.get(name, f"/usr/bin/{name}")
+client_updates.install_kind = lambda interpreter: ("site", "")
+os.environ["PSEUDOLIFE_DOCKER"] = "fake-docker"
+os.environ["PSEUDOLIFE_SHIM_RUNTIMES"] = str(tmp / "rt")
+os.environ["PSEUDOLIFE_SHIM_LAUNCHER"] = str(tmp / "bin" / "pseudolife-mcp")
+for name in t._GIT_ENV + ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKENS"):
+    os.environ.pop(name, None)
+
+checkout, _ = t._checkout(world, tmp)
+sys.exit(up.main(["--checkout", str(checkout), "--no-cache-prune", "--rollback-tag", "unittest",
+                  "--health-delay-ms", "1"]))
+'''
+
+
+def test_step_lines_and_the_streamed_build_land_in_the_order_they_happened(tmp_path):
+    """``ops/update.sh > log 2>&1`` on a headless host (2026-09-29) showed
+    every step line after the whole docker build: the child wrote to the
+    file directly while Python's block-buffered stdout held the steps
+    until exit, so the log read as if the backup followed the build."""
+    driver = tmp_path / "driver.py"
+    driver.write_text(_STREAM_ORDER_DRIVER, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}   # the log-file case, not a tty
+    proc = subprocess.run([sys.executable, str(driver), str(ROOT), str(ROOT / "tests"), str(tmp_path)],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=300, env=env,
+                          cwd=str(ROOT))
+    assert proc.returncode == 0, proc.stdout
+    lines = proc.stdout.splitlines()
+
+    def first(marker: str) -> int:
+        return next(i for i, line in enumerate(lines) if marker in line)
+
+    order = [first(m) for m in ("==> backing up the bank", "==> tagged rollback image", "==> rebuilding the daemon only",
+                                "==> build stamp", "<<child>> compose", "==> waiting for the daemon", "==> healthy.")]
+    assert order == sorted(order), "\n".join(lines)

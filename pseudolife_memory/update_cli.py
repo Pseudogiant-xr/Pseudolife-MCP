@@ -81,6 +81,11 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
     returned is empty."""
     try:
         if stream:
+            # The child writes to the file descriptors directly, past this
+            # interpreter's buffers: with stdout a file (``update.sh > log
+            # 2>&1``) the buffered step lines would otherwise land after the
+            # whole build, and the log would read as if the backup followed it.
+            _flush_output()
             proc = subprocess.run([str(a) for a in argv], timeout=timeout, check=False,
                                   stdin=subprocess.DEVNULL, cwd=cwd, env=env)
             return proc.returncode, ""
@@ -90,6 +95,14 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def _flush_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
 
 
 def which(name: str) -> str | None:
@@ -316,8 +329,10 @@ class Update:
                  warn: Callable[[str], None] | None = None):
         self.o = options
         self.report = Report()
-        self._log = log or (lambda line: print(f"==> {line}"))
-        self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr))
+        # Flushed per line: a log file (or a pipe) block-buffers stdout, and
+        # a step line is read while the step runs, not when the run exits.
+        self._log = log or (lambda line: print(f"==> {line}", flush=True))
+        self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
 

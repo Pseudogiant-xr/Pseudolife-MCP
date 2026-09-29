@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — an update's log reads in the order the steps ran)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`, behind
+  `ops/update.sh` and `ops/update.ps1`) flushes each `==> ...` step line and
+  each warning as it prints it, and flushes both streams before a streamed
+  child (the docker build, the checkout's backup and retention scripts)
+  starts. With stdout a file (`ops/update.sh > log 2>&1` on a headless
+  host, 2026-09-29) Python block-buffered the step lines while the build
+  wrote to the file directly, so every step — "backing up the bank",
+  "tagged rollback image", "rebuilding the daemon only", "healthy" —
+  landed after the whole build output, and the log read as if the backup
+  had followed the build. A terminal run is unchanged.
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before
