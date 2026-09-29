@@ -274,6 +274,63 @@ reads `on - token present, principal allowed` when admission worked, and
 (the daemon's `principal_not_allowed` reason) when it is missing from the
 list.
 
+## Moving a client to a new daemon
+
+When the daemon moves (a new host, a new tailnet address, a restore onto
+another machine), point this machine's clients at it with one command:
+
+```bash
+pseudolife-mcp connect http://100.64.0.2:8765 --dry-run   # the plan; writes nothing, sends no token
+pseudolife-mcp connect http://100.64.0.2:8765             # asks once, then applies
+```
+
+It finds every registration of the shim (Claude Code, Codex, Claude
+Desktop, Gemini CLI) and the copies the plugin hooks read (the `env` block
+of `~/.claude/settings.json`, and Codex's `~/.codex/pseudolife/connection.json`),
+and reports each as `current`, `change`, `manual` (found but not written; the
+line says what to do) or `absent` (with the command that registers it;
+`connect` never creates a registration). Only the daemon URL, the token-file
+path and, for a daemon on another machine, `PSEUDOLIFE_MCP_NO_SPAWN=1`
+change; the command, writer id and anything else in an entry stay as they
+are.
+
+Before writing anything it proves the target accepts every credential it
+would point there: the shim's owner-only check of each token file, an
+authenticated request, and an MCP handshake. A refusal exits 4 with nothing
+written. The writes are all or nothing: each file is backed up beside itself
+first, and if one write fails the files already written are restored.
+
+- **Token files.** Without `--token-file`, each registration keeps the token
+  file it names, which is right when the bank was restored with its tokens.
+  `--token-file` applies one file to every selected client, so to keep one
+  principal per client run it once per client:
+
+  ```bash
+  pseudolife-mcp connect <url> --client claude-code --token-file ~/.pseudolife-mcp/claude-code.token
+  pseudolife-mcp connect <url> --client codex --token-file ~/.pseudolife-mcp/codex.token
+  ```
+
+  Add `--read-token` to create that file from a token typed without echo
+  (it refuses a file that exists).
+- **Not written:** project-scoped Claude Code entries (`projects[...]` in
+  `~/.claude.json`, a `.mcp.json`), a project's `.claude/settings*.json`,
+  non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
+  name (the installer's Desktop step migrates it), Codex settings that come
+  from another Codex config layer, a `PSEUDOLIFE_MCP_DAEMON_URL` in your
+  shell or Windows user environment, and a scheduled unattended update
+  (the report names the `--schedule` command to re-run). Edit those by hand.
+- **Afterwards:** restart the sessions the report lists (and fully quit and
+  relaunch Claude Desktop when its entry changed). Each session gets a new
+  board address on the new URL.
+- **Rolling back:** run `connect` with the old URL, or restore the backups
+  the report names.
+
+`--yes` applies without asking (a run that is not interactive needs it),
+and `--json` prints one machine-readable report. Exit codes: 0 done or
+already current, 1 a write failed and was rolled back, 2 usage or not
+confirmed, 3 no registration it can write (none found, or only `manual`
+ones), 4 verification refused, 5 applied but the post-apply check failed.
+
 ## Troubleshooting
 
 **"unhandled errors in a TaskGroup" on every `tools/list`, while `curl` with
