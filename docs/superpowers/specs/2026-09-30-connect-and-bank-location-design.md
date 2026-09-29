@@ -101,7 +101,7 @@ pseudolife-mcp connect <daemon-url>
 | Place | Key(s) | How it is written |
 |---|---|---|
 | `~/.claude.json` `mcpServers.pseudolife-memory.env` | `PSEUDOLIFE_MCP_DAEMON_URL`, `PSEUDOLIFE_MCP_TOKEN_FILE`, `PSEUDOLIFE_MCP_NO_SPAWN` | JSON edit of those keys only (`_replace_config`) |
-| `~/.claude/settings.json` `env` | `PSEUDOLIFE_MCP_DAEMON_URL`, `PSEUDOLIFE_MCP_TOKEN_FILE` | JSON edit; read by the plugin hooks |
+| `~/.claude/settings.json` `env` | `PSEUDOLIFE_MCP_DAEMON_URL`, and `PSEUDOLIFE_MCP_TOKEN_FILE` when the block holds no credential yet | JSON edit, only when a Claude Code registration exists; read by the plugin hooks |
 | Codex `config.toml` `[mcp_servers.pseudolife-memory.env]` | as for Claude Code | Codex's app-server config writer (`config/batchWrite`) |
 | `~/.codex/pseudolife/connection.json`, and the token copy `~/.codex/pseudolife/token` where the writer keeps one | URL and token-file path | the Codex credential writer |
 | Claude Desktop `claude_desktop_config.json` `pseudolife-desktop` | as for Claude Code | JSON edit of those keys only |
@@ -185,7 +185,9 @@ A failure here exits 4 and writes nothing.
 - **Codex** is written through the same writer the installer uses, in a new
   replace mode. Today that writer refuses an installer URL that differs from
   the configured server's when the Codex env carries no token file or literal
-  token (`setup-codex-hooks.py` 666-670). In replace mode it writes the Codex
+  token (`setup-codex-hooks.py` 666-670). As that writer already does, a
+  literal `PSEUDOLIFE_MCP_TOKEN` in the Codex env moves into Codex's token
+  copy. In replace mode it writes the Codex
   server env, then `connection.json`, then the token copy where it keeps one
   (backed up first), so that the plugin hooks, which compare the two and
   refuse a mismatch (`plugin/hooks/session-start.sh` 111-125,
@@ -202,10 +204,14 @@ A failure here exits 4 and writes nothing.
 - The sessions that need a restart: the processes running the current shim
   runtime (the check `ops/update_clients.py` already makes before replacing
   it), plus "restart Claude Desktop" when its entry changed.
-- A final `doctor` run against the new registrations.
+- A final check: discovery runs again and every written place must name the
+  target, and the target must still answer `/health`. `doctor` itself is not
+  run here, because its handshake would check in on the target's board; the
+  report suggests running it from a client's environment.
 
 Exit codes: 0 done or already current; 1 a write failed and was rolled back
-as above; 2 usage, an invalid URL, or no `--yes` on a non-TTY run; 3 no
+as above; 2 usage, an invalid URL, a declined confirmation, or no `--yes`
+on a non-TTY run; 3 no
 registrations found; 4 verification refused, nothing written; 5 applied, but
 the final check failed (the report says what to do and lists the backups).
 
