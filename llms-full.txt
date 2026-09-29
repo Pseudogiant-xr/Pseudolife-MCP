@@ -3581,19 +3581,33 @@ bounded batch of pending merge proposals — with the same evidence pack the
 review surfaces show, plus a caution line on pairs stamped
 `low_differential` (whose snippets cannot tell the sides apart) — to the
 configured model (`memory.deep_dream.judge_mode`,
-default `shadow`; the dream extractor, or a dedicated `judge_url`), and
+default `shadow`; the dream extractor, or a dedicated `judge_url` serving
+`judge_model` — both Console knobs), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
 (`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
-so an independent sample: two rejects at mean >= `judge_reject_min_confidence_2`
-apply, a disagreement stamps `split` on the note and leaves the row for a
-human. `judge_mode: auto` goes one step further and folds a pair when two
-independent accepts agree on a row that is not `low_differential` at mean
->= `judge_accept_min_confidence` — the only path that ever auto-applies an
-accept. Since 2026-09-02 the other queues have judges too, each riding the
+so an independent sample. The second opinion is asked on the first
+opinion's endpoint unless `judge_second_url` (a Console knob) points it at
+an OpenAI-compatible endpoint of its own, serving `judge_second_model`, so
+the two opinions can come from different providers; that endpoint's bearer
+key is env-only (`PSEUDOLIFE_JUDGE_SECOND_API_KEY`) and goes nowhere else.
+Two rejects at mean >= `judge_reject_min_confidence_2` apply only when the
+two votes came from different models (since 2026-09-30; the same model
+asked twice is one opinion); a disagreement stamps `split` on the note and
+leaves the row for a human. `judge_mode: auto` goes one step further and folds a pair when two
+independent accepts from different models agree on a row that is not
+`low_differential` at mean >= `judge_accept_min_confidence` — the only path
+that ever auto-applies an accept. "Different" is decided on what the
+endpoints *served*, not the names they were asked for: a CLI shim answers a
+name outside its own family (a `claude-*` name on the Codex shim) with its
+launch default, which on 2026-09-03 turned a configured `claude-fable-5`
+second opinion into the first opinion's model. Each judge result counts a
+served-vs-requested mismatch (`served_model_mismatch`, with the names in
+`served_model_mismatches`) and logs a warning, and counts same-model reject
+pairs it refused (`auto_reject_refused_same_model`). Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only

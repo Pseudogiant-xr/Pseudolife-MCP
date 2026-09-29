@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-30 — the merge judge's second opinion can come from another provider, and two votes from one model never auto-reject)
+- Two agreeing merge-judge rejects auto-apply only when the two votes came
+  from different models, the rule two-vote accepts already had. The same
+  model asked twice mostly repeats itself, and on the maintainer's
+  deployment it authorized rejects: from 2026-09-03 the second opinion's
+  endpoint was the Codex CLI shim, which answers any name outside its own
+  family with its launch default, so `judge_second_model: claude-fable-5`
+  was served by the first opinion's model until the merge judge went back
+  to shadow on 2026-09-11. Distinctness is read from the SERVED names (both
+  known and different, another endpoint object, and neither the second
+  vote's served nor configured name equal to the first vote's stamp). A
+  refused pair keeps its second vote, gains `auto-reject needs a distinct
+  second model` on its note and counts as `auto_reject_refused_same_model`
+  in the judge result. With no `judge_second_model` set, two-vote rejects
+  therefore stop applying; the single-vote gate (`judge_reject_min_confidence`)
+  is unchanged.
+- New `memory.deep_dream.judge_second_url`: an OpenAI-compatible endpoint
+  of its own for the merge judge's second opinion, serving
+  `judge_second_model` (empty = its launch default), with a bearer key read
+  only from `PSEUDOLIFE_JUDGE_SECOND_API_KEY` (forwarded by both compose
+  files, documented in `ops/.env.example`) and sent nowhere else. Empty
+  keeps today's behaviour: the second model on the first opinion's
+  endpoint. It is signed into the review fingerprints only while set, so
+  deploying it does not clear recorded verdicts or reopen automatic
+  decisions.
+- A judge endpoint that serves another model than it was asked for is now
+  visible: the merge judge result counts it (`served_model_mismatch`, names
+  in `served_model_mismatches`) and logs a warning, for first and second
+  opinions. It blocks nothing; launch-default aliases (`judge`,
+  `extractor`, `bench`) and dated snapshots of the requested model
+  (`gpt-4o-2024-08-06`) do not count.
+- `judge_url`, `judge_model` and `judge_second_url` are live Console knobs
+  (Deep dream group); pointing the judges at another endpoint no longer
+  needs a `config.yaml` edit and a restart.
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the

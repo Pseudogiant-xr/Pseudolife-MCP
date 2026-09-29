@@ -540,7 +540,8 @@ class DeepDreamConfig:
     # nothing; "auto-reject" = additionally apply reject verdicts at/above
     # judge_reject_min_confidence (decided_by='dream-judge', pair
     # dismissed — and, with judge_second_opinion on, two agreeing rejects
-    # at mean >= judge_reject_min_confidence_2); "auto" = additionally
+    # from DIFFERENT models (since 2026-09-30) at mean >=
+    # judge_reject_min_confidence_2); "auto" = additionally
     # fold a pair on two agreeing accepts from DIFFERENT models on
     # non-low-differential evidence (the only path that applies an
     # accept). Automatic rejections are bound to their evidence and policy;
@@ -562,8 +563,10 @@ class DeepDreamConfig:
     # the cap also moves the auto-accept gate's precondition.
     judge_snippet_max_chars: int = 240
     judge_reject_min_confidence: float = 0.8
-    judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
-    judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # str | None like judge_second_model: both are Console knobs since
+    # 2026-09-30, and the Console clears a string knob to None.
+    judge_url: str | None = ""           # optional OpenAI-compatible override endpoint; empty = the dream extractor
+    judge_model: str | None = ""         # model name for judge_url (ignored when judge_url is empty)
     # One switch for every judge stage below (merge, link, junk, curation,
     # candidates): False makes each return {"skipped": "judges_disabled"}
     # without reading a queue. Also stops ordinary-sweep analyzer filing
@@ -594,6 +597,13 @@ class DeepDreamConfig:
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch
+    # Where the second opinion is asked (2026-09-30): empty = the first
+    # opinion's endpoint (judge_url, else the dream extractor) with
+    # judge_second_model swapped in; set = an OpenAI-compatible endpoint of
+    # its own, serving judge_second_model (empty = its launch default), so
+    # the two opinions can come from different providers. Its bearer key is
+    # env-only, PSEUDOLIFE_JUDGE_SECOND_API_KEY, and never goes anywhere else.
+    judge_second_url: str | None = ""
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
     # Link judge over pending edge_proposals. Edges are reversible
