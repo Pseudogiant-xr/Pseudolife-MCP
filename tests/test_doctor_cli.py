@@ -8,6 +8,21 @@ import pytest
 
 from pseudolife_memory import doctor_cli, shim
 
+_CREDENTIAL_KEYS = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE",
+                    "PSEUDOLIFE_MCP_DAEMON_URL")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_client_config(tmp_path, monkeypatch):
+    """No test reads the host's real client registrations, and the
+    credential keys doctor may copy from a registration into os.environ
+    are restored afterwards (setenv first, so delenv records them)."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "isolated-claude"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "isolated-codex"))
+    for key in _CREDENTIAL_KEYS:
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
+
 
 # --- Git Bash on Windows -----------------------------------------------------
 #
@@ -151,3 +166,102 @@ def test_doctor_reports_specific_safe_recovery(monkeypatch, capsys, failure, hin
     assert "fixture-secret-must-not-leak" not in output
     if failure == "unreachable":
         handshake.assert_not_called()
+
+
+# --- The credential a shell lacks --------------------------------------------
+#
+# Run from a plain shell, doctor used to read the credential only from its own
+# environment. On a Docker-tier host with bearer auth the handshake's shim then
+# exited on its missing-credential line and doctor reported ExceptionGroup with
+# advice to reinstall the interpreter (2026-09-29), although the Claude Code or
+# Codex registration it had just read carries PSEUDOLIFE_MCP_TOKEN_FILE.
+
+def _claude_registration(config_dir: Path, env: dict) -> Path:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / ".claude.json"
+    path.write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
+        "command": "shim", "args": [], "env": env}}}), encoding="utf-8")
+    return path
+
+
+def _doctor_with_auth(monkeypatch, handshake):
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
+    monkeypatch.setattr(doctor_cli, "_windows", lambda: False)
+    monkeypatch.setattr(doctor_cli, "_board_line", lambda timeout: "off")
+    monkeypatch.setattr(doctor_cli, "_codex_hooks_line", lambda health: "current")
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "probe_health", lambda *a, **kw: {
+        "status": "ok", "auth": True, "version": doctor_cli.importlib.metadata.version("pseudolife-mcp")})
+    monkeypatch.setattr(doctor_cli, "_handshake", handshake)
+
+
+def test_registration_supplies_the_credential_the_shell_lacks(tmp_path):
+    token_file = tmp_path / "token"
+    config = tmp_path / "claude"
+    path = _claude_registration(config, {
+        "PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file),
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9999",
+        "PSEUDOLIFE_WRITER_ID": "claude-code"})
+    overrides, source = doctor_cli.registration_credentials(
+        {"CLAUDE_CONFIG_DIR": str(config), "CODEX_HOME": str(tmp_path / "none")})
+    assert overrides == {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file),
+                         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9999"}
+    assert "Claude Code" in source and str(path) in source
+    # A daemon URL the shell already sets is the shell's.
+    overrides, _ = doctor_cli.registration_credentials(
+        {"CLAUDE_CONFIG_DIR": str(config), "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:1"})
+    assert overrides == {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file)}
+    # A credential in the shell wins; no registration is consulted.
+    assert doctor_cli.registration_credentials(
+        {"CLAUDE_CONFIG_DIR": str(config), "PSEUDOLIFE_MCP_TOKEN": "t"}) == ({}, "environment")
+
+
+def test_codex_registration_supplies_the_credential_when_claude_code_has_none(tmp_path):
+    codex = tmp_path / "codex"
+    codex.mkdir()
+    (codex / "config.toml").write_text(
+        '[mcp_servers.pseudolife-memory]\ncommand = "shim"\n'
+        '[mcp_servers.pseudolife-memory.env]\nPSEUDOLIFE_MCP_TOKEN_FILE = "/tokens/codex"\n',
+        encoding="utf-8")
+    # A Claude Code registration without a credential (HTTP, or an older
+    # install) does not stop the search.
+    _claude_registration(tmp_path / "claude", {"PSEUDOLIFE_WRITER_ID": "claude-code"})
+    overrides, source = doctor_cli.registration_credentials(
+        {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "CODEX_HOME": str(codex)})
+    assert overrides == {"PSEUDOLIFE_MCP_TOKEN_FILE": "/tokens/codex"}
+    assert "Codex" in source and "config.toml" in source
+    assert doctor_cli.registration_credentials(
+        {"CLAUDE_CONFIG_DIR": str(tmp_path / "x"), "CODEX_HOME": str(tmp_path / "y")}) == ({}, None)
+
+
+def test_doctor_hands_the_registration_credential_to_the_handshake(tmp_path, monkeypatch, capsys):
+    token_file = tmp_path / "token"
+    _claude_registration(tmp_path / "isolated-claude", {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file)})
+    seen = {}
+
+    async def handshake():
+        seen["token_file"] = doctor_cli.os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE")
+        return {"instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}
+
+    _doctor_with_auth(monkeypatch, handshake)
+    with pytest.raises(SystemExit) as exit_info:
+        doctor_cli.run_doctor()
+    report = json.loads(capsys.readouterr().out)
+    assert seen["token_file"] == str(token_file)
+    assert "Claude Code" in report["credential_source"]
+    assert exit_info.value.code == 0 and report["ok"] is True
+
+
+def test_doctor_names_the_missing_bearer_not_the_interpreter(monkeypatch, capsys):
+    handshake = AsyncMock(side_effect=RuntimeError("unhandled errors in a TaskGroup"))
+    _doctor_with_auth(monkeypatch, handshake)
+    with pytest.raises(SystemExit) as exit_info:
+        doctor_cli.run_doctor()
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    assert exit_info.value.code == 1 and report["ok"] is False
+    assert report["error"] == "BearerMissing" and report["credential_source"] == "none"
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in report["recovery"]
+    assert "PSEUDOLIFE_MCP_TOKEN" in report["recovery"]
+    assert "ExceptionGroup" not in output and "reinstall" not in report["recovery"]
+    handshake.assert_not_called()

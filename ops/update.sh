@@ -15,6 +15,7 @@
 #   ops/update.sh --allow-dirty        # deploy a tree with uncommitted or
 #                                      # untracked files (stamped dirty=true),
 #                                      # or one git cannot describe (unknown)
+#   ops/update.sh --clients-only       # not here: python ops/update_clients.py
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the health wait.
 #
@@ -71,6 +72,9 @@ while [ $# -gt 0 ]; do
         --force-rollback-tag) args+=(--force-rollback-tag); shift ;;
         --all)            args+=(--all); shift ;;
         --allow-dirty)    args+=(--allow-dirty); shift ;;
+        --clients-only)   # a release-mode option of `pseudolife-mcp update`
+            echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)" >&2
+            exit 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done

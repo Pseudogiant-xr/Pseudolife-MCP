@@ -102,3 +102,28 @@ def test_update_sh_rejects_an_unknown_flag_before_running_anything(tmp_path):
                           timeout=60, env=_env(tmp_path))
     assert proc.returncode == 2 and "unknown argument" in proc.stderr
     assert not (tmp_path / "args.json").exists()
+
+
+# `--clients-only` is a release-mode option of `pseudolife-mcp update`; the
+# wrappers deploy a checkout, so they name the command that updates the
+# clients alone instead of failing on an unknown argument (2026-09-29).
+_CLIENTS_REDIRECT = "for the clients alone: python ops/update_clients.py"
+
+
+@pytest.mark.skipif(PWSH is None, reason="pwsh not available")
+def test_update_ps1_redirects_clients_only_before_running_anything(tmp_path):
+    root = _sandbox(tmp_path)
+    proc = subprocess.run([PWSH, "-NoProfile", "-File", str(root / "ops" / "update.ps1"), "-ClientsOnly"],
+                          capture_output=True, text=True, timeout=120, env=_env(tmp_path))
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert _CLIENTS_REDIRECT in proc.stdout + proc.stderr
+    assert not (tmp_path / "args.json").exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not available")
+def test_update_sh_redirects_clients_only_before_running_anything(tmp_path):
+    root = _sandbox(tmp_path)
+    proc = subprocess.run([BASH, str(root / "ops" / "update.sh"), "--clients-only"], capture_output=True, text=True,
+                          timeout=60, env=_env(tmp_path))
+    assert proc.returncode == 2 and _CLIENTS_REDIRECT in proc.stderr, proc.stderr
+    assert not (tmp_path / "args.json").exists()

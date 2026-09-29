@@ -45,6 +45,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ops/update.sh --all` / `ops/update.ps1 -All` from a checkout, or
   `pipx install --force` / `pip install --upgrade` of the release.
 
+### Fixed (2026-09-29 — doctor finds the credential a shell lacks, and the update advice matches today's paths)
+- `pseudolife-mcp doctor` run from a plain shell read the bearer only from
+  its own environment: on a token-gated Docker-tier daemon the handshake's
+  shim exited on its missing-credential line and doctor reported
+  `ExceptionGroup` with advice to reinstall the interpreter. When the shell
+  has neither `PSEUDOLIFE_MCP_TOKEN` nor `PSEUDOLIFE_MCP_TOKEN_FILE`, doctor
+  now takes them (and `PSEUDOLIFE_MCP_DAEMON_URL`, when unset) from this
+  server's Claude Code registration (`~/.claude.json`, honouring
+  `CLAUDE_CONFIG_DIR`), else its Codex one (`config.toml`), and names the
+  registration in a new `credential_source` field. When none carries one
+  and `/health` reports `auth: true`, it reports `BearerMissing` with the
+  exact env keys to set instead of running the handshake.
+- `ops/update.sh --clients-only` failed on "unknown argument", and
+  `ops/update.ps1 -ClientsOnly` silently ignored the flag and ran a full
+  daemon deploy. Both now print the same redirect as
+  `ops/update.py` (`python ops/update_clients.py` for the clients alone)
+  and exit 2 before running anything.
+- The shim update's advice to `pipx uninstall pseudolife-mcp` after moving
+  a pipx registration to the launcher now adds that an extractor shim
+  autostart may still run from that venv (`ops/shim_python.py` can choose
+  it on POSIX), and when the checkout's `ops/.env` names a
+  `PSEUDOLIFE_*_SHIM_PYTHON` inside it, says to keep the venv instead.
+- Docs: the GHCR-pull path updates with `pseudolife-mcp update` rather than
+  a bare `pull` + `up -d`; the troubleshooting and installer-migration notes
+  no longer say every session must close for a shim upgrade; the plugin,
+  provider and Codex-hook passages name `pseudolife-mcp update` beside the
+  checkout scripts; and the configuration guide says where `config.yaml`
+  lives on the Docker tier and what applies a change.
+  [Environment variables](docs/guide/configuration.md#connection--deployment-env-vars)
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before
