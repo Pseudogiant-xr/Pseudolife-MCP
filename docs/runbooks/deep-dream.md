@@ -90,7 +90,11 @@ response is bounded: when the JSON text would exceed ~250 KB, each list is
 cut to its leading 40 items (fewer if still over) and `truncated` maps each
 cut key to its full length, with a `hint`. Cut candidates and duplicate
 listings resurface on the next pass; the pending merge proposals are always
-listed in full by `memory_graph_review(action="list")`. A 316-proposal queue
+listed in full by `memory_graph_review(action="list")`, and
+`GET /api/graph/proposal-evidence?offset=&limit=` pages through them WITH the
+merge judge's evidence pack (up to 100 rows a page; `group` spans the whole
+queue; read every page before settling, since settling or a newly filed
+proposal shifts offsets). A 316-proposal queue
 with snippets was 1.12 MB on the wire on 2026-09-20, past the 1 MiB event
 limit in the SDK client, and failed as a phantom disconnect. The Console
 and the sweep tick read the unbounded service result. Review:

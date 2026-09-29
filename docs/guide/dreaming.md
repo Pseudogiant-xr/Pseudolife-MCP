@@ -566,9 +566,11 @@ works directly via the env triple in the previous sections.
 ## Reasoning effort — the dreamer's thinking budget
 
 By default neither CLI shim sets a reasoning effort: the Claude shim runs
-at the `claude` CLI's per-model default and the Codex shim inherits the
-host's `~/.codex/config.toml`, so what the dreamer actually spends is
-decided outside this repo. To pin it, set
+at the `claude` CLI's per-model default, and the Codex shim runs each call
+with `--ignore-user-config` (so a `model_reasoning_effort` in the host's
+`~/.codex/config.toml` does not apply) at the `codex` CLI's per-model
+default. What the dreamer actually spends is therefore decided outside
+this repo. To pin it, set
 `memory.dream.extractor_reasoning_effort` (Console → Extractor panel, or
 the **Effort** row on the Dreamer card). A set value rides every primary
 extractor request as `reasoning_effort`:
@@ -992,6 +994,16 @@ button queues up to 32 opinions for the next sweep. Operators can use
 are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
 1–100. It queues work without changing automation modes or immediately calling
 a model.
+
+To review a large merge queue from outside the daemon, page through it with
+`GET /api/graph/proposal-evidence?offset=0&limit=25` (limit 1–100). Each item
+is the evidence pack the merge judge itself reads: per-side display, degree,
+scopes and snippets at the judge's snippet cap, `low_differential`, the
+`judge`/`judge2` opinions, and a `group` computed over the whole queue, so
+rows sharing an entity stay one decision across pages. The response carries
+`total` and `next_offset` (`null` on the last page). Offsets shift as rows
+are settled or new proposals are filed, so read the queue first and settle
+it afterwards.
 
 New automatic rejections and pair dismissals also retain the evidence and policy
 behind the decision. A bounded sweep can reopen them when those inputs change;

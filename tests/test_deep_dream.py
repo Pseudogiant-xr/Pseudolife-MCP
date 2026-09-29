@@ -392,6 +392,51 @@ def test_alias_screen_never_mints_a_node_for_a_deleted_cortex_name(svc):
     assert svc._storage.find_entity(nn("deployment pipeline")) is None
 
 
+def test_alias_screen_applies_the_merge_veto(svc, monkeypatch):
+    """Sibling names the write-dedup filing already vetoes (numeric
+    substitution: 'PR #368' / 'PR #364') embed near-identically under
+    Qwen3-Embedding-0.6B (0.989), so the alias screen filed them: 36 of its
+    524 rejected proposals in the 2026-09-29 triage of 1,016 rows, none of
+    its 16 accepted ones, were merge_veto shapes. With every pair embedding
+    identically, only the veto can keep this one out."""
+    import torch
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("PR #364", "state", "merged", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("PR #368", "state", "open", support="user")
+    monkeypatch.setattr(svc._embedder, "encode",
+                        lambda texts, *a, **k: torch.ones(len(texts), 4) / 2)
+    assert svc._propose_dream_alias_candidates(
+        {nn("PR #368"): "PR #368"}, known) == 0
+    assert not [p for p in svc._storage.pending_entity_proposals()
+                if p.get("kind") == "merge"]
+
+
+@pytest.mark.real_model
+def test_alias_screen_threshold_fits_the_production_embedder(svc):
+    """At the default threshold the screen still files the paraphrase it was
+    built for and no longer files an unrelated pair. Under
+    Qwen3-Embedding-0.6B the paraphrase scores 0.750 and 'ship pipeline' /
+    'release train' 0.558; the old 0.5 default was calibrated on
+    all-MiniLM-L6-v2 (paraphrases 0.53-0.77, unrelated <= 0.17)."""
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
+                     "e4b", support="user")
+    svc.cortex_write("release train", "cadence", "weekly", support="user")
+    known = {r.key[0] for r in svc._cortex.records if r.status == "current"}
+    svc.cortex_write("production extractor sidecar", "status", "live",
+                     support="user")
+    svc.cortex_write("ship pipeline", "stage", "build", support="user")
+    filed = svc._propose_dream_alias_candidates(
+        {nn("production extractor sidecar"): "production extractor sidecar",
+         nn("ship pipeline"): "ship pipeline"}, known)
+    rows = [p for p in svc._storage.pending_entity_proposals()
+            if p.get("kind") == "merge"]
+    names = [{p["entity"], p["into"]} for p in rows]
+    assert filed == 1 and names == [{"production extractor sidecar",
+                                      "Pseudolife-MCP default extractor sidecar"}]
+
+
 def _stage_link_pair(svc):
     """Two similar-context entities with NO memory_traces rows, no shared edge
     and no name containment -> a deep-dream LINK candidate whose evidence can

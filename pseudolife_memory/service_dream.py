@@ -1163,6 +1163,7 @@ class DreamOps:
             import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
+            from pseudolife_memory.memory.graph_review import merge_veto
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -1209,6 +1210,12 @@ class DreamOps:
                     continue
                 if variant_conflict(disp, target):
                     continue    # size/quant/version mismatch: never a merge
+                if merge_veto(disp, target):
+                    # The name-shape vetoes the write-dedup filing applies:
+                    # numbered siblings ('PR #368' / 'PR #364') embed at
+                    # 0.989 and were 36 of this screen's 524 rejected
+                    # proposals in the 2026-09-29 triage, none accepted.
+                    continue
                 matches.append((disp, target, pair, score))
             if not matches:
                 return 0
@@ -3465,6 +3472,48 @@ class DreamOps:
             evidence["traces"], mentions, evidence["scopes"],
             cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
             fact_counts=evidence["facts"])
+
+    # Upper bound on one page, so a single request's response size and
+    # snippet work stay bounded however large the queue grows.
+    _EVIDENCE_PAGE_MAX = 100
+
+    def merge_proposal_evidence(self, *, offset: int = 0,
+                                limit: int = 25) -> dict[str, Any]:
+        """One page of pending merge proposals with the merge judge's own
+        evidence pack (``_judge_enrich_from``), for reviewers outside the
+        daemon: ``memory_dream(action="deep")`` cuts its lists at 40 items,
+        so a large queue had no bounded way to be read with its evidence.
+        Rows are in queue order (``pending_entity_proposals``). ``group`` is
+        computed over the WHOLE queue — the pack alone would compute it per
+        page and split an accept-at-most-one decision across pages. Offsets
+        shift as rows are settled or new proposals are filed; read the queue
+        before settling it."""
+        offset = max(0, int(offset))
+        limit = min(max(1, int(limit)), self._EVIDENCE_PAGE_MAX)
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"error": "no_storage"}
+            pending = [p for p in self._storage.pending_entity_proposals()
+                       if p.get("kind") == "merge"]
+            page = pending[offset:offset + limit]
+            evidence = self._judge_evidence_locked(page) if page else None
+        items = self._judge_enrich_from(page, evidence) if page else []
+        if items:
+            from pseudolife_memory.memory.graph_review import shared_pair_groups
+            display = {e["id"]: e["display"]
+                       for e in evidence["graph"]["entities"]}
+            groups = shared_pair_groups(
+                [(p["entity_id"], p["into_id"]) for p in pending])
+            group_of = {p["id"]: g for p, g in zip(pending, groups)}
+            for item in items:
+                g = group_of.get(item["id"])
+                item["group"] = display.get(g) if g is not None else None
+        end = offset + len(page)
+        return {"kind": "merge", "total": len(pending), "offset": offset,
+                "limit": limit,
+                "next_offset": end if end < len(pending) else None,
+                "items": items}
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:

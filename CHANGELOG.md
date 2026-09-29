@@ -6,6 +6,140 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
+- A Codex native child thread (`collaboration.spawn_agent`) or fork already
+  had its own board address: the shim keys identity by the MCP
+  `_meta.threadId` and writes the child's `<key>.agent` record and digest
+  under the child's thread id (`pseudolife_memory/codex_coordination.py`).
+  But the plugin's hooks read the root `session_id`, which Codex carries
+  unchanged into a child, and no hook ran at a child's stop, so the child's
+  own park record never reached the park gate. The 2026-09-29 probe (Codex
+  CLI 0.158.0, desktop 0.158.0-alpha.2.1) measured `SubagentStop` stdin
+  carrying `agent_id` equal to the child's MCP `threadId`, and a block
+  continuing the child once (`stop_hook_active` on its next stop).
+  `hooks.json` gains its own `SubagentStop` group: `lifecycle.ps1 -Event
+  SubagentStop` on Windows, `stop-wake.sh subagent-stop` elsewhere (behind
+  the same `bash -n` guard as `Stop`), synchronous, 10 s. In Codex context
+  it runs the root's park gate keyed by the validated `agent_id` (the
+  canonical lower-case UUID the shim accepts, exactly one top-level field;
+  no fallback to `session_id`): one `GET /api/hook/park-gate` for the
+  child's address, a block answered as `{"decision":"block","reason":...}`
+  on stdout, the `gate` ledger line under the child's key. A child gets no
+  prompt hook, so no turn stamp: the daemon judges its standing record. The
+  served text asks the child to park and never suggests sending. In Claude
+  Code, which fires `SubagentStop` too, the entry does nothing (before
+  this, the bash script run there would have gated the parent session).
+  `ops/setup-codex-hooks.py` lists `SubagentStop` in `PLUGIN_EVENTS`,
+  approves it with the other plugin hooks, treats it as optional (a Codex
+  that does not list it still reaches ready) and keeps a user's choice to
+  disable it. Manual installs stay without it, as they are without `Stop`.
+  Not done here: SubagentStart context, any parent relay or wake of a
+  finished child, and any change to the root session's hooks.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. The new `SubagentStop`
+  handler is a new position Codex has not approved: an existing Codex
+  plugin install lists it in Codex's startup hook review until it is
+  approved there (`/hooks`) or setup reruns
+  (`python ops/setup-codex-hooks.py --source plugin --trust ask`).
+
+### Added (2026-09-29 — a large merge queue can be read with its evidence)
+- `GET /api/graph/proposal-evidence?offset=&limit=` pages through the
+  pending merge proposals with the merge judge's own evidence pack
+  (`_judge_enrich_from`: per-side snippets at `judge_snippet_max_chars`,
+  degree, scopes, `low_differential`, the `judge`/`judge2` opinions).
+  `memory_dream(action="deep")` cuts its lists at 40 items and
+  `memory_graph_review(action="list")` carries no snippets, so the
+  2026-09-29 triage of a 1,016-row queue had to gather evidence one
+  `memory_search` at a time. `group` is computed over the whole queue, not
+  the page, so rows sharing an entity stay one accept-at-most-one decision
+  across pages; `limit` is clamped to 1–100 and the response carries
+  `total` and `next_offset`.
+
+### Measured (2026-09-29 — the review-queue judges move to Opus 5.5, with Sonnet 5.5 as the merge second opinion)
+- The merge judge had been held in `shadow` since 2026-09-11 because its
+  "second opinion" came from the same model: `judge_second_model` only
+  swaps the model name on the first judge's endpoint, and the deployed
+  endpoint (the Codex shim) serves unknown names as its launch default.
+  Pointing `judge_url` at a Claude shim makes `judge_model` and
+  `judge_second_model` two real models. `evals/queue_judge_ladder.py`
+  re-ran the 2026-09-02 panel for `claude-opus-5-5` and
+  `claude-sonnet-5-5` (two replicates each), `claude-fable-5-1` (merges,
+  one replicate) and `gpt-6-astra` / `gpt-6-sol` / `gpt-6-luna` (two
+  replicates each) (`evals/results/queue-judge-ladder-20260929-*.json`).
+  The new `evals/cross_judge_gates.py` pairs the first-opinion model with
+  each candidate second opinion, as the sweep does
+  (`evals/results/queue-judge-cross-20260929.json`).
+- Opus 5.5 first, Sonnet 5.5 second: two-vote rejects 18/18
+  (17/17 on the second replicate), which supports `auto-reject`; two-vote
+  non-low-differential accepts 6/7, which does not support `auto`. The
+  miss, panel row 2016, is accepted by five of the six arms (GPT-6 Luna
+  rejects it) and was labelled reject at panel confidence 0.62.
+- GPT-6 second opinions let false rejects through the two-vote gate:
+  Astra 25/26, Sol 27/30, Luna 25/28. Their confidence does not separate
+  right from wrong: 55 of 55 Astra reject votes sit at or above the 0.8
+  single-vote gate (Opus 5.5: 17 of 67).
+- On the 7 rows where Opus 5.5 and Sonnet 5.5 split,
+  Fable 5.1 matched the label 6 times (Opus 5.5 4, Sonnet 5.5 3). The sweep
+  leaves a split for a human, so this moves no gate.
+- Opus 5.5 on the other queues:
+  link auto-accept 3/3 and auto-reject 5/5,
+  junk auto-keep 8/8 and auto-delete under the bar 6/6,
+  curation auto-distinct 25/25, so the `auto` / `auto-distinct` modes those
+  judges already run in stand. Curation keep-side precision 8/11 and
+  candidate auto-dismiss 20/24 keep curation `auto` and the candidate
+  judge where they were.
+- Applied to a deployment by configuration alone: `judge_url` pointing at a
+  Claude shim, `judge_model: claude-opus-5-5`, `judge_second_model:
+  claude-sonnet-5-5`, `judge_mode: auto-reject`.
+
+### Fixed (2026-09-29 — the Codex shim no longer fails when the memory daemon is down)
+- `evals/codex_shim.py` ran every `codex exec` against the host's
+  interactive `~/.codex/config.toml`. Where that config marks the
+  pseudolife-memory MCP server `required`, an unreachable daemon made
+  Codex refuse to start a session, and every dream or judge call returned
+  HTTP 500 (a queue-judge ladder run, 2026-09-29). Each call now passes
+  `--ignore-user-config` (no MCP servers, plugins or hook trust from
+  `config.toml`; auth still comes from `CODEX_HOME`),
+  `-c features.hooks=false` (because `hooks.json` is read either way) and
+  `--skip-git-repo-check` (directory trust lived in the ignored config).
+  `-c mcp_servers={}` was measured on codex-cli 0.158.0 and is not
+  enough: the enabled pseudolife plugin started its own copy of the
+  server, and the model called the board and bank for a one-word reply
+  (80k input tokens; 16k with `--ignore-user-config`, no MCP calls). The
+  flag is present in codex-cli 0.157.1 and 0.158.0; an older CLI that
+  lacks it fails `/health` with an unexpected-argument error. A side
+  effect: a `model_reasoning_effort` in the host's `config.toml` no
+  longer reaches the shim. Pin it with `--reasoning-effort` or
+  `memory.dream.extractor_reasoning_effort`.
+  [Reasoning effort](docs/guide/dreaming.md#reasoning-effort--the-dreamers-thinking-budget)
+
+### Fixed (2026-09-29 — the dream-alias screen stops filing numbered siblings and unrelated names)
+- The embedding alias screen that files merge proposals for names a dream
+  just minted (`_propose_dream_alias_candidates`) was the review queue's
+  noisiest source. In the 2026-09-29 triage of 1,016 pending merge
+  proposals it had filed 574 proposals
+  (16 accepted, 524 rejected, 34 left). Two causes:
+  - It never applied `merge_veto`, the name-shape vetoes the write-dedup and
+    analyzer filings already use, so numbered siblings like two PR numbers
+    (which embed near-identically) were proposed as duplicates. The screen
+    now applies them. Replayed over the triage verdicts, the veto
+    vetoes 36 of its rejected proposals and none of its accepted ones.
+  - `memory.dream.alias_candidate_min_cosine` (0.5) was calibrated on
+    all-MiniLM-L6-v2 and went stale with the Qwen3-Embedding-0.6B swap,
+    which scores unrelated short names above it. The default is now 0.7:
+    past the veto the screen keeps 420 of the remaining 538 and
+    loses one accepted paraphrase (cosine 0.655);
+    0.8 would keep 194 but lose 6 of its 16 true duplicates, so 0.7 is the
+    conservative step. A real-model test pins that the screen still files
+    the paraphrase it was built for and drops an unrelated pair.
+- `evals/merge_detector_replay.py` replays labelled merge verdicts through
+  the vetoes and the threshold; its input carries bank names and stays in
+  the gitignored `evals/data/`, its artifact
+  (`evals/results/merge-detector-replay-20260929.json`) carries ids,
+  detectors, scores and verdicts only. Labels: the 2026-09-29 triage (eight
+  read-only Opus slice judges, a 0.8 accept floor applied in the main
+  thread); `leave` rows are unlabelled.
+
 ### Changed (2026-09-30 — the merge judge's second opinion can come from another provider, and two votes from one model never auto-reject)
 - Two agreeing merge-judge rejects auto-apply only when the two votes came
   from different models, the rule two-vote accepts already had. The same
@@ -61,41 +195,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opinions, refused a same-model reject, saw a served-model mismatch or
   lost its second endpoint, not only when it judged or reopened something.
 
-### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
-- A Codex native child thread (`collaboration.spawn_agent`) or fork already
-  had its own board address: the shim keys identity by the MCP
-  `_meta.threadId` and writes the child's `<key>.agent` record and digest
-  under the child's thread id (`pseudolife_memory/codex_coordination.py`).
-  But the plugin's hooks read the root `session_id`, which Codex carries
-  unchanged into a child, and no hook ran at a child's stop, so the child's
-  own park record never reached the park gate. The 2026-09-29 probe (Codex
-  CLI 0.158.0, desktop 0.158.0-alpha.2.1) measured `SubagentStop` stdin
-  carrying `agent_id` equal to the child's MCP `threadId`, and a block
-  continuing the child once (`stop_hook_active` on its next stop).
-  `hooks.json` gains its own `SubagentStop` group: `lifecycle.ps1 -Event
-  SubagentStop` on Windows, `stop-wake.sh subagent-stop` elsewhere (behind
-  the same `bash -n` guard as `Stop`), synchronous, 10 s. In Codex context
-  it runs the root's park gate keyed by the validated `agent_id` (the
-  canonical lower-case UUID the shim accepts, exactly one top-level field;
-  no fallback to `session_id`): one `GET /api/hook/park-gate` for the
-  child's address, a block answered as `{"decision":"block","reason":...}`
-  on stdout, the `gate` ledger line under the child's key. A child gets no
-  prompt hook, so no turn stamp: the daemon judges its standing record. The
-  served text asks the child to park and never suggests sending. In Claude
-  Code, which fires `SubagentStop` too, the entry does nothing (before
-  this, the bash script run there would have gated the parent session).
-  `ops/setup-codex-hooks.py` lists `SubagentStop` in `PLUGIN_EVENTS`,
-  approves it with the other plugin hooks, treats it as optional (a Codex
-  that does not list it still reaches ready) and keeps a user's choice to
-  disable it. Manual installs stay without it, as they are without `Stop`.
-  Not done here: SubagentStart context, any parent relay or wake of a
-  finished child, and any change to the root session's hooks.
-- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
-  (or `ops/update.sh --all`) and restart clients. The new `SubagentStop`
-  handler is a new position Codex has not approved: an existing Codex
-  plugin install lists it in Codex's startup hook review until it is
-  approved there (`/hooks`) or setup reruns
-  (`python ops/setup-codex-hooks.py --source plugin --trust ask`).
 
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
@@ -6409,7 +6508,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (rag 0.6947, hybrid 0.7326, cortex 0.3158 over the 475 unleaked rows)
   beside the all-500 headline they are not.
 
-
 ### Changed (2026-09-04 — the abstention headline is bounded by the no-memory floor)
 - **README and `evals/README.md` presented BEAM-100K abstention (fact
   spine 0.950 vs naive RAG 0.775) as "the one decisive win".** The
@@ -6601,7 +6699,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `dbname=pseudolife_memory`, a trailing slash, and an upper-cased name each
   walked through onto the live bank. It now compares case-insensitively and
   parses the keyword form too.
-
 
 ### Added (2026-09-04 — offline retrieval replay and graph ablation harnesses; eval-only)
 - **`evals/retrieval_telemetry_review.py`, `evals/retrieval_replay.py` and
@@ -10304,7 +10401,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ScrubJay-style auto-perishability stays shelved (class granularity is
   not the binding error); the measured next lever is a serving-side
   staleness policy, under its own preregistration.
-
 
 ### Added (2026-08-08 — retention-interval eval harness: the freshness machinery gets its first eval)
 - **`evals/retention_interval_eval.py`** (preregistration

@@ -222,7 +222,7 @@ KNOBS: list[dict[str, Any]] = [
      "help": "New dream entity whose name-token Jaccard vs an existing name "
              "reaches this files a merge proposal for review. 0 = off."},
     {"path": "memory.dream.alias_candidate_min_cosine", "group": "Dream",
-     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.5,
+     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.7,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
      "help": "New dream entity whose name-embedding cosine vs an existing "
              "entity reaches this files a merge proposal for review (semantic "
