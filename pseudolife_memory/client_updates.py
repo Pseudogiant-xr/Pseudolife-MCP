@@ -816,6 +816,43 @@ def print_codex_reapproval(report: dict) -> None:
         print(text)
 
 
+# ── extractor autostart ─────────────────────────────────────────────────────
+
+def _autostart_module(repo: Path):
+    """The checkout's ``ops/shim_autostart.py``, loaded by file path."""
+    return _load_from_checkout(repo, "ops/shim_autostart.py", "pseudolife_shim_autostart")
+
+
+def check_autostart(repo: Path) -> dict:
+    """Informational: an extractor autostart task or unit registered before
+    ``ops/shim_autostart.py`` still carries the model and the rest on its
+    command line, so at logon it starts those, not ``ops/.env``; no update
+    moves it. ``registration_note`` for every registered kind; a kind with
+    no registration (no CLI extractor shim on this host) says nothing.
+    Never fails the run."""
+    try:
+        module = _autostart_module(repo)
+        kinds = sorted(module.KINDS)
+    except Exception as exc:  # noqa: BLE001 - informational: say it, never fail the run
+        return {"state": "unknown", "detail": f"could not read the extractor autostart registrations ({exc})"}
+    registered, notes = 0, []
+    for kind in kinds:
+        try:
+            if module._registered_command(kind) is None:
+                continue
+            registered += 1
+            note = module.registration_note(kind)
+        except Exception as exc:  # noqa: BLE001
+            note = f"its registration could not be read ({exc})"
+        if note:
+            notes.append(f"{kind}: {note}")
+    if notes:
+        return {"state": "stale", "detail": "; ".join(notes), "notes": notes}
+    if registered:
+        return {"state": "current", "detail": "the registered extractor autostart reads ops/.env at every start"}
+    return {"state": "none", "detail": "no extractor autostart task or unit is registered"}
+
+
 def _marker(state: str) -> str:
     if state == "failed":
         return "[!]"
@@ -828,7 +865,8 @@ def _marker(state: str) -> str:
 
 def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
-    (those in ``steps``) and ``ok``."""
+    (those in ``steps``), ``autostart`` when a checkout is known, and
+    ``ok``."""
     report: dict = {}
     if "shim" in steps:
         report["shim"] = update_shim(source, repo)
@@ -836,15 +874,19 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
         report["codex"] = check_codex_hooks(repo, daemon_digest)
+    if repo is not None:
+        # Informational, after the client steps: never "failed", so never
+        # fails the run.
+        report["autostart"] = check_autostart(repo)
     # A shim left un-upgraded because sessions run it still needs the rerun.
     report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
     return report
 
 
 def print_ladder(report: dict) -> None:
-    labels = {"shim": "Shim", "plugin": "Plugin", "codex": "Codex hooks"}
+    labels = {"shim": "Shim", "plugin": "Plugin", "codex": "Codex hooks", "autostart": "Extractor autostart"}
     for key, label in labels.items():
-        if key in report:
+        if key in report and not (key == "autostart" and report[key]["state"] == "none"):
             result = report[key]
             print(f"  {_marker(result['state'])} {label:<14} {result['state']} - {result['detail']}")
 

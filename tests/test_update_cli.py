@@ -161,6 +161,8 @@ def world(tmp_path, monkeypatch):
     monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
     # the pip tier's own-install checks: a plain site install, a runtime layout elsewhere
     monkeypatch.setattr(client_updates, "install_kind", lambda interpreter: ("site", ""))
+    # this interpreter's own extras are not the test's: no lite extra unless a test says so
+    monkeypatch.setattr(up, "lite_installed", lambda: False)
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "rt"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "bin" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")))
     return w
@@ -539,6 +541,36 @@ def test_a_failed_pip_upgrade_is_named(world, capsys):
     world.pip_rc = 1
     assert _run([]) == 1
     assert "WinError 32" in capsys.readouterr().err
+
+
+def test_a_lite_install_is_upgraded_with_its_embedded_postgres(world, monkeypatch, capsys):
+    """pipx --force rebuilds the venv and pip installs only what it is
+    asked for: a requirement without [lite] leaves the upgraded install
+    without pg0-embedded, and the daemon then refuses to start. The step
+    line names the requirement; the printed command quotes it, since the
+    brackets are a glob in zsh."""
+    world.pypi = "99.0.0"
+    monkeypatch.setattr(up, "lite_installed", lambda: True)
+    assert _run([]) == 0
+    out = capsys.readouterr().out
+    assert "installs pseudolife-mcp[lite]==99.0.0" in out
+    pip = [c for c in world.calls if c[1:4] == ["-m", "pip", "install"]]
+    if os.name == "nt":
+        assert pip == [] and '-m pip install --upgrade "pseudolife-mcp[lite]==99.0.0"' in out
+    else:
+        assert pip == [[sys.executable, "-m", "pip", "install", "--upgrade", "pseudolife-mcp[lite]==99.0.0"]]
+    # pipx: the command is printed on every platform, with the extra
+    monkeypatch.setenv("PIPX_HOME", sys.prefix)
+    world.calls.clear()
+    assert _run([]) == 0
+    out = capsys.readouterr().out
+    assert 'pipx install --force "pseudolife-mcp[lite]==99.0.0"' in out
+    assert not [c for c in world.calls if Path(c[0]).name.lower().startswith("pipx")]
+    # without the extra the requirement is the bare package
+    monkeypatch.setattr(up, "lite_installed", lambda: False)
+    assert _run([]) == 0
+    out = capsys.readouterr().out
+    assert "pipx install --force pseudolife-mcp==99.0.0" in out and "[lite]" not in out
 
 
 def test_a_pip_upgrade_never_lands_on_an_editable_checkout(world, monkeypatch, capsys):

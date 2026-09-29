@@ -340,16 +340,36 @@ def _at(when: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def _user_environment(name: str) -> str | None:
+    """``name`` in the Windows User-scope environment (``HKCU\\Environment``,
+    what ``[Environment]::GetEnvironmentVariable(name, "User")`` reads):
+    the environment a scheduled task registered for this user starts with,
+    whatever this shell holds. ``None`` when unset, or off Windows."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, kind = winreg.QueryValueEx(key, name)
+    except OSError:
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    return os.path.expandvars(value) if kind == winreg.REG_EXPAND_SZ else value
+
+
 def _systemd_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "systemd" / "user"
 
 
-def _unit_environment() -> list[str]:
+def _unit_environment() -> tuple[list[str], str | None]:
     """``Environment=`` lines so the timer's run finds the daemon and its
-    bearer: a systemd --user unit inherits nothing from a shell. A token
-    given only as PSEUDOLIFE_MCP_TOKEN is written to a private file, never
-    into the unit."""
+    bearer, and the token file they name (or ``None``): a systemd --user
+    unit inherits nothing from a shell. A token given only as
+    PSEUDOLIFE_MCP_TOKEN is written to a private file, never into the
+    unit."""
     lines = []
     url = os.environ.get("PSEUDOLIFE_MCP_DAEMON_URL")
     if url:
@@ -368,13 +388,63 @@ def _unit_environment() -> list[str]:
         token_file = str(path)
     if token_file:
         lines.append(f"Environment=PSEUDOLIFE_MCP_TOKEN_FILE={token_file}")
-    return lines
+    return lines, token_file or None
+
+
+def _resolves(token_file: str | None, token: str | None) -> str:
+    """``''`` when the bearer given by ``token_file`` (read as the run will
+    read it) or else ``token`` resolves to a token, else why not."""
+    from pseudolife_memory.credentials import CredentialProvider
+
+    if not token_file and not token:
+        return "neither PSEUDOLIFE_MCP_TOKEN_FILE nor PSEUDOLIFE_MCP_TOKEN is set"
+    try:
+        provider = CredentialProvider(path=token_file) if token_file else CredentialProvider(token=token)
+        if provider.snapshot().token:
+            return ""
+    except Exception as exc:  # noqa: BLE001 - a bad credential file is no bearer; say why
+        return f"PSEUDOLIFE_MCP_TOKEN_FILE={token_file} does not resolve ({type(exc).__name__}: {str(exc)[:160]})"
+    return "the configured bearer is empty"
+
+
+def _no_bearer(update, why: str, fix: str) -> None:
+    """Refuse, or with --allow-no-bearer say what the schedule will do."""
+    effect = ("the scheduled run cannot read the board, so it would hold off every day (exit 4, which the "
+              "scheduler counts as success) and never apply a release")
+    if getattr(update.o, "allow_no_bearer", False):
+        update.warn(f"no bearer resolves for the scheduled run ({why}): {effect}. Installed anyway "
+                    f"(--allow-no-bearer); {fix}")
+        return
+    raise UpdateError(f"no bearer resolves for the scheduled run ({why}): {effect}. {fix}; or pass "
+                      f"--allow-no-bearer to install it anyway. Nothing was installed", 2)
 
 
 def schedule(update, when: str, platform: str = sys.platform) -> int:
     hour, minute = _at(when)
+    if not (platform.startswith("win") or platform.startswith("linux")):
+        raise UpdateError("--schedule installs a Windows scheduled task or a systemd --user timer; on this "
+                          "platform run `pseudolife-mcp update --unattended` from your own scheduler", 2)
+    if update.detect_tier() == "pip":
+        raise UpdateError("--schedule installs unattended daemon updates, and this is a pip install with no "
+                          "daemon container to update: run `pseudolife-mcp update` yourself when a release is "
+                          "out. Nothing was installed", 2)
     command = _command(getattr(update.o, "daemon_url", None))
+    again = f"pseudolife-mcp update --schedule {hour:02d}:{minute:02d}"
     if platform.startswith("win"):
+        # The task starts with the user's User-scope environment, not this
+        # shell's: that is the bearer it will send.
+        token_file = _user_environment("PSEUDOLIFE_MCP_TOKEN_FILE")
+        why = _resolves(token_file, None if token_file else _user_environment("PSEUDOLIFE_MCP_TOKEN"))
+        bearer_line = ""
+        if why:
+            suggested = os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE") or "$env:USERPROFILE\\.pseudolife-mcp\\<principal>.token"
+            _no_bearer(update, f"in your User-scope environment, which the task inherits: {why}",
+                       f"Set it once in PowerShell, then run {again} again: "
+                       f'[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "{suggested}", "User")')
+        else:
+            bearer_line = ("the task inherits your User-scope environment, not this shell's: its bearer is the "
+                           + (f"User-scope PSEUDOLIFE_MCP_TOKEN_FILE={token_file}" if token_file
+                              else "User-scope PSEUDOLIFE_MCP_TOKEN"))
         quoted = " ".join(f'"{part}"' if " " in part else part for part in command)
         code, out = run_cli(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", f"{hour:02d}:{minute:02d}",
                              "/TN", TASK_NAME, "/TR", quoted])
@@ -384,14 +454,25 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
                               f"PowerShell fresh from the Start menu (never from a shell inside a Store-packaged "
                               f"app) and run this command there once", 2)
         update.step(f"registered the scheduled task '{TASK_NAME}' (daily at {hour:02d}:{minute:02d}): {quoted}")
-    elif platform.startswith("linux"):
+    else:
+        # The unit carries its own token file: the one this shell names, or
+        # one written from this shell's PSEUDOLIFE_MCP_TOKEN.
+        shell_file = os.environ.get("PSEUDOLIFE_MCP_TOKEN_FILE")
+        why = _resolves(shell_file, None if shell_file else os.environ.get("PSEUDOLIFE_MCP_TOKEN"))
+        if why:
+            _no_bearer(update, f"in this shell, whose token file the unit carries: {why}",
+                       f"Run it again from a shell that names the token file: "
+                       f"PSEUDOLIFE_MCP_TOKEN_FILE=<path to the token file> {again}")
+        environment, token_file = _unit_environment()
+        bearer_line = (f"the unit carries its own bearer (PSEUDOLIFE_MCP_TOKEN_FILE={token_file})"
+                       if token_file and not why else "")
         unit_dir = _systemd_dir()
         unit_dir.mkdir(parents=True, exist_ok=True)
         exec_start = " ".join(f'"{part}"' if " " in part else part for part in command)
         service = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended daemon update", "",
                              "[Service]", "Type=oneshot", f"ExecStart={exec_start}",
                              # 3 = current, 4 = held off: not failures of the unit.
-                             "SuccessExitStatus=3 4", *_unit_environment(), ""])
+                             "SuccessExitStatus=3 4", *environment, ""])
         timer = "\n".join(["[Unit]", "Description=Pseudolife-MCP unattended daemon update (daily)", "",
                            "[Timer]", f"OnCalendar=*-*-* {hour:02d}:{minute:02d}:00", "Persistent=true",
                            "RandomizedDelaySec=300", "", "[Install]", "WantedBy=timers.target", ""])
@@ -404,9 +485,8 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
                 raise UpdateError(f"{' '.join(argv)} failed ({out.strip() or code}); the unit files are under "
                                   f"{unit_dir}", 2)
         update.step(f"installed {UNIT_NAME}.timer under {unit_dir} (daily at {hour:02d}:{minute:02d}): {exec_start}")
-    else:
-        raise UpdateError("--schedule installs a Windows scheduled task or a systemd --user timer; on this "
-                          "platform run `pseudolife-mcp update --unattended` from your own scheduler", 2)
+    if bearer_line:
+        update.step(bearer_line)
     update.step("the run applies a release only while updates.unattended_daemon is on in the daemon's "
                 "config.yaml (off by default) and no session is active on the board; the log is "
                 f"{data_dir() / LOG_NAME}")

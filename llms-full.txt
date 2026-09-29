@@ -6886,10 +6886,29 @@ must also be in `coordination.daemon_notice_principals` (`--schedule`
 prints one line saying so). On Linux the unit carries its own token file,
 so running `--schedule` with `PSEUDOLIFE_MCP_TOKEN_FILE` naming the
 dedicated principal's token (in that shell only) gives the timer its own
-bearer. The Windows task runs with the user's persistent environment, the
-same bearer the user's own clients read, so there it can post notices only
-if that principal is listed, which lets every session sharing it post them
-too; leaving the list empty keeps the log as the record. `--schedule` on Linux writes
+bearer. The Windows task runs with the user's User-scope environment
+variables, not the shell's, so its bearer is whatever
+`PSEUDOLIFE_MCP_TOKEN_FILE` (or `PSEUDOLIFE_MCP_TOKEN`) holds at User
+scope. No installer sets that: the installers give each client its own
+token file in that client's registration. There the run can post notices
+only if that principal is listed, which lets every other process reading
+the same User-scope bearer post them too; leaving the list empty keeps the
+log as the record.
+
+`--schedule` resolves the bearer the scheduled run will see (Linux: the
+token file it writes into the unit; Windows: the User-scope environment)
+and refuses with exit 2 when none resolves, naming the command that sets
+it: without a bearer the run cannot read the board, so it would hold off
+every day with exit 4, which the scheduler counts as success. On Windows
+that command is, in PowerShell, once:
+
+```powershell
+[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "<path to the token file>", "User")
+```
+
+`--allow-no-bearer` installs the schedule anyway, with a warning. Its
+output names the bearer the run will use. `--schedule` also refuses on a
+pip install, which has no daemon container to update. `--schedule` on Linux writes
 `~/.config/systemd/user/pseudolife-update.{service,timer}` with the
 daemon URL and the token file as `Environment=` lines (a token given only
 as `PSEUDOLIFE_MCP_TOKEN` is written to a private
@@ -6901,10 +6920,10 @@ timer runs only while that user has a session unless lingering is on:
 is for. On Windows it registers the task `Pseudolife Unattended Update`
 through `schtasks`, which on an administrator account needs an elevated
 PowerShell opened from the Start menu (the refusal says so); the task
-runs while the user is signed in, with the user's persistent environment
-variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` (the installer sets it as a
-User variable) and any `PSEUDOLIFE_MCP_DAEMON_URL` must be set there,
-not only in a shell. A `--daemon-url` given with `--schedule` rides
+runs while the user is signed in, with the user's User-scope environment
+variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` and any
+`PSEUDOLIFE_MCP_DAEMON_URL` must be set at User scope (the command
+above), not only in a shell. A `--daemon-url` given with `--schedule` rides
 along in the task or unit. The task or timer runs the shim launcher
 (`pseudolife-mcp update --unattended`), so it follows the side-by-side
 runtimes; `--unschedule` removes the task or the unit, the timer and the

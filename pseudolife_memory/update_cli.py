@@ -137,6 +137,17 @@ def data_dir() -> Path:
     return Path(os.environ.get("PSEUDOLIFE_MCP_DATA_DIR") or home() / ".pseudolife-mcp")
 
 
+def lite_installed() -> bool:
+    """True when this install carries the ``lite`` extra: its embedded
+    Postgres provider (``pg0``, from ``pg0-embedded``) is importable here.
+    Looked up, not imported."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("pg0") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 # ── options ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -162,6 +173,7 @@ class Options:
     result_file: Path | None = None    # the exit code is written here at the end (an unattended caller reads it)
     unattended: bool = False           # the scheduled run: apply only when the knob is on and the board is idle
     schedule: str | None = None        # install the daily task / timer at HH:MM
+    allow_no_bearer: bool = False      # --schedule even when no bearer resolves for the scheduled run
     unschedule: bool = False           # remove it
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
@@ -575,11 +587,19 @@ class Update:
                               f"upgrade it yourself: \"{sys.executable}\" -m pip install --upgrade pseudolife-mcp=={target}", 2)
         pipx_home = os.environ.get("PIPX_HOME") or str(home() / ".local" / "pipx")
         under_pipx = "pipx" in prefix.parts or str(prefix).lower().startswith(str(pipx_home).lower())
+        # pipx --force rebuilds the venv and pip installs only what it is
+        # named: without the extra, a lite install loses its embedded
+        # Postgres and the daemon no longer starts.
+        lite = lite_installed()
+        requirement = f"pseudolife-mcp[lite]=={target}" if lite else f"pseudolife-mcp=={target}"
         if under_pipx:
-            argv = [which("pipx") or "pipx", "install", "--force", f"pseudolife-mcp=={target}"]
+            argv = [which("pipx") or "pipx", "install", "--force", requirement]
         else:
-            argv = [sys.executable, "-m", "pip", "install", "--upgrade", f"pseudolife-mcp=={target}"]
-        shown = " ".join(argv)
+            argv = [sys.executable, "-m", "pip", "install", "--upgrade", requirement]
+        # Quoted where it is printed: the brackets are a glob in zsh.
+        shown = " ".join(f'"{part}"' if "[" in part else part for part in argv)
+        self.step(f"this install {'carries the lite extra (embedded Postgres), so the upgrade' if lite else 'has no lite extra; the upgrade'} "
+                  f"installs {requirement}")
         self.step("a pip install carries the bank with it: back it up first (pseudolife-mcp backup) if you have not")
         if os.name == "nt" or under_pipx:
             # pipx deletes the venv this command runs from; on Windows pip cannot
@@ -1165,6 +1185,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schedule", metavar="HH:MM", default=None,
                         help="install a daily scheduled task (Windows) or systemd --user timer (Linux) that runs "
                              "`update --unattended` at this time")
+    parser.add_argument("--allow-no-bearer", action="store_true",
+                        help="--schedule even when no bearer resolves for the scheduled run (it then holds off "
+                             "every day with exit 4 until one does)")
     parser.add_argument("--unschedule", action="store_true", help="remove that task or timer")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
@@ -1204,7 +1227,8 @@ def options_from_args(args) -> Options:
                    env_file=Path(args.env_file) if args.env_file else None,
                    check=args.check, as_json=args.json, daemon_url=args.daemon_url,
                    result_file=Path(args.result_file) if args.result_file else None,
-                   unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule)
+                   unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule,
+                   allow_no_bearer=args.allow_no_bearer)
 
 
 def main(argv: list[str] | None = None) -> int:
