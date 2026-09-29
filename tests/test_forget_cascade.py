@@ -151,3 +151,31 @@ def test_forget_storage_failure_does_not_drop_in_memory_entry(svc, monkeypatch):
         svc.delete(text=text)
     assert svc._storage.get_entry(source_id) is not None
     assert any(e.text == text for b in svc._cms.bands for e in b.entries)
+
+
+def test_forget_removes_quoted_digest_from_briefing(svc):
+    from tests.test_session_digest import _FakeDigestExtractor
+
+    svc.episode_start_session("briefing-session", "Buoy colors")
+    forgotten = "Beacon Lima was violet"
+    _stored_id(svc, forgotten)
+    _stored_id(svc, "Beacon Mike was orange")
+    svc.episode_end_session("briefing-session", run_dream=False)
+    assert svc.generate_digests_stage(
+        _FakeDigestExtractor(["Lima violet; Mike orange."]))["written"] == 1
+
+    before = svc.session_briefing(include_coordination=False)
+    assert "Lima violet" in before["markdown"]
+    assert "Lima violet" in before["recap"]["summary"]
+    assert svc.delete(text=forgotten)["deleted_count"] == 1
+    after = svc.session_briefing(include_coordination=False)
+    assert after["recap"]["title"] == "Buoy colors"
+    assert "Lima violet" not in after["markdown"]
+    assert "summary" not in after["recap"]
+
+    assert svc.generate_digests_stage(
+        _FakeDigestExtractor(["Mike orange remains."]))["written"] == 1
+    regenerated = svc.session_briefing(include_coordination=False)
+    assert "Lima violet" not in regenerated["markdown"]
+    assert "Mike orange remains." in regenerated["markdown"]
+

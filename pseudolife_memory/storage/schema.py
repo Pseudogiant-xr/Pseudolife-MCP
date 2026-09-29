@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 50
+SCHEMA_META_VERSION = 51
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS edges (
 -- supporting index and fell back to a sequential scan.
 CREATE INDEX IF NOT EXISTS edges_dst_idx ON edges (dst_id);
 
--- v50: entry-level support for dream edges. Legacy and explicit edges have
+-- v51: entry-level support for dream edges. Legacy and explicit edges have
 -- no rows here and are never inferred to belong to a forgotten entry.
 CREATE TABLE IF NOT EXISTS edge_evidence (
   edge_id BIGINT NOT NULL REFERENCES edges(id) ON DELETE CASCADE,
