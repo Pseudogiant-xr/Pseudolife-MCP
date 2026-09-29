@@ -1015,6 +1015,19 @@ _DIGEST_SYSTEM_PROMPT = (
     "(two at most)."
 )
 
+# These instruction-specific phrases are not session events unless the stored
+# record itself discusses them. Reject their unsupported appearance as
+# malformed output so the digest stage's existing bounded retry applies.
+_DIGEST_PROMPT_ECHO = tuple(re.compile(pattern, re.IGNORECASE | re.DOTALL)
+                            for pattern in (
+    r"\bmissing detail\b.{0,100}\bcheap\b.{0,100}\binvented one\b.{0,100}\bpoison",
+    (r"\bone compact narrative paragraph\b.{0,100}\bno headings\b.{0,40}\bbullet lists\b"
+     r"|\bno headings\b.{0,40}\bbullet lists\b.{0,100}\bone compact narrative paragraph\b"),
+    r"\bpast tense anchored to the session\b",
+    r"\bhistory,? never as a claim about the present\b",
+    r"\bwhat the session set out to do\b.{0,100}\bphases or steps\b",
+))
+
 
 _RELATIONS_PROMPT_HEAD = (
     "You extract durable RELATIONSHIPS between named entities from notes, as "
@@ -1095,7 +1108,7 @@ def _parse_outcome_claims(content: str, cap: int) -> list[dict] | None:
     return out
 
 
-def _parse_digest(content: str) -> str | None:
+def _parse_digest(content: str, *, context_text: str | None = None) -> str | None:
     """Parse a summarize_session reply. ``None`` = malformed (retryable);
     a digest is mandatory prose, so an empty/blank string is malformed
     too — there is no valid nothing-found for a non-empty session."""
@@ -1112,6 +1125,10 @@ def _parse_digest(content: str) -> str | None:
         return None
     digest = parsed.get("digest")
     if not isinstance(digest, str) or not digest.strip():
+        return None
+    if context_text is not None and any(
+            pattern.search(digest) and not pattern.search(context_text)
+            for pattern in _DIGEST_PROMPT_ECHO):
         return None
     return digest.strip()
 
@@ -1910,7 +1927,7 @@ class OpenAICompatExtractor:
             content = data["choices"][0]["message"]["content"] or ""
         except Exception as exc:  # noqa: BLE001 — transport, not content
             raise ExtractorError(f"summarize_session failed: {exc}") from exc
-        return _parse_digest(content)
+        return _parse_digest(content, context_text=context_text)
 
 
 _EXTRACTOR_MODES = ("auto", "primary", "fallback")
