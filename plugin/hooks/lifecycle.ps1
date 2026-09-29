@@ -1,7 +1,19 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop')][string]$Event)
+param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop',
+    'SubagentBoardStart', 'SubagentBoardStop')][string]$Event)
 $ErrorActionPreference = 'Stop'
+
+# SubagentStart / SubagentStop carry Claude Code's subagent liveness hook
+# (subagent-board.sh, schema v50), which Claude runs through the bash
+# command. Codex loads the same hooks.json and on Windows runs this one: its
+# native subagents have board addresses of their own, linked to their parent
+# by the shim, so here there is nothing to do. Exit before reading anything:
+# falling through would reach the SessionEnd request at the bottom.
+if ($Event -in 'SubagentBoardStart', 'SubagentBoardStop') {
+    try { [void][Console]::In.ReadToEnd() } catch {}
+    exit 0
+}
 
 function Write-Context([string]$text) {
     $hookEvent = switch ($Event) {
@@ -42,7 +54,7 @@ function Get-PluginVersion {
 # only moves with a release). Same function as pseudolife_memory.plugin_hooks
 # and session-start.sh: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
 function Get-PluginHooksDigest {
-    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'coordination-start.sh', 'coordination-prompt.sh', 'session-end.sh', 'stop-wake.sh')
+    $names = @('lifecycle.ps1', 'session-start.sh', 'user-prompt-submit.sh', 'coordination-start.sh', 'coordination-prompt.sh', 'session-end.sh', 'stop-wake.sh', 'subagent-board.sh')
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($name in $names) {

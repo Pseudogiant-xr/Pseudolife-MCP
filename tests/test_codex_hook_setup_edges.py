@@ -206,14 +206,17 @@ def test_plugin_runtime_accepts_both_manifest_platform_commands_and_root_expansi
     setup.vet_plugin(hooks)
 
 
-@pytest.mark.parametrize("listed", ["all", "without-stop"])
+@pytest.mark.parametrize("listed", ["all", "without-stop", "without-subagent"])
 def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, listed):
     """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
-    async hooks outside SessionEnd and omit Stop. Both reach ready."""
+    async hooks outside SessionEnd and omit Stop. A Codex that does not list
+    the subagent hooks (v50) is fine too. All reach ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     if listed == "without-stop":
         hooks = [h for h in hooks if h["eventName"] != "stop"]
+    if listed == "without-subagent":
+        hooks = [h for h in hooks if h["eventName"] not in ("subagentStart", "subagentStop")]
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
@@ -222,18 +225,37 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
         setup.dotted("hooks", "state", h["key"], "trusted_hash") for h in hooks)
 
 
-def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
-    """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    the six memory, memory-policy and coordination hooks are still approved."""
+@pytest.mark.parametrize("disabled", [("stop",), ("subagentStart", "subagentStop")])
+def test_a_disabled_no_op_hook_does_not_block_setup(tmp_path, monkeypatch, disabled):
+    """A user who disabled a no-op entry in /hooks (Stop, or the v50
+    subagent hooks) keeps that choice; the six memory, memory-policy and
+    coordination hooks, and any other no-op entry, are still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    [stop] = [h for h in hooks if h["eventName"] == "stop"]
-    stop["enabled"] = False
+    off = [h for h in hooks if h["eventName"] in disabled]
+    assert len(off) == len(disabled)
+    for hook in off:
+        hook["enabled"] = False
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == 6
-    assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
+    assert len(writes[0]["edits"]) == len(hooks) - len(off)
+    lifecycle = [h for h in hooks if h["eventName"] in setup.EVENTS]
+    assert len(lifecycle) == 6 and all(
+        any(h["key"] in edit["keyPath"] for edit in writes[0]["edits"]) for h in lifecycle)
+    assert all(h["key"] not in edit["keyPath"] for h in off for edit in writes[0]["edits"])
+
+
+def test_the_plugin_byte_check_covers_the_subagent_script(tmp_path, monkeypatch):
+    """subagent-board.sh is Codex's non-Windows subagent command, run under
+    the trust setup writes: a changed copy is skew."""
+    original = seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    (tmp_path / "plugin/hooks/subagent-board.sh").write_text("exit 2\n")
+    mock_runtime(monkeypatch, tmp_path, user_config(tmp_path), hooks)
+    result = setup.setup(options())
+    assert result["status"] == "unavailable" and "differ" in result["recovery"], result
+    assert all(path.read_bytes() == data for path, data in original.items())
 
 
 def test_the_plugin_byte_check_covers_the_stop_script(tmp_path, monkeypatch):

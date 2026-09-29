@@ -46,7 +46,8 @@ WOKE_WINDOW = 3600.0
 # landed. The adapter's own attach, detach, delivery reads (a live channel
 # pushing mail in logs ``read`` with ``path: delivery``) and the woke marker
 # itself are left out, as they say nothing about whether the turn used the
-# mail.
+# mail, and so is any event another actor logged under the address (v50: the
+# subagent hooks' children updates, the daemon's parent links).
 ACTED_EVENTS = frozenset({"update", "read", "ack", "send", "register"})
 # How far before ``since`` the caller reads events for the park outcomes: a
 # park can stand at most this long (the daemon's PARK_MAX_TTL), so a park
@@ -146,7 +147,7 @@ def wake_precision(wakes, events, *, since, until):
             continue
         if event["event"] == "woke":
             woke_at[agent].append(event["created_at"])
-        elif event["event"] in ACTED_EVENTS and not (
+        elif event["event"] in ACTED_EVENTS and event.get("actor", "agent") == "agent" and not (
                 event["event"] == "read" and (event.get("payload") or {}).get("path") == "delivery"):
             by_agent[agent].append(event["created_at"])
     for moments in (*by_agent.values(), *woke_at.values()):

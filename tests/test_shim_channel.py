@@ -214,6 +214,76 @@ def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
     assert headers[1]["X-PL-Principal"] == "fixture-principal"
 
 
+@pytest.mark.parametrize("turn,expected", [
+    ({"thread_id": "01a0ec35-a4b3-7651-a945-81ed1f6cb638", "thread_source": "subagent",
+      "subagent_kind": "thread_spawn",
+      "parent_thread_id": "01a0ec35-a19d-7043-9336-ac6b9863afd7"},
+     "01a0ec35-a19d-7043-9336-ac6b9863afd7"),
+    ({"thread_id": "01a0ec35-a4b3-7651-a945-81ed1f6cb638"}, None),             # a root turn
+    ({"thread_id": "01a0ec35-a4b3-7651-a945-81ed1f6cb638", "thread_source": "subagent",
+      "parent_thread_id": "../../x"}, None),                                    # malformed
+    ("{broken", None),
+], ids=["subagent", "root", "malformed-parent", "malformed-metadata"])
+def test_codex_turn_metadata_hands_the_parent_thread_to_the_registry(monkeypatch, turn, expected):
+    """v50: the shim reads a native child's parent thread from Codex's turn
+    metadata and passes it with the call's thread; a root turn, or metadata
+    it cannot read, passes none and the call goes on."""
+    from mcp import types
+    from mcp.client import session, streamable_http
+    from mcp.server import Server, stdio
+
+    child = "01a0ec35-a4b3-7651-a945-81ed1f6cb638"
+    requested = []
+
+    @asynccontextmanager
+    async def http_client(**kwargs):
+        yield object()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield object(), object()
+
+    class Remote:
+        def __init__(self, *args):
+            self._tool_output_schemas = {}
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def initialize(self): return SimpleNamespace(instructions="fixture")
+        async def call_tool(self, name, arguments):
+            return types.CallToolResult(content=[], is_error=False)
+
+    class Adapter:
+        instance_headers = {"X-PL-Agent": "fixture-agent", "X-PL-Agent-Key": "private-fixture"}
+        unread_hint = None
+        def deliver_hint(self): return None
+        def note_turn(self): pass
+
+    class Registry:
+        async def get(self, thread_id, *, snapshot, **kwargs):
+            requested.append((thread_id, kwargs))
+            return Adapter()
+        def unread_hint(self, thread_id, adapter): return None
+        def note_call(self, *args, **kwargs): pass
+
+    async def serve(server, *args, **kwargs):
+        handler = server.get_request_handler("tools/call")
+        await handler.handler(None, types.CallToolRequestParams(
+            name="memory_stats", arguments={},
+            _meta={"threadId": child, "x-codex-turn-metadata": turn}))
+
+    monkeypatch.setattr(streamable_http, "create_mcp_http_client", http_client)
+    monkeypatch.setattr(streamable_http, "streamable_http_client", transport)
+    monkeypatch.setattr(session, "ClientSession", Remote)
+    monkeypatch.setattr(stdio, "stdio_server", transport)
+    monkeypatch.setattr(Server, "run", serve)
+
+    asyncio.run(shim._proxy(
+        "http://fixture.invalid", "fixture-token", "process-session",
+        codex_metadata=True, coordination_registry=Registry()))
+
+    assert requested == [(child, {"parent_thread": expected} if expected else {})]
+
+
 def test_invalid_codex_metadata_never_uses_coordination_identity(monkeypatch):
     from mcp import types
     from mcp.client import session, streamable_http

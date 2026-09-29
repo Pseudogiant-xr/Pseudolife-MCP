@@ -161,6 +161,94 @@ def test_parent_names_its_children_over_rest(pg_conn, pg_url, tmp_path):
 
 
 
+def test_subagents_are_their_parents_children_over_rest(pg_conn, pg_url, tmp_path):
+    """v50 end to end on the bench Postgres. A Codex native child registers
+    through the adapter with its parent thread before the parent has made a
+    call, is linked when the parent registers, shows the link on the peer
+    list, and is refused a send (403, child_send_refused) while its own mail
+    still reaches it. A Claude Code session's subagent hooks list and unlist
+    a child on the session's row through ``/api/hook/subagent``."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._db_url = pg_url
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+    parent_thread = "01a0ec35-a19d-7043-9336-ac6b9863afd7"
+    child_thread = "01a0ec35-a4b3-7651-a945-81ed1f6cb638"
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def codex(name, thread, **kwargs):
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / f"{name}.json", label=name, episode=thread,
+                    delivery_transport="codex", **kwargs)
+
+            async def post(agent, action, body, status=200):
+                result = await client.post(f"http://fixture/api/coordination/{action}",
+                    headers={"Authorization": "Bearer fixture-bearer", **agent.instance_headers},
+                    json=body)
+                assert result.status_code == status, result.text
+                return result.json()
+
+            async with codex("child", child_thread, parent_thread=parent_thread) as child, \
+                    CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                                        state_path=tmp_path / "peer.json", label="peer") as peer:
+                child_id = child.instance_headers["X-PL-Agent"]
+
+                async def listed(agent_id):
+                    rows = (await post(peer, "agents", {}))["agents"]
+                    return next(r for r in rows if r["agent_id"] == agent_id)
+
+                row = await listed(child_id)
+                assert (row["subagent"], row["parent_agent_id"]) == (True, None)
+                async with codex("parent", parent_thread) as parent:
+                    parent_id = parent.instance_headers["X-PL-Agent"]
+                    row = await listed(child_id)
+                    assert (row["subagent"], row["parent_agent_id"]) == (True, parent_id)
+                    assert (await listed(parent_id))["subagent"] is False
+                    refused = await post(child, "send", {"to": parent_id, "text": "done",
+                                                         "request_id": "c1"}, status=403)
+                    assert refused == {"error": "child_send_refused",
+                                       "detail": "a subagent does not send board mail; "
+                                                 "ask your parent session"}
+                    await post(parent, "send", {"to": child_id, "text": "carry on",
+                                                "request_id": "p1"})
+                    mail = (await post(child, "receive", {}))["messages"]
+                    assert [m["text"] for m in mail] == ["carry on"]
+                    await post(child, "ack", {"message_id": mail[0]["message_id"]})
+
+                    async def hook(event, child_key, kind="general-purpose"):
+                        result = await client.post(
+                            "http://fixture/api/hook/subagent",
+                            params={"agent": peer.instance_headers["X-PL-Agent"], "event": event,
+                                    "child": child_key, "type": kind},
+                            headers={"Authorization": "Bearer fixture-bearer"})
+                        assert result.status_code == 200
+                        return result.text
+
+                    await post(peer, "update", {"children": ["review"]})
+                    assert await hook("start", "a698026ca4ba524e9") == "ok\n"
+                    rows = (await post(parent, "agents", {}))["agents"]
+                    peer_row = next(r for r in rows if r["label"] == "peer")
+                    assert [c["label"] for c in peer_row["children"]] == [
+                        "review", "general-purpose#a698026c"]
+                    assert await hook("stop", "a698026ca4ba524e9") == "ok\n"
+                    assert await hook("stop", "a698026ca4ba524e9") == ""
+                    peer_row = next(r for r in (await post(parent, "agents", {}))["agents"]
+                                    if r["label"] == "peer")
+                    assert [c["label"] for c in peer_row["children"]] == ["review"]
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()
+
+
 def test_park_records_gate_wakes_over_rest(pg_conn, pg_url, tmp_path):
     """End to end on the bench Postgres: a session parks over REST, peers
     see the record, chatter to it is withheld with the need, mail that

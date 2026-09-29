@@ -830,7 +830,8 @@ def _plugin_handler_keys():
     hooks.json (as written to ~/.codex/config.toml, checked 2026-09-25)."""
     manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))
     event_keys = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit",
-                  "SessionEnd": "session_end", "Stop": "stop"}
+                  "SessionEnd": "session_end", "Stop": "stop",
+                  "SubagentStart": "subagent_start", "SubagentStop": "subagent_stop"}
     return [f"pseudolife-memory@pseudolife-mcp:hooks/hooks.json:{event_keys[event]}:{g}:{h}"
             for event, groups in manifest["hooks"].items()
             for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])]

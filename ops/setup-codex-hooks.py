@@ -53,12 +53,20 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
 # context elsewhere), never the wake, approved with the three lifecycle
 # hooks. Optional: Codex before 0.148 skips async hooks outside SessionEnd
 # and lists three. Manual installs keep EVENTS.
-PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
-# A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
+# SubagentStart and SubagentStop (schema v50) carry Claude Code's subagent
+# liveness hook, a no-op in Codex (lifecycle.ps1 exits at once; the bash
+# script exits in Codex context): Codex's native subagents are linked to
+# their parent by the shim instead. Optional like Stop, for a Codex that
+# does not list them.
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStart": "SubagentStart",
+                 "subagentStop": "SubagentStop"}
+OPTIONAL_PLUGIN_EVENTS = ("stop", "subagentStart", "subagentStop")
+# A manual bundle copies SCRIPTS; it has no Stop or subagent hooks, so no
+# stop-wake.sh or subagent-board.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
            "coordination-start.sh", "coordination-prompt.sh", "session-end.sh")
 LEGACY_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
-PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh",)
+PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh", "subagent-board.sh")
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
 
@@ -345,8 +353,9 @@ def complete_set(hooks, source):
     from collections import Counter
     counts = Counter(h["eventName"] for h in hooks)
     required = Counter({event: len(roles) for event, roles in MANUAL_ROLES.items()})
-    if source == "plugin" and counts.get("stop") == 1:
-        del counts["stop"]
+    for event in OPTIONAL_PLUGIN_EVENTS:
+        if source == "plugin" and counts.get(event) == 1:
+            del counts[event]
     return (counts == required
             and len({h.get("command") for h in hooks}) == len(hooks)
             and len({h.get("key") for h in hooks}) == len(hooks))
@@ -423,10 +432,10 @@ def is_legacy(hook, home):
 
 
 def select_hooks(hooks, home, source):
-    # A Stop entry the user disabled in /hooks is a no-op there anyway: keep
-    # that choice instead of refusing setup over it.
+    # A Stop or subagent entry the user disabled in /hooks is a no-op there
+    # anyway: keep that choice instead of refusing setup over it.
     plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID
-              and (h["enabled"] or h["eventName"] != "stop")]
+              and (h["enabled"] or h["eventName"] not in OPTIONAL_PLUGIN_EVENTS)]
     manual = [h for h in hooks if owned_manual(h, home)]
     legacy = [h for h in hooks if is_legacy(h, home)]
     other_legacy = [h for h in hooks if h not in legacy and h not in plugin
@@ -475,7 +484,9 @@ def vet_plugin(hooks):
         if len(matches) != 1 or matches[0] in seen[event]:
             raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
         seen[event].add(matches[0])
-    if any(len(seen[event]) != len(roles[event]) for event in seen if event != "Stop" or seen[event]):
+    optional = {PLUGIN_EVENTS[event] for event in OPTIONAL_PLUGIN_EVENTS}
+    if any(len(seen[event]) != len(roles[event])
+           for event in seen if event not in optional or seen[event]):
         raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
 
 

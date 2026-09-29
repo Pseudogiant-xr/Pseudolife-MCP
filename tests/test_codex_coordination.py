@@ -19,6 +19,98 @@ def test_thread_id_accepts_only_canonical_uuid_metadata():
     assert thread_id_from_meta(None) is None
 
 
+def _turn(thread, **fields):
+    """A tools/call ``_meta`` as Codex 0.158.0 sent it for a native child
+    (collaboration.spawn_agent, measured 2026-09-29 on the CLI and the
+    desktop bundle): the transport ``threadId`` beside the nested
+    ``x-codex-turn-metadata``."""
+    metadata = {"session_id": THREAD_A, "thread_id": thread, "turn_id": "t",
+                "parent_thread_id": THREAD_A, "subagent_kind": "thread_spawn",
+                "thread_source": "subagent", "codex_version": "0.158.0"}
+    metadata.update(fields)
+    metadata = {key: value for key, value in metadata.items() if value is not None}
+    return {"threadId": thread, "sessionId": THREAD_A, "x-codex-turn-metadata": metadata}
+
+
+def test_parent_thread_is_read_only_from_a_consistent_subagent_turn():
+    import json
+    from pseudolife_memory.codex_coordination import parent_thread_from_meta
+
+    assert parent_thread_from_meta(_turn(THREAD_B), THREAD_B) == THREAD_A
+    # Another spawn kind is still a model-spawned subagent of that parent.
+    assert parent_thread_from_meta(_turn(THREAD_B, subagent_kind="thread_fork"),
+                                   THREAD_B) == THREAD_A
+    # The same metadata as a JSON string (the header spelling) is read too.
+    meta = _turn(THREAD_B)
+    meta["x-codex-turn-metadata"] = json.dumps(meta["x-codex-turn-metadata"])
+    assert parent_thread_from_meta(meta, THREAD_B) == THREAD_A
+    # A root thread, and a user's fork (no subagent thread source), are peers.
+    root = _turn(THREAD_A, parent_thread_id=None, subagent_kind=None, thread_source=None)
+    assert parent_thread_from_meta(root, THREAD_A) is None
+    assert parent_thread_from_meta(_turn(THREAD_B, thread_source="user"), THREAD_B) is None
+    assert parent_thread_from_meta(_turn(THREAD_B, thread_source=None), THREAD_B) is None
+
+
+def test_malformed_turn_metadata_is_ignored_never_an_error():
+    import json
+    from pseudolife_memory.codex_coordination import parent_thread_from_meta
+
+    cases = [
+        None, "meta", {}, {"threadId": THREAD_B},
+        {"threadId": THREAD_B, "x-codex-turn-metadata": 7},
+        {"threadId": THREAD_B, "x-codex-turn-metadata": "{not json"},
+        {"threadId": THREAD_B, "x-codex-turn-metadata": "[1, 2]"},
+        {"threadId": THREAD_B, "x-codex-turn-metadata": json.dumps(
+            {**_turn(THREAD_B)["x-codex-turn-metadata"], "pad": "x" * 20000})},
+        _turn(THREAD_B, thread_id=THREAD_A),                   # another thread's turn
+        _turn(THREAD_B, thread_id=None),
+        _turn(THREAD_B, parent_thread_id=THREAD_B),            # its own parent
+        _turn(THREAD_B, parent_thread_id=THREAD_A.upper()),    # not canonical
+        _turn(THREAD_B, parent_thread_id="../../x"),
+        _turn(THREAD_B, parent_thread_id=7),
+        _turn(THREAD_B, thread_source=["subagent"]),
+    ]
+    for meta in cases:
+        assert parent_thread_from_meta(meta, THREAD_B) is None, meta
+    # The transport thread must be the one the caller validated.
+    assert parent_thread_from_meta(_turn(THREAD_B), THREAD_A) is None
+    assert parent_thread_from_meta(_turn(THREAD_B), None) is None
+
+
+def test_registry_passes_the_parent_thread_to_a_new_adapter_only(tmp_path):
+    from pseudolife_memory.codex_coordination import CodexCoordinationRegistry
+
+    options = []
+
+    class Adapter:
+        instance_headers = {"X-PL-Agent": "a", "X-PL-Agent-Key": "k"}
+        unread_hint = None
+
+        def __init__(self, *args, **kwargs):
+            options.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+    async def drive():
+        registry = CodexCoordinationRegistry(
+            "http://127.0.0.1:8765", "fixture-token", state_dir=tmp_path,
+            adapter_factory=Adapter, startup_seconds=1)
+        await registry.get(THREAD_A)
+        await registry.get(THREAD_B, parent_thread=THREAD_A)
+        # An attached thread keeps its adapter whatever a later call says.
+        await registry.get(THREAD_B, parent_thread=None)
+        await registry.aclose()
+
+    asyncio.run(drive())
+    assert len(options) == 2
+    assert "parent_thread" not in options[0]
+    assert options[1]["parent_thread"] == THREAD_A and options[1]["episode"] == THREAD_B
+
+
 def test_state_path_is_stable_isolated_and_contains_no_identity(tmp_path):
     from pseudolife_memory.codex_coordination import state_path_for_thread
 

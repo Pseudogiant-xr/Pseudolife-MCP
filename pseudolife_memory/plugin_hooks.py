@@ -25,11 +25,12 @@ from pathlib import Path
 # In this order on every side. ``hooks.json`` is deliberately absent, so a copy
 # of the scripts without it digests the same. The one exception is a manual
 # Codex bundle (ops/setup-codex-hooks.py): it carries six scripts and no
-# stop-wake.sh (manual installs have no Stop hook), so it has no digest; it
+# stop-wake.sh or subagent-board.sh (manual installs have no Stop or
+# subagent hooks), so it has no digest; it
 # sends no plugin version either, so the notice was never live there.
 HOOK_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
                 "coordination-start.sh", "coordination-prompt.sh", "session-end.sh",
-                "stop-wake.sh")
+                "stop-wake.sh", "subagent-board.sh")
 
 
 def hooks_digest(directory: Path | str) -> str | None:

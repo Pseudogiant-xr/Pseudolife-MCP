@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + Stop hook that wakes an idle session on board mail that clears its declared need (on by default) and asks it to park",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + Stop hook that wakes an idle session on board mail that clears its declared need (on by default) and asks it to park + SubagentStart/SubagentStop hooks that list a session's running subagents on its board row",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -77,6 +77,30 @@
             "async": true,
             "asyncRewake": true,
             "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" start",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStart",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" stop",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStop",
+            "timeout": 5
           }
         ]
       }
