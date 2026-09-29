@@ -540,6 +540,19 @@ class DreamOps:
                 queued = rid in cur.get("regenerate", [])
                 if (cur["ts"] > cand["ended_at"] and not queued) or existing:
                     continue
+                em = self._cms.episodes
+                root = em.episodes.get(rid)
+                subtree = {rid} | {e.id for e in em.episodes.values()
+                                   if em._descends_from(e, rid)}
+                if (root is None or self._episode_inference_context(
+                        root, subtree) != cand["context"]):
+                    # Extraction ran unlocked: a forget may have changed
+                    # its input. Keep this root queued even if a later
+                    # candidate advances the cursor in this same pass.
+                    cur["regenerate"] = sorted(
+                        set(cur.get("regenerate", [])) | {rid})
+                    self._save_digest_cursor(cur)
+                    continue
                 if digest is None:             # malformed: bounded retry
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:

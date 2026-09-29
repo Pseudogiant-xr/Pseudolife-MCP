@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (2026-09-29 — forget cascade for derived state)
 - Forgetting a source memory retires current facts whose last current citation was removed, keeps their version history, retires affected session digests and queues them for regeneration from surviving entries. Newly extracted dream edges retain entry evidence and retire when their last current source is forgotten; entities remain available for graph review. Schema v51 adds edge evidence provenance.
+- Digest extraction rechecks its source context before publishing. A forget during extraction discards the stale candidate and keeps regeneration queued, including when a later session advances the digest cursor.
 
 ### Changed (2026-09-30 — subagents show on the board as their parent's children, not as peers; schema v50)
 - **Behaviour change for Codex users: a Codex subagent can no longer send

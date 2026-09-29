@@ -179,3 +179,52 @@ def test_forget_removes_quoted_digest_from_briefing(svc):
     assert "Lima violet" not in regenerated["markdown"]
     assert "Mike orange remains." in regenerated["markdown"]
 
+@pytest.mark.parametrize("regenerating", [False, True])
+def test_forget_during_digest_extraction_discards_then_regenerates(svc, regenerating):
+    from tests.test_session_digest import _FakeDigestExtractor
+
+    svc.episode_start_session("racing-session", "Buoy inspection")
+    forgotten = "Beacon November was violet"
+    _stored_id(svc, forgotten)
+    _stored_id(svc, "Beacon Oscar remains orange")
+    if regenerating:
+        _stored_id(svc, "Beacon Papa was silver")
+    root = svc.episode_end_session("racing-session", run_dream=False)["id"]
+    if regenerating:
+        assert svc.generate_digests_stage(_FakeDigestExtractor(
+            ["November violet; Oscar orange; Papa silver."]))["written"] == 1
+        svc.delete(text="Beacon Papa was silver")
+
+    # A later candidate advances the cursor while the first must stay queued.
+    svc.episode_start_session("later-session", "Pump inspection")
+    _stored_id(svc, "The Delta pump passed its pressure check")
+    later = svc.episode_end_session("later-session", run_dream=False)["id"]
+
+    class ForgettingExtractor:
+        def summarize_session(self, context_text, *, target_chars):
+            if "November" in context_text:
+                assert "violet" in context_text
+                assert svc.delete(text=forgotten)["deleted_count"] == 1
+                return "November violet; Oscar orange."
+            return "The Delta pump passed."
+
+    result = svc.generate_digests_stage(ForgettingExtractor())
+    assert result == {"scanned": 2, "written": 1}
+    assert svc._episode_digest_body(root) is None
+    assert svc._episode_digest_body(later) == "The Delta pump passed."
+    assert not any(e.source == "digest" and e.superseded_at is None
+                   and "November" in e.text
+                   for band in svc._cms.bands for e in band.entries)
+    with svc._lock:
+        cursor = svc._load_digest_cursor()
+        assert root in cursor["regenerate"]
+        assert cursor["ts"] == svc._cms.episodes.episodes[later].ended_at
+
+    fresh = _FakeDigestExtractor(["Oscar orange remains."])
+    assert svc.generate_digests_stage(fresh)["written"] == 1
+    assert len(fresh.contexts) == 1
+    assert "November" not in fresh.contexts[0]
+    assert "Oscar" in fresh.contexts[0]
+    assert svc._episode_digest_body(root) == "Oscar orange remains."
+    with svc._lock:
+        assert root not in svc._load_digest_cursor()["regenerate"]
