@@ -160,6 +160,7 @@ jobs:
             GIT_SHA=${{ github.sha }}
             GIT_DIRTY=false
             BUILD_TIME=${{ env.BUILD_TIME }}
+            BUILD_SOURCE=release
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:${{ env.VERSION }}
             ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:latest

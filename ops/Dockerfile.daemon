@@ -121,16 +121,21 @@ VOLUME ["/data"]
 # ops/update.ps1|.sh pass the checkout's HEAD, whether it was dirty, and the
 # build time; a build without them bakes "unknown". Declared after the last
 # RUN on purpose: a changed ARG invalidates every later RUN, and the build
-# time changes on every build.
+# time changes on every build. BUILD_SOURCE says who built it: "checkout"
+# (ops/docker-compose.yml) or "release" (.github/workflows/release.yml);
+# the update notices lead a checkout build to the checkout's update command.
 ARG GIT_SHA=unknown
 ARG GIT_DIRTY=unknown
 ARG BUILD_TIME=unknown
+ARG BUILD_SOURCE=unknown
 LABEL org.opencontainers.image.revision=$GIT_SHA \
       org.opencontainers.image.created=$BUILD_TIME \
-      pseudolife.build.dirty=$GIT_DIRTY
+      pseudolife.build.dirty=$GIT_DIRTY \
+      pseudolife.build.source=$BUILD_SOURCE
 ENV PSEUDOLIFE_BUILD_GIT_SHA=$GIT_SHA \
     PSEUDOLIFE_BUILD_DIRTY=$GIT_DIRTY \
-    PSEUDOLIFE_BUILD_TIME=$BUILD_TIME
+    PSEUDOLIFE_BUILD_TIME=$BUILD_TIME \
+    PSEUDOLIFE_BUILD_SOURCE=$BUILD_SOURCE
 
 EXPOSE 8765
 

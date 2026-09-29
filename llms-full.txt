@@ -591,6 +591,15 @@ pseudolife-mcp update --tag 0.15.1
 pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
 ```
 
+**The first update from 0.15.0 or earlier** has no such command (that shim
+answers "unknown mode", and that daemon never announces a release): from a
+checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
+for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
+or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
+extra only for a lite install). After that, `pseudolife-mcp update` exists.
+On a client-only machine (the daemon on another host), `update` and
+`--clients-only` move this machine's clients to the daemon's release.
+
 On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
 bank up (the checkout's backup script when the compose project still has
 one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
@@ -657,7 +666,8 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
 The image records the commit it was built from, and `/health` reports it
-as `build` (`git_sha`, `dirty`, `built_at`). So the script refuses a tree
+as `build` (`git_sha`, `dirty`, `built_at`, and `source`: `checkout` or
+`release`). So the script refuses a tree
 with uncommitted or untracked files, and lists them. It also refuses a
 tree git cannot describe (no git, not a clone, or git's `safe.directory`
 refusal, which it quotes). Commit or clean up first, or pass
@@ -6652,15 +6662,27 @@ one is the daemon's job.
 
 The installed shim carries the update (`pseudolife_memory/update_cli.py`;
 `ops/update.ps1` and `ops/update.sh` are thin wrappers over the same code
-for a checkout). It needs no checkout:
+for a checkout). It needs no checkout.
+
+**The first update from 0.15.0 or earlier** has no such command (that
+shim answers "unknown mode", and that daemon never checks for a release,
+so nothing announces it): from a checkout, `git pull`, then
+`ops/update.sh --all` or `ops/update.ps1 -All`; for a pipx or pip install,
+`pipx install --force "pseudolife-mcp[lite]==<version>"` or
+`pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
+extra only for a lite install). After that, `pseudolife-mcp update`
+exists. The installers do not put the shim launcher's directory
+(`~/.local/share/pseudolife-mcp/bin`, `%LOCALAPPDATA%\pseudolife-mcp\bin`)
+on `PATH`; until you add it, run the launcher by the full path the
+installer and the session notices print.
 
 | command | what it does |
 |---|---|
 | `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
-| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon |
-| `--reinstall` | recreate the daemon at the version it already runs |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
+| `--reinstall` | recreate the daemon at the version it already runs; with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
@@ -6669,8 +6691,12 @@ What it refuses: a target it cannot read (PyPI unreachable and no
 `--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
 Docker installed but not answering (Docker Desktop stopped is not "no
 daemon container": the shim runtime this runs from is never pip-upgraded
-in its place), and on a pip install an editable checkout or a shim
-runtime. On Windows a pip install's own upgrade command is printed
+in its place), on a pip install an editable checkout, and with
+`--clients-only` a release whose version equals a current shim runtime
+built from a checkout (a checkout-built daemon still reports the last
+release's version, and the launcher starts the newest runtime: the
+release build would replace the checkout's code; the refusal names the
+checkout command). On Windows a pip install's own upgrade command is printed
 rather than run, since pip cannot replace the running console script;
 pipx's `install --force` likewise, since it deletes the environment the
 command runs from.
@@ -6729,7 +6755,10 @@ command moves both. A daemon with no route to PyPI offers nothing;
 daemon-behind and hooks-differ notices, `pseudolife-mcp doctor` and the
 shim's own version line all name `pseudolife-mcp update` (or its
 `--clients-only` half) first, with the checkout scripts as the
-alternative.
+alternative; the hooks-differ notice of a daemon built from a checkout
+(`build.source: checkout` on `/health`) names the checkout scripts first.
+When `PATH` does not find the shim launcher, the SessionStart hook
+reports its path and the notices name the launcher by that path.
 
 `unattended_clients` (default off) lets the safe half run by itself:
 when a session's shim finds the daemon running a newer release than the

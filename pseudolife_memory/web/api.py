@@ -307,6 +307,7 @@ def build_console_app(
             # is shape-checked before it can reach the model's context.
             plugin_version = params.get("plugin_version")
             plugin_hooks_digest = params.get("plugin_hooks_digest")
+            launcher = params.get("launcher")   # shape-checked by session_hook.launcher_command
 
             def start_hook():
                 # Bind the request headers so the briefing's awareness
@@ -320,7 +321,8 @@ def build_console_app(
                 try:
                     return hook_session_start(service, session_id, source, authorized,
                                               plugin_version=plugin_version,
-                                              plugin_hooks_digest=plugin_hooks_digest)
+                                              plugin_hooks_digest=plugin_hooks_digest,
+                                              launcher=launcher)
                 finally:
                     unbind_request_headers(binding)
             text = await asyncio.get_running_loop().run_in_executor(None, start_hook)

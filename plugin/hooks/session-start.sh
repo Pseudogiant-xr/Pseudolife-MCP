@@ -260,6 +260,19 @@ fi
 if [ -n "$PLUGIN_HOOKS_DIGEST" ]; then
     QS="${QS:-?}${QS:+&}plugin_hooks_digest=${PLUGIN_HOOKS_DIGEST}"
 fi
+# The shim launcher (pseudolife_memory/runtimes.py), when PATH does not find
+# it: the installers do not put its directory on PATH, so the served update
+# notices name it by its path instead of a bare `pseudolife-mcp`. The daemon
+# shape-checks it before it reaches the model's context.
+LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-$HOME/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+if [ -f "$LAUNCHER" ]; then
+    FOUND=$(command -v pseudolife-mcp 2>/dev/null || true)
+    if [ -z "$FOUND" ] || ! [ "$FOUND" -ef "$LAUNCHER" ]; then
+        ENCODED=$(printf '%s' "$LAUNCHER" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/+/%2B/g' \
+            -e 's/&/%26/g' -e 's/#/%23/g' -e 's/\\/%5C/g')
+        QS="${QS:-?}${QS:+&}launcher=${ENCODED}"
+    fi
+fi
 # One retry bridges the daemon's short maintenance stalls (CMS autosave
 # ~1.5s, dream-sweep tick; measured 2026-09-01 against a 1,123-entry bank)
 # that can hold the service lock past a single attempt's timeout — a

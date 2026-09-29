@@ -209,6 +209,39 @@ def current_runtime(layout: Layout) -> Runtime | None:
     return runtimes[-1] if runtimes else None
 
 
+def running_runtime(layout: Layout, prefix: str | None = None) -> Runtime | None:
+    """The runtime this interpreter runs from (``sys.prefix`` is its
+    directory), or ``None``: a pip or pipx install, or a checkout's venv."""
+    prefix = sys.prefix if prefix is None else prefix
+    return next((r for r in list_runtimes(layout) if _same_path(prefix, str(r.path))), None)
+
+
+def from_checkout(runtime: Runtime) -> bool:
+    """Whether the runtime was installed from a checkout (a path, not a
+    requirement such as ``pseudolife-mcp==0.15.1``)."""
+    return bool(runtime.source_commit) or (bool(runtime.source) and not _REQUIREMENT.match(runtime.source))
+
+
+def launcher_command(layout: Layout | None = None, which: Callable[[str], str | None] = shutil.which) -> str:
+    """How a notice names the command: plain ``pseudolife-mcp`` when PATH
+    resolves it to this user's launcher, or when there is no launcher (a
+    pip or pipx install, a daemon in a container); else the launcher's full
+    path, quoted when it holds a space. The launcher directory is not put
+    on PATH by the installers, so a bare name would find an older pipx
+    install, or nothing."""
+    try:
+        layout = default_layout() if layout is None else layout
+    except ValueError:      # a half-set layout override
+        return PACKAGE
+    if not layout.launcher.is_file():
+        return PACKAGE
+    found = which(PACKAGE)
+    if found and _same_path(found, str(layout.launcher)):
+        return PACKAGE
+    text = str(layout.launcher)
+    return f'"{text}"' if any(c.isspace() for c in text) else text
+
+
 def _next_sequence(layout: Layout) -> int:
     highest = 0
     try:

@@ -58,6 +58,29 @@ function Get-PluginHooksDigest {
     } catch { return '' }
 }
 
+# The shim launcher (pseudolife_memory/runtimes.py) when it exists and PATH
+# does not find it, else ''. The installers do not put its directory on PATH.
+function Get-ShimLauncherOffPath {
+    try {
+        $launcher = if ($env:PSEUDOLIFE_SHIM_LAUNCHER) { $env:PSEUDOLIFE_SHIM_LAUNCHER }
+            elseif ($env:OS -eq 'Windows_NT') { Join-Path $env:LOCALAPPDATA 'pseudolife-mcp\bin\pseudolife-mcp.exe' }
+            else {
+                $data = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
+                Join-Path $data 'pseudolife-mcp/bin/pseudolife-mcp'
+            }
+        if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { return '' }
+        $wanted = (Resolve-Path -LiteralPath $launcher).Path
+        $found = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $item = Get-Item -LiteralPath $found.Source
+            $target = if ($item.LinkTarget) { [IO.Path]::GetFullPath($item.LinkTarget, $item.DirectoryName) } else { $item.FullName }
+            $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+            if ([string]::Equals($target, $wanted, $comparison)) { return '' }
+        }
+        return $wanted
+    } catch { return '' }
+}
+
 function Get-DigestKey([string]$SessionId) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($SessionId)
     $hash = [Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
@@ -423,6 +446,10 @@ try {
         if ($pluginVersion) { $pairs += 'plugin_version=' + [Uri]::EscapeDataString($pluginVersion) }
         $hooksDigest = Get-PluginHooksDigest
         if ($hooksDigest -match '^[0-9a-f]{64}$') { $pairs += 'plugin_hooks_digest=' + $hooksDigest }
+        # The shim launcher, when PATH does not find it (as in session-start.sh):
+        # the served update notices then name it by its path.
+        $launcher = Get-ShimLauncherOffPath
+        if ($launcher) { $pairs += 'launcher=' + [Uri]::EscapeDataString($launcher) }
         $query = if ($pairs.Count) { '?' + ($pairs -join '&') } else { '' }
         # Match session-start.sh's maintenance-stall retry: at most 5+1+5
         # seconds of request/delay budget, within the 15-second hook budget.

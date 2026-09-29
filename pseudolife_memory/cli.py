@@ -59,6 +59,8 @@ modes:
                  `lease check NAME` exits 1 while it is held (a launch gate);
                  `lease list` shows them; `lease break NAME` (operator)
                  frees a stuck one
+  version       print the package version, and the shim runtime it runs
+                from with that runtime's source commit (also --version)
   help          show this message (also -h / --help)
 
 credentials (token-gated daemon): PSEUDOLIFE_MCP_TOKEN=<bearer>, or
@@ -70,10 +72,29 @@ docs: https://github.com/Pseudogiant-xr/Pseudolife-MCP
 """
 
 
+def _print_version() -> None:
+    """``pseudolife-mcp <version>``, then the runtime this interpreter runs
+    from when it is one of the side-by-side shim runtimes."""
+    from pseudolife_memory import __version__, runtimes
+
+    print(f"pseudolife-mcp {__version__}")
+    try:
+        runtime = runtimes.running_runtime(runtimes.default_layout())
+    except ValueError:      # a half-set layout override: no runtime to name
+        runtime = None
+    if runtime is not None:
+        origin = (f"source commit {runtime.source_commit}" if runtime.source_commit
+                  else f"source {runtime.source or 'unknown'}")
+        print(f"runtime {runtime.path} ({origin})")
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "shim"
     if mode in ("help", "-h", "--help"):
         print(_USAGE, end="")
+        sys.exit(0)
+    if mode in ("version", "--version"):
+        _print_version()
         sys.exit(0)
     if mode == "serve":
         from pseudolife_memory.daemon import run_daemon

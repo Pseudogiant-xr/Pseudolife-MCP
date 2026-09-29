@@ -1,5 +1,6 @@
 """Claude and Codex installer UX guards."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -749,3 +750,84 @@ def test_installers_wire_claude_desktop_through_the_shared_register_script() -> 
     # A single-client Desktop install gets its own daemon-side writer id.
     assert "claude-desktop) WRITER_ID=claude-desktop" in sh
     assert '"claude-desktop" { "claude-desktop" }' in ps
+
+
+# -- the closing update line (2026-09-29 first-update findings) ----------------
+# The launcher directory is not on PATH, so a bare `pseudolife-mcp update`
+# is "command not found" on a new install and the old pipx package on an
+# upgraded one. The line names the launcher by its path until PATH finds it.
+
+def _update_line_bash(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+    from tests.test_codex_hooks import bash_exe
+    launcher = tmp_path / "launcher dir" / "pseudolife-mcp"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    block = "\n".join(_marker_block(_read("ops/install.sh"), "update line"))
+    win = str(launcher).replace("'", "'\\''")
+    script = f"""set -eu
+SHIM_PATH="$(cygpath -u '{win}' 2>/dev/null || printf '%s' '{win}')"
+CLIENT_ONLY='{"1" if client_only else ""}'
+PATH='/usr/bin:/bin'
+if [ '{"yes" if on_path else "no"}' = yes ]; then PATH="$(dirname "$SHIM_PATH"):$PATH"; fi
+{block}
+print_update_line
+"""
+    proc = subprocess.run([bash_exe()], input=script, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def test_install_sh_update_line_names_the_launcher_until_path_finds_it(tmp_path: Path) -> None:
+    off = _update_line_bash(tmp_path, on_path=False, client_only=False)
+    assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" update \(--check', off), off
+    assert "to PATH" in off and "ops/update.sh --all" in off
+    on = _update_line_bash(tmp_path, on_path=True, client_only=False)
+    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+
+
+def test_install_sh_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:
+    out = _update_line_bash(tmp_path, on_path=False, client_only=True)
+    assert re.search(r'"[^"]*launcher dir/pseudolife-mcp" update --clients-only', out), out
+    assert "ops/update.sh --all" not in out
+
+
+def _update_line_ps1(tmp_path: Path, *, on_path: bool, client_only: bool) -> str:
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh not available")
+    import os
+    launcher = tmp_path / "launcher dir" / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_bytes(b"MZ")
+    launcher.chmod(0o755)
+    block = "\n".join(_marker_block(_read("ops/install.ps1"), "update line"))
+    path = str(launcher).replace("'", "''")
+    env = {**os.environ, "PATH": (str(launcher.parent) + os.pathsep if on_path else "") + os.environ.get("PATH", "")}
+    if not on_path:
+        env["PATH"] = os.pathsep.join(p for p in env["PATH"].split(os.pathsep)
+                                      if not (Path(p) / launcher.name).exists())
+    script = block + f"\nWrite-UpdateLine -ShimPath '{path}' -ClientOnly:${'true' if client_only else 'false'}\n"
+    proc = subprocess.run([pwsh, "-NoProfile", "-Command", script], capture_output=True, text=True,
+                          timeout=60, env=env)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+def test_install_ps1_update_line_names_the_launcher_until_path_finds_it(tmp_path: Path) -> None:
+    off = _update_line_ps1(tmp_path, on_path=False, client_only=False)
+    assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update \(--check", off), off
+    assert "to PATH" in off and "update.ps1 -All" in off
+    on = _update_line_ps1(tmp_path, on_path=True, client_only=False)
+    assert "no checkout needed: pseudolife-mcp update (--check" in on and "to PATH" not in on
+
+
+def test_install_ps1_update_line_on_a_client_only_install_moves_the_clients(tmp_path: Path) -> None:
+    out = _update_line_ps1(tmp_path, on_path=False, client_only=True)
+    assert re.search(r"launcher dir[\\/]pseudolife-mcp(\.exe)?\"? update --clients-only", out), out
+    assert "update.ps1 -All" not in out
+
+
+def test_the_client_only_notes_point_at_the_update_command() -> None:
+    notes = "\n".join(_heredoc_payload(_marker_block(_read("ops/install.sh"), "client-only notes")))
+    assert "--clients-only" in notes

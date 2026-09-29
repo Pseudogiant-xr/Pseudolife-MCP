@@ -585,6 +585,15 @@ pseudolife-mcp update --tag 0.15.1
 pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
 ```
 
+**The first update from 0.15.0 or earlier** has no such command (that shim
+answers "unknown mode", and that daemon never announces a release): from a
+checkout, `git pull`, then `ops/update.sh --all` or `ops/update.ps1 -All`;
+for a pipx or pip install, `pipx install --force "pseudolife-mcp[lite]==<version>"`
+or `pip install --upgrade "pseudolife-mcp[lite]==<version>"` (the `[lite]`
+extra only for a lite install). After that, `pseudolife-mcp update` exists.
+On a client-only machine (the daemon on another host), `update` and
+`--clients-only` move this machine's clients to the daemon's release.
+
 On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
 bank up (the checkout's backup script when the compose project still has
 one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
@@ -651,7 +660,8 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
 The image records the commit it was built from, and `/health` reports it
-as `build` (`git_sha`, `dirty`, `built_at`). So the script refuses a tree
+as `build` (`git_sha`, `dirty`, `built_at`, and `source`: `checkout` or
+`release`). So the script refuses a tree
 with uncommitted or untracked files, and lists them. It also refuses a
 tree git cannot describe (no git, not a clone, or git's `safe.directory`
 refusal, which it quotes). Commit or clean up first, or pass

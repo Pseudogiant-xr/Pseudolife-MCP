@@ -136,6 +136,36 @@ def test_install_creates_a_complete_runtime_and_the_launcher(tmp_path, shape, to
         assert repr(str(layout.root)).encode() in layout.launcher.read_bytes()
 
 
+def test_notices_name_the_launcher_by_its_path_unless_path_finds_it(tmp_path, shape, tools):
+    """The installers never put the launcher directory on PATH: a bare
+    `pseudolife-mcp` then finds an older pipx install, or nothing (the
+    first update on a Debian host, 2026-09-29)."""
+    layout = _layout(tmp_path, shape)
+    assert rt.launcher_command(layout, which=lambda name: None) == "pseudolife-mcp"   # no launcher yet
+    _install(layout, tools)
+    assert rt.launcher_command(layout, which=lambda name: None) == str(layout.launcher)
+    stale = tmp_path / "pipx-bin" / layout.launcher.name
+    stale.parent.mkdir()
+    stale.write_text("old pipx shim", encoding="utf-8")
+    assert rt.launcher_command(layout, which=lambda name: str(stale)) == str(layout.launcher)
+    assert rt.launcher_command(layout, which=lambda name: str(layout.launcher)) == "pseudolife-mcp"
+    spaced = rt.Layout(layout.root, tmp_path / "with space" / layout.launcher.name)
+    spaced.launcher.parent.mkdir()
+    spaced.launcher.write_text("launcher", encoding="utf-8")
+    assert rt.launcher_command(spaced, which=lambda name: None) == f'"{spaced.launcher}"'
+
+
+def test_the_running_runtime_and_its_source_are_known(tmp_path, shape, tools):
+    layout = _layout(tmp_path, shape)
+    checkout = _install(layout, tools)
+    release = _install(layout, tools, version="0.15.1", source="pseudolife-mcp==0.15.1")
+    assert rt.running_runtime(layout, prefix=str(checkout.path)).path == checkout.path
+    assert rt.running_runtime(layout, prefix=str(tmp_path / "elsewhere")) is None
+    assert rt.from_checkout(checkout) is True
+    release.source_commit = None
+    assert rt.from_checkout(release) is False
+
+
 def test_a_second_version_installs_beside_the_first_and_becomes_current(tmp_path, shape, tools):
     layout = _layout(tmp_path, shape)
     first = _install(layout, tools, "0.15.0")
