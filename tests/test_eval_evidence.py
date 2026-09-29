@@ -3280,6 +3280,102 @@ CLAIMS.append(Claim(
     value=_ladder("curation", "duplicate_keep_precision", "precision"),
     stated=0.5625, places=4))
 
+# The 2026-09-29 judge swap (Opus 5.5 first, Sonnet 5.5 second): the
+# cross-model gates come from evals/cross_judge_gates.py's artifact, the
+# per-queue numbers from the Opus 5.5 ladder arm, the contested row's panel
+# confidence from the scrubbed panel.
+CROSS_0929 = "evals/results/queue-judge-cross-20260929.json"
+OPUS55_0929 = "evals/results/queue-judge-ladder-20260929-opus55.json"
+
+
+def _pair(arm, rep, gate, field):
+    return lambda d: d["pairs"][arm]["replicates"][rep][gate][field]
+
+
+def _opus55(queue, metric, field):
+    return lambda d: d["arms"]["opus-5-5"]["queues"][queue][metric][field]
+
+
+for _cid, _needle, _art, _val, _stated in [
+    ("cross-sonnet-reject-n", "two-vote rejects 18/18", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_reject", "n"), 18),
+    ("cross-sonnet-reject-bad", "two-vote rejects 18/18", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_reject", "bad"), 0),
+    ("cross-sonnet-reject-r2-n", "(17/17 on the second replicate)", CROSS_0929,
+     _pair("sonnet55", 1, "two_vote_reject", "n"), 17),
+    ("cross-sonnet-reject-r2-bad", "(17/17 on the second replicate)", CROSS_0929,
+     _pair("sonnet55", 1, "two_vote_reject", "bad"), 0),
+    ("cross-sonnet-accept-n", "non-low-differential accepts 6/7", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_accept_not_lowdiff", "n"), 7),
+    ("cross-sonnet-accept-bad", "non-low-differential accepts 6/7", CROSS_0929,
+     _pair("sonnet55", 0, "two_vote_accept_not_lowdiff", "bad"), 1),
+    ("cross-sonnet-accept-miss-row", "panel row 2016", CROSS_0929,
+     lambda d: d["pairs"]["sonnet55"]["replicates"][0]
+     ["two_vote_accept_not_lowdiff"]["bad_ids"][0], 2016),
+    ("cross-contested-panel-confidence", "panel confidence 0.62", PANEL_0902,
+     lambda d: next(r["panel_confidence"] for r in d["merges"] if r["id"] == 2016),
+     0.62),
+    ("cross-astra-reject-n", "Astra 25/26", CROSS_0929,
+     _pair("astra", 0, "two_vote_reject", "n"), 26),
+    ("cross-astra-reject-bad", "Astra 25/26", CROSS_0929,
+     _pair("astra", 0, "two_vote_reject", "bad"), 1),
+    ("cross-sol-reject-n", "Sol 27/30", CROSS_0929,
+     _pair("sol", 0, "two_vote_reject", "n"), 30),
+    ("cross-sol-reject-bad", "Sol 27/30", CROSS_0929,
+     _pair("sol", 0, "two_vote_reject", "bad"), 3),
+    ("cross-luna-reject-n", "Luna 25/28", CROSS_0929,
+     _pair("luna", 0, "two_vote_reject", "n"), 28),
+    ("cross-luna-reject-bad", "Luna 25/28", CROSS_0929,
+     _pair("luna", 0, "two_vote_reject", "bad"), 3),
+    ("cross-astra-calibration-at-gate", "55 of 55 Astra reject votes", CROSS_0929,
+     lambda d: d["calibration"]["astra"]["at_or_above_reject_gate"], 55),
+    ("cross-astra-calibration-total", "55 of 55 Astra reject votes", CROSS_0929,
+     lambda d: d["calibration"]["astra"]["reject_votes"], 55),
+    ("cross-opus55-calibration-at-gate", "Opus 5.5: 17 of 67", CROSS_0929,
+     lambda d: d["calibration"]["opus55"]["at_or_above_reject_gate"], 17),
+    ("cross-opus55-calibration-total", "Opus 5.5: 17 of 67", CROSS_0929,
+     lambda d: d["calibration"]["opus55"]["reject_votes"], 67),
+    ("cross-splits-n", "On the 7 rows where", CROSS_0929,
+     lambda d: d["splits"]["n"], 7),
+    ("cross-splits-fable", "Fable 5.1 matched the label 6 times", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["fable51"], 6),
+    ("cross-splits-opus", "(Opus 5.5 4, Sonnet 5.5 3)", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["opus55"], 4),
+    ("cross-splits-sonnet", "(Opus 5.5 4, Sonnet 5.5 3)", CROSS_0929,
+     lambda d: d["splits"]["correct_by_arm"]["sonnet55"], 3),
+    ("opus55-link-accept-n", "link auto-accept 3/3", OPUS55_0929,
+     _opus55("links", "auto_accept", "n"), 3),
+    ("opus55-link-accept-bad", "link auto-accept 3/3", OPUS55_0929,
+     _opus55("links", "auto_accept", "bad"), 0),
+    ("opus55-link-reject-n", "3/3 and auto-reject 5/5,", OPUS55_0929,
+     _opus55("links", "auto_reject", "n"), 5),
+    ("opus55-link-reject-bad", "3/3 and auto-reject 5/5,", OPUS55_0929,
+     _opus55("links", "auto_reject", "bad"), 0),
+    ("opus55-junk-keep-n", "junk auto-keep 8/8", OPUS55_0929,
+     _opus55("junk", "auto_keep", "n"), 8),
+    ("opus55-junk-keep-bad", "junk auto-keep 8/8", OPUS55_0929,
+     _opus55("junk", "auto_keep", "bad"), 0),
+    ("opus55-junk-delete-n", "auto-delete under the bar 6/6", OPUS55_0929,
+     _opus55("junk", "auto_delete_under_bar", "n"), 6),
+    ("opus55-junk-delete-bad", "auto-delete under the bar 6/6", OPUS55_0929,
+     _opus55("junk", "auto_delete_under_bar", "bad"), 0),
+    ("opus55-curation-distinct-n", "curation auto-distinct 25/25", OPUS55_0929,
+     _opus55("curation", "auto_distinct", "n"), 25),
+    ("opus55-curation-distinct-bad", "curation auto-distinct 25/25", OPUS55_0929,
+     _opus55("curation", "auto_distinct", "bad"), 0),
+    ("opus55-curation-keep-n", "keep-side precision 8/11", OPUS55_0929,
+     _opus55("curation", "duplicate_keep_precision", "n"), 11),
+    ("opus55-curation-keep-bad", "keep-side precision 8/11", OPUS55_0929,
+     _opus55("curation", "duplicate_keep_precision", "bad"), 3),
+    ("opus55-candidate-dismiss-n", "candidate auto-dismiss 20/24", OPUS55_0929,
+     _opus55("candidates", "auto_dismiss", "n"), 24),
+    ("opus55-candidate-dismiss-bad", "candidate auto-dismiss 20/24", OPUS55_0929,
+     _opus55("candidates", "auto_dismiss", "bad"), 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=2 if isinstance(_stated, float) else 0))
+
 
 # ── docs-currency pass (2026-09-04, v0.15.0): the same review-queue judge
 # and v35-label numbers, re-stated in evals/README.md's own prose and in

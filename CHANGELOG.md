@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-09-29 — the review-queue judges move to Opus 5.5, with Sonnet 5.5 as the merge second opinion)
+- The merge judge had been held in `shadow` since 2026-09-11 because its
+  "second opinion" came from the same model: `judge_second_model` only
+  swaps the model name on the first judge's endpoint, and the deployed
+  endpoint (the Codex shim) serves unknown names as its launch default.
+  Pointing `judge_url` at a Claude shim makes `judge_model` and
+  `judge_second_model` two real models. `evals/queue_judge_ladder.py`
+  re-ran the 2026-09-02 panel for `claude-opus-5-5` and
+  `claude-sonnet-5-5` (two replicates each), `claude-fable-5-1` (merges,
+  one replicate) and `gpt-6-astra` / `gpt-6-sol` / `gpt-6-luna` (two
+  replicates each) (`evals/results/queue-judge-ladder-20260929-*.json`).
+  The new `evals/cross_judge_gates.py` pairs the first-opinion model with
+  each candidate second opinion, as the sweep does
+  (`evals/results/queue-judge-cross-20260929.json`).
+- Opus 5.5 first, Sonnet 5.5 second: two-vote rejects 18/18
+  (17/17 on the second replicate), which supports `auto-reject`; two-vote
+  non-low-differential accepts 6/7, which does not support `auto`. The
+  miss, panel row 2016, is accepted by every arm and was labelled reject at
+  panel confidence 0.62.
+- GPT-6 second opinions let false rejects through the two-vote gate:
+  Astra 25/26, Sol 27/30, Luna 25/28. Their confidence does not separate
+  right from wrong: 55 of 55 Astra reject votes sit at or above the 0.8
+  single-vote gate (Opus 5.5: 17 of 67).
+- On the 7 rows where Opus 5.5 and Sonnet 5.5 split,
+  Fable 5.1 matched the label 6 times (Opus 5.5 4, Sonnet 5.5 3). The sweep
+  leaves a split for a human, so this moves no gate.
+- Opus 5.5 on the other queues:
+  link auto-accept 3/3 and auto-reject 5/5,
+  junk auto-keep 8/8 and auto-delete under the bar 6/6,
+  curation auto-distinct 25/25, so the `auto` / `auto-distinct` modes those
+  judges already run in stand. Curation keep-side precision 8/11 and
+  candidate auto-dismiss 20/24 keep curation `auto` and the candidate
+  judge where they were.
+- Applied to a deployment by configuration alone: `judge_url` pointing at a
+  Claude shim, `judge_model: claude-opus-5-5`, `judge_second_model:
+  claude-sonnet-5-5`, `judge_mode: auto-reject`.
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
