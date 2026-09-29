@@ -30,6 +30,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   why attention is needed before triaging.
   [Deep dream](docs/guide/dreaming.md#deep-dream--full-corpus-graph-consolidation)
 
+### Added (2026-09-30 — a Claude Code subagent can no longer write to the board as its parent session)
+- A subagent runs inside its parent's shim, so its board calls carried the
+  parent's identity: its status update overwrote the parent's, its ack
+  marked the parent's mail read, its send went out under the parent's name
+  (#425). Until now only the served check-in asked subagents to read only.
+  The plugin now carries a PreToolUse hook (`subagent-board-guard.sh`,
+  matched to `mcp__<server>__memory_agents` and `mcp__<server>__memory_message`
+  on any server name) that denies, for a call whose hook input carries
+  Claude Code's `agent_id`, `memory_agents` update, claim and release and
+  `memory_message` send and ack, with a reason naming the board and telling
+  the subagent to ask its parent. List, receive, other tools and every
+  call the parent makes pass; an unreadable payload or
+  `PSEUDOLIFE_AGENT_COORDINATION` off lets the call through. No daemon
+  request. Probed live on Claude Code 2.1.283 against a stand-in server:
+  the child's update never reached it, its list and the parent's update
+  did. Codex 0.158 lists the entry (`pre_tool_use`); a Codex child has its
+  own board address, so there it allows every call (`lifecycle.ps1 -Event
+  SubagentBoardGuard` exits at once, the bash script checks the Codex
+  context). `ops/setup-codex-hooks.py` approves it with the rest and, like
+  Stop, does not require it; the hooks digest and the Codex byte check
+  cover the new script. A plugin change reaches clients only through
+  `ops/update.ps1 -All` / `ops/update.sh --all` (or
+  `ops/update_clients.py`); Codex asks for approval again after it.
+  [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
+
 ### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
 - A Codex native child thread (`collaboration.spawn_agent`) or fork already
   had its own board address: the shim keys identity by the MCP
@@ -218,7 +243,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The sweep logs the merge judge's result whenever a tick took second
   opinions, refused a same-model reject, saw a served-model mismatch or
   lost its second endpoint, not only when it judged or reopened something.
-
 
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install

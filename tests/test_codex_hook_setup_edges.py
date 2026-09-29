@@ -206,14 +206,20 @@ def test_plugin_runtime_accepts_both_manifest_platform_commands_and_root_expansi
     setup.vet_plugin(hooks)
 
 
-@pytest.mark.parametrize("listed", ["all", "without-stop"])
-def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, listed):
+@pytest.mark.parametrize("dropped", [
+    (), ("stop",), ("subagentStop",), ("preToolUse",), ("subagentStop", "preToolUse"),
+    ("stop", "subagentStop", "preToolUse")],
+    ids=["all", "without-stop", "without-subagent-stop", "without-pre-tool-use",
+         "without-both-child-hooks", "lifecycle-only"])
+def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, dropped):
     """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
-    async hooks outside SessionEnd and omit Stop. Both reach ready."""
+    async hooks outside SessionEnd and omit Stop. Codex 0.158 lists the
+    SubagentStop child park gate and the PreToolUse subagent board guard (a
+    no-op in Codex) too. Every combination of the optional entries reaches
+    ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    if listed == "without-stop":
-        hooks = [h for h in hooks if h["eventName"] != "stop"]
+    hooks = [h for h in hooks if h["eventName"] not in dropped]
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
@@ -224,8 +230,8 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
 
 def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    the six memory, memory-policy and coordination hooks and the child
-    park gate (SubagentStop) are still approved."""
+    every other hook (the six memory, memory-policy and coordination hooks,
+    the child park gate and the subagent board guard) is still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     [stop] = [h for h in hooks if h["eventName"] == "stop"]
@@ -233,8 +239,38 @@ def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == 7
+    assert len(writes[0]["edits"]) == len(hooks) - 1 == 8
     assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
+
+
+def test_a_disabled_subagent_board_guard_does_not_block_setup(tmp_path, monkeypatch):
+    seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    [guard] = [h for h in hooks if h["eventName"] == "preToolUse"]
+    guard["enabled"] = False
+    writes = approving_runtime(monkeypatch, tmp_path, hooks)
+    result = setup.setup(options())
+    assert result["status"] == "ready", result
+    assert all(guard["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
+
+
+def test_two_pre_tool_use_entries_are_not_the_plugin(tmp_path, monkeypatch):
+    """Optional means one entry or none, not any number."""
+    hooks = plugin_hooks(tmp_path)
+    [guard] = [h for h in hooks if h["eventName"] == "preToolUse"]
+    assert not setup.complete_set(hooks + [dict(guard, key="plugin-extra", command="echo x")], "plugin")
+
+
+def test_the_plugin_byte_check_covers_the_subagent_board_guard(tmp_path, monkeypatch):
+    """subagent-board-guard.sh is Codex's non-Windows PreToolUse command, run
+    under the trust setup writes: a changed copy is skew."""
+    original = seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    (tmp_path / "plugin/hooks/subagent-board-guard.sh").write_text("exit 2\n")
+    mock_runtime(monkeypatch, tmp_path, user_config(tmp_path), hooks)
+    result = setup.setup(options())
+    assert result["status"] == "unavailable" and "differ" in result["recovery"], result
+    assert all(path.read_bytes() == data for path, data in original.items())
 
 
 def test_the_plugin_byte_check_covers_the_stop_script(tmp_path, monkeypatch):
