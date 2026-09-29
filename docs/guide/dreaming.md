@@ -939,7 +939,9 @@ the configuration itself makes the second opinion the first model again
 first endpoint's model name) the pass is skipped in every mode, shadow
 included: that vote could authorize nothing, so no model call is spent on
 it, the rows keep waiting, and the result counts them
-(`second_opinion_skipped_same_model`). The sweep logs the merge judge's
+(`second_opinion_skipped_same_model`). Reviewers then see no same-model
+`judge2` block or `split` tag on those rows; a same-model re-ask flipped
+2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
 result whenever a tick judged, reconsidered, took second opinions,
 refused a same-model reject, saw a served-model mismatch or lost its
 second endpoint. Since 2026-09-02 the other queues have judges too, each riding the

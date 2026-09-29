@@ -598,7 +598,9 @@ class DeepDreamConfig:
     # model's two votes authorized rejects from 2026-09-03 to 09-11) a
     # reject: both two-vote gates require a DIFFERENT model here (with
     # claude-fable-5 as the second model the same 63 rows gave 6/6
-    # accepts, 8/8 rejects). A same-model second vote is still recorded.
+    # accepts, 8/8 rejects). A same-model second opinion by configuration
+    # is not asked at all (judge_second_opinion above); one whose sameness
+    # only the served name reveals is recorded and authorizes nothing.
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch

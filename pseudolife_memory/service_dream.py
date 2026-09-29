@@ -3527,8 +3527,13 @@ class DreamOps:
         second vote is not independent enough to authorize a fold). Name
         vetoes (``merge_veto``, ``variant_conflict``) hold at apply time
         too. Disagreement stamps ``split`` on the note and leaves the row
-        for a human. ``second_extractor`` is the test hook for the second
-        opinion's endpoint. Never raises into the sweep timer."""
+        for a human. When the configuration makes the second opinion the
+        first model again (no ``judge_second_url``; ``judge_second_model``
+        empty or the first's configured name) the pass is skipped with no
+        model call (``second_opinion_skipped_same_model``), in every mode.
+        ``second_extractor`` is the test hook for the second opinion's
+        endpoint; passing either extractor keeps the pass. Never raises
+        into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -3628,12 +3633,16 @@ class DreamOps:
                     # not end the tick before any first opinion runs. The
                     # rows stay waiting; their batch share goes to first
                     # opinions this tick. On the first opinion's own
-                    # endpoint the first call would fail the same way after
-                    # a second timeout, so that failure ends the tick as
-                    # before.
+                    # endpoint (same URL AND same key: judge_url has its own
+                    # key, so a keyless second call to its URL can 401 where
+                    # the first would not) the first call would fail the
+                    # same way after a second timeout, so that failure ends
+                    # the tick as before.
                     if ex2 is ex or (getattr(ex2, "base_url", None) is not None
                                      and getattr(ex2, "base_url", None)
-                                     == getattr(ex, "base_url", None)):
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex2, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
                         raise
                     logger.warning("deep-dream judge: second opinion failed, "
                                    "first opinions continue: %s", exc)
