@@ -57,13 +57,21 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
 # child's agent_id (its MCP threadId, probed on Codex 0.158.0 2026-09-29); in
 # Claude Code the entry does nothing. Optional too: a Codex that does not
 # list it still reaches ready.
-PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStop": "SubagentStop"}
-OPTIONAL_PLUGIN_EVENTS = ("stop", "subagentStop")
-# A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
+# The PreToolUse entry is Claude Code's subagent board guard
+# (subagent-board-guard.sh). Codex 0.158.0 lists it (pre_tool_use:0:0 in
+# hooks/list, 2026-09-30), but a Codex child has a board address of its own,
+# so in Codex it allows every call (lifecycle.ps1 -Event SubagentBoardGuard
+# on Windows, the script's Codex check elsewhere). Approved with the rest,
+# like Stop, and optional the same way: one entry or none.
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStop": "SubagentStop",
+                 "preToolUse": "PreToolUse"}
+OPTIONAL_PLUGIN_EVENTS = ("stop", "subagentStop", "preToolUse")
+# A manual bundle copies SCRIPTS; it has no Stop or PreToolUse hook, so no
+# stop-wake.sh and no subagent-board-guard.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
            "coordination-start.sh", "coordination-prompt.sh", "session-end.sh")
 LEGACY_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
-PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh",)
+PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh", "subagent-board-guard.sh")
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
 
@@ -431,7 +439,8 @@ def is_legacy(hook, home):
 
 def select_hooks(hooks, home, source):
     # A Stop or SubagentStop entry the user disabled in /hooks gives up only
-    # the park gate: keep that choice instead of refusing setup over it.
+    # the park gate, and a PreToolUse one is a no-op in Codex: keep that
+    # choice instead of refusing setup over it.
     plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID
               and (h["enabled"] or h["eventName"] not in OPTIONAL_PLUGIN_EVENTS)]
     manual = [h for h in hooks if owned_manual(h, home)]

@@ -48,7 +48,9 @@ daemon running, use
 to approve the PseudoLife hook definitions and verify their lifecycle (the
 `Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
 the park gate, and the `SubagentStop` entry runs that gate for a Codex child
-thread under the child's own address, doing nothing in Claude Code).
+thread under the child's own address, doing nothing in Claude Code; the
+`PreToolUse` entry is Claude Code's subagent board guard, which in Codex
+allows every call, and setup approves it with the rest).
 Automatic detection reuses a recognized, enabled plugin bundle. If the
 runtime cannot support automatic trust, setup gives `/hooks` review guidance
 and uses standing instructions when approved. A plugin installation or a
@@ -226,6 +228,17 @@ listed for review and left alone. By hand:
   in the background after each turn and wakes the idle session when board
   mail that clears its declared need arrives; policy-gated and capped. See
   [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
+- **Subagent board guard** (PreToolUse, since 2026-09-30; off with the board,
+  `PSEUDOLIFE_AGENT_COORDINATION=0`) — a subagent runs in its parent's shim,
+  so its board calls carry the parent's identity. For a subagent's call
+  (Claude Code marks it with `agent_id` in the hook input) the hook denies
+  `memory_agents` update, claim and release and `memory_message` send and
+  ack on any server name, with a reason telling it to ask its parent; list,
+  receive and every other tool pass, and so does everything the parent
+  calls. No daemon request. A payload it cannot read is let through. Codex
+  lists this entry too; there it allows every call, because a Codex child
+  has a board address of its own. See
+  [Configuration](../docs/guide/configuration.md#delivery-and-recovery).
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
 
