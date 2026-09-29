@@ -25,11 +25,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `~/.pseudolife-mcp/unattended-update.log`, the durable record.
   `--unattended` refuses the flags that would skip the backup or half
   the update. New route `POST /api/daemon-notice` carries the notice:
-  only a bearer whose principal is in `coordination.allowed_principals`
-  may post, as for mail, since the reserved sender is otherwise
-  unforgeable. The systemd unit carries `SuccessExitStatus=3 4` and the
-  guide says to enable lingering; a `--daemon-url` given with
-  `--schedule` rides into the task or unit.
+  only a bearer whose principal is listed in the new
+  `coordination.daemon_notice_principals` (default empty) may post, since
+  the reserved sender is otherwise unforgeable and `allowed_principals`
+  admits `default`, the principal every ordinary session uses; the
+  refusal names the key and the setup (a dedicated `PSEUDOLIFE_MCP_TOKENS`
+  principal as the scheduled run's bearer), `--schedule` prints one line
+  saying so, and the run says in one line why a notice was not taken
+  (refused for the principal, the board off, the daemon silent). One
+  update runs at a time per host: a daemon-recreating
+  `pseudolife-mcp update` (release or checkout mode), a `--clients-only`
+  run and the unattended run hold an exclusive OS lock on
+  `~/.pseudolife-mcp/update.lock`; an attended run that finds it held
+  exits 2 naming the holder's pid, the unattended run holds off (exit 4),
+  and the unattended run reads the daemon's version again under the lock,
+  so a release an attended run applied meanwhile is "nothing to do"
+  rather than tagged as the rollback of the version it replaced. The
+  guide states what the idle check cannot see (clients off the board) and
+  the board's activity windows (1 h, 3 h while holding a lease). The
+  systemd unit carries `SuccessExitStatus=3 4` and the guide says to
+  enable lingering; a `--daemon-url` given with `--schedule` rides into
+  the task or unit.
   [Configuration](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
 - Every update path (`pseudolife-mcp update`, `ops/update.*`,
   `ops/update_clients.py`, the unattended notice) prints the complete

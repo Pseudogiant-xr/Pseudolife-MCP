@@ -4075,6 +4075,7 @@ coordination:
   enabled: true
   awareness_limit: 5
   allowed_principals: [editor, reviewer]
+  daemon_notice_principals: []
   audit_retention_days: 90
   wake:
     per_recipient_per_hour: 20
@@ -4148,6 +4149,24 @@ sees no peers and no awareness section in its briefing, and with no bearer token
 configured there is no principal to list, so the board stays dormant on an open
 loopback install: no awareness, no mail and no startup check-in. The
 installers mint a token by default; see [Turning the board on](#turning-the-board-on).
+
+`daemon_notice_principals` (default empty) names the principals that may
+post a board notice as the daemon itself through `POST /api/daemon-notice`:
+the unattended updater's "updated" or "held off" notice (see
+[unattended daemon updates](#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)).
+It is a separate list because `allowed_principals` admits `default`, the
+principal every ordinary session uses, and a notice that reads as the
+daemon's must not be something any session, or an agent steered by text it
+has read, can send. While it is empty every such notice is refused, and
+the refusal names this key. To turn the notice on, give the scheduled run
+its own principal: a `PSEUDOLIFE_MCP_TOKENS` entry `<token>:updater` in the
+daemon's environment (the map works beside the singular token), `updater`
+in `daemon_notice_principals` and in `allowed_principals` (the run reads
+the board as well; an explicit list replaces the default, so write
+`[default, updater]` to keep your sessions on it), and that token as the
+scheduled run's bearer. The reserved `daemon` principal is never admitted
+as a caller, whatever either list says, and each notice carries a line
+naming the principal that posted it.
 
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
@@ -6716,7 +6735,10 @@ can take minutes, and a session that started meanwhile holds the
 recreate off before the rollback tag is moved (the backup already taken
 is harmless). When a release is out it posts a board notice from the
 daemon's reserved principal, stamped with the posting principal, to the
-sessions the board lists as active: updated (with the rollback tag, the
+sessions the board lists as active, provided the run's bearer principal is
+listed in [`coordination.daemon_notice_principals`](#experimental-agent-coordination)
+(empty by default, so out of the box the notice is refused, the run says so
+in one line, and the log is the only record): updated (with the rollback tag, the
 client states and, when the hook scripts changed, the Codex re-approval
 steps), or held off and why (which sessions are active; the board
 unreadable). With the knob off it only logs, so a daily run never
@@ -6736,10 +6758,48 @@ update failed. `--unattended` refuses `--no-backup`, `--clients-only`,
 `--reinstall` and `--check`: it always backs up and moves the daemon
 and the clients together.
 
+One update runs at a time on a host. Every daemon-recreating run
+(`pseudolife-mcp update` in release or checkout mode, so also
+`ops/update.ps1` and `ops/update.sh`), every `--clients-only` run and the
+unattended run hold an exclusive OS lock on `~/.pseudolife-mcp/update.lock`
+(under `PSEUDOLIFE_MCP_DATA_DIR` when that is set) until they exit; the OS
+drops it if the process dies, and the holder's pid sits beside it in
+`update.lock.pid`. An attended run that finds it held exits 2 with
+"another pseudolife-mcp update is running (pid N)" and changes nothing; the
+unattended run treats it as a hold-off (exit 4, with a notice), never a
+failure. The unattended run reads the daemon's version again after taking
+the lock and before the backup and the rollback tag, so a release an
+attended update applied in the meantime is "nothing to do" (exit 3), never
+tagged as the rollback of the version it replaced. `--check` and the pip
+tier take no lock; `ops/update_clients.py` does not either.
+
+The "no session is active" check sees only sessions on the agent board:
+clients started through the shim with its board adapter, whose bearer
+principal is in `coordination.allowed_principals`. It does not see a client
+connected over HTTP without the shim, a client that opted out of the board
+(`PSEUDOLIFE_AGENT_COORDINATION=0`), or a client whose token-map principal
+is not in `allowed_principals`; the daemon can be recreated under any of
+them. A board
+session counts as active while its own last board action (registering, a
+status update, a lease, sending or receiving mail; a heartbeat alone does
+not count) is within the last hour (`ACTIVE_WINDOW`, 3600 seconds), or
+within the last three hours (`ATTACHED_IDLE_WINDOW`, `STATUS_STALE_AFTER`
+of two hours plus `ACTIVE_WINDOW`) while it holds a live attachment lease;
+both are in `pseudolife_memory/storage/coordination.py`. Anything quieter
+is counted as idle and does not hold the update off.
+
 What the run needs: a Docker-tier daemon on this host and the bearer
 (`PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN` in the run's
 environment) whose principal is admitted to the board, since the idle
-check registers a throwaway board address. `--schedule` on Linux writes
+check registers a throwaway board address; for its notice, that principal
+must also be in `coordination.daemon_notice_principals` (`--schedule`
+prints one line saying so). On Linux the unit carries its own token file,
+so running `--schedule` with `PSEUDOLIFE_MCP_TOKEN_FILE` naming the
+dedicated principal's token (in that shell only) gives the timer its own
+bearer. The Windows task runs with the user's persistent environment, the
+same bearer the user's own clients read, so there it can post notices only
+if that principal is listed, which lets every session sharing it post them
+too; leaving the list empty keeps the log as the record. `--schedule` on Linux writes
 `~/.config/systemd/user/pseudolife-update.{service,timer}` with the
 daemon URL and the token file as `Environment=` lines (a token given only
 as `PSEUDOLIFE_MCP_TOKEN` is written to a private

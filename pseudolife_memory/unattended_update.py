@@ -12,7 +12,8 @@ the daemon's reserved principal saying it updated, or that it held off and
 why. Every run appends to ``~/.pseudolife-mcp/unattended-update.log``.
 
 Exit codes: 0 updated, 3 current (nothing to do), 4 held off (the knob is
-off, a session is active, or the board cannot be read), 2 the run could
+off, a session is active, the board cannot be read, or another
+``pseudolife-mcp update`` holds the update lock), 2 the run could
 not even check, 1 the update failed (the notice and the log carry the
 rollback).
 
@@ -91,7 +92,9 @@ def board_activity(url: str, token: str | None) -> tuple[list[dict], int, str]:
 
 def post_json(url: str, token: str | None, body: dict, timeout: float = 10.0) -> dict | None:
     """POST ``body`` as JSON; the reply as a dict, or ``None`` when the
-    daemon did not take it. A redirect is refused rather than followed."""
+    daemon did not answer. A refusal (an HTTP error status) is the
+    daemon's JSON error body with ``http_status`` added, so the caller can
+    say why. A redirect is refused rather than followed."""
     from pseudolife_memory.daemon_url import _NoRedirectHandler
 
     request = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
@@ -102,6 +105,13 @@ def post_json(url: str, token: str | None, body: dict, timeout: float = 10.0) ->
         opener = urllib.request.build_opener(_NoRedirectHandler)
         with opener.open(request, timeout=timeout) as response:  # noqa: S310 - the configured daemon URL
             data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            refusal = json.loads(exc.read().decode("utf-8"))
+        except (OSError, ValueError):
+            refusal = None
+        error = refusal.get("error") if isinstance(refusal, dict) else None
+        return {"error": error if isinstance(error, str) else f"HTTP {exc.code}", "http_status": exc.code}
     except (OSError, ValueError, urllib.error.URLError):
         return None
     return data if isinstance(data, dict) else None
@@ -111,13 +121,20 @@ def post_notice(update, text: str) -> None:
     """A board notice from the daemon's reserved principal to every attached
     session; best effort, one step line either way."""
     text = text[:NOTICE_LIMIT]
-    reply = post_json(update.o.daemon_url.rstrip("/") + "/api/daemon-notice", bearer(), {"text": text})
-    recipients = (reply or {}).get("recipients")
+    reply = post_json(update.o.daemon_url.rstrip("/") + "/api/daemon-notice", bearer(), {"text": text}) or {}
+    recipients = reply.get("recipients")
+    error = str(reply.get("error") or "")
     if isinstance(recipients, int):
         update.step(f"board notice posted from the daemon principal ({recipients} recipient(s))")
+    elif error.startswith("principal_not_allowed"):
+        update.step("board notice refused: this run's bearer principal is not listed in "
+                    "coordination.daemon_notice_principals (empty by default; see the unattended-update section "
+                    "of docs/guide/configuration.md); the log carries the same text")
+    elif reply.get("reason") == "board_unavailable":
+        update.step("board notice not posted: the board is off or has no Postgres; the log carries the same text")
     else:
-        update.step("board notice not posted (the board is off, or the daemon did not take it); "
-                    "the log carries the same text")
+        why = f"the daemon refused it: {error[:200]}" if error else "the daemon did not answer"
+        update.step(f"board notice not posted ({why}); the log carries the same text")
 
 
 # ── the run ─────────────────────────────────────────────────────────────────
@@ -209,6 +226,40 @@ def _run(update) -> int:
         post_notice(update, text)
         update.report.exit_code = 4
         return 4
+    lock = _cli.UpdateLock()
+    try:
+        lock.acquire()
+    except _cli.UpdateBusy as busy:
+        text = (f"Pseudolife-MCP: release {latest} is available (the daemon runs {current}); the unattended "
+                f"update held off because another pseudolife-mcp update is running (pid {busy.pid}). It tries "
+                f"again at the next scheduled run.")
+        update.step(text)
+        post_notice(update, text)
+        update.report.exit_code = 4
+        return 4
+    try:
+        return _apply(update, latest, idle)
+    finally:
+        lock.release()
+
+
+def _apply(update, latest: str, idle: int) -> int:
+    """The update itself, under the update lock. The daemon's version is
+    read again first: an attended update that finished between the first
+    read and the lock has already moved it, and a rollback tag named for
+    the old version would then hold the new image."""
+    o = update.o
+    health = update.daemon_health()
+    if not health:
+        raise UpdateError("the daemon did not answer /health after the update lock was taken; nothing was changed", 2)
+    current = health.get("version") if isinstance(health.get("version"), str) else None
+    if not current or not version_key(current):
+        raise UpdateError("the daemon's /health carries no version; nothing was changed", 2)
+    update.report.current = current
+    if version_key(current) >= version_key(latest):
+        update.step(f"current: the daemon already runs {current} (another update moved it); nothing to do")
+        update.report.exit_code = 3
+        return 3
     update.step(f"applying release {latest} unattended: no session is active on the board"
                 + (f" ({idle} idle)" if idle else ""))
     def board_still_idle() -> None:
@@ -359,6 +410,9 @@ def schedule(update, when: str, platform: str = sys.platform) -> int:
     update.step("the run applies a release only while updates.unattended_daemon is on in the daemon's "
                 "config.yaml (off by default) and no session is active on the board; the log is "
                 f"{data_dir() / LOG_NAME}")
+    update.step("its board notice needs its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the "
+                "daemon, <name> in coordination.daemon_notice_principals and allowed_principals, and that token "
+                "as this run's bearer; until then the notice is refused and the log is the only record")
     return 0
 
 

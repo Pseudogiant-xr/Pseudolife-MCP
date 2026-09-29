@@ -43,10 +43,13 @@ def board(monkeypatch, tmp_path):
     return state
 
 
-def _daemon(world, tmp_path, *, knob=True, version="0.15.0"):
+def _daemon(world, tmp_path, *, knob=True, version="0.15.0", reads=1):
+    """``reads``: how many /health reads answer ``version`` before any
+    answers a test appends (2 for a run that takes the update lock and
+    reads the daemon's version again)."""
     _project(world, tmp_path, version=version)
     world.health = [{"status": "ok", "version": version, "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64,
-                     "updates": {"unattended_daemon": knob, "unattended_clients": False}}]
+                     "updates": {"unattended_daemon": knob, "unattended_clients": False}}] * reads
 
 
 def _log(tmp_path) -> str:
@@ -107,7 +110,7 @@ def test_flags_that_skip_a_safety_step_are_refused_unattended(world, board, tmp_
 def test_a_session_that_starts_during_the_backup_holds_the_recreate_off(world, board, clients, tmp_path):
     """The board is read again right before the daemon is recreated: the
     backup can take minutes."""
-    _daemon(world, tmp_path)
+    _daemon(world, tmp_path, reads=2)
     world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
     reads = []
 
@@ -157,7 +160,7 @@ def test_an_unreadable_board_holds_off(world, board, tmp_path):
 
 
 def test_an_idle_board_applies_the_release_with_backup_and_rollback_then_tells(world, board, clients, tmp_path, capsys):
-    _daemon(world, tmp_path)
+    _daemon(world, tmp_path, reads=2)
     world.health.append({"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0, "hooks_digest": "d" * 64})
     world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
     assert up.main(["--unattended", "--health-delay-ms", "1"]) == 0
@@ -177,7 +180,7 @@ def test_an_idle_board_applies_the_release_with_backup_and_rollback_then_tells(w
 
 
 def test_the_notice_carries_the_codex_steps_when_the_hooks_changed(world, board, tmp_path, monkeypatch):
-    _daemon(world, tmp_path)
+    _daemon(world, tmp_path, reads=2)
     world.health.append({"status": "ok", "version": "0.15.1"})
     world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
     monkeypatch.setattr(client_updates, "run_steps", lambda steps, **kw: {
@@ -190,7 +193,7 @@ def test_the_notice_carries_the_codex_steps_when_the_hooks_changed(world, board,
 
 
 def test_a_failed_update_is_told_with_the_rollback(world, board, clients, tmp_path, capsys):
-    _daemon(world, tmp_path)
+    _daemon(world, tmp_path, reads=2)
     world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
     world.health.append(None)                                    # the daemon never comes back
     assert up.main(["--unattended", "--health-retries", "1", "--health-delay-ms", "1"]) == 1
@@ -201,7 +204,7 @@ def test_a_failed_update_is_told_with_the_rollback(world, board, clients, tmp_pa
 
 
 def test_a_pinned_tag_and_the_json_report(world, board, clients, tmp_path, capsys):
-    _daemon(world, tmp_path)
+    _daemon(world, tmp_path, reads=2)
     world.health.append({"status": "ok", "version": "0.15.2"})
     world.images[f"{up.GHCR_IMAGE}:0.15.2"] = "sha256:new"
     assert up.main(["--unattended", "--tag", "0.15.2", "--health-delay-ms", "1", "--json"]) == 0
@@ -215,6 +218,93 @@ def test_the_notice_not_taken_is_said_and_never_fatal(world, board, tmp_path, ca
     board["reply"] = None
     assert up.main(["--unattended"]) == 4
     assert "board notice not posted" in capsys.readouterr().out
+
+
+def test_the_notice_refused_says_which_key_admits_it(world, board, tmp_path, capsys):
+    """A daemon notice needs a principal listed in
+    coordination.daemon_notice_principals: the run says so, and goes on."""
+    _daemon(world, tmp_path)
+    board["active"] = [{"agent_id": "a1", "label": "x"}]
+    board["reply"] = {"error": "principal_not_allowed: a daemon notice needs ..."}
+    assert up.main(["--unattended"]) == 4
+    out = capsys.readouterr().out
+    assert "board notice refused" in out and "coordination.daemon_notice_principals" in out
+    board["reply"] = {"recipients": None, "reason": "board_unavailable"}
+    assert up.main(["--unattended"]) == 4
+    assert "board notice not posted: the board is off or has no Postgres" in capsys.readouterr().out
+
+
+def test_post_json_returns_a_refusals_body(monkeypatch):
+    """The daemon's 400 carries the reason; the notice line names it."""
+    import io
+    import urllib.error
+
+    class Opener:
+        def open(self, request, timeout=None):
+            raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {},
+                                         io.BytesIO(b'{"error": "principal_not_allowed: no"}'))
+
+    monkeypatch.setattr(uu.urllib.request, "build_opener", lambda *handlers: Opener())
+    assert uu.post_json("http://127.0.0.1:8765/api/daemon-notice", "tok", {"text": "x"}) == \
+        {"error": "principal_not_allowed: no", "http_status": 400}
+
+
+# ── the update lock ─────────────────────────────────────────────────────────
+
+def test_another_update_holding_the_lock_holds_the_unattended_run_off(world, board, clients, tmp_path, capsys):
+    from pseudolife_memory import os_lock
+
+    _daemon(world, tmp_path)
+    world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
+    lock = os_lock.OsLock(tmp_path / "data" / up.LOCK_NAME)
+    assert lock.acquire()
+    (tmp_path / "data" / up.LOCK_HOLDER_NAME).write_text("4242\n", encoding="utf-8")
+    try:
+        assert up.main(["--unattended", "--health-delay-ms", "1"]) == 4
+    finally:
+        lock.release()
+    assert not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
+    assert clients == []
+    (_, _, text), = board["notices"]
+    assert "held off because another pseudolife-mcp update is running (pid 4242)" in text
+    assert "another pseudolife-mcp update is running" in _log(tmp_path)
+
+
+def test_a_version_that_moved_before_the_lock_is_nothing_to_do(world, board, clients, tmp_path, capsys):
+    """An attended update that finished between the first /health read and
+    the lock: the daemon already runs the release, so nothing is tagged
+    (a rollback tag named for the old version would hold the new image)."""
+    _daemon(world, tmp_path)
+    world.health.append({"status": "ok", "version": "0.15.1", "schema": 49, "persist_errors": 0,
+                         "hooks_digest": "e" * 64, "updates": {"unattended_daemon": True}})
+    world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 3
+    assert not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
+    assert "already runs 0.15.1" in capsys.readouterr().out and board["notices"] == []
+
+
+def test_the_unattended_run_releases_the_lock_on_every_exit_path(world, board, clients, tmp_path, monkeypatch):
+    from pseudolife_memory import os_lock
+
+    path = tmp_path / "data" / up.LOCK_NAME
+    # release() removes the pid file; the probe alone cannot tell, since a
+    # collected handle drops the OS lock too
+    holder = tmp_path / "data" / up.LOCK_HOLDER_NAME
+    _daemon(world, tmp_path, reads=2)
+    world.health.append({"status": "ok", "version": "0.15.1"})
+    world.images[f"{up.GHCR_IMAGE}:0.15.1"] = "sha256:new"
+    assert up.main(["--unattended", "--health-delay-ms", "1"]) == 0
+    assert os_lock.probe(path) is False and not holder.exists()
+    _daemon(world, tmp_path, reads=2)
+    world.pull_rc = 1
+    assert up.main(["--unattended"]) == 1
+    assert os_lock.probe(path) is False and not holder.exists()
+    world.pull_rc = 0
+    _daemon(world, tmp_path, reads=2)
+    monkeypatch.setattr(up.Update, "deploy_release", lambda self, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        up.main(["--unattended"])
+    assert os_lock.probe(path) is False and not holder.exists()
 
 
 # ── the board read ──────────────────────────────────────────────────────────
@@ -296,7 +386,10 @@ def test_schedule_registers_a_daily_windows_task(scheduler, tmp_path, capsys):
     assert argv[:2] == ["schtasks", "/Create"] and "/SC" in argv and argv[argv.index("/SC") + 1] == "DAILY"
     assert argv[argv.index("/ST") + 1] == "03:30" and argv[argv.index("/TN") + 1] == uu.TASK_NAME
     assert argv[argv.index("/TR") + 1].endswith("update --unattended")
-    assert "updates.unattended_daemon" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "updates.unattended_daemon" in out
+    notice = [line for line in out.splitlines() if "coordination.daemon_notice_principals" in line]
+    assert len(notice) == 1 and "PSEUDOLIFE_MCP_TOKENS" in notice[0]
 
 
 def test_schedule_writes_a_systemd_timer_with_the_bearer_file(scheduler, tmp_path, monkeypatch):
@@ -362,15 +455,18 @@ def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path):
 
 # ── the route ───────────────────────────────────────────────────────────────
 
-def test_the_daemon_notice_route_admits_only_an_allowed_principal(monkeypatch):
-    """The reserved daemon sender is otherwise unforgeable: the route gates
-    the caller as mail does and stamps the notice with the principal."""
+def test_the_daemon_notice_route_admits_only_a_listed_notice_principal(monkeypatch):
+    """The reserved daemon sender is otherwise unforgeable: the route admits
+    only a principal named in coordination.daemon_notice_principals (empty
+    by default), never the board's ordinary ``default`` principal, and
+    stamps the notice with the principal."""
     from pseudolife_memory import coordination
     from pseudolife_memory.web.api import build_console_app
     from pseudolife_memory.web.fixtures import FixtureService
     from tests.asgi_helpers import call, stub_mcp
 
     svc = FixtureService()
+    monkeypatch.setattr(svc.config.coordination, "daemon_notice_principals", [])
     sent = []
     monkeypatch.setattr(coordination, "daemon_notice", lambda service, text: sent.append(text) or {"recipients": 2})
     app = build_console_app(stub_mcp, "secret", lambda: {"status": "ok"}, svc)
@@ -379,15 +475,23 @@ def test_the_daemon_notice_route_admits_only_an_allowed_principal(monkeypatch):
     # no principal resolver on the stand-in: refused
     st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
     assert st == 400 and b"principal_not_allowed" in reply and sent == []
+    # every ordinary session's principal: refused while the list is empty, and the refusal names the key
     svc._request_principal = lambda: "default"
     st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 400 and b"principal_not_allowed" in reply and sent == []
+    assert b"coordination.daemon_notice_principals" in reply and b"PSEUDOLIFE_MCP_TOKENS" in reply
+    monkeypatch.setattr(svc.config.coordination, "daemon_notice_principals", ["updater", "daemon"])
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
+    assert st == 400 and b"principal_not_allowed" in reply and sent == []   # default is still not listed
+    svc._request_principal = lambda: "updater"
+    st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
     assert st == 200 and json.loads(reply)["recipients"] == 2
-    assert sent == ["Pseudolife-MCP: updated\n(posted by the unattended updater, principal default)"]
-    for who in ("intruder", "daemon"):                            # the reserved name is never a caller
+    assert sent == ["Pseudolife-MCP: updated\n(posted by the unattended updater, principal updater)"]
+    for who in ("intruder", "default", "daemon"):                 # the reserved name is never a caller, even listed
         svc._request_principal = lambda who=who: who
         st, reply = call(app, "POST", "/api/daemon-notice", body=body, headers=headers)
         assert st == 400 and b"principal_not_allowed" in reply, who
-    svc._request_principal = lambda: "default"
+    svc._request_principal = lambda: "updater"
     st, reply = call(app, "POST", "/api/daemon-notice", body=json.dumps({"text": "x\x07y"}).encode(), headers=headers)
     assert st == 400 and b"printable" in reply
     st, reply = call(app, "POST", "/api/daemon-notice", body=json.dumps({"text": "y" * 4001}).encode(), headers=headers)

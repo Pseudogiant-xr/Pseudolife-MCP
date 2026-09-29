@@ -174,6 +174,66 @@ class UpdateError(RuntimeError):
         self.exit_code = exit_code
 
 
+# ── one update at a time ────────────────────────────────────────────────────
+
+LOCK_NAME = "update.lock"
+LOCK_HOLDER_NAME = "update.lock.pid"
+
+
+class UpdateBusy(UpdateError):
+    """Another ``pseudolife-mcp update`` on this host holds the update lock."""
+
+    def __init__(self, pid: str):
+        super().__init__(f"another pseudolife-mcp update is running (pid {pid}); nothing was changed. "
+                         f"Run this again when it has finished", 2)
+        self.pid = pid
+
+
+class UpdateLock:
+    """The exclusive OS lock on ``<data dir>/update.lock`` that one
+    daemon-recreating run (checkout or release mode), a ``--clients-only``
+    run or the unattended run holds from before it reads what to change
+    until it exits. Two at once can interleave: an unattended run that read
+    the old version tags the image an attended run has just deployed as the
+    old version's rollback, and that rollback would put the new release
+    back. The OS drops the lock when the holder exits or dies; the pid
+    beside it only names the holder in the refusal."""
+
+    def __init__(self):
+        from pseudolife_memory.os_lock import OsLock
+
+        self.directory = data_dir()
+        self._lock = OsLock(self.directory / LOCK_NAME)
+
+    def acquire(self) -> None:
+        """Take the lock, or raise ``UpdateBusy`` naming the holder's pid."""
+        if not self._lock.acquire():
+            try:
+                pid = (self.directory / LOCK_HOLDER_NAME).read_text(encoding="utf-8").strip()
+            except OSError:
+                pid = ""
+            raise UpdateBusy(pid if pid.isdigit() else "unknown")
+        try:
+            (self.directory / LOCK_HOLDER_NAME).write_text(f"{os.getpid()}\n", encoding="utf-8")
+        except OSError:
+            pass  # the pid only names the holder; the OS lock is the exclusion
+
+    def release(self) -> None:
+        if self._lock.held:
+            try:
+                (self.directory / LOCK_HOLDER_NAME).unlink()
+            except OSError:
+                pass
+        self._lock.release()
+
+    def __enter__(self) -> "UpdateLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.release()
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 def version_key(value: str) -> tuple[int, ...] | None:
@@ -346,12 +406,15 @@ class Update:
                                   "halves; run without --daemon-only / --clients-only", 2)
             self.upgrade_pip()
             return
-        if self.o.checkout is not None:
-            self.report.mode = "checkout"
-            self.deploy_checkout()
-        else:
-            self.report.mode = "release"
-            self.deploy_release()
+        # Held from before the daemon's version is read until the run ends,
+        # so an unattended run (or a second terminal) cannot interleave.
+        with UpdateLock():
+            if self.o.checkout is not None:
+                self.report.mode = "checkout"
+                self.deploy_checkout()
+            else:
+                self.report.mode = "release"
+                self.deploy_release()
 
     # -- tier --------------------------------------------------------------
     def detect_tier(self) -> str:

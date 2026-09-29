@@ -56,6 +56,8 @@ def test_board_is_on_by_default_for_the_singular_token_principal(tmp_path):
         cfg = load_config(path).coordination
         assert cfg.enabled is True
         assert cfg.allowed_principals == ["default"]
+        # No principal may post as the daemon until an operator names one.
+        assert cfg.daemon_notice_principals == []
 
 
 @pytest.mark.parametrize("text,enabled,allowed", [
@@ -95,9 +97,19 @@ def test_config_loads_explicit_awareness_settings(tmp_path):
     assert cfg.coordination.allowed_principals == ["editor", "reviewer"]
 
 
+def test_config_loads_the_daemon_notice_principals(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("coordination:\n  daemon_notice_principals: [Updater, updater, ' ops ']\n")
+    cfg = load_config(path).coordination
+    assert cfg.daemon_notice_principals == ["updater", "ops"]
+    assert cfg.allowed_principals == ["default"]
+
+
 @pytest.mark.parametrize("setting", [
     "enabled: 'false'", "awareness_limit: 0", "awareness_limit: 21",
     "allowed_principals: editor", "allowed_principals: ['']",
+    "daemon_notice_principals: updater", "daemon_notice_principals: ['']",
+    "daemon_notice_principals: [1]",
 ])
 def test_invalid_coordination_config_is_rejected(tmp_path, setting):
     path = tmp_path / "config.yaml"

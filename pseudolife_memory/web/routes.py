@@ -263,20 +263,27 @@ class ConsoleRoutes:
         """Post ``text`` to the sessions active on the board as the daemon's
         reserved principal (``coordination.daemon_notice``): what the
         unattended updater says when it updated or held off. The reserved
-        sender is otherwise unforgeable, so this is gated as mail is: the
-        caller's bearer principal must be in ``coordination.allowed_principals``
-        (a tokenless daemon has no principal and refuses), and the notice
-        carries a provenance line naming that principal. ``recipients`` is
-        ``None`` when the board cannot carry it (off, no Postgres), which
-        the caller reports as not said."""
+        sender is otherwise unforgeable, so the caller's bearer principal
+        must be listed in ``coordination.daemon_notice_principals``, which
+        is empty by default: ``allowed_principals`` admits ``default``,
+        the principal every ordinary session uses, and a notice that reads
+        as the daemon's must not be something any session can send. A
+        tokenless daemon has no principal and refuses; the reserved name
+        itself is never a caller; and the notice carries a provenance line
+        naming the principal. ``recipients`` is ``None`` when the board
+        cannot carry it (off, no Postgres), which the caller reports as
+        not said."""
         from pseudolife_memory import coordination
         from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
         resolve = getattr(self.svc, "_request_principal", None)
         principal = resolve() if resolve else None
-        allowed = self.svc.config.coordination.allowed_principals
-        if principal is None or principal == DAEMON_PRINCIPAL or principal not in allowed:
-            raise ValueError("principal_not_allowed: a daemon notice needs a bearer whose principal is in "
-                             "coordination.allowed_principals")
+        listed = self.svc.config.coordination.daemon_notice_principals
+        if principal is None or principal == DAEMON_PRINCIPAL or principal not in listed:
+            raise ValueError("principal_not_allowed: a daemon notice needs a bearer whose principal is listed in "
+                             "coordination.daemon_notice_principals (empty by default). Give the scheduled run "
+                             "its own principal: a PSEUDOLIFE_MCP_TOKENS entry token:<name> on the daemon, "
+                             "<name> in coordination.daemon_notice_principals (and in allowed_principals, so the "
+                             "run can read the board), and that token as the scheduled run's bearer")
         text = body.get("text")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("text is required")

@@ -389,6 +389,62 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
     assert clients == [] and any(c.startswith("compose") for c in world.docker_calls())
 
 
+@pytest.fixture
+def held_update_lock(world, tmp_path):
+    """Another ``pseudolife-mcp update`` on this host: the OS lock on
+    ``update.lock`` held by a second handle, with its pid recorded."""
+    from pseudolife_memory import os_lock
+
+    lock = os_lock.OsLock(tmp_path / "data" / up.LOCK_NAME)
+    assert lock.acquire()
+    (tmp_path / "data" / up.LOCK_HOLDER_NAME).write_text("4242\n", encoding="utf-8")
+    yield lock
+    lock.release()
+
+
+def test_an_attended_update_refuses_while_another_update_holds_the_lock(world, clients, tmp_path, capsys,
+                                                                        held_update_lock):
+    """Two updates at once: the second could tag the first one's new image
+    as the rollback of the old version, so it stops before anything runs."""
+    _project(world, tmp_path)
+    for argv in ([], ["--clients-only"], ["--checkout", str(tmp_path / "project")]):
+        assert _run(argv) == 2, argv
+        assert "another pseudolife-mcp update is running (pid 4242)" in capsys.readouterr().err
+    assert not any(c.startswith(("pull", "tag", "compose", "exec")) for c in world.docker_calls())
+    assert clients == []
+    world.health = [{"status": "ok", "version": "0.15.0"}]
+    assert _run(["--check"]) == 0                                # a read-only check takes no lock
+
+
+def test_the_update_lock_is_released_on_every_exit_path(world, clients, tmp_path, monkeypatch):
+    from pseudolife_memory import os_lock
+
+    path = tmp_path / "data" / up.LOCK_NAME
+    # release() removes the pid file; the probe alone cannot tell, since a
+    # collected handle drops the OS lock too
+    holder = tmp_path / "data" / up.LOCK_HOLDER_NAME
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--health-delay-ms", "1"]) == 0                   # success
+    assert os_lock.probe(path) is False and not holder.exists()
+    _project(world, tmp_path)
+    world.pull_rc = 1
+    assert _run([]) == 1                                           # an UpdateError
+    assert os_lock.probe(path) is False and not holder.exists()
+    world.pull_rc = 0
+    real = world.run_cli
+
+    def boom(argv, **kw):
+        if "pull" in [str(a) for a in argv]:
+            raise RuntimeError("unexpected")
+        return real(argv, **kw)
+
+    monkeypatch.setattr(up, "run_cli", boom)
+    with pytest.raises(RuntimeError):
+        _run([])                                                   # an unexpected exception
+    assert os_lock.probe(path) is False and not holder.exists()
+
+
 def test_a_version_mismatch_after_the_recreate_fails_and_moves_no_client(world, clients, tmp_path, capsys):
     _project(world, tmp_path)
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.0"}]

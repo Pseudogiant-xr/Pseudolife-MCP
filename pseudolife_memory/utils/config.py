@@ -1380,6 +1380,13 @@ class CoordinationConfig:
     awareness_limit: int = 5
     allowed_principals: list[str] = field(
         default_factory=lambda: [DEFAULT_PRINCIPAL])
+    # Principals that may post a board notice as the daemon through
+    # ``POST /api/daemon-notice`` (the unattended updater). Empty by
+    # default: ``default`` is every ordinary session's principal, and a
+    # notice from the daemon must not be something any session can send.
+    # An operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal here
+    # for the scheduled run's bearer (review of #463, 2026-09-29).
+    daemon_notice_principals: list[str] = field(default_factory=list)
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1413,6 +1420,12 @@ class CoordinationConfig:
             raise ValueError("coordination.allowed_principals must be a list of names")
         self.allowed_principals = list(dict.fromkeys(
             p.strip().lower() for p in self.allowed_principals))
+        if not isinstance(self.daemon_notice_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.daemon_notice_principals
+        ):
+            raise ValueError("coordination.daemon_notice_principals must be a list of names")
+        self.daemon_notice_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.daemon_notice_principals))
 
 
 @dataclass
