@@ -513,6 +513,14 @@ def update_shim(source, repo: Path | None = None) -> dict:
                          "session runs it, unless an extractor shim autostart uses that venv (`python "
                          "ops/shim_autostart.py show claude|codex` names its interpreter)")
         detail.append(note)
+    # `pseudolife-mcp` typed in a terminal reaches the launcher too (a
+    # ~/.local/bin link on POSIX, the user PATH on Windows): on 2026-09-29 it
+    # still ran pipx's copy of the old package after every registration had
+    # moved. A step that cannot be done is named and fails nothing: every
+    # registration names the launcher by its full path.
+    exposed = rt.expose_launcher(layout, env=env)
+    if exposed["state"] != "skipped":
+        detail.append(exposed["detail"] + (f"; {exposed['hint']}" if exposed.get("hint") else ""))
     pinned = rt.pinned_runtimes(layout, rt.find_registrations(env))
     pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes)
     if pruned["error"]:

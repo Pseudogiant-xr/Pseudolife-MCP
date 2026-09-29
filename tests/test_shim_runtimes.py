@@ -835,3 +835,220 @@ def test_a_registration_that_spawns_its_own_daemon_is_never_moved_onto_a_runtime
     # A registration already on the launcher is not re-examined.
     again = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True), roots=[elsewhere])
     assert {r["client"]: r["state"] for r in again}["claude-code"] == "current"
+
+
+# ── reaching the launcher by name ───────────────────────────────────────────
+#
+# 2026-09-29, a Debian 13 host after migration: `which -a pseudolife-mcp`
+# still found pipx's ~/.local/bin link to the OLD package, so "run
+# `pseudolife-mcp update`" ran the old code, and after `pipx uninstall` ran
+# nothing. POSIX: ~/.local/bin/pseudolife-mcp becomes a link to the
+# launcher. Windows: the launcher directory goes on the user PATH. Every
+# test here works under tmp_path with an injected registry: this machine's
+# PATH, registry and ~/.local/bin are never written.
+
+def _can_symlink(directory: Path) -> bool:
+    probe = directory / "symlink-probe"
+    try:
+        os.symlink(str(directory), str(probe))
+    except (OSError, NotImplementedError):
+        return False
+    probe.unlink()
+    return True
+
+
+@pytest.fixture
+def posix_link(tmp_path):
+    """A POSIX-shaped layout under tmp_path with its launcher written and a
+    user bin directory beside it; skipped where this user cannot symlink
+    (Windows without Developer Mode)."""
+    if not _can_symlink(tmp_path):
+        pytest.skip("this user cannot create symlinks here")
+    home = tmp_path / "home"
+    user_bin = home / ".local" / "bin"
+    layout = rt.Layout(home / ".local" / "share" / "pseudolife-mcp" / "runtimes",
+                       home / ".local" / "share" / "pseudolife-mcp" / "bin" / "pseudolife-mcp",
+                       user_bin=user_bin)
+    rt.ensure_launcher(layout)
+    user_bin.mkdir(parents=True)
+    env = {"HOME": str(home), "PATH": os.pathsep.join([str(user_bin), "/usr/bin", "/bin"])}
+    return layout, env
+
+
+def _console_script(path: Path) -> Path:
+    """What pip and pipx write for this package's entry point."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/opt/python/bin/python3\n# -*- coding: utf-8 -*-\nimport re\nimport sys\n"
+                    "from pseudolife_memory.cli import main\nif __name__ == '__main__':\n"
+                    "    sys.exit(main())\n", encoding="utf-8")
+    os.chmod(path, 0o755)
+    return path
+
+
+def test_a_free_user_bin_name_becomes_a_link_to_the_launcher(posix_link):
+    layout, env = posix_link
+    link = layout.user_bin / "pseudolife-mcp"
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "linked", result
+    assert link.is_symlink() and os.readlink(link) == str(layout.launcher)
+    assert str(link) in result["detail"] and result["hint"] is None
+    again = rt.expose_launcher(layout, env=env)
+    assert again["state"] == "current" and again["hint"] is None
+
+
+def test_a_pipx_link_to_the_old_shim_is_moved_aside_never_deleted(posix_link):
+    layout, env = posix_link
+    home = Path(env["HOME"])
+    old = _console_script(home / ".local" / "share" / "pipx" / "venvs" / "pseudolife-mcp" / "bin" / "pseudolife-mcp")
+    link = layout.user_bin / "pseudolife-mcp"
+    os.symlink(str(old), str(link))
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "replaced", result
+    assert os.readlink(link) == str(layout.launcher)
+    aside = list(layout.user_bin.glob("pseudolife-mcp.pipx-*"))
+    assert len(aside) == 1 and aside[0].is_symlink() and os.readlink(aside[0]) == str(old)
+    assert str(aside[0]) in result["detail"] and "pipx uninstall" in result["detail"]
+    assert old.is_file()
+
+
+def test_a_pip_user_console_script_is_moved_aside(posix_link):
+    layout, env = posix_link
+    link = _console_script(layout.user_bin / "pseudolife-mcp")
+    before = link.read_text(encoding="utf-8")
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "replaced", result
+    assert os.readlink(link) == str(layout.launcher)
+    aside = list(layout.user_bin.glob("pseudolife-mcp.pip-user-*"))
+    assert len(aside) == 1 and aside[0].read_text(encoding="utf-8") == before
+
+
+def test_a_link_into_a_pip_user_scripts_dir_is_moved_aside(posix_link):
+    layout, env = posix_link
+    home = Path(env["HOME"])
+    old = _console_script(home / "Library" / "Python" / "3.12" / "bin" / "pseudolife-mcp")
+    link = layout.user_bin / "pseudolife-mcp"
+    os.symlink(str(old), str(link))
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "replaced", result
+    assert len(list(layout.user_bin.glob("pseudolife-mcp.pip-user-*"))) == 1
+
+
+@pytest.mark.parametrize("entry", ["script", "link"])
+def test_a_name_that_belongs_to_something_else_is_left_alone(posix_link, entry):
+    layout, env = posix_link
+    link = layout.user_bin / "pseudolife-mcp"
+    if entry == "script":
+        link.write_text("#!/bin/sh\nexec my-own-wrapper \"$@\"\n", encoding="utf-8")
+        before = link.read_text(encoding="utf-8")
+    else:
+        other = layout.user_bin.parent / "tools" / "pseudolife-mcp"
+        other.parent.mkdir()
+        other.write_text("#!/bin/sh\n", encoding="utf-8")
+        os.symlink(str(other), str(link))
+        before = os.readlink(link)
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "left", result
+    assert (link.read_text(encoding="utf-8") if entry == "script" else os.readlink(link)) == before
+    assert not list(layout.user_bin.glob("pseudolife-mcp.*"))
+    assert "left as it is" in result["detail"] and str(layout.launcher) in result["detail"]
+
+
+def test_a_user_bin_off_path_gets_the_one_line_fix(posix_link):
+    layout, env = posix_link
+    env = {**env, "PATH": os.pathsep.join(["/usr/bin", "/bin"])}
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "linked"
+    assert result["hint"] == ('~/.local/bin is not on PATH: add export PATH="$HOME/.local/bin:$PATH" '
+                              'to your shell profile (~/.profile, ~/.bashrc or ~/.zshrc), then open a new terminal')
+
+
+def test_an_earlier_path_entry_that_still_wins_is_named(posix_link):
+    layout, env = posix_link
+    earlier = Path(env["HOME"]) / "usr-local-bin"
+    stale = _console_script(earlier / "pseudolife-mcp")
+    env = {**env, "PATH": os.pathsep.join([str(earlier), env["PATH"]])}
+    result = rt.expose_launcher(layout, env=env)
+    assert result["state"] == "linked"
+    assert result["hint"] and str(stale) in result["hint"] and "first" in result["hint"]
+
+
+def test_default_layout_names_where_the_launcher_is_reached_from(tmp_path):
+    posix = rt.default_layout({"HOME": "/home/u"}, windows=False)
+    assert posix.user_bin == Path("/home/u/.local/bin") and not posix.user_path
+    chosen = rt.default_layout({"HOME": "/home/u", "PSEUDOLIFE_SHIM_USER_BIN": str(tmp_path / "b")}, windows=False)
+    assert chosen.user_bin == tmp_path / "b"
+    windows = rt.default_layout({"LOCALAPPDATA": r"X:\profile\AppData\Local", "USERPROFILE": r"X:\profile"},
+                                windows=True)
+    assert windows.user_path and windows.user_bin is None
+    # Overridden paths (a test fixture, an operator's own layout) touch no
+    # PATH unless a user bin directory is named as well.
+    overrides = {"PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "r")}
+    posix_over = rt.default_layout({**overrides, "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l")}, windows=False)
+    assert posix_over.user_bin is None and not posix_over.user_path
+    named = rt.default_layout({**overrides, "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l"),
+                               "PSEUDOLIFE_SHIM_USER_BIN": str(tmp_path / "b")}, windows=False)
+    assert named.user_bin == tmp_path / "b"
+    win_over = rt.default_layout({**overrides, "PSEUDOLIFE_SHIM_LAUNCHER": str(tmp_path / "l.exe")}, windows=True)
+    assert win_over.user_bin is None and not win_over.user_path
+
+
+class _NoRegistry:
+    def get(self, name):
+        raise AssertionError("the registry was read")
+
+    def __setitem__(self, name, value):
+        raise AssertionError("the registry was written")
+
+
+def test_a_layout_without_a_user_bin_or_user_path_changes_nothing(tmp_path, shape):
+    layout = _layout(tmp_path, shape)
+    result = rt.expose_launcher(layout, env={"PATH": ""}, registry=_NoRegistry(),
+                                broadcast=lambda: pytest.fail("broadcast"))
+    assert result["state"] == "skipped"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows user PATH semantics (case-insensitive, ; separated)")
+def test_the_launcher_directory_is_prepended_to_the_user_path_once(tmp_path):
+    directory = tmp_path / "pseudolife-mcp" / "bin"
+    registry = {"Path": (r"%USERPROFILE%\.local\bin;C:\Tools;", 1)}
+    broadcasts = []
+    result = rt.ensure_user_path(directory, registry=registry, broadcast=lambda: broadcasts.append(1))
+    assert result["state"] == "added", result
+    assert registry["Path"] == (str(directory) + r";%USERPROFILE%\.local\bin;C:\Tools;", 2)  # REG_EXPAND_SZ
+    assert broadcasts == [1]
+    again = rt.ensure_user_path(directory, registry=registry, broadcast=lambda: broadcasts.append(1))
+    assert again["state"] == "current" and broadcasts == [1]
+    # already there in another spelling: left as it is
+    spelled = {"Path": (r"C:\Tools;" + str(directory).upper() + "\\", 2)}
+    assert rt.ensure_user_path(directory, registry=spelled, broadcast=lambda: broadcasts.append(1))["state"] == "current"
+    assert spelled["Path"] == (r"C:\Tools;" + str(directory).upper() + "\\", 2) and broadcasts == [1]
+    # no user Path value at all
+    empty: dict = {}
+    assert rt.ensure_user_path(directory, registry=empty, broadcast=lambda: None)["state"] == "added"
+    assert empty["Path"] == (str(directory), 2)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows user PATH semantics")
+def test_a_terminal_that_still_runs_another_copy_is_told_to_open_a_new_one(tmp_path):
+    layout = rt.Layout(tmp_path / "runtimes", tmp_path / "bin" / "pseudolife-mcp.exe", user_path=True)
+    old = r"C:\Users\<user>\.local\bin\pseudolife-mcp.exe"
+    registry: dict = {"Path": (r"%USERPROFILE%\.local\bin", 2)}
+    result = rt.expose_launcher(layout, env={"PATH": ""}, registry=registry, broadcast=lambda: None,
+                                which=lambda name, path=None: old)
+    assert result["state"] == "added"
+    assert registry["Path"][0].startswith(str(layout.launcher_dir) + ";")
+    assert result["hint"] == ("open a new terminal for `pseudolife-mcp` to resolve to the launcher; "
+                              f"this one still runs {old}")
+    current = rt.expose_launcher(layout, env={"PATH": ""}, registry=registry, broadcast=lambda: None,
+                                 which=lambda name, path=None: str(layout.launcher))
+    assert current["state"] == "current" and current["hint"] is None
+
+
+def test_the_checkout_script_exposes_nothing_for_an_overridden_layout(tmp_path):
+    launcher = tmp_path / "bin" / _console_name("windows" if os.name == "nt" else "posix")
+    env = {k: v for k, v in os.environ.items() if k != "PSEUDOLIFE_SHIM_USER_BIN"}
+    env.update({"PSEUDOLIFE_SHIM_RUNTIMES": str(tmp_path / "runtimes"), "PSEUDOLIFE_SHIM_LAUNCHER": str(launcher)})
+    proc = subprocess.run([sys.executable, str(ROOT / "ops" / "shim_runtime.py"), "--json", "expose"],
+                          capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["state"] == "skipped"

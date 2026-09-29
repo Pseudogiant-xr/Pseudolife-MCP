@@ -1657,6 +1657,11 @@ ensure_shim() {
             SHIM_PATH="$shim_launcher"
             SHIM_OK=1
             SHIM_MANAGER_KIND=runtime
+            # `pseudolife-mcp` typed in a terminal reaches the launcher too: a
+            # ~/.local/bin/pseudolife-mcp link to it (an old pipx or pip --user
+            # entry there is moved aside, anything else is left and named; a
+            # ~/.local/bin missing from PATH gets its one-line fix printed).
+            "$SHIM_PY" "$repo/ops/shim_runtime.py" expose || true
             # A pipx environment from an earlier install: registrations that
             # still name it move to the launcher (shim_registration_migrates).
             if command -v pipx >/dev/null 2>&1; then

@@ -126,6 +126,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   landed after the whole build output, and the log read as if the backup
   had followed the build. A terminal run is unchanged.
 
+### Changed (2026-09-29 — `pseudolife-mcp` typed in a terminal runs the launcher, not an old pipx copy)
+- After the move to side-by-side shim runtimes every registration named the
+  launcher, but the name `pseudolife-mcp` in a terminal still resolved to
+  pipx's `~/.local/bin` link into its venv of the old package (Debian 13,
+  2026-09-29): `pseudolife-mcp update` ran old code, and after the
+  suggested `pipx uninstall` it ran nothing. The installers
+  (`ops/install.sh`, `ops/install.ps1`) and the update step
+  (`pseudolife-mcp update`, `ops/update_clients.py`) now make the name
+  reach the launcher; `python ops/shim_runtime.py expose` does it alone.
+- POSIX: `~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher.
+  A free name is linked; pipx's link into `venvs/pseudolife-mcp`, or a
+  pip --user console script of this package, is moved aside as
+  `pseudolife-mcp.<kind>-<stamp>` and never deleted; anything else is left
+  as it is and named. The link survives `pipx uninstall`, which removes
+  only bin-dir links that resolve into its own venv
+  (`pipx.commands.common.get_exposed_paths_for_package`). When
+  `~/.local/bin` is not on `PATH` the step prints the one-line fix
+  (`export PATH="$HOME/.local/bin:$PATH"`) and edits no profile; when an
+  earlier `PATH` entry still wins, it is named. `PSEUDOLIFE_SHIM_USER_BIN`
+  moves the directory.
+- Windows: the launcher directory is prepended to the user `PATH`
+  (`HKCU\Environment`, written back as an expandable string; the machine
+  `PATH` is never touched), skipped when already present, and
+  `WM_SETTINGCHANGE` is broadcast so consoles opened afterwards see it. A
+  terminal that still resolves the name elsewhere is told to open a new
+  one. pipx's `pseudolife-mcp.exe` further down `PATH` is left in place.
+  `ops/install.ps1` repeats the outcome in its summary ("Launcher on
+  PATH").
+- `pseudolife-mcp doctor` reports `path_resolution`: what
+  `pseudolife-mcp` resolves to, the launcher, and a warning when they
+  differ. A layout from `PSEUDOLIFE_SHIM_RUNTIMES` /
+  `PSEUDOLIFE_SHIM_LAUNCHER` changes no `PATH` unless
+  `PSEUDOLIFE_SHIM_USER_BIN` is set as well.
+  [Where the shim lives](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before

@@ -103,6 +103,14 @@ def home(env: dict | None = None) -> Path:
 class Layout:
     root: Path        # where the runtimes live
     launcher: Path    # the one path every client registers
+    # Where ``pseudolife-mcp`` typed in a terminal is made to reach the
+    # launcher (expose_launcher). POSIX: the directory that gets a
+    # ``pseudolife-mcp`` link to it (``~/.local/bin``). Windows: whether the
+    # launcher directory goes on the user PATH. Neither is set for a layout
+    # built by hand or from overridden paths, so a test fixture never
+    # touches this machine's PATH.
+    user_bin: Path | None = None
+    user_path: bool = False
 
     @property
     def launcher_dir(self) -> Path:
@@ -112,10 +120,14 @@ class Layout:
 def default_layout(env: dict | None = None, windows: bool | None = None) -> Layout:
     """The layout for this user. ``PSEUDOLIFE_SHIM_RUNTIMES`` and
     ``PSEUDOLIFE_SHIM_LAUNCHER`` override the two paths (a test fixture, or
-    an operator who keeps them elsewhere); both must then be set."""
+    an operator who keeps them elsewhere); both must then be set, and the
+    launcher is then linked from no directory and put on no PATH unless
+    ``PSEUDOLIFE_SHIM_USER_BIN`` names the directory to link it from
+    (POSIX). That variable also moves the default ``~/.local/bin``."""
     env = os.environ if env is None else env
     windows = (os.name == "nt") if windows is None else windows
     root_override, launcher_override = env.get("PSEUDOLIFE_SHIM_RUNTIMES"), env.get("PSEUDOLIFE_SHIM_LAUNCHER")
+    user_bin_override = env.get("PSEUDOLIFE_SHIM_USER_BIN")
     if root_override and launcher_override:
         launcher = Path(launcher_override)
         # The launcher's suffix decides the runtime shape (Scripts\ + .exe or
@@ -124,13 +136,15 @@ def default_layout(env: dict | None = None, windows: bool | None = None) -> Layo
             raise ValueError("PSEUDOLIFE_SHIM_LAUNCHER must end with .exe on Windows")
         if not windows and launcher.suffix.lower() == ".exe":
             raise ValueError("PSEUDOLIFE_SHIM_LAUNCHER must not end with .exe off Windows")
-        return Layout(Path(root_override), launcher)
+        return Layout(Path(root_override), launcher,
+                      user_bin=Path(user_bin_override) if user_bin_override and not windows else None)
     user = home(env)
     if windows:
         local = Path(env.get("LOCALAPPDATA") or user / "AppData" / "Local") / PACKAGE
-        return Layout(local / "runtimes", local / "bin" / "pseudolife-mcp.exe")
+        return Layout(local / "runtimes", local / "bin" / "pseudolife-mcp.exe", user_path=True)
     data = Path(env.get("XDG_DATA_HOME") or user / ".local" / "share") / PACKAGE
-    return Layout(data / "runtimes", data / "bin" / "pseudolife-mcp")
+    return Layout(data / "runtimes", data / "bin" / "pseudolife-mcp",
+                  user_bin=Path(user_bin_override) if user_bin_override else user / ".local" / "bin")
 
 
 def _windows(layout: Layout) -> bool:
@@ -645,6 +659,250 @@ def _launcher_record(layout: Layout) -> Path:
 def _sha256(data: bytes) -> str:
     import hashlib
     return hashlib.sha256(data).hexdigest()
+
+
+# ── reaching the launcher by name ───────────────────────────────────────────
+#
+# 2026-09-29, a Debian 13 host after migration: every registration named the
+# launcher, but `pseudolife-mcp` typed in a terminal was still pipx's
+# ~/.local/bin link into its venv of the OLD package, so `pseudolife-mcp
+# update` ran old code, and after `pipx uninstall` it ran nothing. The
+# launcher is therefore made reachable by name: on POSIX through a
+# ``pseudolife-mcp`` link in ``~/.local/bin``, on Windows by putting the
+# launcher directory first on the user PATH.
+#
+# Why a symlink survives `pipx uninstall`: pipx collects what to remove from
+# its bin dir with pipx.commands.common.get_exposed_paths_for_package (called
+# by pipx.commands.uninstall._get_package_bin_dir_app_paths). Where the bin
+# dir supports symlinks, it takes only symlinks for which
+# ``b.resolve().parent.samefile(venv_bin_path)``, i.e. links that resolve into
+# the package's own venv; a regular file is never taken there. This link
+# resolves to the launcher, outside every pipx venv, so pipx leaves it (the
+# by-name fallback applies only where the bin dir cannot hold symlinks,
+# which is Windows, where this module never links). The old pipx link moved
+# aside still resolves into the venv, so `pipx uninstall` removes that one
+# with the venv. `pipx install --force` would replace the link (plain
+# `pipx install` refuses a name that points elsewhere), which is why the
+# installers try the side-by-side runtime before pipx.
+
+LINK_NAME = "pseudolife-mcp"
+_CONSOLE_ENTRY = re.compile(r"^\s*from pseudolife_memory\.cli import main\s*$", re.M)
+_REG_EXPAND_SZ = 2
+
+
+def _is_console_script(path: Path) -> bool:
+    """Whether ``path`` is the console script pip or pipx writes for this
+    package's entry point (a python shebang importing ``pseudolife_memory.
+    cli.main``); a hand-made wrapper that runs the package some other way
+    is not."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(4096).decode("utf-8", "replace")
+    except OSError:
+        return False
+    first = head.split("\n", 1)[0]
+    return first.startswith("#!") and "python" in first and bool(_CONSOLE_ENTRY.search(head))
+
+
+def _in_pipx_venv(path: str) -> bool:
+    """Whether ``path`` lies in a pipx venv of this package
+    (``<PIPX_HOME>/venvs/pseudolife-mcp/...``)."""
+    parts = [part.lower() for part in Path(path).parts]
+    return any(parts[i] == "venvs" and parts[i + 1] == PACKAGE and any("pipx" in p for p in parts[:i])
+               for i in range(len(parts) - 1))
+
+
+def _link_entry(link: Path, layout: Layout) -> str:
+    """What occupies the link's name: ``free``, ``current`` (the launcher
+    already), ``pipx`` or ``pip-user`` (this package's old console script,
+    which may be moved aside; ``runtime`` for one inside a runtime), or
+    ``foreign``."""
+    if link.is_symlink():
+        target = os.readlink(link)
+        absolute = target if os.path.isabs(target) else os.path.join(str(link.parent), target)
+        if _same_path(absolute, str(layout.launcher)):
+            return "current"
+        if _in_pipx_venv(absolute) or _in_pipx_venv(os.path.realpath(absolute)):
+            return "pipx"
+        resolved = Path(os.path.realpath(absolute))
+        if _is_console_script(resolved):
+            return "runtime" if _under(str(resolved), layout.root) else "pip-user"
+        return "foreign"
+    if not link.exists():
+        return "free"
+    if link.is_file():
+        try:
+            if link.read_text(encoding="utf-8") == launcher_content(layout):
+                return "current"
+        except (OSError, UnicodeDecodeError):
+            pass
+        if _is_console_script(link):
+            return "pip-user"
+    return "foreign"
+
+
+def _home_relative(path: Path, env: dict, form: str) -> str:
+    """``path`` with the home directory written as ``~`` or ``$HOME``."""
+    user = home(env)
+    try:
+        rest = path.relative_to(user)
+    except ValueError:
+        return str(path)
+    return f"{form}/{rest.as_posix()}" if str(rest) != "." else form
+
+
+def link_user_bin(layout: Layout, *, env: dict | None = None, which: Callable = shutil.which) -> dict:
+    """Make ``<user_bin>/pseudolife-mcp`` a symlink to the launcher (POSIX).
+    Returns ``{"state", "detail", "hint"}``: state ``linked`` (the name was
+    free), ``replaced`` (this package's old pipx or pip --user entry was
+    moved aside as ``pseudolife-mcp.<kind>-<stamp>``, never deleted),
+    ``current``, ``left`` (the name is something else, untouched),
+    ``failed`` or ``skipped`` (no user bin directory for this layout).
+    ``hint`` is one line for the operator when the directory is not on
+    ``PATH``, or when an earlier ``PATH`` entry still wins."""
+    env = os.environ if env is None else env
+    if layout.user_bin is None:
+        return {"state": "skipped", "detail": "no user bin directory for this layout", "hint": None}
+    link = layout.user_bin / LINK_NAME
+    launcher = str(layout.launcher)
+    kind = _link_entry(link, layout)
+    aside = None
+    try:
+        if kind == "current":
+            state, detail = "current", f"{link} already runs the launcher"
+        elif kind == "foreign":
+            return {"state": "left", "hint": None,
+                    "detail": f"{link} is not this package's (another tool, or a hand-made script); left as it "
+                              f"is. `pseudolife-mcp` there does not reach the launcher: run {launcher} by its "
+                              "full path, or replace that entry yourself"}
+        else:
+            layout.user_bin.mkdir(parents=True, exist_ok=True)
+            if kind != "free":
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                aside = link.with_name(f"{LINK_NAME}.{kind}-{stamp}")
+                counter = 0
+                while aside.exists() or aside.is_symlink():
+                    counter += 1
+                    aside = link.with_name(f"{LINK_NAME}.{kind}-{stamp}-{counter}")
+                os.rename(link, aside)
+            try:
+                os.symlink(launcher, str(link))
+            except OSError:
+                if aside is not None:
+                    os.rename(aside, link)
+                raise
+            state = "linked" if aside is None else "replaced"
+            detail = f"linked {link} -> {launcher}"
+            if aside is not None:
+                detail += f"; the old {kind} entry is kept as {aside}"
+                if kind == "pipx":
+                    detail += " (`pipx uninstall pseudolife-mcp` removes it with its venv once no session runs it)"
+    except OSError as exc:
+        return {"state": "failed", "hint": None,
+                "detail": f"could not link {link} to {launcher} ({exc}); run the launcher by its full path"}
+    path = env.get("PATH", "")
+    entries = [entry for entry in path.split(os.pathsep) if entry]
+    hint = None
+    if not any(_same_path(entry, str(layout.user_bin)) for entry in entries):
+        shown = _home_relative(layout.user_bin, env, "~")
+        hint = (f"{shown} is not on PATH: add export PATH=\"{_home_relative(layout.user_bin, env, '$HOME')}:$PATH\" "
+                "to your shell profile (~/.profile, ~/.bashrc or ~/.zshrc), then open a new terminal")
+    else:
+        found = which(LINK_NAME, path=path)
+        if found and not _same_path(os.path.realpath(found), os.path.realpath(launcher)):
+            hint = (f"`pseudolife-mcp` still resolves to {found} first on PATH; remove that entry "
+                    f"or put {layout.user_bin} before its directory")
+    return {"state": state, "detail": detail, "hint": hint}
+
+
+class _UserEnvironment:
+    """``HKCU\\Environment`` through winreg, shaped like the dict a test
+    passes instead: ``get(name)`` is ``(value, type)`` or ``None``, and
+    ``[name] = (value, type)`` writes it. The machine environment is never
+    opened."""
+
+    def get(self, name: str):
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+                return winreg.QueryValueEx(key, name)
+        except FileNotFoundError:
+            return None
+
+    def __setitem__(self, name: str, item) -> None:
+        import winreg
+        value, kind = item
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, name, 0, kind, value)
+
+
+def _broadcast_environment_change() -> None:
+    """Tell running programs (Explorer, and so every console opened after)
+    that the user environment changed: ``WM_SETTINGCHANGE`` with
+    ``"Environment"``, as the System Properties dialog sends it."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPCWSTR,
+                                               wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+        result = ctypes.c_size_t()
+        # HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG, 5 s per window
+        user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "Environment", 0x0002, 5000, ctypes.byref(result))
+    except Exception:  # noqa: BLE001 - a missed broadcast only delays the change to the next logon
+        pass
+
+
+def _path_entry_is(entry: str, directory: Path) -> bool:
+    expanded = os.path.expandvars(entry.strip().strip('"'))
+    if not expanded:
+        return False
+    return (os.path.normcase(os.path.normpath(expanded))
+            == os.path.normcase(os.path.normpath(str(directory))))
+
+
+def ensure_user_path(directory: Path, *, registry=None, broadcast: Callable | None = None) -> dict:
+    """Put ``directory`` first on the user PATH (Windows), read-modify-write:
+    the existing value is kept byte for byte behind it, written back as an
+    expandable string, and nothing happens when it is already there in any
+    spelling. Prepended so it wins over pipx's ``%USERPROFILE%\\.local\\bin``
+    and pip's user scripts directory, which may still hold an older
+    ``pseudolife-mcp.exe`` (a running exe is never renamed or deleted).
+    Returns ``{"state": "added"|"current"|"failed", "detail"}``."""
+    registry = _UserEnvironment() if registry is None else registry
+    broadcast = _broadcast_environment_change if broadcast is None else broadcast
+    try:
+        existing = registry.get("Path")
+        value = str(existing[0]) if existing and existing[0] is not None else ""
+        if any(_path_entry_is(entry, directory) for entry in value.split(";")):
+            return {"state": "current", "detail": f"{directory} is already on your user PATH"}
+        registry["Path"] = (f"{directory};{value}" if value else str(directory), _REG_EXPAND_SZ)
+    except OSError as exc:
+        return {"state": "failed", "detail": f"could not add {directory} to your user PATH ({exc})"}
+    broadcast()
+    return {"state": "added", "detail": f"added {directory} to the front of your user PATH"}
+
+
+def expose_launcher(layout: Layout, *, env: dict | None = None, registry=None,
+                    broadcast: Callable | None = None, which: Callable = shutil.which) -> dict:
+    """Make ``pseudolife-mcp`` typed in a terminal reach the launcher: the
+    user bin link on POSIX (:func:`link_user_bin`), the user PATH on
+    Windows (:func:`ensure_user_path`), plus a ``hint`` when this terminal
+    still resolves the name elsewhere. ``skipped`` for a layout that names
+    neither (a hand-built or overridden one)."""
+    env = os.environ if env is None else env
+    if not _windows(layout):
+        return link_user_bin(layout, env=env, which=which)
+    if not layout.user_path:
+        return {"state": "skipped", "detail": "the user PATH is not managed for this layout", "hint": None}
+    result = ensure_user_path(layout.launcher_dir, registry=registry, broadcast=broadcast)
+    result["hint"] = None
+    if result["state"] != "failed":
+        found = which(LINK_NAME, path=env.get("PATH"))
+        if not found or not _same_path(found, str(layout.launcher)):
+            result["hint"] = ("open a new terminal for `pseudolife-mcp` to resolve to the launcher; "
+                              + (f"this one still runs {found}" if found else "this one does not find it yet"))
+    return result
 
 
 # ── processes ───────────────────────────────────────────────────────────────
@@ -1255,6 +1513,8 @@ def main(argv: list[str] | None = None) -> int:
     p_launcher.add_argument("--if-installed", action="store_true",
                             help="exit 3 unless the launcher and a complete runtime exist")
     sub.add_parser("prune", help="remove runtimes nothing runs or names")
+    sub.add_parser("expose", help="make `pseudolife-mcp` in a terminal reach the launcher "
+                                  "(POSIX: a ~/.local/bin link; Windows: the user PATH)")
     p_migrate = sub.add_parser("migrate", help="point registrations that name a runtime path at the launcher")
     p_migrate.add_argument("--client", action="append", default=None,
                            help="only this client (claude-code, codex, claude-desktop, gemini)")
@@ -1302,6 +1562,15 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         print(str(layout.launcher))
         return 0
+    if args.command == "expose":
+        result = expose_launcher(layout)
+        if args.json:
+            _print_result(result, True)
+        else:
+            print(result["detail"])
+            if result.get("hint"):
+                print(result["hint"])
+        return 1 if result["state"] == "failed" else 0
     if args.command == "prune":
         result = remove_unused(layout, pinned=pinned_runtimes(layout, find_registrations()), log=log)
         _print_result(result, args.json)

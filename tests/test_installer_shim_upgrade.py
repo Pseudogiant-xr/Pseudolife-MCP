@@ -136,6 +136,7 @@ case "$1" in *shim_runtime.py)
         printf '#!/bin/sh\n' >"$FAKE_INSTALLED_BIN/pseudolife-mcp"
         chmod +x "$FAKE_INSTALLED_BIN/pseudolife-mcp"
     fi
+    if [ "$2" = expose ]; then echo "fake: linked the launcher into ~/.local/bin"; exit 0; fi
     if [ "$2" = install ] || [ "$2" = launcher ]; then
         if [ -f "$FAKE_INSTALLED_BIN/pseudolife-mcp" ]; then
             if [ "$FAKE_WINDOWS_PATH" = yes ]; then cygpath -w "$FAKE_INSTALLED_BIN/pseudolife-mcp"; else printf '%%s\n' "$FAKE_INSTALLED_BIN/pseudolife-mcp"; fi
@@ -198,6 +199,7 @@ if [ '{"yes" if failed_later_probe else "no"}' = yes ]; then
     resolve_installed_shim || true
 fi
 ensure_shim
+echo "--- call log ---"
 cat "$call_log"
 printf 'resolved|%s\n' "$SHIM_PATH"
 """
@@ -206,7 +208,9 @@ printf 'resolved|%s\n' "$SHIM_PATH"
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
-    lines = proc.stdout.decode().splitlines()
+    output = proc.stdout.decode().splitlines()
+    # What the helper itself printed comes before the call log.
+    lines = output[output.index("--- call log ---") + 1:]
     resolved = lines.pop().split("|", 1)[1]
     diagnostics = proc.stdout.decode(errors="replace") + proc.stderr.decode(errors="replace")
     return lines, resolved, diagnostics
@@ -220,7 +224,11 @@ def test_install_sh_installs_a_side_by_side_runtime_behind_the_launcher(bash: st
     clients register; pipx and pip are never called, and a second
     ensure_shim is memoised."""
     calls, resolved, diagnostics = _run_bash_helper(bash, manager="runtime", state=state)
-    assert calls == [f"python3|{ROOT}/ops/shim_runtime.py install --source {ROOT} --python python3"]
+    # ...then `pseudolife-mcp` in a terminal is pointed at the launcher too
+    # (ops/shim_runtime.py expose: the ~/.local/bin link), its note shown.
+    assert calls == [f"python3|{ROOT}/ops/shim_runtime.py install --source {ROOT} --python python3",
+                     f"python3|{ROOT}/ops/shim_runtime.py expose"]
+    assert "fake: linked the launcher into ~/.local/bin" in diagnostics
     assert Path(resolved).name == "pseudolife-mcp"
     assert Path(resolved).parent.name == "installed dir"
     assert "falling back" not in diagnostics
@@ -367,6 +375,7 @@ function global:{command} {{
         if (($callArgs[1] -eq 'install') -and ({'$true' if create_executable else '$false'})) {{
             Set-Content -LiteralPath (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe') -Value 'fake'
         }}
+        if ($callArgs[2] -eq 'expose') {{ Write-Output '{{"state": "added", "detail": "fake: added the launcher directory to the user PATH", "hint": "open a new terminal"}}'; $global:LASTEXITCODE = 0; return }}
         if (($callArgs[1] -eq 'install') -or ($callArgs[1] -eq 'launcher')) {{
             if (Test-Path -LiteralPath (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe')) {{
                 Write-Output (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe'); $global:LASTEXITCODE = 0; return
@@ -395,6 +404,7 @@ $env:PSEUDOLIFE_SHIM_LAUNCHER = Join-Path '{escaped_installed_bin}' 'pseudolife-
 function Get-ShimRuntimePython {{ {runtime_python} }}
 Install-ShimOnce | Out-Null
 Install-ShimOnce | Out-Null
+Add-Content -LiteralPath '{escaped_log}' -Value ('notes|' + (@($script:shimPathNotes) -join ' / '))
 Add-Content -LiteralPath '{escaped_log}' -Value ('resolved|' + $script:shimInstallPath)
 """
     env = os.environ.copy()
@@ -412,14 +422,21 @@ Add-Content -LiteralPath '{escaped_log}' -Value ('resolved|' + $script:shimInsta
     assert proc.returncode == 0, proc.stderr.decode(errors="replace")
     lines = log.read_text(encoding="utf-8").splitlines()
     resolved = lines.pop().split("|", 1)[1]
-    diagnostics = proc.stdout.decode(errors="replace") + proc.stderr.decode(errors="replace")
+    notes = lines.pop().split("|", 1)[1]
+    diagnostics = (proc.stdout.decode(errors="replace") + proc.stderr.decode(errors="replace")
+                   + f"\nshim path notes: {notes}")
     return lines, resolved, diagnostics
 
 
 @pytest.mark.parametrize("state", ["fresh", "stale"])
 def test_install_ps1_installs_a_side_by_side_runtime_behind_the_launcher(tmp_path: Path, state: str) -> None:
     calls, resolved, diagnostics = _run_powershell_helper(tmp_path, manager="runtime", state=state)
-    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python"]
+    # ...then the launcher directory goes on the user PATH (ops/shim_runtime.py
+    # expose), its note shown now and kept for the summary.
+    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python",
+                     f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} --json expose"]
+    assert "shim path notes: fake: added the launcher directory to the user PATH / open a new terminal" in diagnostics
+    assert diagnostics.count("fake: added the launcher directory to the user PATH") == 2   # shown, and kept
     assert Path(resolved).name == "pseudolife-mcp.exe"
     assert Path(resolved).parent.name == "installed"
     assert "falling back" not in diagnostics

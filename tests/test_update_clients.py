@@ -646,6 +646,69 @@ def test_pipx_bin_dir_copy_of_the_launcher_moves_to_the_launcher(cli, tmp_path):
     assert _read(cli.home / ".claude.json")["mcpServers"]["pseudolife-memory"]["command"] == str(_layout(cli).launcher)
     assert "pipx uninstall pseudolife-mcp" in result["detail"]
 
+
+def test_the_ladder_says_how_the_launcher_is_reached_by_name(cli, monkeypatch, capsys):
+    """After the runtime installs, `pseudolife-mcp` in a terminal is made to
+    reach the launcher (a ~/.local/bin link on POSIX, the user PATH on
+    Windows) and the ladder names what happened, with the new-terminal note;
+    the layout it is asked about is the one the runtime went into."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    seen = []
+
+    def expose(layout_, **kw):
+        seen.append(layout_)
+        return {"state": "added", "detail": f"added {layout_.launcher_dir} to the front of your user PATH",
+                "hint": "open a new terminal for `pseudolife-mcp` to resolve to the launcher; "
+                        "this one still runs C:/old/pseudolife-mcp.exe"}
+
+    monkeypatch.setattr(uc.runtimes_module(), "expose_launcher", expose)
+    assert uc.main(["--repo", str(ROOT), "--only", "shim"]) == 0
+    out = capsys.readouterr().out
+    assert seen == [layout]
+    assert f"added {layout.launcher_dir} to the front of your user PATH" in out
+    assert "open a new terminal for `pseudolife-mcp` to resolve to the launcher; this one still runs" in out
+
+
+def test_a_failed_path_step_is_named_but_does_not_fail_the_shim(cli, monkeypatch):
+    """Every registration names the launcher by its full path: a PATH step
+    that could not be done is reported, the installed runtime stands."""
+    _register_claude(cli, str(_layout(cli).launcher))
+    monkeypatch.setattr(uc.runtimes_module(), "expose_launcher", lambda layout_, **kw: {
+        "state": "failed", "detail": "could not add X to your user PATH (denied)", "hint": None})
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0", result
+    assert "could not add X to your user PATH (denied)" in result["detail"]
+
+
+def test_an_overridden_layout_touches_no_path(cli):
+    _register_claude(cli, str(_layout(cli).launcher))
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0"
+    assert "PATH" not in result["detail"] and "linked" not in result["detail"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the ~/.local/bin link is the POSIX mechanism")
+def test_the_old_pipx_link_in_the_user_bin_is_replaced_by_the_launcher(cli, monkeypatch):
+    """The Debian host of 2026-09-29: ~/.local/bin/pseudolife-mcp was pipx's
+    link to the old package. The update moves it aside and links the
+    launcher there, and the ladder says so."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    user_bin = cli.home / ".local" / "bin"
+    old = cli.home / ".local" / "share" / "pipx" / "venvs" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+    old.parent.mkdir(parents=True)
+    old.write_text("#!/usr/bin/python3\nfrom pseudolife_memory.cli import main\n", encoding="utf-8")
+    user_bin.mkdir(parents=True)
+    os.symlink(str(old), str(user_bin / "pseudolife-mcp"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_USER_BIN", str(user_bin))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(user_bin), "/usr/bin", "/bin"]))
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0", result
+    assert os.readlink(user_bin / "pseudolife-mcp") == str(layout.launcher)
+    assert f"linked {user_bin / 'pseudolife-mcp'} -> {layout.launcher}" in result["detail"]
+    assert "the old pipx entry is kept as" in result["detail"]
+
 # ── the plugin cache ────────────────────────────────────────────────────────
 
 def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True):
