@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — updating a lite install keeps its embedded Postgres, and an unattended schedule that could never apply says so when it is installed)
+- `pseudolife-mcp update` on a pip or pipx install now asks for
+  `pseudolife-mcp[lite]==<version>` when the running install carries the
+  `lite` extra (its embedded Postgres provider, `pg0`, is importable), and
+  its step line names the requirement. It asked for the bare package:
+  `pipx install --force` rebuilds the venv, so `pg0-embedded` was gone
+  after the update and the daemon no longer started. The printed command
+  quotes the requirement, since the brackets are a glob in zsh.
+- `pseudolife-mcp update --schedule HH:MM` resolves the bearer the
+  scheduled run will see and refuses with exit 2 when none resolves,
+  naming the command that sets it; `--allow-no-bearer` installs the
+  schedule anyway, with a warning. Without a bearer the run cannot read
+  the board, so it held off every day with exit 4, which the scheduler
+  counts as success, and nothing said the updates never applied. On
+  Windows the task starts with the user's User-scope environment, not the
+  shell's, so that is what is read (`HKCU\Environment`); the fix is
+  `[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "<path>", "User")`.
+  On Linux the unit carries its own token file, the one the shell names or
+  one written from its `PSEUDOLIFE_MCP_TOKEN`. The output now names the
+  bearer the run will use. `--schedule` also refuses on a pip install,
+  which has no daemon container to update. The configuration guide said
+  the installer sets the token file as a User variable; none does, and
+  the sentence now says what the code does.
+  [Unattended daemon updates](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- `ops/preflight.sh` checks that python's `venv` can build the stdio
+  shim's side-by-side runtime (`import ensurepip, venv`) and names
+  `sudo apt install python3-venv` when it cannot (Debian and Ubuntu ship
+  ensurepip separately; Debian 13, 2026-09-29). It called pipx the
+  preferred installer; pipx is the fallback the installer takes when the
+  venv runtime cannot be built, and the line now says so.
+- The client-side ladder (`ops/update_clients.py`, and `pseudolife-mcp
+  update` in checkout mode) ends with an informational "Extractor
+  autostart" line when an extractor shim's scheduled task or systemd unit
+  was registered before `ops/shim_autostart.py` and still carries the
+  model on its command line, so at logon it starts that model, not
+  `ops/.env`. No update moves a registration; the line names the one
+  installer run that does. It never fails the run, and a host with no
+  extractor autostart registered prints nothing.
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before

@@ -108,14 +108,33 @@ else
          "https://www.python.org/downloads/ (Arch: sudo pacman -S python)"
 fi
 
-# ── pipx (preferred installer for the stdio MCP shim) ──────────────────────
-# Without pipx the installer falls back to `pip install --user`, which PEP
-# 668 distros (Ubuntu 24.04+, Debian 12+, Fedora, Arch) refuse — the shim is
-# then skipped and the MCP transport is wired over HTTP instead (issue #176).
+# ── python venv (builds the stdio MCP shim's side-by-side runtime) ──────────
+# The installer builds the shim runtime with `python3 -m venv`. Debian and
+# Ubuntu ship venv's ensurepip in the separate python3-venv package; without
+# it the installer falls back to pipx, then to `pip install --user`, which
+# PEP 668 distros (Ubuntu 24.04+, Debian 12+, Fedora, Arch) refuse.
+venv_py=""
+if command -v python3 >/dev/null 2>&1; then venv_py=python3
+elif command -v python >/dev/null 2>&1; then venv_py=python
+fi
+if [ -n "$venv_py" ]; then
+    if "$venv_py" -c 'import ensurepip, venv' >/dev/null 2>&1; then
+        ok "python venv (stdio shim runtime)"
+    else
+        warn "python venv cannot build the shim runtime (ensurepip missing) — the installer falls back to pipx, then to 'pip --user', which PEP 668 distros refuse" \
+             "Debian/Ubuntu: sudo apt install python3-venv (other distros ship venv with python)"
+    fi
+fi
+
+# ── pipx (fallback installer for the stdio MCP shim) ───────────────────────
+# Used only when the venv runtime above cannot be built. Without pipx too,
+# the installer falls back to `pip install --user`, which PEP 668 distros
+# refuse — the shim is then skipped and the MCP transport is wired over
+# HTTP instead (issue #176).
 if command -v pipx >/dev/null 2>&1; then
-    ok "pipx (stdio shim install)"
+    ok "pipx (fallback shim installer)"
 else
-    warn "pipx not found — shim install falls back to 'pip --user', which PEP 668 distros refuse; the installer then wires the HTTP transport" \
+    warn "pipx not found (the fallback shim installer, used only when the venv runtime cannot be built) — without either, shim install falls back to 'pip --user', which PEP 668 distros refuse; the installer then wires the HTTP transport" \
          "https://pipx.pypa.io/stable/installation/ (Debian/Ubuntu: sudo apt install pipx; Arch: sudo pacman -S python-pipx)"
 fi
 

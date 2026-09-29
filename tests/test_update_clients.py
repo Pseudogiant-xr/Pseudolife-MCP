@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -188,6 +189,12 @@ def cli(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.setattr(uc, "_RUNTIMES_MODULE", None, raising=False)
+    # This machine's extractor autostart tasks and units are not read either.
+    fake.autostart = {"registered": {}, "notes": {}}
+    monkeypatch.setattr(uc, "_autostart_module", lambda repo: SimpleNamespace(
+        KINDS={"claude": {}, "codex": {}},
+        _registered_command=lambda kind: fake.autostart["registered"].get(kind),
+        registration_note=lambda kind: fake.autostart["notes"].get(kind, "")))
     return fake
 
 
@@ -828,6 +835,43 @@ def test_main_json_output_is_machine_readable(cli, tmp_path, capsys):
     assert uc.main(["--repo", str(ROOT), "--only", "plugin", "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["plugin"]["state"] == "current:0.15.0" and report["ok"] is True
+
+
+def test_an_autostart_task_that_still_carries_the_model_is_named_after_the_ladder(cli, capsys):
+    """An extractor autostart task or unit registered before
+    ops/shim_autostart.py keeps starting the model on its own command line
+    at logon, whatever ops/.env says; no update said so. The note is
+    informational: it never fails the run, and an unregistered kind (no
+    CLI extractor shim here) says nothing."""
+    note = ("the scheduled task 'Pseudolife Claude Shim' still carries the model and the rest on its command "
+            "line: at logon it starts those, not ops/.env. Run ops/install-shim-autostart.ps1 once (elevated)")
+    cli.autostart["registered"] = {"claude": "old command line --model old-model"}
+    cli.autostart["notes"] = {"claude": note, "codex": "the unit is not registered"}
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["ok"] is True
+    assert report["autostart"]["state"] == "stale" and report["autostart"]["notes"] == [f"claude: {note}"]
+    uc.print_ladder(report)
+    assert f"[!] Extractor autostart" in capsys.readouterr().out
+    # registered and running the runner: current; nothing registered: no line at all
+    cli.autostart["notes"] = {}
+    assert uc.run_steps((), repo=ROOT, source="unused")["autostart"]["state"] == "current"
+    cli.autostart["registered"] = {}
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["autostart"]["state"] == "none"
+    uc.print_ladder(report)
+    assert "autostart" not in capsys.readouterr().out
+    # no checkout known: no autostart step
+    assert "autostart" not in uc.run_steps((), repo=None, source="unused")
+
+
+def test_an_unreadable_autostart_registration_never_fails_the_run(cli, monkeypatch):
+    def broken(repo):
+        raise OSError("no ops/shim_autostart.py in this checkout")
+
+    monkeypatch.setattr(uc, "_autostart_module", broken)
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["ok"] is True and report["autostart"]["state"] == "unknown"
+    assert "no ops/shim_autostart.py" in report["autostart"]["detail"]
 
 
 def test_helper_runs_as_a_script():

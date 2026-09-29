@@ -362,9 +362,24 @@ def test_board_activity_fails_closed_and_ignores_its_own_address(monkeypatch):
 
 # ── the schedule ────────────────────────────────────────────────────────────
 
+class _Calls(list):
+    """The scheduler commands run, plus the tier the host reports and the
+    User-scope environment a Windows task would inherit."""
+    tier = "docker"
+    user_env: dict
+
+
 @pytest.fixture
 def scheduler(monkeypatch, tmp_path):
-    calls = []
+    from pseudolife_memory.credentials import _write_token_file
+
+    calls = _Calls()
+    token_file = tmp_path / "user-scope.token"
+    _write_token_file(token_file, "user-scope-token")
+    calls.token_file = token_file
+    calls.user_env = {"PSEUDOLIFE_MCP_TOKEN_FILE": str(token_file)}
+    monkeypatch.setattr(up.Update, "detect_tier", lambda self: calls.tier)
+    monkeypatch.setattr(uu, "_user_environment", lambda name: calls.user_env.get(name))
     monkeypatch.setattr(uu, "run_cli", lambda argv, **kw: (calls.append([str(a) for a in argv]) or (0, "")))
     monkeypatch.setattr(uu, "_command",
                         lambda daemon_url=None: [str(tmp_path / "bin" / "pseudolife-mcp"), "update", "--unattended"])
@@ -390,9 +405,11 @@ def test_schedule_registers_a_daily_windows_task(scheduler, tmp_path, capsys):
     assert "updates.unattended_daemon" in out
     notice = [line for line in out.splitlines() if "coordination.daemon_notice_principals" in line]
     assert len(notice) == 1 and "PSEUDOLIFE_MCP_TOKENS" in notice[0]
+    # the task inherits the User-scope environment, not this shell's
+    assert f"User-scope PSEUDOLIFE_MCP_TOKEN_FILE={scheduler.token_file}" in out
 
 
-def test_schedule_writes_a_systemd_timer_with_the_bearer_file(scheduler, tmp_path, monkeypatch):
+def test_schedule_writes_a_systemd_timer_with_the_bearer_file(scheduler, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret-token")
     monkeypatch.setenv("PSEUDOLIFE_MCP_DAEMON_URL", "http://127.0.0.1:8765")
     assert uu.schedule(_update(), "3:05", platform="linux") == 0
@@ -410,6 +427,7 @@ def test_schedule_writes_a_systemd_timer_with_the_bearer_file(scheduler, tmp_pat
     assert "OnCalendar=*-*-* 03:05:00" in timer and "Persistent=true" in timer
     assert scheduler == [["systemctl", "--user", "daemon-reload"],
                          ["systemctl", "--user", "enable", "--now", "pseudolife-update.timer"]]
+    assert f"the unit carries its own bearer (PSEUDOLIFE_MCP_TOKEN_FILE={token_file})" in capsys.readouterr().out
 
 
 def test_a_daemon_url_rides_into_the_scheduled_command(scheduler, tmp_path, monkeypatch):
@@ -441,7 +459,61 @@ def test_a_refused_task_registration_names_the_elevated_shell(scheduler, monkeyp
         uu.schedule(_update(), "03:30", platform="win32")
 
 
-def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path):
+def test_schedule_refuses_when_the_scheduled_run_would_have_no_bearer(scheduler, tmp_path, monkeypatch):
+    """Without a bearer the run cannot read the board, so it holds off every
+    day with exit 4, which the unit counts as success: nothing would ever
+    say the updates never apply. Windows: the task sees the User-scope
+    environment, never this shell's. Linux: the unit carries the token file
+    this shell names (or writes one from PSEUDOLIFE_MCP_TOKEN)."""
+    scheduler.user_env.clear()
+    with pytest.raises(up.UpdateError) as refused:
+        uu.schedule(_update(), "03:30", platform="win32")
+    text = str(refused.value)
+    assert refused.value.exit_code == 2 and "--allow-no-bearer" in text and "Nothing was installed" in text
+    assert '[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "' in text and '", "User")' in text
+    # a bearer set only in this shell is not what the task will see; its path is the one suggested
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(scheduler.token_file))
+    with pytest.raises(up.UpdateError) as refused:
+        uu.schedule(_update(), "03:30", platform="win32")
+    assert f'"PSEUDOLIFE_MCP_TOKEN_FILE", "{scheduler.token_file}", "User"' in str(refused.value)
+    # a User-scope token file that does not resolve is no bearer either
+    scheduler.user_env["PSEUDOLIFE_MCP_TOKEN_FILE"] = str(tmp_path / "missing.token")
+    with pytest.raises(up.UpdateError, match="SetEnvironmentVariable"):
+        uu.schedule(_update(), "03:30", platform="win32")
+    # Linux: nothing in this shell, or a token file that does not resolve
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN_FILE")
+    with pytest.raises(up.UpdateError) as refused:
+        uu.schedule(_update(), "03:30", platform="linux")
+    assert refused.value.exit_code == 2 and "PSEUDOLIFE_MCP_TOKEN_FILE=" in str(refused.value)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(tmp_path / "missing.token"))
+    with pytest.raises(up.UpdateError, match="--allow-no-bearer"):
+        uu.schedule(_update(), "03:30", platform="linux")
+    assert scheduler == []
+    assert not (tmp_path / "xdg" / "systemd" / "user" / "pseudolife-update.service").exists()
+
+
+def test_allow_no_bearer_installs_the_schedule_and_says_it_will_hold_off(scheduler, capsys):
+    scheduler.user_env.clear()
+    update = up.Update(up.Options(schedule="03:30", allow_no_bearer=True))
+    assert uu.schedule(update, "03:30", platform="win32") == 0
+    assert scheduler[0][:2] == ["schtasks", "/Create"]
+    err = capsys.readouterr().err
+    assert "no bearer" in err and "exit 4" in err
+
+
+def test_schedule_refuses_a_pip_install(scheduler, tmp_path):
+    """No daemon container here: the unattended run would refuse every day."""
+    scheduler.tier = "pip"
+    for platform in ("win32", "linux"):
+        with pytest.raises(up.UpdateError, match="pip install") as refused:
+            uu.schedule(_update(), "03:30", platform=platform)
+        assert refused.value.exit_code == 2
+    assert scheduler == []
+    assert not (tmp_path / "xdg" / "systemd" / "user" / "pseudolife-update.service").exists()
+
+
+def test_unschedule_removes_the_task_or_the_timer(scheduler, tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "secret-token")
     uu.schedule(_update(), "03:30", platform="linux")
     scheduler.clear()
     assert uu.unschedule(_update(), platform="linux") == 0
@@ -503,8 +575,10 @@ def test_the_daemon_notice_route_admits_only_a_listed_notice_principal(monkeypat
 
 def test_the_cli_routes_the_flags(scheduler, monkeypatch, capsys):
     seen = []
-    monkeypatch.setattr(uu, "schedule", lambda update, when, platform=None: seen.append(("schedule", when)) or 0)
+    monkeypatch.setattr(uu, "schedule", lambda update, when, platform=None:
+                        seen.append(("schedule", when, update.o.allow_no_bearer)) or 0)
     monkeypatch.setattr(uu, "unschedule", lambda update, platform=None: seen.append(("unschedule", None)) or 0)
     assert up.main(["--schedule", "04:00"]) == 0
+    assert up.main(["--schedule", "04:00", "--allow-no-bearer"]) == 0
     assert up.main(["--unschedule"]) == 0
-    assert seen == [("schedule", "04:00"), ("unschedule", None)]
+    assert seen == [("schedule", "04:00", False), ("schedule", "04:00", True), ("unschedule", None)]
