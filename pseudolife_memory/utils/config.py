@@ -443,7 +443,14 @@ class DreamConfig:
     # "Pseudolife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
-    alias_candidate_min_cosine: float = 0.5
+    # 0.7 since 2026-09-29: the 0.5 above was calibrated on MiniLM and went
+    # stale with the Qwen3-Embedding-0.6B swap, which scores that paraphrase
+    # 0.750 and the unrelated 'ship pipeline' / 'release train' 0.558. In the
+    # 2026-09-29 triage of 1,016 merge proposals this screen had filed 574
+    # (16 accepted, 524 rejected, 34 left); past the merge veto, 0.7 keeps
+    # 420 of the remaining 538 and loses one accepted paraphrase (0.655) —
+    # the scrubbed replay is evals/results/merge-detector-replay-20260929.json.
+    alias_candidate_min_cosine: float = 0.7
     # TiMem-inspired known-facts window
     # (docs/specs/2026-07-10-known-facts-window-design.md): when > 0, the dream
     # prompt also shows the CURRENT VALUES of the top-N relevance-ranked slots
@@ -559,7 +566,8 @@ class DeepDreamConfig:
     # nothing; "auto-reject" = additionally apply reject verdicts at/above
     # judge_reject_min_confidence (decided_by='dream-judge', pair
     # dismissed — and, with judge_second_opinion on, two agreeing rejects
-    # at mean >= judge_reject_min_confidence_2); "auto" = additionally
+    # from DIFFERENT models (since 2026-09-30) at mean >=
+    # judge_reject_min_confidence_2); "auto" = additionally
     # fold a pair on two agreeing accepts from DIFFERENT models on
     # non-low-differential evidence (the only path that applies an
     # accept). Automatic rejections are bound to their evidence and policy;
@@ -581,8 +589,10 @@ class DeepDreamConfig:
     # the cap also moves the auto-accept gate's precondition.
     judge_snippet_max_chars: int = 240
     judge_reject_min_confidence: float = 0.8
-    judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
-    judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # str | None like judge_second_model: both are Console knobs since
+    # 2026-09-30, and the Console clears a string knob to None.
+    judge_url: str | None = ""           # optional OpenAI-compatible override endpoint; empty = the dream extractor
+    judge_model: str | None = ""         # model name for judge_url (ignored when judge_url is empty)
     # One switch for every judge stage below (merge, link, junk, curation,
     # candidates): False makes each return {"skipped": "judges_disabled"}
     # without reading a queue. Also stops ordinary-sweep analyzer filing
@@ -607,12 +617,21 @@ class DeepDreamConfig:
     judge_second_opinion: bool = True
     # A same-model second vote (temperature 0) is independent only through
     # batch composition — 2/129 flips on the 2026-08-16 ladder — which is
-    # enough to double-check a reject but not to authorize a fold: "auto"
-    # accepts require a DIFFERENT model here (with claude-fable-5 as the
-    # second model the same 63 rows gave 6/6 accepts, 8/8 rejects).
+    # not enough to authorize a fold, nor (since 2026-09-30, after one
+    # model's two votes authorized rejects from 2026-09-03 to 09-11) a
+    # reject: both two-vote gates require a DIFFERENT model here (with
+    # claude-fable-5 as the second model the same 63 rows gave 6/6
+    # accepts, 8/8 rejects). A same-model second vote is still recorded.
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch
+    # Where the second opinion is asked (2026-09-30): empty = the first
+    # opinion's endpoint (judge_url, else the dream extractor) with
+    # judge_second_model swapped in; set = an OpenAI-compatible endpoint of
+    # its own, serving judge_second_model (empty = its launch default), so
+    # the two opinions can come from different providers. Its bearer key is
+    # env-only, PSEUDOLIFE_JUDGE_SECOND_API_KEY, and never goes anywhere else.
+    judge_second_url: str | None = ""
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
     # Link judge over pending edge_proposals. Edges are reversible

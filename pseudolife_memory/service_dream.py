@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any
@@ -1162,6 +1163,7 @@ class DreamOps:
             import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
+            from pseudolife_memory.memory.graph_review import merge_veto
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -1208,6 +1210,12 @@ class DreamOps:
                     continue
                 if variant_conflict(disp, target):
                     continue    # size/quant/version mismatch: never a merge
+                if merge_veto(disp, target):
+                    # The name-shape vetoes the write-dedup filing applies:
+                    # numbered siblings ('PR #368' / 'PR #364') embed at
+                    # 0.989 and were 36 of this screen's 524 rejected
+                    # proposals in the 2026-09-29 triage, none accepted.
+                    continue
                 matches.append((disp, target, pair, score))
             if not matches:
                 return 0
@@ -3419,6 +3427,85 @@ class DreamOps:
                 extra_body=ex.extra_body)
         return ex if hasattr(ex, method) else None
 
+    def _judge_second_extractor(self):
+        """The merge judge's second-opinion endpoint, or None to reuse the
+        first opinion's extractor. ``judge_second_url`` builds an endpoint
+        of its own serving ``judge_second_model`` (so the two opinions can
+        come from different providers), authenticated only by
+        ``PSEUDOLIFE_JUDGE_SECOND_API_KEY``; without it,
+        ``judge_second_model`` is swapped onto the first opinion's
+        endpoint. Read per call, so both are live knobs."""
+        cfg = self.config.memory.deep_dream
+        if cfg.judge_second_url:
+            import os
+
+            from pseudolife_memory.memory.dream import OpenAICompatExtractor
+            dream_cfg = self.config.memory.dream
+            return OpenAICompatExtractor(
+                cfg.judge_second_url, cfg.judge_second_model or "judge",
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_SECOND_API_KEY") or None,
+                # The same budget as judge_url's endpoint (see above).
+                max_tokens=dream_cfg.extractor_max_tokens,
+                timeout_seconds=dream_cfg.extractor_timeout_seconds)
+        if cfg.judge_second_model:
+            return self._judge_extractor(None, model=cfg.judge_second_model)
+        return None
+
+    # A dated snapshot of the requested model (``gpt-4o`` served as
+    # ``gpt-4o-2024-08-06``) is the model that was asked for.
+    _DATED_SNAPSHOT = re.compile(r"-(\d{8}|\d{4}-\d{2}-\d{2})")
+
+    @classmethod
+    def _served_model_mismatch(cls, ex) -> tuple[str, str] | None:
+        """``(requested, served)`` when a judge endpoint reported serving a
+        model other than the one it was asked for: the Codex shim answers
+        any non-gpt-*/codex-* name with its launch default, so from
+        2026-09-03 to 2026-09-11 ``judge_second_model: claude-fable-5`` was
+        served by the first opinion's model and nothing said so. A
+        launch-default alias (``judge`` / ``extractor`` / ``bench``) asks
+        for whatever the endpoint serves, so it never mismatches."""
+        requested = getattr(ex, "model", None)
+        served = getattr(ex, "served_model", None)
+        if (not requested or not served
+                or requested in ("judge", "extractor", "bench")
+                or served == requested
+                or (served.startswith(requested)
+                    and cls._DATED_SNAPSHOT.fullmatch(served[len(requested):]))):
+            return None
+        return requested, served
+
+    def _report_served_model(self, out: dict, opinion: str, ex) -> None:
+        """Count and log a served-model mismatch on the judge result. It
+        never blocks a verdict; the auto gates judge distinctness on the
+        served names themselves (:meth:`_second_opinion_distinct`)."""
+        mismatch = self._served_model_mismatch(ex)
+        if mismatch is None:
+            return
+        requested, served = mismatch
+        logger.warning("deep-dream judge: %s opinion asked for model %s but "
+                       "the endpoint served %s", opinion, requested, served)
+        out["served_model_mismatch"] += 1
+        out["served_model_mismatches"].append(
+            {"opinion": opinion, "requested": requested, "served": served})
+
+    @staticmethod
+    def _second_opinion_distinct(review, row, ex, ex2, model2: str) -> bool:
+        """Whether a merge row's second vote came from a different model
+        than its first, as the two-vote auto gates require. Distinct only
+        when both served identities are known and differ, the second
+        opinion came from another endpoint object, and neither its stamp
+        (the served name) nor its configured name equals the first
+        opinion's stamp: rows judged before served names were stamped carry
+        the CONFIGURED name, and a second endpoint that served the first's
+        model under another requested name is one opinion asked twice."""
+        first_model = row.get("judge_model") or ""
+        first_served = review.observed(row)
+        served2 = getattr(ex2, "served_model", None)
+        configured2 = getattr(ex2, "model", None)
+        return bool(first_served and served2 and first_served != served2
+                    and ex2 is not ex and first_model != model2
+                    and not (configured2 and first_model == configured2))
+
     def _judge_evidence_locked(self, pending: list[dict]) -> dict:
         """The storage reads behind the merge-judge evidence pack (caller
         holds the lock); :meth:`_judge_enrich_from` builds the pack from
@@ -3455,6 +3542,48 @@ class DreamOps:
             evidence["traces"], mentions, evidence["scopes"],
             cfg.max_context_snippets, cfg.judge_snippet_max_chars, True,
             fact_counts=evidence["facts"])
+
+    # Upper bound on one page, so a single request's response size and
+    # snippet work stay bounded however large the queue grows.
+    _EVIDENCE_PAGE_MAX = 100
+
+    def merge_proposal_evidence(self, *, offset: int = 0,
+                                limit: int = 25) -> dict[str, Any]:
+        """One page of pending merge proposals with the merge judge's own
+        evidence pack (``_judge_enrich_from``), for reviewers outside the
+        daemon: ``memory_dream(action="deep")`` cuts its lists at 40 items,
+        so a large queue had no bounded way to be read with its evidence.
+        Rows are in queue order (``pending_entity_proposals``). ``group`` is
+        computed over the WHOLE queue — the pack alone would compute it per
+        page and split an accept-at-most-one decision across pages. Offsets
+        shift as rows are settled or new proposals are filed; read the queue
+        before settling it."""
+        offset = max(0, int(offset))
+        limit = min(max(1, int(limit)), self._EVIDENCE_PAGE_MAX)
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"error": "no_storage"}
+            pending = [p for p in self._storage.pending_entity_proposals()
+                       if p.get("kind") == "merge"]
+            page = pending[offset:offset + limit]
+            evidence = self._judge_evidence_locked(page) if page else None
+        items = self._judge_enrich_from(page, evidence) if page else []
+        if items:
+            from pseudolife_memory.memory.graph_review import shared_pair_groups
+            display = {e["id"]: e["display"]
+                       for e in evidence["graph"]["entities"]}
+            groups = shared_pair_groups(
+                [(p["entity_id"], p["into_id"]) for p in pending])
+            group_of = {p["id"]: g for p, g in zip(pending, groups)}
+            for item in items:
+                g = group_of.get(item["id"])
+                item["group"] = display.get(g) if g is not None else None
+        end = offset + len(page)
+        return {"kind": "merge", "total": len(pending), "offset": offset,
+                "limit": limit,
+                "next_offset": end if end < len(pending) else None,
+                "items": items}
 
     @staticmethod
     def _model_name(ex, fallback: str | None = None) -> str:
@@ -3504,8 +3633,10 @@ class DreamOps:
         ``judge_reject_min_confidence``. Second opinion
         (``judge_second_opinion``): rows already carrying a first verdict
         but still pending are re-judged once in a fresh batch (optionally
-        ``judge_second_model``); two rejects at mean confidence >=
-        ``judge_reject_min_confidence_2`` apply, and in ``auto`` mode two
+        ``judge_second_model``, on ``judge_second_url`` when set); two
+        rejects from DIFFERENT models (since 2026-09-30, the rule below) at
+        mean confidence >= ``judge_reject_min_confidence_2`` apply, and in
+        ``auto`` mode two
         accepts on a non-low-differential row at mean >=
         ``judge_accept_min_confidence`` fold the entity — the only path
         that ever auto-applies an accept, and only when the two opinions
@@ -3557,6 +3688,8 @@ class DreamOps:
                 return {"judged": 0, "reconsideration": reconsidered}
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
+                   "auto_reject_refused_same_model": 0,
+                   "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
                    "model": getattr(ex, "model", None) or type(ex).__name__,
                    "mode": cfg.judge_mode}
@@ -3567,10 +3700,8 @@ class DreamOps:
                 if second_extractor is not None:
                     ex2 = second_extractor
                 else:
-                    ex2 = (self._judge_extractor(
-                               None, model=cfg.judge_second_model)
-                           if cfg.judge_second_model and extractor is None
-                           else ex) or ex
+                    ex2 = (self._judge_second_extractor()
+                           if extractor is None else None) or ex
                 from pseudolife_memory.memory.graph_consolidation import (
                     variant_conflict)
                 from pseudolife_memory.memory.graph_review import merge_veto
@@ -3587,8 +3718,28 @@ class DreamOps:
                               "snippet_chars": cfg.judge_snippet_max_chars}
                              for i, e in enumerate(enriched)]
                 second_observed = observed_model(ex2)
-                verdicts = ex2.judge_merges(proposals)
+                try:
+                    verdicts = ex2.judge_merges(proposals)
+                except Exception as exc:  # noqa: BLE001 — see below
+                    # With judge_second_url the two opinions fail apart: a
+                    # second endpoint that is down or refuses its key must
+                    # not end the tick before any first opinion runs. The
+                    # rows stay waiting; their batch share goes to first
+                    # opinions this tick. On the first opinion's own
+                    # endpoint the first call would fail the same way after
+                    # a second timeout, so that failure ends the tick as
+                    # before.
+                    if ex2 is ex or (getattr(ex2, "base_url", None) is not None
+                                     and getattr(ex2, "base_url", None)
+                                     == getattr(ex, "base_url", None)):
+                        raise
+                    logger.warning("deep-dream judge: second opinion failed, "
+                                   "first opinions continue: %s", exc)
+                    out["second_opinion_error"] = str(exc)
+                    second = []
+            if second:
                 self._stamp_skipped(verdicts, proposals)
+                self._report_served_model(out, "second", ex2)
                 model2 = self._model_name(ex2)
                 now = _t.time()
                 with self._lock:
@@ -3602,13 +3753,10 @@ class DreamOps:
                     # proposal's entity ids, never through names.
                     canon_by_id = {e["id"]: e["canonical"]
                                    for e in self._storage.load_graph()["entities"]}
-                # Same-model detection must survive rows judged before this
-                # build (stamped with the CONFIGURED name) and a shared
-                # extractor (ex2 is ex): distinct only when the second
-                # opinion came from another endpoint object AND its served
-                # and configured names both differ from the first stamp.
-                same_endpoint = ex2 is ex
-                configured2 = getattr(ex2, "model", None)
+                # Both two-vote gates need the votes from DIFFERENT models
+                # (_second_opinion_distinct): the same model mostly repeats
+                # itself, and two rejects from one model authorized rejects
+                # until the merge judge went back to shadow on 2026-09-11.
                 snap: dict = {}
                 with self._lock:
                     review.validate(batch, response_extractor=ex2, expected_model=second_observed)
@@ -3637,6 +3785,15 @@ class DreamOps:
                             if (v1 == v2 == "reject"
                                     and cfg.judge_mode in ("auto-reject", "auto")
                                     and mean >= cfg.judge_reject_min_confidence_2):
+                                if not self._second_opinion_distinct(
+                                        review, row, ex, ex2, model2):
+                                    self._storage.set_entity_proposal_second_judgment(
+                                        e["id"], verdict=v2, confidence=c2,
+                                        model=model2, at=now,
+                                        note=f"{note} | auto-reject needs a "
+                                             f"distinct second model"[:400])
+                                    out["auto_reject_refused_same_model"] += 1
+                                    continue
                                 res = review.apply(row, self.graph_reject_entity_proposal,
                                     e["id"], decided_by="dream-judge")
                                 if res.get("rejected"):
@@ -3660,12 +3817,8 @@ class DreamOps:
                                     out["auto_accept_refused"] = out.get(
                                         "auto_accept_refused", 0) + 1
                                     continue
-                                first_model = row.get("judge_model") or ""
-                                if (not review.observed(row)
-                                        or not getattr(ex2, "served_model", None)
-                                        or review.observed(row) == getattr(ex2, "served_model", None)
-                                        or same_endpoint or first_model == model2
-                                        or (configured2 and first_model == configured2)):
+                                if not self._second_opinion_distinct(
+                                        review, row, ex, ex2, model2):
                                     reason = "auto-accept needs a distinct second model"
                                 elif str(row.get("reason") or "").startswith("analyzer-duplicate"):
                                     # The accept gate's evidence holds no analyzer-
@@ -3709,6 +3862,7 @@ class DreamOps:
                              for i, e in enumerate(enriched)]
                 verdicts = ex.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
+                self._report_served_model(out, "first", ex)
                 model = self._model_name(ex, out["model"])
                 out["model"] = model
                 now = _t.time()

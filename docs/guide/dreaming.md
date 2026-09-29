@@ -566,9 +566,11 @@ works directly via the env triple in the previous sections.
 ## Reasoning effort — the dreamer's thinking budget
 
 By default neither CLI shim sets a reasoning effort: the Claude shim runs
-at the `claude` CLI's per-model default and the Codex shim inherits the
-host's `~/.codex/config.toml`, so what the dreamer actually spends is
-decided outside this repo. To pin it, set
+at the `claude` CLI's per-model default, and the Codex shim runs each call
+with `--ignore-user-config` (so a `model_reasoning_effort` in the host's
+`~/.codex/config.toml` does not apply) at the `codex` CLI's per-model
+default. What the dreamer actually spends is therefore decided outside
+this repo. To pin it, set
 `memory.dream.extractor_reasoning_effort` (Console → Extractor panel, or
 the **Effort** row on the Dreamer card). A set value rides every primary
 extractor request as `reasoning_effort`:
@@ -904,19 +906,35 @@ bounded batch of pending merge proposals — with the same evidence pack the
 review surfaces show, plus a caution line on pairs stamped
 `low_differential` (whose snippets cannot tell the sides apart) — to the
 configured model (`memory.deep_dream.judge_mode`,
-default `shadow`; the dream extractor, or a dedicated `judge_url`), and
+default `shadow`; the dream extractor, or a dedicated `judge_url` serving
+`judge_model` — both Console knobs), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
 (`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
-so an independent sample: two rejects at mean >= `judge_reject_min_confidence_2`
-apply, a disagreement stamps `split` on the note and leaves the row for a
-human. `judge_mode: auto` goes one step further and folds a pair when two
-independent accepts agree on a row that is not `low_differential` at mean
->= `judge_accept_min_confidence` — the only path that ever auto-applies an
-accept. Since 2026-09-02 the other queues have judges too, each riding the
+so an independent sample. The second opinion is asked on the first
+opinion's endpoint unless `judge_second_url` (a Console knob) points it at
+an OpenAI-compatible endpoint of its own, serving `judge_second_model`, so
+the two opinions can come from different providers; that endpoint's bearer
+key is env-only (`PSEUDOLIFE_JUDGE_SECOND_API_KEY`) and goes nowhere else.
+Two rejects at mean >= `judge_reject_min_confidence_2` apply only when the
+two votes came from different models (since 2026-09-30; the same model
+asked twice is one opinion); a disagreement stamps `split` on the note and
+leaves the row for a human. `judge_mode: auto` goes one step further and folds a pair when two
+independent accepts from different models agree on a row that is not
+`low_differential` at mean >= `judge_accept_min_confidence` — the only path
+that ever auto-applies an accept. "Different" is decided on what the
+endpoints *served*, not the names they were asked for: a CLI shim answers a
+name outside its own family (a `claude-*` name on the Codex shim) with its
+launch default, which on 2026-09-03 turned a configured `claude-fable-5`
+second opinion into the first opinion's model. Each merge-judge result counts a
+served-vs-requested mismatch (`served_model_mismatch`, with the names in
+`served_model_mismatches`) and logs a warning, and counts same-model reject
+pairs it refused (`auto_reject_refused_same_model`). A second endpoint
+that fails (down, or refusing its key) is reported as
+`second_opinion_error` and never stops that tick's first opinions. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
@@ -964,6 +982,16 @@ button queues up to 32 opinions for the next sweep. Operators can use
 are `merge`, `link`, `junk`, `curation` and `candidate`, with a total limit of
 1–100. It queues work without changing automation modes or immediately calling
 a model.
+
+To review a large merge queue from outside the daemon, page through it with
+`GET /api/graph/proposal-evidence?offset=0&limit=25` (limit 1–100). Each item
+is the evidence pack the merge judge itself reads: per-side display, degree,
+scopes and snippets at the judge's snippet cap, `low_differential`, the
+`judge`/`judge2` opinions, and a `group` computed over the whole queue, so
+rows sharing an entity stay one decision across pages. The response carries
+`total` and `next_offset` (`null` on the last page). Offsets shift as rows
+are settled or new proposals are filed, so read the queue first and settle
+it afterwards.
 
 New automatic rejections and pair dismissals also retain the evidence and policy
 behind the decision. A bounded sweep can reopen them when those inputs change;

@@ -47,7 +47,8 @@ daemon running, use
 `python ops/setup-codex-hooks.py` from the repository, or the Docker installer,
 to approve the PseudoLife hook definitions and verify their lifecycle (the
 `Stop` entry is Claude Code's wake hook, on by default; in Codex it runs only
-the park gate).
+the park gate, and the `SubagentStop` entry runs that gate for a Codex child
+thread under the child's own address, doing nothing in Claude Code).
 Automatic detection reuses a recognized, enabled plugin bundle. If the
 runtime cannot support automatic trust, setup gives `/hooks` review guidance
 and uses standing instructions when approved. A plugin installation or a
