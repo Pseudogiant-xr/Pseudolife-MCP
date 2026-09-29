@@ -566,9 +566,11 @@ works directly via the env triple in the previous sections.
 ## Reasoning effort — the dreamer's thinking budget
 
 By default neither CLI shim sets a reasoning effort: the Claude shim runs
-at the `claude` CLI's per-model default and the Codex shim inherits the
-host's `~/.codex/config.toml`, so what the dreamer actually spends is
-decided outside this repo. To pin it, set
+at the `claude` CLI's per-model default, and the Codex shim runs each call
+with `--ignore-user-config` (so a `model_reasoning_effort` in the host's
+`~/.codex/config.toml` does not apply) at the `codex` CLI's per-model
+default. What the dreamer actually spends is therefore decided outside
+this repo. To pin it, set
 `memory.dream.extractor_reasoning_effort` (Console → Extractor panel, or
 the **Effort** row on the Dreamer card). A set value rides every primary
 extractor request as `reasoning_effort`:
