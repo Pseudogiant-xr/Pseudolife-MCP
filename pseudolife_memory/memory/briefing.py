@@ -134,6 +134,36 @@ def format_briefing(surprises: list[dict], questions: list[dict],
     return "\n\n".join(parts)
 
 
+def review_queue_line(block: dict | None) -> str:
+    """The one line the briefing and a fresh session start show while
+    ``dream_status["review_queue"]`` says the review queue needs attention,
+    else ''. Never raises."""
+    try:
+        if not block or not (block.get("attention") or {}).get("needed"):
+            return ""
+        merge = int(block["pending"]["merge"])
+        age = block.get("oldest_merge_age_days")
+        judges = block.get("judges") or {}
+        mode = judges.get("judge_mode", "unknown")
+        enabled = judges.get("judges_enabled", True)
+        head = (f"Pseudolife-MCP: review queue has {merge:,} merge "
+                f"proposal{'s' if merge != 1 else ''} pending")
+        if age is not None:
+            days = round(float(age))
+            head += (", oldest under a day" if float(age) < 1
+                     else f", oldest {days} day{'s' if days != 1 else ''}")
+        if enabled and mode in ("auto-reject", "auto"):
+            # Configured to drain, yet the queue needs attention: the judge
+            # is not running or not keeping up.
+            return (f"{head}; merge judge in {mode} is not clearing it. Run "
+                    "/dream to review them, or check the judge endpoint.")
+        judge = "merge judges disabled" if not enabled else f"merge judge in {mode}"
+        return (f"{head}; {judge}. Run /dream to review them, "
+                "or check the deep_dream judge modes.")
+    except Exception:  # noqa: BLE001 — a display line, never an error
+        return ""
+
+
 _STARTUP_ORDER = (
     "Lessons from past work", "Where we left off", "Verified world facts",
     "What your memory is unsure about",

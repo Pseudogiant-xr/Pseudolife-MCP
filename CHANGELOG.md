@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-30 — status and the session briefing say when the merge-proposal queue is piling up)
+- From 2026-09-11 to 09-29 the merge judge sat in `shadow` as a
+  containment and the pending merge-proposal queue grew from about 100
+  rows to 1,016 with nothing reporting it: `memory_dream(action="status")`
+  carried only the deep-dream need signal and the briefing said nothing.
+  `dream_status` now carries a `review_queue` block beside `deep_dream`:
+  pending merge, junk and link counts, the ages of the oldest pending and
+  oldest unjudged merge, every judge's configured mode, and
+  `attention: {needed, reasons}` for the merge queue. Two aggregate
+  queries; a failure is an `error` field, never a failed status.
+  Attention is needed at `memory.deep_dream.review_queue_alert_pending`
+  (default 500) pending merges in any mode, or when at least
+  `review_queue_alert_min_pending` (default 100) wait and one has waited
+  past `review_queue_alert_age_days` (default 14): the oldest pending
+  merge while no judge applies merge verdicts, or the oldest unjudged one
+  while `auto-reject` / `auto` should be judging. While it is needed, the
+  briefing (`GET /api/briefing`, `pseudolife-mcp briefing`) and the
+  SessionStart hook output carry one line with the count, the age, the
+  merge judge's mode and the remedy; the plugin's hook leaves it out on a
+  resume or compaction.
+  [Deep dream](docs/guide/dreaming.md#deep-dream--full-corpus-graph-consolidation)
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
