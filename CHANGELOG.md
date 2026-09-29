@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-29 — a large merge queue can be read with its evidence)
+- `GET /api/graph/proposal-evidence?offset=&limit=` pages through the
+  pending merge proposals with the merge judge's own evidence pack
+  (`_judge_enrich_from`: per-side snippets at `judge_snippet_max_chars`,
+  degree, scopes, `low_differential`, the `judge`/`judge2` opinions).
+  `memory_dream(action="deep")` cuts its lists at 40 items and
+  `memory_graph_review(action="list")` carries no snippets, so the
+  2026-09-29 triage of a 1,016-row queue had to gather evidence one
+  `memory_search` at a time. `group` is computed over the whole queue, not
+  the page, so rows sharing an entity stay one accept-at-most-one decision
+  across pages; `limit` is clamped to 1–100 and the response carries
+  `total` and `next_offset`.
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
