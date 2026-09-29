@@ -576,18 +576,60 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**Lite tier:** one command, bank untouched:
+**One command, no checkout:** the installed shim updates the whole install
+from a release:
+
+```bash
+pseudolife-mcp update            # the newest release on PyPI
+pseudolife-mcp update --tag 0.15.1
+pseudolife-mcp update --check    # exit 0 when a newer release exists, 3 when current
+```
+
+On a Docker-tier install it pulls the pinned GHCR daemon image, backs the
+bank up (the checkout's backup script when the compose project still has
+one, else its own `pg_dump` + state-volume tar into `~/.pseudolife-mcp/
+backups`), tags the running image for rollback, recreates **only** the
+daemon container from the compose files it was created with (or the
+package's bundled copies when the checkout is gone), waits for `/health`
+at the new version, then installs the release as a new shim runtime beside
+the running one, refreshes the plugin cache and prints the Codex hook
+step. The backup stays visible and deliberate: nothing here automates it
+away. `--clients-only` / `--daemon-only` take one half; the shim itself
+runs from wherever it was registered, so use its full path when
+`pseudolife-mcp` is not on `PATH`. On a **pip / lite** install it upgrades
+the package in the interpreter that holds it (pip, or pipx) and restarts
+nothing: it says what to restart.
+
+You are told when it is time: the daemon checks PyPI for the newest
+release in the background (`updates.check_releases`, on by default) and
+every session's briefing then opens with `release X is available — run
+pseudolife-mcp update`. With `updates.unattended_clients: true` in
+`config.yaml` (off by default) a Docker-tier shim on the daemon's host
+installs the daemon's release as its own new runtime and refreshes the
+plugin cache by itself whenever the daemon is newer than it; the daemon
+recreate stays a deliberate command.
+On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
+daily task or timer that applies a new release only while
+`updates.unattended_daemon: true` is set and no session is active on the
+agent board, with the same backup and rollback tag, and posts a board
+notice either way. When Codex's hook copy differs from the scripts just
+deployed, every update path prints the complete re-approval steps, and
+nothing otherwise.
+See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
+
+**Lite tier by hand:** one command, bank untouched:
 
 ```bash
 pip install -U "pseudolife-mcp[lite]"
 ```
 
 On Windows, first close every Claude Code, Codex and Claude Desktop
-session using the shim (quit Desktop from the tray): upgrading a shim
+session using the shim (quit Desktop from the tray): upgrading a package
 that is running can leave it half-removed.
 
-**Docker tier:** after a `git pull` (or local code change), redeploy the
-**daemon only** — safely, without touching Postgres or the extractor:
+**Docker tier from a checkout:** after a `git pull` (or local code
+change), redeploy the **daemon only** — safely, without touching Postgres
+or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -596,7 +638,9 @@ that is running can leave it half-removed.
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+Both are thin wrappers over the same Python deploy `pseudolife-mcp update`
+runs (`ops/update.py` → `pseudolife_memory/update_cli.py`), so there is
+one implementation. It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
 image (when a previous one exists — it says so loudly when there isn't),
 rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —
@@ -621,11 +665,6 @@ your clients launch and the **Claude Code plugin** are separate and do not
 move with it. `-All` / `--all` moves them in the same run, after the
 daemon is healthy:
 
-On Windows, close every Claude Code, Codex and Claude Desktop session
-using the shim first (quit Desktop from the tray). If an in-use shim was
-skipped, the daemon deploy has already succeeded; after closing those
-sessions, retry only the shim: `python ops/update_clients.py --only shim`.
-
 ```powershell
 .\ops\update.ps1 -All   # Windows
 ```
@@ -633,20 +672,32 @@ sessions, retry only the shim: `python ops/update_clients.py --only shim`.
 ./ops/update.sh --all   # Linux / macOS
 ```
 
-It reinstalls the shim behind each Claude Code / Codex registration where
-that is safe (pipx, or the registered interpreter's pip; a shim running
-straight from this checkout is already live and is named instead, since
-its metadata refresh needs every session closed; on Windows a shim whose
-virtualenv or launcher a session is running from is skipped, with the
-sessions counted and the rerun named, because pip or pipx would leave it
-half-removed), refreshes the plugin
-cache by comparing bytes against the marketplace clone (the plugin's
-version string only moves with a release, so `/plugin update` alone would
-say "already latest"), and reports whether Codex's hook copy matches the
-checkout (that refresh is a consent step: `python ops/setup-codex-hooks.py`).
-It ends with a ladder of what moved and which clients need a restart; a
-client-side step that fails is reported, never a failed deploy. The same
-helper runs on its own: `python ops/update_clients.py`. Custom
+No session has to be closed for the shim step. Each shim version installs
+into its own **runtime** (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN`
+on Windows, `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere) and
+every client registers one **launcher** path
+(`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` /
+`~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) that starts the newest
+complete runtime. Neither directory is on `PATH`: run `doctor`, `lease` or
+`wait-mail` through the launcher's full path, or add its directory to
+`PATH` yourself.
+The step installs the checkout as a new runtime beside the old one, moves
+any registration that still names a runtime, pipx or virtualenv path to
+the launcher in place (Claude Code, Codex, Claude Desktop and Gemini CLI;
+each file is backed up first as `<file>.bak-<stamp>`), and removes older
+runtimes once no process runs from them and no registration names them.
+Sessions already running keep the runtime they started with; the next
+session start uses the new one. A shim running straight from this
+checkout's `.venv` is already live and is named instead. It then
+refreshes the plugin cache by comparing bytes against the marketplace
+clone (the plugin's version string only moves with a release, so
+`/plugin update` alone would say "already latest"), and reports whether
+Codex's hook copy matches the checkout (that refresh is a consent step:
+`python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
+and which clients need a restart; a client-side step that fails is
+reported, never a failed deploy. The same helper runs on its own:
+`python ops/update_clients.py`, and `python ops/shim_runtime.py` manages
+the runtimes by hand (`install`, `list`, `prune`, `migrate`). Custom
 registrations are preserved and named; upgrade those in their own
 interpreter. A daemon-side credential change with an old shim leaves the
 two out of step: the Claude Desktop registrar refuses a shim that cannot
@@ -813,10 +864,9 @@ releases through 0.15.0 only read the literal `PSEUDOLIFE_MCP_TOKEN`, so
 the registrar probes `<command> --help` for the file form first and
 refuses an older shim (exit 4, nothing written) rather than register an
 entry that would fail with the same TaskGroup error — upgrade the shim
-(`pipx upgrade pseudolife-mcp`, or `pipx install --force .` from the checkout) and
-re-run. On Windows, run that upgrade with every session using the shim
-closed (Desktop fully quit from the tray), or it can leave the shim
-half-removed. After any edit, fully quit Desktop from the tray or
+(re-run the installer, or `python ops/update_clients.py --only shim` from
+the checkout: it installs a new runtime beside the running one, so no
+session has to close) and re-run. After any edit, fully quit Desktop from the tray or
 menu-bar icon and relaunch — closing the window does not reload the
 config.
 

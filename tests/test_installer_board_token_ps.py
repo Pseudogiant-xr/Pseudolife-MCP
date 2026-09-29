@@ -324,6 +324,7 @@ function global:pipx {{
 }}
 {helper}
 function Get-ShimProcessTable {{ $null }}
+function Get-ShimRuntimePython {{ $null }}
 {_function("Register-Result($provider, $okState, $okMessage)")}
 {loop}
 Write-Output ("STATE=" + $mcpState['{client}'])

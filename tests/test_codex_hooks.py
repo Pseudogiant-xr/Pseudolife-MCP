@@ -839,6 +839,9 @@ def test_bash_fresh_codex_stages_bind_file_url_and_preserve_ambient_env(
     runtime_marker = tmp_path / "runtime-called"
     env = isolated_env(home)
     env.update({
+        # No side-by-side runtime install inside the slice: the fake has no
+        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
+        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(),
         "USERPROFILE": home.as_posix(),
         "PSEUDOLIFE_MCP_TOKEN": "ambient-static-token",
@@ -974,6 +977,9 @@ function Get-EnvValue($name) {{
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
+# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
+# names this function), so the pipx path stays what this test drives.
+function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
 function pipx {{
     $global:LASTEXITCODE=0
     if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
@@ -996,6 +1002,9 @@ function codex {{
 ''', encoding="utf-8")
     env = isolated_env(home)
     env.update({
+        # No side-by-side runtime install inside the slice: the fake has no
+        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
+        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_CREDENTIAL": str(credential_marker),
         "FIXTURE_HOOK": str(hook_marker), "FIXTURE_RUNTIME": str(runtime_marker),
@@ -1130,6 +1139,9 @@ function Get-EnvValue($name) {{
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
+# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
+# names this function), so the pipx path stays what this test drives.
+function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
 function pipx {{
     $global:LASTEXITCODE=0
     if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
@@ -1185,6 +1197,9 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
     wrong_url = f"http://127.0.0.1:{wrong.server_port}"
     env = isolated_env(home)
     env.update({
+        # No side-by-side runtime install inside the slice: the fake has no
+        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
+        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_HOOK_HELPER": str(ROOT / "ops/setup-codex-hooks.py"),
         "FIXTURE_CREDENTIAL": str(credential_marker), "FIXTURE_RUNTIME": str(runtime_marker),
@@ -1254,6 +1269,35 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
             server.server_close()
         for worker in workers:
             worker.join(timeout=2)
+
+
+def test_powershell_shim_lookup_tolerates_an_unrunnable_interpreter(tmp_path):
+    """A PSEUDOLIFE_SHIM_PYTHON that cannot be run (a removed venv, a stale
+    override) must read as "no launcher" and fall through to pipx / pip,
+    never stop the installer with a terminating CommandNotFound under
+    $ErrorActionPreference = Stop (found by a full run on 2026-09-29)."""
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("pwsh not available")
+    source = (ROOT / "ops/install.ps1").read_text(encoding="utf-8")
+    functions = []
+    for name in ("Get-InstallerPython", "Get-ShimRuntimePython", "Resolve-InstalledShimPath"):
+        match = re.search(rf"(?ms)^function {re.escape(name)}\b.*?^}}", source)
+        assert match, name
+        functions.append(match[0])
+    driver = tmp_path / "driver.ps1"
+    driver.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f"$repo='{ROOT.as_posix()}'\n"
+        "$env:PSEUDOLIFE_SHIM_PYTHON='definitely-not-a-command-here'\n"
+        "function Get-Command($Name, $ErrorAction) { return $null }\n"
+        + "\n".join(functions) +
+        "\n$launcher = Resolve-InstalledShimPath @{ Cmd = 'runtime' }\n"
+        "if ($null -ne $launcher) { throw \"unexpected launcher $launcher\" }\n"
+        "Write-Output 'tolerated'\n", encoding="utf-8")
+    completed = subprocess.run([pwsh, "-NoProfile", "-File", str(driver)], capture_output=True, timeout=60)
+    assert completed.returncode == 0, (completed.stdout.decode(), completed.stderr.decode())
+    assert b"tolerated" in completed.stdout
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
@@ -1369,6 +1413,9 @@ function Get-EnvValue($name) {{
 }}
 function Read-Host {{ throw 'unexpected prompt' }}
 function python {{ & '{Path(sys.executable).as_posix()}' @args }}
+# The side-by-side runtime install is refused here (PSEUDOLIFE_SHIM_PYTHON
+# names this function), so the pipx path stays what this test drives.
+function fake-no-runtime {{ $global:LASTEXITCODE = 1 }}
 function pipx {{
     $global:LASTEXITCODE=0
     if ($args[0] -eq 'environment') {{ return $env:FIXTURE_SHIM_BIN }}
@@ -1393,6 +1440,9 @@ $mcpState['codex'] | Set-Content $env:FIXTURE_RESULT
     _write_token_file(forwarded, "forwarded-fixture")
     env = isolated_env(home)
     env.update({
+        # No side-by-side runtime install inside the slice: the fake has no
+        # interpreter, so ensure_shim takes the pipx/pip path this test drives.
+        "PSEUDOLIFE_SHIM_PYTHON": "fake-no-runtime",
         "HOME": home.as_posix(), "USERPROFILE": home.as_posix(),
         "PYTHONPATH": str(ROOT), "FIXTURE_HOOK_HELPER": str(ROOT / "ops/setup-codex-hooks.py"),
         "FIXTURE_CREDENTIAL": str(marker), "FIXTURE_CODEX_CALL": str(codex_call),

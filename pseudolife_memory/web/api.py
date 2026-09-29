@@ -561,7 +561,7 @@ def build_console_app(
                     # caller's principal: the awareness section, and the
                     # session registration record (v43) episode/start writes.
                     if path not in ("/api/agents", "/api/briefing",
-                                    "/api/episode/start"):
+                                    "/api/episode/start", "/api/daemon-notice"):
                         return routes.dispatch(method, path, params, body)
                     from pseudolife_memory.writer_context import (
                         bind_request_headers, unbind_request_headers)

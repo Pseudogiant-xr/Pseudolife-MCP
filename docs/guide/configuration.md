@@ -62,6 +62,7 @@ coordination:
   enabled: true
   awareness_limit: 5
   allowed_principals: [editor, reviewer]
+  daemon_notice_principals: []
   audit_retention_days: 90
   wake:
     per_recipient_per_hour: 20
@@ -135,6 +136,24 @@ sees no peers and no awareness section in its briefing, and with no bearer token
 configured there is no principal to list, so the board stays dormant on an open
 loopback install: no awareness, no mail and no startup check-in. The
 installers mint a token by default; see [Turning the board on](#turning-the-board-on).
+
+`daemon_notice_principals` (default empty) names the principals that may
+post a board notice as the daemon itself through `POST /api/daemon-notice`:
+the unattended updater's "updated" or "held off" notice (see
+[unattended daemon updates](#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)).
+It is a separate list because `allowed_principals` admits `default`, the
+principal every ordinary session uses, and a notice that reads as the
+daemon's must not be something any session, or an agent steered by text it
+has read, can send. While it is empty every such notice is refused, and
+the refusal names this key. To turn the notice on, give the scheduled run
+its own principal: a `PSEUDOLIFE_MCP_TOKENS` entry `<token>:updater` in the
+daemon's environment (the map works beside the singular token), `updater`
+in `daemon_notice_principals` and in `allowed_principals` (the run reads
+the board as well; an explicit list replaces the default, so write
+`[default, updater]` to keep your sessions on it), and that token as the
+scheduled run's bearer. The reserved `daemon` principal is never admitted
+as a caller, whatever either list says, and each notice carries a line
+naming the principal that posted it.
 
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
@@ -298,8 +317,8 @@ comes from the `X-PL-Board` header on `GET /api/hook/coordination-start`
 
 To keep an open-loopback install with the board dormant, pass `--no-token`
 (`-NoToken`). `--transport http` mints no token either, nor does a host that
-cannot install the shim (no pipx, and no Python >= 3.10 whose pip may install
-packages), since its registrations fall back to HTTP. None of these removes a
+cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
+pipx), since its registrations fall back to HTTP. None of these removes a
 token that is already configured.
 
 ### Waking an idle session: `pseudolife-mcp wait-mail`
@@ -2196,6 +2215,45 @@ daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 
 ## stdio shim (per-session identity)
 
+### Where the shim lives: side-by-side runtimes behind one launcher
+
+The installers put the shim into its own **runtime** and register one
+**launcher** path with every client (`pseudolife_memory/runtimes.py`;
+`python ops/shim_runtime.py` from a checkout):
+
+| | Windows | Linux / macOS |
+|---|---|---|
+| runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
+| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp` (not `~/.local/bin`, which pip --user and pipx own) |
+
+A runtime is a plain virtualenv holding the package (`pip install
+--no-deps`) and the shim's own dependencies — not torch, chromadb or the
+embedder, which a stdio shim never loads (`serve` and `embedded` need a
+full install). `runtime.json` inside it (version, source, commit) is
+written last, so a directory without it is an install that did not
+finish; the launcher starts the highest-numbered complete runtime (on
+Windows a console-script executable of the kind pip writes, on POSIX a
+`/bin/sh` script that `exec`s it). Installing a new version — the
+installer, `ops/update.ps1 -All` / `update.sh --all`, or `python
+ops/shim_runtime.py install --source <checkout or requirement>` — builds a
+new runtime beside the old ones and never touches a file a running session
+has open: sessions keep the runtime they started with, the next session
+start takes the new one, and an old runtime is removed (by the same step,
+or `shim_runtime.py prune`) only once no process runs from it and no
+registration names it. A registration that still names a runtime, pipx or
+virtualenv path directly is moved to the launcher in place, the file
+backed up first and its permission bits kept (`shim_runtime.py migrate`); a
+mode argument such as `channel` stays. A registration that would spawn its
+own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon URL — the
+pip and lite tiers) is never moved onto a shim runtime, which cannot serve.
+The launcher directory is not on `PATH`; run `pseudolife-mcp doctor` and
+friends through its full path. Set `PSEUDOLIFE_SHIM_PYTHON`
+to choose the interpreter the runtimes are created from;
+`PSEUDOLIFE_SHIM_RUNTIMES` and `PSEUDOLIFE_SHIM_LAUNCHER` (together) move
+both paths. A host whose Python cannot make a virtualenv falls back to the
+earlier pipx / `pip install --user` install, which does need every session
+closed to upgrade.
+
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the
 mechanism that gives **concurrent** Claude Code sessions distinct identity —
@@ -2538,6 +2596,261 @@ ops/.env>@127.0.0.1:5433/pseudolife_memory`), else the lite tier's
 embedded instance, attached or started for the duration — never
 initialized: importing is how a fresh bank gets *filled*, but creating
 one is the daemon's job.
+
+## Updating: `pseudolife-mcp update`
+
+The installed shim carries the update (`pseudolife_memory/update_cli.py`;
+`ops/update.ps1` and `ops/update.sh` are thin wrappers over the same code
+for a checkout). It needs no checkout:
+
+| command | what it does |
+|---|---|
+| `pseudolife-mcp update` | Docker tier: pull `ghcr.io/pseudogiant-xr/pseudolife-daemon:<newest release on PyPI>`, back the bank up, tag the running image `…-pre-update-<stamp>`, recreate only the daemon container, wait for `/health` at that version, then the client side. Pip / lite: upgrade the package where it is installed; restart nothing. |
+| `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
+| `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
+| `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon |
+| `--reinstall` | recreate the daemon at the version it already runs |
+| `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
+| `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
+| `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+What it refuses: a target it cannot read (PyPI unreachable and no
+`--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
+Docker installed but not answering (Docker Desktop stopped is not "no
+daemon container": the shim runtime this runs from is never pip-upgraded
+in its place), and on a pip install an editable checkout or a shim
+runtime. On Windows a pip install's own upgrade command is printed
+rather than run, since pip cannot replace the running console script;
+pipx's `install --force` likewise, since it deletes the environment the
+command runs from.
+
+Where things come from: the compose files are the ones the running daemon
+container was created with (its `com.docker.compose.project.*` labels),
+plus `docker-compose.ghcr.yml` beside them; when they are gone the
+package's bundled copies (pinned byte-equal to `ops/`) are written under
+`~/.pseudolife-mcp/compose/`. The backup is the checkout's `ops/backup.*`
+when the compose project's working directory is still a checkout — that
+one keeps the row-count gate and the mirror — else the built-in one: a
+`pg_dump -Z9` inside the Postgres container, copied out and checked for
+the dump's closing marker (a killed dump is a valid gzip of a truncated
+file, so a missing marker stops the update with the `.part` artifact
+kept), plus a tar of the daemon's `/data`, both under
+`~/.pseudolife-mcp/backups` in the checkout scripts' file names (restore
+them with `ops/restore.ps1 -BackupFile <path>` / `restore.sh
+--backup-file <path>`; the built-in backup keeps no manifest, row-count
+gate or mirror, and rotates only its own files older than seven days,
+always keeping the newest three of each kind). When the compose files are
+gone AND no env file was found beside them, the update stops unless
+`--env-file` names one: the bundled compose files without the env would
+reset the Postgres password, the volume names and the bearer.
+The rollback is the running image tagged by id as
+`ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>-pre-update-<stamp>`,
+because the GHCR overlay selects the daemon's image through
+`PSEUDOLIFE_IMAGE_TAG`: the printed rollback is that variable naming the
+tag on the same `docker compose … up -d --no-deps pseudolife-daemon`. A
+daemon that comes back healthy at a version other than the one pulled
+fails the update with that rollback and moves no client. Release mode
+builds nothing, so it prunes no build cache. `PSEUDOLIFE_DOCKER` names
+the docker command (the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or
+`--daemon-url` names the daemon. The Codex hook step is printed, never
+automated: Codex trusts hooks by hash and asks again when a script
+changes; the check compares Codex's clone with the daemon just deployed,
+never with a checkout at some other commit.
+
+### Being told, and the unattended client half (`updates`)
+
+```yaml
+updates:
+  check_releases: true          # ask PyPI for the newest release, on a background thread
+  check_interval_seconds: 21600 # every six hours; 60 is the floor
+  unattended_clients: false     # the shim may take the client half of an update by itself
+```
+
+With `check_releases` on (the default) the daemon reads the newest
+release from PyPI once per interval on its own thread, never on a request,
+keeps the last good answer, and serves it on `/health` as
+`updates.latest_release` (with `checked_at`). When that release is newer
+than the daemon, the session-start briefing opens with one line naming
+the command: `release X is available (daemon Y[, plugin Z]) — run
+pseudolife-mcp update`, and no second line about the plugin, since that
+command moves both. A daemon with no route to PyPI offers nothing;
+`check_releases: false` makes no request at all. The plugin-behind,
+daemon-behind and hooks-differ notices, `pseudolife-mcp doctor` and the
+shim's own version line all name `pseudolife-mcp update` (or its
+`--clients-only` half) first, with the checkout scripts as the
+alternative.
+
+`unattended_clients` (default off) lets the safe half run by itself:
+when a session's shim finds the daemon running a newer release than the
+shim is (the state right after `pseudolife-mcp update --daemon-only`, or
+after a release update that moved the daemon but not this client), it
+starts `pseudolife-mcp update --clients-only --tag <the daemon's
+version>` in the background and says so in its served instructions. That
+installs the daemon's release as a new shim runtime beside the running
+one and refreshes the plugin cache; the running session keeps its
+runtime, the next session starts on the new one, and the Codex step is
+still printed for the operator (the log is
+`~/.pseudolife-mcp/update-clients.log`). One attempt per release per
+hour: the run writes its exit code to a result file beside the log (5
+when a client step failed, so a runtime that was never installed is
+never reported as finished), and the next session's shim says when the
+last attempt failed, and which command to run, instead of trying again.
+Only a Docker-tier registration
+on this host takes it (the daemon URL is loopback and the registration
+carries `PSEUDOLIFE_MCP_NO_SPAWN`, as the Docker-tier installers set it):
+on a lite daemon or against a remote one the command could not succeed,
+so nothing is started. A plugin cache that is stale while the daemon and
+the shim are at the same version is not refreshed unattended; the
+briefing's hooks-differ line names the command for that. The daemon
+recreate, with its backup and rollback tag, is never taken by this knob:
+that stays `pseudolife-mcp update`, run on purpose. (The knob lives in
+the daemon's `config.yaml` and reaches the shim through `/health`, so one
+setting governs every client of that daemon.) `PSEUDOLIFE_RELEASE_CHECK=0`
+in the daemon's environment makes no release request whatever the file
+says; the test daemons run with it.
+
+### Unattended daemon updates on headless hosts (`updates.unattended_daemon`)
+
+```bash
+pseudolife-mcp update --schedule 03:30   # once: a daily task (Windows) or systemd --user timer (Linux)
+pseudolife-mcp update --unattended       # what that run does; exit 0 updated, 3 current, 4 held off
+pseudolife-mcp update --unschedule
+```
+
+```yaml
+updates:
+  unattended_daemon: true   # default false: the scheduled run then only reports
+```
+
+The scheduled run applies a new release only when BOTH hold: the daemon's
+`config.yaml` has `updates.unattended_daemon: true` (the run reads it from
+`/health`, so installing the timer alone changes nothing), and the agent
+board lists no active session. It then takes the same path as an attended
+`pseudolife-mcp update`: backup (the checkout's script or the built-in
+`pg_dump` + state tar), the rollback tag, recreate only the daemon, wait
+for `/health` at the new version, then the client side; the board is
+read once more right before the daemon is recreated, since the backup
+can take minutes, and a session that started meanwhile holds the
+recreate off before the rollback tag is moved (the backup already taken
+is harmless). When a release is out it posts a board notice from the
+daemon's reserved principal, stamped with the posting principal, to the
+sessions the board lists as active, provided the run's bearer principal is
+listed in [`coordination.daemon_notice_principals`](#experimental-agent-coordination)
+(empty by default, so out of the box the notice is refused, the run says so
+in one line, and the log is the only record): updated (with the rollback tag, the
+client states and, when the hook scripts changed, the Codex re-approval
+steps), or held off and why (which sessions are active; the board
+unreadable). With the knob off it only logs, so a daily run never
+nags. The durable record is `~/.pseudolife-mcp/unattended-update.log`,
+which every step line reaches; the notice is best effort. An update succeeds
+only when no session is active, so its notice usually reaches nobody
+and a session that starts later meets the new daemon through the
+version handshake and the log; a failed update posts the failure with
+the rollback line when the daemon can still take it, and always logs
+it. Idle sessions do not hold it off: a session with no activity in the
+board's active window keeps its shim runtime and reconnects to the
+recreated daemon on its next call; the held-off notice says how many
+were idle (a count of stale addresses, so an upper bound). Exit codes:
+0 updated, 3 current, 4 held off, 2 the run could not check, 1 the
+update failed. `--unattended` refuses `--no-backup`, `--clients-only`,
+`--daemon-only`, `--force-rollback-tag`, `--allow-downgrade`,
+`--reinstall` and `--check`: it always backs up and moves the daemon
+and the clients together.
+
+One update runs at a time on a host. Every daemon-recreating run
+(`pseudolife-mcp update` in release or checkout mode, so also
+`ops/update.ps1` and `ops/update.sh`), every `--clients-only` run and the
+unattended run hold an exclusive OS lock on `~/.pseudolife-mcp/update.lock`
+(under `PSEUDOLIFE_MCP_DATA_DIR` when that is set) until they exit; the OS
+drops it if the process dies, and the holder's pid sits beside it in
+`update.lock.pid`. An attended run that finds it held exits 2 with
+"another pseudolife-mcp update is running (pid N)" and changes nothing; the
+unattended run treats it as a hold-off (exit 4, with a notice), never a
+failure. The unattended run reads the daemon's version again after taking
+the lock and before the backup and the rollback tag, so a release an
+attended update applied in the meantime is "nothing to do" (exit 3), never
+tagged as the rollback of the version it replaced. `--check` and the pip
+tier take no lock; `ops/update_clients.py` does not either.
+
+The "no session is active" check sees only sessions on the agent board:
+clients started through the shim with its board adapter, whose bearer
+principal is in `coordination.allowed_principals`. It does not see a client
+connected over HTTP without the shim, a client that opted out of the board
+(`PSEUDOLIFE_AGENT_COORDINATION=0`), or a client whose token-map principal
+is not in `allowed_principals`; the daemon can be recreated under any of
+them. A board
+session counts as active while its own last board action (registering, a
+status update, a lease, sending or receiving mail; a heartbeat alone does
+not count) is within the last hour (`ACTIVE_WINDOW`, 3600 seconds), or
+within the last three hours (`ATTACHED_IDLE_WINDOW`, `STATUS_STALE_AFTER`
+of two hours plus `ACTIVE_WINDOW`) while it holds a live attachment lease;
+both are in `pseudolife_memory/storage/coordination.py`. Anything quieter
+is counted as idle and does not hold the update off.
+
+What the run needs: a Docker-tier daemon on this host and the bearer
+(`PSEUDOLIFE_MCP_TOKEN_FILE` or `PSEUDOLIFE_MCP_TOKEN` in the run's
+environment) whose principal is admitted to the board, since the idle
+check registers a throwaway board address; for its notice, that principal
+must also be in `coordination.daemon_notice_principals` (`--schedule`
+prints one line saying so). On Linux the unit carries its own token file,
+so running `--schedule` with `PSEUDOLIFE_MCP_TOKEN_FILE` naming the
+dedicated principal's token (in that shell only) gives the timer its own
+bearer. The Windows task runs with the user's persistent environment, the
+same bearer the user's own clients read, so there it can post notices only
+if that principal is listed, which lets every session sharing it post them
+too; leaving the list empty keeps the log as the record. `--schedule` on Linux writes
+`~/.config/systemd/user/pseudolife-update.{service,timer}` with the
+daemon URL and the token file as `Environment=` lines (a token given only
+as `PSEUDOLIFE_MCP_TOKEN` is written to a private
+`~/.pseudolife-mcp/unattended-update.token` first; the token itself never
+lands in the unit; `SuccessExitStatus=3 4` keeps "current" and "held
+off" from counting as unit failures) and enables the timer. A `--user`
+timer runs only while that user has a session unless lingering is on:
+`loginctl enable-linger <user>` once, which is the headless case this
+is for. On Windows it registers the task `Pseudolife Unattended Update`
+through `schtasks`, which on an administrator account needs an elevated
+PowerShell opened from the Start menu (the refusal says so); the task
+runs while the user is signed in, with the user's persistent environment
+variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` (the installer sets it as a
+User variable) and any `PSEUDOLIFE_MCP_DAEMON_URL` must be set there,
+not only in a shell. A `--daemon-url` given with `--schedule` rides
+along in the task or unit. The task or timer runs the shim launcher
+(`pseudolife-mcp update --unattended`), so it follows the side-by-side
+runtimes; `--unschedule` removes the task or the unit, the timer and the
+private token file. A tokenless install cannot read the board and
+therefore never updates unattended; nor does macOS get a scheduler here
+(run `--unattended` from your own). The bank backup is taken every time
+and is never skipped by this path. The board read registers a throwaway
+address labelled "unattended update", pruned by the board after its
+hour; a run never counts that label as a session.
+
+### Codex hook re-approval, on every update path
+
+Codex trusts hooks by hash and runs only handlers it has approved, so no
+update can finish this for you. Whenever Codex's copy of the plugin hooks
+differs from the scripts just deployed, and only then, every update path
+(`pseudolife-mcp update`, `ops/update.ps1` / `update.sh`,
+`ops/update_clients.py`, the unattended run's board notice) prints the
+complete steps: which hook files changed (read from Codex's marketplace
+clone against the checkout, or against the Claude plugin cache when that
+holds the daemon's scripts), the refresh (update the plugin in Codex's
+plugin manager so its clone holds the new scripts;
+`ops/setup-codex-hooks.py --source plugin` approves what the clone holds
+and does not pull one), the approval (`/hooks` in a Codex session, or
+`python ops/setup-codex-hooks.py --source plugin --trust yes` /
+`--codex-hook-trust yes` for an unattended install), what is off until
+then (the memory briefing, the per-turn memory and mail notes, the board
+check-in, the SessionEnd close and the Stop-hook park gate), and the
+check: `pseudolife-mcp doctor` reports `codex_hooks = current`. A manual
+copy (`setup-codex-hooks.py --source manual`) gets its own commands, and
+`doctor` reports `bundle-present` for it. An update whose hooks did not
+change says nothing about Codex, and neither does one that finds no
+marketplace clone at all. A daemon-only update (`ops/update.ps1` without
+`-All`, `update --daemon-only`) whose hook scripts changed says in one
+line that the client side and these steps are still to do; the shim's
+unattended client half leaves the steps beside its result file
+(`~/.pseudolife-mcp/update-clients.<version>.codex`) and its next
+session's note points at them.
 
 ## Schema version history
 

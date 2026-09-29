@@ -88,6 +88,20 @@ class _PowerShell:
             f"$repo = '{_q(ROOT)}'\n"
             "function Step($message) { Write-Output \"STEP: $message\" }\n"
             f"function Get-InstallerPython {{ '{_q(sys.executable)}' }}\n"
+            # The side-by-side shim runtime is never really installed here:
+            # ops/shim_runtime.py install fails in the shim-install-failed
+            # scenario (FAKE_PIPX_EXIT), otherwise the launcher is the
+            # installed shim path and nothing migrates.
+            "$env:PSEUDOLIFE_SHIM_PYTHON = 'fake_runtime_python'\n"
+            "function global:fake_runtime_python {\n"
+            "    $callArgs = @($args)\n"
+            "    $global:LASTEXITCODE = 0\n"
+            "    if (\"$($callArgs[0])\" -notlike '*shim_runtime.py') { $global:LASTEXITCODE = 91; return }\n"
+            "    if ($env:FAKE_PIPX_EXIT -and ($env:FAKE_PIPX_EXIT -ne '0')) { $global:LASTEXITCODE = 1; return }\n"
+            "    if ($callArgs[1] -eq 'migrate') { $global:LASTEXITCODE = 3; return }\n"
+            "    $bin = if ($env:FAKE_INSTALL_BIN) { $env:FAKE_INSTALL_BIN } else { '/fixture/installed-bin' }\n"
+            "    return (Join-Path $bin 'pseudolife-mcp')\n"
+            "}\n"
             + _between(INSTALL, "function Get-HelperStatus($output)", "\n}\n") + "\n}\n"
         )
         script = self.tmp / "run.ps1"

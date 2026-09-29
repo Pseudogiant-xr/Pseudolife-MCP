@@ -90,6 +90,19 @@ class _Shell:
             f"export PATH CALL_LOG='{self.path(self.calls)}'\n"
             f"repo='{self.path(ROOT)}'\n"
             f"installer_python() {{ printf '%s\\n' '{self.path(sys.executable)}'; }}\n"
+            # The side-by-side shim runtime is never really installed here:
+            # ops/shim_runtime.py install fails in the shim-install-failed
+            # scenario (FAKE_PIPX_EXIT), otherwise the launcher is the
+            # installed shim path and nothing migrates.
+            "export PSEUDOLIFE_SHIM_PYTHON=fake_runtime_python\n"
+            "fake_runtime_python() {\n"
+            "    case \"$1\" in *shim_runtime.py)\n"
+            "        [ \"${FAKE_PIPX_EXIT:-0}\" = 0 ] || return 1\n"
+            "        if [ \"$2\" = migrate ]; then return 3; fi\n"
+            "        printf '%s/pseudolife-mcp\\n' \"${FAKE_INSTALL_BIN:-/fixture/installed-bin}\"; return 0 ;;\n"
+            "    esac\n"
+            "    return 91\n"
+            "}\n"
             "step() { printf 'STEP: %s\\n' \"$*\"; }\n"
         )
         env = dict(self.env)

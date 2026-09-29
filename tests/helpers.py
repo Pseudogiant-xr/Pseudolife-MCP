@@ -245,6 +245,8 @@ def spawn_serve(data_dir, database_url: str, *,
             "PSEUDOLIFE_MCP_PORT": str(port),
             "PSEUDOLIFE_MCP_DATABASE_URL": database_url,
             "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
+            # A test daemon never asks PyPI for the newest release.
+            "PSEUDOLIFE_RELEASE_CHECK": "0",
             **(env_extra or {}),
         }
         env = {k: v for k, v in env.items() if v is not None}

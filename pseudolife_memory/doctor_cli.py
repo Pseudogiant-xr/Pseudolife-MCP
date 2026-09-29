@@ -258,6 +258,19 @@ def _wake_report(health: dict | None) -> dict:
     return report
 
 
+def _codex_hooks_line(health: dict) -> str:
+    """Whether Codex's hook copy is the daemon's scripts: the line the
+    re-approval steps say to verify (``codex_hooks = current``)."""
+    from pseudolife_memory.client_updates import check_codex_hooks
+
+    try:
+        result = check_codex_hooks(None, daemon_digest=health.get("hooks_digest"))
+    except Exception as exc:  # noqa: BLE001 - doctor reports, never fails on this
+        return f"unknown ({type(exc).__name__})"
+    changed = result.get("changed_files")
+    return result["state"] + (f" (changed: {', '.join(changed)})" if changed else "")
+
+
 def _board_line(timeout: float) -> str:
     """The agent board's status for the credential this shim would send."""
     from pseudolife_memory.board_status import board_status
@@ -304,6 +317,7 @@ def run_doctor() -> None:
             report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
         else:
             report["daemon_version"] = health.get("version") or "unknown"
+            report["codex_hooks"] = _codex_hooks_line(health)
             report.update(asyncio.run(asyncio.wait_for(_handshake(), timeout=args.timeout)))
             report["ok"] = bool(report["instructions_present"] and report["tool_count"]
                                 and not report["tools_missing_annotations"])
@@ -318,10 +332,11 @@ def run_doctor() -> None:
                 report["version_mismatch"] = True
                 report["recovery"] = (
                     f"The shim is pseudolife-mcp {report['pseudolife-mcp']} but the daemon "
-                    f"is {report['daemon_version']}. Reinstall the shim from the daemon's "
-                    f"checkout in the registered interpreter (re-run the installer, or "
-                    f"pipx install --force <checkout>), or redeploy the daemon "
-                    f"(ops/update.ps1 / ops/update.sh); then retry.")
+                    f"is {report['daemon_version']}. Run pseudolife-mcp update --clients-only "
+                    f"--tag {report['daemon_version']} (the daemon's release as a new shim "
+                    f"runtime beside the running one; from a checkout: python "
+                    f"ops/update_clients.py --only shim; no session has to close), or update "
+                    f"the daemon with pseudolife-mcp update; then start a new session and retry.")
     except TimeoutError:
         report["error"] = "TimeoutError"
         report["recovery"] = "Check daemon health and MCP access; if startup is slow, retry doctor with a larger --timeout budget."

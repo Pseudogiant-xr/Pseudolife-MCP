@@ -461,18 +461,17 @@ def test_providers_guide_matches_installer_matrix() -> None:
 
 
 def test_update_scripts_carry_the_shared_header_style() -> None:
-    """The deploy scripts get the installers' colored step styling (gated on
-    NO_COLOR / TTY, literal `==>` prefix kept for log greps) but no banner —
-    their output is tee'd into deploy logs."""
-    sh = _read("ops/update.sh")
-    ps = _read("ops/update.ps1")
-    for text in (sh, ps):
-        assert "NO_COLOR" in text
-        assert "==>" in text
+    """The deploy's step lines keep the literal `==>` prefix for log greps
+    (the output is tee'd into deploy logs) and carry no escape bytes; the
+    wrappers print no banner. The steps are printed by the Python deploy
+    the wrappers hand over to."""
+    deploy = _read("pseudolife_memory/update_cli.py")
+    assert '"==> ' in deploy and "\x1b" not in deploy
+    for path in ("ops/update.sh", "ops/update.ps1"):
+        text = _read(path)
         assert "\x1b" not in text
         assert "# >>> banner >>>" not in text
-    assert "step()" in sh
-    assert "function Step" in ps
+        assert "update.py" in text
 
 
 def test_installer_ps1_parses() -> None:
@@ -666,7 +665,7 @@ def test_shim_autostart_scripts_pick_an_interpreter_that_imports_the_package() -
         assert 'PYTHON_EXE="$(command -v python3)"' not in sh, rel   # the old fallback
         # Quoted in ExecStart: systemd splits an unquoted path with a space,
         # which is the crash loop this pick exists to prevent (review, 2026-09-29).
-        assert 'ExecStart="$PYTHON_EXE" "$repo/evals/' in sh, rel
+        assert 'ExecStart="$PYTHON_EXE" "$repo/ops/shim_autostart.py" run ' in sh, rel
         # The chosen interpreter is printed with the registration line.
         assert "Registered + started" in sh and "$PYTHON_EXE" in sh.split("Registered + started", 1)[1], rel
     for rel in ("ops/install-shim-autostart.ps1", "ops/install-codex-shim-autostart.ps1"):

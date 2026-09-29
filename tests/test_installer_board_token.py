@@ -284,6 +284,7 @@ CLAUDE_JSON='{shell.path(claude_json) if claude_json else ""}'
 configure_codex_runtime_defaults() {{ CODEX_RUNTIME_DEFAULTS=preserved; }}
 shim_process_table() {{ return 2; }}
 {helper}
+shim_runtime_python() {{ :; }}
 {loop}
 printf 'STATE=%s/%s\\n' "$MCP_CLAUDE" "$MCP_GEMINI"
 """
