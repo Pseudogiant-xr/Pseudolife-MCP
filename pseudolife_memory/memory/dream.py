@@ -1126,10 +1126,12 @@ def _parse_digest(content: str, *, context_text: str | None = None) -> str | Non
     digest = parsed.get("digest")
     if not isinstance(digest, str) or not digest.strip():
         return None
-    if context_text is not None and any(
-            pattern.search(digest) and not pattern.search(context_text)
-            for pattern in _DIGEST_PROMPT_ECHO):
-        return None
+    if context_text is not None:
+        digest_words = " ".join(digest.split())
+        context_words = " ".join(context_text.split())
+        if any(pattern.search(digest_words) and not pattern.search(context_words)
+               for pattern in _DIGEST_PROMPT_ECHO):
+            return None
     return digest.strip()
 
 

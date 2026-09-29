@@ -69,6 +69,26 @@ def test_summarize_session_rejects_prompt_echo_unless_source_mentions_it(
             payload["digest"])
 
 
+@pytest.mark.parametrize("source_space", ["\n", "\r\n", "\t", " \n  "])
+@pytest.mark.parametrize("digest_space", [" ", "\n"])
+def test_summarize_session_accepts_wrapped_source_wording(
+        monkeypatch, source_space, digest_space):
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    from pseudolife_memory.utils import no_redirect
+
+    digest = f"The team adopted past tense anchored to the{digest_space}session."
+    context = ("Session: Digest review\n- The team adopted past tense anchored "
+               f"to the{source_space}session.")
+    reply = json.dumps({"choices": [{"message": {"content":
+        json.dumps({"digest": digest})}}]}).encode()
+    monkeypatch.setattr(no_redirect, "urlopen",
+                        lambda request, timeout: io.BytesIO(reply))
+    extractor = OpenAICompatExtractor("http://example.test/v1", "test-model")
+
+    assert extractor.summarize_session(context) == digest
+    assert extractor.summarize_session("Session: Fixture repair\n- Fixed a fixture.") is None
+
+
 # ── config ───────────────────────────────────────────────────────────────────
 
 def test_digest_config_defaults():

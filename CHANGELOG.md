@@ -10,7 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Session digest parsing rejects distinctive instructions echoed from its own
   prompt when those phrases are absent from the session record. The existing
   bounded retry handles the rejected output; sessions that discuss the same
-  wording can still retain it in their digest.
+  wording can still retain it in their digest. Whitespace differences in the
+  comparison do not reject wrapped source text or reformat the returned prose.
 
 ### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
 - A Codex native child thread (`collaboration.spawn_agent`) or fork already
