@@ -443,7 +443,14 @@ class DreamConfig:
     # "Pseudolife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
-    alias_candidate_min_cosine: float = 0.5
+    # 0.7 since 2026-09-29: the 0.5 above was calibrated on MiniLM and went
+    # stale with the Qwen3-Embedding-0.6B swap, which scores that paraphrase
+    # 0.750 and the unrelated 'ship pipeline' / 'release train' 0.558. In the
+    # 2026-09-29 triage of 1,016 merge proposals this screen had filed 574
+    # (16 accepted, 524 rejected, 34 left); past the merge veto, 0.7 keeps
+    # 420 of the remaining 538 and loses one accepted paraphrase (0.655) —
+    # the scrubbed replay is evals/results/merge-detector-replay-20260929.json.
+    alias_candidate_min_cosine: float = 0.7
     # TiMem-inspired known-facts window
     # (docs/specs/2026-07-10-known-facts-window-design.md): when > 0, the dream
     # prompt also shows the CURRENT VALUES of the top-N relevance-ranked slots

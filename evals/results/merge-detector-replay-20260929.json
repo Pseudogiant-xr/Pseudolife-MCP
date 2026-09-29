@@ -1,0 +1,7303 @@
+{
+ "built_by": "evals/merge_detector_replay.py",
+ "data": "merge-triage-20260929.json",
+ "labels": "Full triage of the live bank's 1,016 pending merge proposals, 2026-09-29: 8 read-only Opus slice judges (memory_search evidence, house merge rules, group-aligned), main thread applied an accept floor of confidence 0.8 plus 8 name-level overrides to leave. verdict=leave is unlabelled.",
+ "by_detector": {
+  "analyzer-duplicate": {
+   "all": {
+    "accept": 16,
+    "reject": 119,
+    "leave": 29,
+    "n": 164
+   },
+   "vetoed": {
+    "accept": 0,
+    "reject": 0,
+    "leave": 0,
+    "n": 0
+   },
+   "passes_veto": {
+    "accept": 16,
+    "reject": 119,
+    "leave": 29,
+    "n": 164
+   }
+  },
+  "dream-alias": {
+   "all": {
+    "accept": 16,
+    "reject": 524,
+    "leave": 34,
+    "n": 574
+   },
+   "vetoed": {
+    "accept": 0,
+    "reject": 36,
+    "leave": 0,
+    "n": 36
+   },
+   "passes_veto": {
+    "accept": 16,
+    "reject": 488,
+    "leave": 34,
+    "n": 538
+   }
+  },
+  "substring": {
+   "all": {
+    "accept": 2,
+    "reject": 1,
+    "leave": 0,
+    "n": 3
+   },
+   "vetoed": {
+    "accept": 0,
+    "reject": 0,
+    "leave": 0,
+    "n": 0
+   },
+   "passes_veto": {
+    "accept": 2,
+    "reject": 1,
+    "leave": 0,
+    "n": 3
+   }
+  },
+  "token-subset": {
+   "all": {
+    "accept": 3,
+    "reject": 1,
+    "leave": 0,
+    "n": 4
+   },
+   "vetoed": {
+    "accept": 0,
+    "reject": 0,
+    "leave": 0,
+    "n": 0
+   },
+   "passes_veto": {
+    "accept": 3,
+    "reject": 1,
+    "leave": 0,
+    "n": 4
+   }
+  },
+  "write-dedup": {
+   "all": {
+    "accept": 64,
+    "reject": 150,
+    "leave": 57,
+    "n": 271
+   },
+   "vetoed": {
+    "accept": 0,
+    "reject": 0,
+    "leave": 0,
+    "n": 0
+   },
+   "passes_veto": {
+    "accept": 64,
+    "reject": 150,
+    "leave": 57,
+    "n": 271
+   }
+  }
+ },
+ "dream_alias_threshold_curve_after_veto": [
+  {
+   "min_cosine": 0.5,
+   "filed": {
+    "accept": 16,
+    "reject": 488,
+    "leave": 34,
+    "n": 538
+   },
+   "accepts_lost": 0
+  },
+  {
+   "min_cosine": 0.6,
+   "filed": {
+    "accept": 16,
+    "reject": 481,
+    "leave": 34,
+    "n": 531
+   },
+   "accepts_lost": 0
+  },
+  {
+   "min_cosine": 0.65,
+   "filed": {
+    "accept": 16,
+    "reject": 445,
+    "leave": 34,
+    "n": 495
+   },
+   "accepts_lost": 0
+  },
+  {
+   "min_cosine": 0.7,
+   "filed": {
+    "accept": 15,
+    "reject": 372,
+    "leave": 33,
+    "n": 420
+   },
+   "accepts_lost": 1
+  },
+  {
+   "min_cosine": 0.75,
+   "filed": {
+    "accept": 14,
+    "reject": 269,
+    "leave": 32,
+    "n": 315
+   },
+   "accepts_lost": 2
+  },
+  {
+   "min_cosine": 0.8,
+   "filed": {
+    "accept": 10,
+    "reject": 157,
+    "leave": 27,
+    "n": 194
+   },
+   "accepts_lost": 6
+  },
+  {
+   "min_cosine": 0.85,
+   "filed": {
+    "accept": 10,
+    "reject": 77,
+    "leave": 19,
+    "n": 106
+   },
+   "accepts_lost": 6
+  },
+  {
+   "min_cosine": 0.9,
+   "filed": {
+    "accept": 7,
+    "reject": 25,
+    "leave": 10,
+    "n": 42
+   },
+   "accepts_lost": 9
+  }
+ ],
+ "rows": [
+  {
+   "id": 3603,
+   "detector": "dream-alias",
+   "similarity": 0.93,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4362,
+   "detector": "dream-alias",
+   "similarity": 0.882,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4367,
+   "detector": "dream-alias",
+   "similarity": 0.837,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3614,
+   "detector": "dream-alias",
+   "similarity": 0.822,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4107,
+   "detector": "dream-alias",
+   "similarity": 0.781,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3668,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3669,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3670,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3671,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3675,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3784,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2289,
+   "detector": "dream-alias",
+   "similarity": 0.931,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3705,
+   "detector": "dream-alias",
+   "similarity": 0.748,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2423,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2424,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2426,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3439,
+   "detector": "dream-alias",
+   "similarity": 0.589,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3179,
+   "detector": "dream-alias",
+   "similarity": 0.835,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3224,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3225,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3226,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3975,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2906,
+   "detector": "dream-alias",
+   "similarity": 0.971,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3186,
+   "detector": "dream-alias",
+   "similarity": 0.868,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3180,
+   "detector": "dream-alias",
+   "similarity": 0.84,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3248,
+   "detector": "dream-alias",
+   "similarity": 0.805,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2924,
+   "detector": "dream-alias",
+   "similarity": 0.875,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3545,
+   "detector": "dream-alias",
+   "similarity": 0.856,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3927,
+   "detector": "dream-alias",
+   "similarity": 0.805,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4257,
+   "detector": "dream-alias",
+   "similarity": 0.798,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3716,
+   "detector": "dream-alias",
+   "similarity": 0.749,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3711,
+   "detector": "dream-alias",
+   "similarity": 0.699,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3444,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3928,
+   "detector": "dream-alias",
+   "similarity": 0.653,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3708,
+   "detector": "dream-alias",
+   "similarity": 0.972,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3926,
+   "detector": "dream-alias",
+   "similarity": 0.972,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3789,
+   "detector": "dream-alias",
+   "similarity": 0.965,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 4162,
+   "detector": "dream-alias",
+   "similarity": 0.892,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3164,
+   "detector": "dream-alias",
+   "similarity": 0.818,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2938,
+   "detector": "dream-alias",
+   "similarity": 0.793,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3475,
+   "detector": "dream-alias",
+   "similarity": 0.847,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3470,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3472,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3269,
+   "detector": "dream-alias",
+   "similarity": 0.815,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3234,
+   "detector": "dream-alias",
+   "similarity": 0.752,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3327,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4077,
+   "detector": "dream-alias",
+   "similarity": 0.764,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3455,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3459,
+   "detector": "dream-alias",
+   "similarity": 0.686,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4497,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4498,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4499,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2814,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.714,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3532,
+   "detector": "dream-alias",
+   "similarity": 0.684,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3438,
+   "detector": "dream-alias",
+   "similarity": 0.636,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3175,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3176,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3892,
+   "detector": "dream-alias",
+   "similarity": 0.972,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3973,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3089,
+   "detector": "dream-alias",
+   "similarity": 0.884,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3135,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3152,
+   "detector": "dream-alias",
+   "similarity": 0.851,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3726,
+   "detector": "dream-alias",
+   "similarity": 0.676,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3906,
+   "detector": "dream-alias",
+   "similarity": 0.828,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3733,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3240,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3251,
+   "detector": "dream-alias",
+   "similarity": 0.764,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2855,
+   "detector": "dream-alias",
+   "similarity": 0.791,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4118,
+   "detector": "dream-alias",
+   "similarity": 0.777,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3631,
+   "detector": "dream-alias",
+   "similarity": 0.77,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3626,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2536,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2537,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4242,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4236,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3445,
+   "detector": "dream-alias",
+   "similarity": 0.726,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3515,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3285,
+   "detector": "dream-alias",
+   "similarity": 0.689,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4174,
+   "detector": "dream-alias",
+   "similarity": 0.646,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2691,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2692,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3628,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4003,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4340,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4440,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2352,
+   "detector": "token-subset",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3137,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4316,
+   "detector": "token-subset",
+   "similarity": 0.984,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2442,
+   "detector": "dream-alias",
+   "similarity": 0.949,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4452,
+   "detector": "dream-alias",
+   "similarity": 0.899,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3386,
+   "detector": "dream-alias",
+   "similarity": 0.862,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2672,
+   "detector": "dream-alias",
+   "similarity": 0.841,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4246,
+   "detector": "dream-alias",
+   "similarity": 0.814,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3084,
+   "detector": "dream-alias",
+   "similarity": 0.805,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3270,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3262,
+   "detector": "dream-alias",
+   "similarity": 0.792,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2438,
+   "detector": "dream-alias",
+   "similarity": 0.781,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4079,
+   "detector": "dream-alias",
+   "similarity": 0.771,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3157,
+   "detector": "dream-alias",
+   "similarity": 0.765,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3460,
+   "detector": "dream-alias",
+   "similarity": 0.751,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2538,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3425,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4099,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4103,
+   "detector": "dream-alias",
+   "similarity": 0.743,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3899,
+   "detector": "dream-alias",
+   "similarity": 0.733,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3717,
+   "detector": "dream-alias",
+   "similarity": 0.724,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3786,
+   "detector": "dream-alias",
+   "similarity": 0.71,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3599,
+   "detector": "dream-alias",
+   "similarity": 0.703,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3623,
+   "detector": "dream-alias",
+   "similarity": 0.694,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2994,
+   "detector": "dream-alias",
+   "similarity": 0.684,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3929,
+   "detector": "dream-alias",
+   "similarity": 0.677,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2286,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2493,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2751,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2993,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3462,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3672,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3997,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4432,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4450,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3072,
+   "detector": "dream-alias",
+   "similarity": 0.649,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4089,
+   "detector": "dream-alias",
+   "similarity": 0.638,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2995,
+   "detector": "dream-alias",
+   "similarity": 0.615,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2658,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3140,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3712,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4331,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3700,
+   "detector": "dream-alias",
+   "similarity": 0.908,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4265,
+   "detector": "dream-alias",
+   "similarity": 0.887,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3679,
+   "detector": "dream-alias",
+   "similarity": 0.833,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3908,
+   "detector": "dream-alias",
+   "similarity": 0.781,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3790,
+   "detector": "dream-alias",
+   "similarity": 0.774,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3809,
+   "detector": "dream-alias",
+   "similarity": 0.721,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3880,
+   "detector": "dream-alias",
+   "similarity": 0.699,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3816,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3897,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4223,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3706,
+   "detector": "dream-alias",
+   "similarity": 0.579,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4170,
+   "detector": "dream-alias",
+   "similarity": 0.909,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4267,
+   "detector": "dream-alias",
+   "similarity": 0.891,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3874,
+   "detector": "dream-alias",
+   "similarity": 0.768,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3782,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4224,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3688,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4218,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4324,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4228,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4233,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4235,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4081,
+   "detector": "dream-alias",
+   "similarity": 0.961,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3264,
+   "detector": "dream-alias",
+   "similarity": 0.906,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3263,
+   "detector": "dream-alias",
+   "similarity": 0.807,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3473,
+   "detector": "dream-alias",
+   "similarity": 0.766,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3030,
+   "detector": "dream-alias",
+   "similarity": 0.87,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2982,
+   "detector": "dream-alias",
+   "similarity": 0.841,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3087,
+   "detector": "dream-alias",
+   "similarity": 0.748,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3081,
+   "detector": "dream-alias",
+   "similarity": 0.728,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3818,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3622,
+   "detector": "dream-alias",
+   "similarity": 0.72,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3817,
+   "detector": "dream-alias",
+   "similarity": 0.715,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3735,
+   "detector": "dream-alias",
+   "similarity": 0.682,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3100,
+   "detector": "dream-alias",
+   "similarity": 0.958,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3368,
+   "detector": "dream-alias",
+   "similarity": 0.868,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3026,
+   "detector": "dream-alias",
+   "similarity": 0.816,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3825,
+   "detector": "dream-alias",
+   "similarity": 0.88,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4163,
+   "detector": "dream-alias",
+   "similarity": 0.868,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4106,
+   "detector": "dream-alias",
+   "similarity": 0.637,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2989,
+   "detector": "dream-alias",
+   "similarity": 0.836,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3355,
+   "detector": "dream-alias",
+   "similarity": 0.827,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3167,
+   "detector": "dream-alias",
+   "similarity": 0.791,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3822,
+   "detector": "dream-alias",
+   "similarity": 0.81,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3283,
+   "detector": "dream-alias",
+   "similarity": 0.796,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3165,
+   "detector": "dream-alias",
+   "similarity": 0.794,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3094,
+   "detector": "dream-alias",
+   "similarity": 0.757,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3090,
+   "detector": "dream-alias",
+   "similarity": 0.749,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3134,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3075,
+   "detector": "dream-alias",
+   "similarity": 0.743,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3088,
+   "detector": "dream-alias",
+   "similarity": 0.731,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3344,
+   "detector": "dream-alias",
+   "similarity": 0.708,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3079,
+   "detector": "dream-alias",
+   "similarity": 0.712,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4115,
+   "detector": "dream-alias",
+   "similarity": 0.707,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3476,
+   "detector": "dream-alias",
+   "similarity": 0.633,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3371,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3527,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3624,
+   "detector": "dream-alias",
+   "similarity": 0.956,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 4249,
+   "detector": "dream-alias",
+   "similarity": 0.944,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3276,
+   "detector": "dream-alias",
+   "similarity": 0.875,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2984,
+   "detector": "dream-alias",
+   "similarity": 0.793,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4060,
+   "detector": "dream-alias",
+   "similarity": 0.85,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4057,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3806,
+   "detector": "dream-alias",
+   "similarity": 0.822,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3350,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3469,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3471,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4011,
+   "detector": "dream-alias",
+   "similarity": 0.782,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4010,
+   "detector": "dream-alias",
+   "similarity": 0.78,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3080,
+   "detector": "dream-alias",
+   "similarity": 0.763,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3810,
+   "detector": "dream-alias",
+   "similarity": 0.695,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2679,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2728,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4261,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4250,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4078,
+   "detector": "dream-alias",
+   "similarity": 0.719,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4157,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3521,
+   "detector": "dream-alias",
+   "similarity": 0.679,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3589,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.625,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2737,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4222,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3731,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3431,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2529,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2530,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2453,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3229,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2628,
+   "detector": "token-subset",
+   "similarity": 0.9747,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2990,
+   "detector": "dream-alias",
+   "similarity": 0.945,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4243,
+   "detector": "dream-alias",
+   "similarity": 0.893,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3361,
+   "detector": "dream-alias",
+   "similarity": 0.861,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3333,
+   "detector": "dream-alias",
+   "similarity": 0.841,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4093,
+   "detector": "dream-alias",
+   "similarity": 0.813,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3684,
+   "detector": "dream-alias",
+   "similarity": 0.803,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3600,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2283,
+   "detector": "dream-alias",
+   "similarity": 0.791,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4092,
+   "detector": "dream-alias",
+   "similarity": 0.779,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3531,
+   "detector": "dream-alias",
+   "similarity": 0.77,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3004,
+   "detector": "dream-alias",
+   "similarity": 0.763,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2401,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2543,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3450,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4220,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3737,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3335,
+   "detector": "dream-alias",
+   "similarity": 0.731,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3138,
+   "detector": "dream-alias",
+   "similarity": 0.722,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3633,
+   "detector": "dream-alias",
+   "similarity": 0.709,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4069,
+   "detector": "dream-alias",
+   "similarity": 0.702,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3019,
+   "detector": "dream-alias",
+   "similarity": 0.692,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3099,
+   "detector": "dream-alias",
+   "similarity": 0.683,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4260,
+   "detector": "dream-alias",
+   "similarity": 0.674,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2298,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2499,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2763,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3098,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3468,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3680,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4054,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4433,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3441,
+   "detector": "dream-alias",
+   "similarity": 0.666,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3719,
+   "detector": "dream-alias",
+   "similarity": 0.648,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3982,
+   "detector": "dream-alias",
+   "similarity": 0.637,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3161,
+   "detector": "dream-alias",
+   "similarity": 0.612,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2686,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3227,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3976,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4350,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4365,
+   "detector": "dream-alias",
+   "similarity": 0.86,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3694,
+   "detector": "dream-alias",
+   "similarity": 0.823,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3692,
+   "detector": "dream-alias",
+   "similarity": 0.811,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3696,
+   "detector": "dream-alias",
+   "similarity": 0.791,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4364,
+   "detector": "dream-alias",
+   "similarity": 0.781,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3613,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3887,
+   "detector": "dream-alias",
+   "similarity": 0.727,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3676,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4230,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4231,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4379,
+   "detector": "dream-alias",
+   "similarity": 0.948,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4381,
+   "detector": "dream-alias",
+   "similarity": 0.94,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4380,
+   "detector": "dream-alias",
+   "similarity": 0.906,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4382,
+   "detector": "dream-alias",
+   "similarity": 0.906,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4383,
+   "detector": "dream-alias",
+   "similarity": 0.887,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4387,
+   "detector": "dream-alias",
+   "similarity": 0.838,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3342,
+   "detector": "dream-alias",
+   "similarity": 0.879,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3181,
+   "detector": "dream-alias",
+   "similarity": 0.878,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3343,
+   "detector": "dream-alias",
+   "similarity": 0.859,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3610,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4441,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3714,
+   "detector": "dream-alias",
+   "similarity": 0.752,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3707,
+   "detector": "dream-alias",
+   "similarity": 0.718,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3632,
+   "detector": "dream-alias",
+   "similarity": 0.676,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3552,
+   "detector": "dream-alias",
+   "similarity": 0.617,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3704,
+   "detector": "dream-alias",
+   "similarity": 0.553,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3542,
+   "detector": "dream-alias",
+   "similarity": 0.855,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3520,
+   "detector": "dream-alias",
+   "similarity": 0.821,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3516,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3969,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3146,
+   "detector": "dream-alias",
+   "similarity": 0.699,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3142,
+   "detector": "dream-alias",
+   "similarity": 0.668,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3141,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3145,
+   "detector": "dream-alias",
+   "similarity": 0.634,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3922,
+   "detector": "dream-alias",
+   "similarity": 0.957,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3925,
+   "detector": "dream-alias",
+   "similarity": 0.914,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3348,
+   "detector": "dream-alias",
+   "similarity": 0.675,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3905,
+   "detector": "dream-alias",
+   "similarity": 0.88,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3971,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3972,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3155,
+   "detector": "dream-alias",
+   "similarity": 0.835,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3917,
+   "detector": "dream-alias",
+   "similarity": 0.729,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3223,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4102,
+   "detector": "dream-alias",
+   "similarity": 0.806,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3435,
+   "detector": "dream-alias",
+   "similarity": 0.713,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3282,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4002,
+   "detector": "dream-alias",
+   "similarity": 0.754,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4264,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3697,
+   "detector": "dream-alias",
+   "similarity": 0.619,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4073,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3681,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3078,
+   "detector": "dream-alias",
+   "similarity": 0.647,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4009,
+   "detector": "dream-alias",
+   "similarity": 0.686,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4111,
+   "detector": "dream-alias",
+   "similarity": 0.655,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4047,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3920,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3921,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2311,
+   "detector": "dream-alias",
+   "similarity": 0.945,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3174,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3551,
+   "detector": "dream-alias",
+   "similarity": 0.867,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3550,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3682,
+   "detector": "dream-alias",
+   "similarity": 0.847,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3720,
+   "detector": "dream-alias",
+   "similarity": 0.71,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3903,
+   "detector": "dream-alias",
+   "similarity": 0.818,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3902,
+   "detector": "dream-alias",
+   "similarity": 0.758,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3826,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4096,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3073,
+   "detector": "dream-alias",
+   "similarity": 0.78,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3069,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3097,
+   "detector": "dream-alias",
+   "similarity": 0.76,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3096,
+   "detector": "dream-alias",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2998,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3008,
+   "detector": "dream-alias",
+   "similarity": 0.662,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3819,
+   "detector": "dream-alias",
+   "similarity": 0.749,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3866,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3629,
+   "detector": "dream-alias",
+   "similarity": 0.718,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4071,
+   "detector": "dream-alias",
+   "similarity": 0.61,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4067,
+   "detector": "dream-alias",
+   "similarity": 0.671,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4159,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2816,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2817,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3780,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4455,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2532,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3461,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2482,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3526,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3369,
+   "detector": "dream-alias",
+   "similarity": 0.971,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3277,
+   "detector": "dream-alias",
+   "similarity": 0.924,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4100,
+   "detector": "dream-alias",
+   "similarity": 0.888,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4368,
+   "detector": "dream-alias",
+   "similarity": 0.861,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3900,
+   "detector": "dream-alias",
+   "similarity": 0.84,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2991,
+   "detector": "dream-alias",
+   "similarity": 0.811,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2399,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3779,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3339,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3538,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3804,
+   "detector": "dream-alias",
+   "similarity": 0.77,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3279,
+   "detector": "dream-alias",
+   "similarity": 0.763,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2402,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2654,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3536,
+   "detector": "dream-alias",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4259,
+   "detector": "dream-alias",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3983,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3005,
+   "detector": "dream-alias",
+   "similarity": 0.73,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4062,
+   "detector": "dream-alias",
+   "similarity": 0.721,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3823,
+   "detector": "dream-alias",
+   "similarity": 0.709,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3002,
+   "detector": "dream-alias",
+   "similarity": 0.701,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3243,
+   "detector": "dream-alias",
+   "similarity": 0.692,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3163,
+   "detector": "dream-alias",
+   "similarity": 0.683,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3592,
+   "detector": "dream-alias",
+   "similarity": 0.671,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2359,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2531,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2772,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3268,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3518,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3732,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4058,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4434,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3290,
+   "detector": "dream-alias",
+   "similarity": 0.665,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3821,
+   "detector": "dream-alias",
+   "similarity": 0.648,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4068,
+   "detector": "dream-alias",
+   "similarity": 0.633,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3621,
+   "detector": "dream-alias",
+   "similarity": 0.61,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2729,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3272,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3977,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4374,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3376,
+   "detector": "dream-alias",
+   "similarity": 0.83,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3017,
+   "detector": "dream-alias",
+   "similarity": 0.796,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3377,
+   "detector": "dream-alias",
+   "similarity": 0.789,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4219,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3020,
+   "detector": "dream-alias",
+   "similarity": 0.727,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3007,
+   "detector": "dream-alias",
+   "similarity": 0.722,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3382,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3783,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3870,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4226,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3252,
+   "detector": "dream-alias",
+   "similarity": 0.942,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3184,
+   "detector": "dream-alias",
+   "similarity": 0.914,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3873,
+   "detector": "dream-alias",
+   "similarity": 0.904,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3178,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3981,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4349,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4451,
+   "detector": "dream-alias",
+   "similarity": 0.872,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4384,
+   "detector": "dream-alias",
+   "similarity": 0.865,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4254,
+   "detector": "dream-alias",
+   "similarity": 0.84,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4255,
+   "detector": "dream-alias",
+   "similarity": 0.804,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3182,
+   "detector": "dream-alias",
+   "similarity": 0.715,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4371,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4373,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4375,
+   "detector": "dream-alias",
+   "similarity": 0.724,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4448,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4449,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2985,
+   "detector": "dream-alias",
+   "similarity": 0.841,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3723,
+   "detector": "dream-alias",
+   "similarity": 0.821,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3724,
+   "detector": "dream-alias",
+   "similarity": 0.752,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3068,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3727,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3728,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3729,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4166,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3259,
+   "detector": "dream-alias",
+   "similarity": 0.936,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3549,
+   "detector": "dream-alias",
+   "similarity": 0.744,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3191,
+   "detector": "dream-alias",
+   "similarity": 0.729,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3699,
+   "detector": "dream-alias",
+   "similarity": 0.878,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3428,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3429,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4457,
+   "detector": "dream-alias",
+   "similarity": 0.825,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3702,
+   "detector": "dream-alias",
+   "similarity": 0.656,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4377,
+   "detector": "dream-alias",
+   "similarity": 0.628,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4175,
+   "detector": "dream-alias",
+   "similarity": 0.797,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4086,
+   "detector": "dream-alias",
+   "similarity": 0.744,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3994,
+   "detector": "dream-alias",
+   "similarity": 0.736,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2676,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3261,
+   "detector": "dream-alias",
+   "similarity": 0.721,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2674,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3907,
+   "detector": "dream-alias",
+   "similarity": 0.738,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3898,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3974,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3808,
+   "detector": "dream-alias",
+   "similarity": 0.672,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3867,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3875,
+   "detector": "dream-alias",
+   "similarity": 0.627,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4164,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3687,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3904,
+   "detector": "dream-alias",
+   "similarity": 0.927,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3074,
+   "detector": "dream-alias",
+   "similarity": 0.877,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3913,
+   "detector": "dream-alias",
+   "similarity": 0.861,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3910,
+   "detector": "dream-alias",
+   "similarity": 0.823,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4355,
+   "detector": "dream-alias",
+   "similarity": 0.845,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3872,
+   "detector": "dream-alias",
+   "similarity": 0.825,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2589,
+   "detector": "dream-alias",
+   "similarity": 0.813,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2535,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4094,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3827,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3447,
+   "detector": "dream-alias",
+   "similarity": 0.777,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3514,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3811,
+   "detector": "dream-alias",
+   "similarity": 0.76,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3457,
+   "detector": "dream-alias",
+   "similarity": 0.709,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3265,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3426,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3713,
+   "detector": "dream-alias",
+   "similarity": 0.746,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3678,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3453,
+   "detector": "dream-alias",
+   "similarity": 0.717,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3456,
+   "detector": "dream-alias",
+   "similarity": 0.671,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3605,
+   "detector": "dream-alias",
+   "similarity": 0.67,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3785,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2976,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3177,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3868,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3871,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3011,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3014,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2534,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3597,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4453,
+   "detector": "dream-alias",
+   "similarity": 0.963,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 2996,
+   "detector": "dream-alias",
+   "similarity": 0.921,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3791,
+   "detector": "dream-alias",
+   "similarity": 0.881,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2939,
+   "detector": "dream-alias",
+   "similarity": 0.859,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3249,
+   "detector": "dream-alias",
+   "similarity": 0.839,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3718,
+   "detector": "dream-alias",
+   "similarity": 0.809,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2771,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3799,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3347,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4271,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3357,
+   "detector": "dream-alias",
+   "similarity": 0.769,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4333,
+   "detector": "dream-alias",
+   "similarity": 0.762,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2454,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2656,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3619,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4330,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2992,
+   "detector": "dream-alias",
+   "similarity": 0.74,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3091,
+   "detector": "dream-alias",
+   "similarity": 0.73,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4262,
+   "detector": "dream-alias",
+   "similarity": 0.721,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3820,
+   "detector": "dream-alias",
+   "similarity": 0.708,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 4080,
+   "detector": "dream-alias",
+   "similarity": 0.701,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3984,
+   "detector": "dream-alias",
+   "similarity": 0.691,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3338,
+   "detector": "dream-alias",
+   "similarity": 0.682,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4161,
+   "detector": "dream-alias",
+   "similarity": 0.67,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2369,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2582,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2854,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3275,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3524,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3734,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4072,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4435,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4251,
+   "detector": "dream-alias",
+   "similarity": 0.663,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3914,
+   "detector": "dream-alias",
+   "similarity": 0.648,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4110,
+   "detector": "dream-alias",
+   "similarity": 0.628,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3715,
+   "detector": "dream-alias",
+   "similarity": 0.604,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2752,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3366,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3978,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4442,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3351,
+   "detector": "dream-alias",
+   "similarity": 0.843,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3247,
+   "detector": "dream-alias",
+   "similarity": 0.836,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3358,
+   "detector": "dream-alias",
+   "similarity": 0.788,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2745,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3187,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3266,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3427,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3970,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3522,
+   "detector": "dream-alias",
+   "similarity": 0.596,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4496,
+   "detector": "analyzer-duplicate",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4454,
+   "detector": "dream-alias",
+   "similarity": 0.901,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4456,
+   "detector": "dream-alias",
+   "similarity": 0.885,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4458,
+   "detector": "dream-alias",
+   "similarity": 0.825,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4459,
+   "detector": "dream-alias",
+   "similarity": 0.802,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4500,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3250,
+   "detector": "dream-alias",
+   "similarity": 0.902,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2403,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4320,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4428,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2916,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3228,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2436,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2444,
+   "detector": "dream-alias",
+   "similarity": 0.929,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3449,
+   "detector": "dream-alias",
+   "similarity": 0.92,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3467,
+   "detector": "dream-alias",
+   "similarity": 0.847,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4001,
+   "detector": "dream-alias",
+   "similarity": 0.912,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4000,
+   "detector": "dream-alias",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3381,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3517,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4366,
+   "detector": "dream-alias",
+   "similarity": 0.812,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3222,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3424,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3695,
+   "detector": "dream-alias",
+   "similarity": 0.728,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3812,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3813,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3814,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4085,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2288,
+   "detector": "dream-alias",
+   "similarity": 0.866,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4339,
+   "detector": "dream-alias",
+   "similarity": 0.793,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2725,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4258,
+   "detector": "dream-alias",
+   "similarity": 0.82,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4346,
+   "detector": "dream-alias",
+   "similarity": 0.699,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4328,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4116,
+   "detector": "dream-alias",
+   "similarity": 0.787,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3092,
+   "detector": "dream-alias",
+   "similarity": 0.749,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3133,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3239,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4113,
+   "detector": "dream-alias",
+   "similarity": 0.711,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2432,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3824,
+   "detector": "dream-alias",
+   "similarity": 0.734,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3815,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3018,
+   "detector": "dream-alias",
+   "similarity": 0.645,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2669,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2670,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2671,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3660,
+   "detector": "substring",
+   "similarity": 0.9929,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3996,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4352,
+   "detector": "dream-alias",
+   "similarity": 0.927,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4326,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3479,
+   "detector": "dream-alias",
+   "similarity": 0.86,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3151,
+   "detector": "dream-alias",
+   "similarity": 0.706,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3148,
+   "detector": "dream-alias",
+   "similarity": 0.839,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3147,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3232,
+   "detector": "dream-alias",
+   "similarity": 0.808,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3337,
+   "detector": "dream-alias",
+   "similarity": 0.797,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4372,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4378,
+   "detector": "dream-alias",
+   "similarity": 0.636,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3340,
+   "detector": "dream-alias",
+   "similarity": 0.774,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3330,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3722,
+   "detector": "dream-alias",
+   "similarity": 0.759,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3024,
+   "detector": "dream-alias",
+   "similarity": 0.736,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3608,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3881,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3242,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3329,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4104,
+   "detector": "dream-alias",
+   "similarity": 0.712,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4105,
+   "detector": "dream-alias",
+   "similarity": 0.669,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4269,
+   "detector": "dream-alias",
+   "similarity": 0.669,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4171,
+   "detector": "dream-alias",
+   "similarity": 0.636,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2977,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2978,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.625,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3882,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3883,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3434,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4263,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2644,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4176,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3380,
+   "detector": "dream-alias",
+   "similarity": 0.962,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4332,
+   "detector": "dream-alias",
+   "similarity": 0.92,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 4181,
+   "detector": "dream-alias",
+   "similarity": 0.875,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 4240,
+   "detector": "dream-alias",
+   "similarity": 0.859,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4389,
+   "detector": "dream-alias",
+   "similarity": 0.828,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3169,
+   "detector": "dream-alias",
+   "similarity": 0.808,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 2827,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3896,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3464,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3085,
+   "detector": "dream-alias",
+   "similarity": 0.777,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3685,
+   "detector": "dream-alias",
+   "similarity": 0.769,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3027,
+   "detector": "dream-alias",
+   "similarity": 0.76,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2465,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3183,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3730,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4348,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3590,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3466,
+   "detector": "dream-alias",
+   "similarity": 0.727,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3465,
+   "detector": "dream-alias",
+   "similarity": 0.719,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 3245,
+   "detector": "dream-alias",
+   "similarity": 0.707,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4343,
+   "detector": "dream-alias",
+   "similarity": 0.7,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3615,
+   "detector": "dream-alias",
+   "similarity": 0.69,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4055,
+   "detector": "dream-alias",
+   "similarity": 0.682,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3454,
+   "detector": "dream-alias",
+   "similarity": 0.669,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2405,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2727,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2902,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3280,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3547,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3781,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4097,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4436,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3095,
+   "detector": "dream-alias",
+   "similarity": 0.662,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3154,
+   "detector": "dream-alias",
+   "similarity": 0.647,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3523,
+   "detector": "dream-alias",
+   "similarity": 0.626,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2430,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2819,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3430,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3979,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4445,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4385,
+   "detector": "dream-alias",
+   "similarity": 0.914,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4253,
+   "detector": "dream-alias",
+   "similarity": 0.884,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4386,
+   "detector": "dream-alias",
+   "similarity": 0.878,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4256,
+   "detector": "dream-alias",
+   "similarity": 0.877,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3533,
+   "detector": "dream-alias",
+   "similarity": 0.81,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4388,
+   "detector": "dream-alias",
+   "similarity": 0.805,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3602,
+   "detector": "dream-alias",
+   "similarity": 0.803,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3534,
+   "detector": "dream-alias",
+   "similarity": 0.797,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3604,
+   "detector": "dream-alias",
+   "similarity": 0.888,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3246,
+   "detector": "dream-alias",
+   "similarity": 0.827,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4376,
+   "detector": "dream-alias",
+   "similarity": 0.817,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3238,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3612,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4221,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4430,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4245,
+   "detector": "dream-alias",
+   "similarity": 0.883,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4356,
+   "detector": "dream-alias",
+   "similarity": 0.88,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4237,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4238,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4239,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4323,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3891,
+   "detector": "dream-alias",
+   "similarity": 0.996,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3802,
+   "detector": "dream-alias",
+   "similarity": 0.995,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3796,
+   "detector": "dream-alias",
+   "similarity": 0.99,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3803,
+   "detector": "dream-alias",
+   "similarity": 0.85,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3356,
+   "detector": "dream-alias",
+   "similarity": 0.9,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3698,
+   "detector": "dream-alias",
+   "similarity": 0.889,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3341,
+   "detector": "dream-alias",
+   "similarity": 0.83,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3360,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3710,
+   "detector": "dream-alias",
+   "similarity": 0.757,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3701,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3993,
+   "detector": "dream-alias",
+   "similarity": 0.663,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3787,
+   "detector": "dream-alias",
+   "similarity": 0.638,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4325,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4229,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4232,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4234,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4353,
+   "detector": "dream-alias",
+   "similarity": 0.866,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3721,
+   "detector": "dream-alias",
+   "similarity": 0.805,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3986,
+   "detector": "dream-alias",
+   "similarity": 0.716,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3158,
+   "detector": "dream-alias",
+   "similarity": 0.818,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3160,
+   "detector": "dream-alias",
+   "similarity": 0.795,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3159,
+   "detector": "dream-alias",
+   "similarity": 0.794,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3077,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3168,
+   "detector": "dream-alias",
+   "similarity": 0.761,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3437,
+   "detector": "dream-alias",
+   "similarity": 0.757,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3326,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3257,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3328,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3798,
+   "detector": "dream-alias",
+   "similarity": 0.727,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3362,
+   "detector": "dream-alias",
+   "similarity": 0.688,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3387,
+   "detector": "dream-alias",
+   "similarity": 0.59,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2437,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2593,
+   "detector": "dream-alias",
+   "similarity": 0.899,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2460,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2489,
+   "detector": "dream-alias",
+   "similarity": 0.811,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3617,
+   "detector": "dream-alias",
+   "similarity": 0.985,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3519,
+   "detector": "dream-alias",
+   "similarity": 0.978,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 2762,
+   "detector": "dream-alias",
+   "similarity": 0.912,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2818,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4252,
+   "detector": "dream-alias",
+   "similarity": 0.86,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4431,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3738,
+   "detector": "dream-alias",
+   "similarity": 0.837,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3171,
+   "detector": "dream-alias",
+   "similarity": 0.686,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3384,
+   "detector": "dream-alias",
+   "similarity": 0.808,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4244,
+   "detector": "dream-alias",
+   "similarity": 0.78,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3620,
+   "detector": "dream-alias",
+   "similarity": 0.799,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3529,
+   "detector": "dream-alias",
+   "similarity": 0.69,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4369,
+   "detector": "dream-alias",
+   "similarity": 0.773,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4063,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3985,
+   "detector": "dream-alias",
+   "similarity": 0.759,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4334,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3609,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3869,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3278,
+   "detector": "dream-alias",
+   "similarity": 0.734,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3271,
+   "detector": "write-dedup",
+   "similarity": 0.714,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4266,
+   "detector": "dream-alias",
+   "similarity": 0.701,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4070,
+   "detector": "dream-alias",
+   "similarity": 0.655,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2417,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2987,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2980,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3367,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3884,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3885,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4327,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4443,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4040,
+   "detector": "substring",
+   "similarity": 0.989,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3995,
+   "detector": "dream-alias",
+   "similarity": 0.96,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3284,
+   "detector": "dream-alias",
+   "similarity": 0.919,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3683,
+   "detector": "dream-alias",
+   "similarity": 0.87,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4059,
+   "detector": "dream-alias",
+   "similarity": 0.858,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3736,
+   "detector": "dream-alias",
+   "similarity": 0.822,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3528,
+   "detector": "dream-alias",
+   "similarity": 0.807,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2896,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4277,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3911,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3478,
+   "detector": "dream-alias",
+   "similarity": 0.776,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3546,
+   "detector": "dream-alias",
+   "similarity": 0.766,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3530,
+   "detector": "dream-alias",
+   "similarity": 0.76,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2501,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3189,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3886,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3805,
+   "detector": "dream-alias",
+   "similarity": 0.748,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3912,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3336,
+   "detector": "dream-alias",
+   "similarity": 0.726,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3086,
+   "detector": "dream-alias",
+   "similarity": 0.717,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4090,
+   "detector": "dream-alias",
+   "similarity": 0.707,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3093,
+   "detector": "dream-alias",
+   "similarity": 0.696,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3725,
+   "detector": "dream-alias",
+   "similarity": 0.689,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3289,
+   "detector": "dream-alias",
+   "similarity": 0.681,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3172,
+   "detector": "dream-alias",
+   "similarity": 0.668,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2414,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2730,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2937,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3281,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3587,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3792,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4165,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4437,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2997,
+   "detector": "dream-alias",
+   "similarity": 0.661,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3230,
+   "detector": "dream-alias",
+   "similarity": 0.647,
+   "verdict": "reject",
+   "veto": "event-slug"
+  },
+  {
+   "id": 4342,
+   "detector": "write-dedup",
+   "similarity": 0.625,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2431,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2820,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3525,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3980,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4447,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3071,
+   "detector": "dream-alias",
+   "similarity": 0.835,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3070,
+   "detector": "dream-alias",
+   "similarity": 0.829,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3173,
+   "detector": "dream-alias",
+   "similarity": 0.822,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3606,
+   "detector": "dream-alias",
+   "similarity": 0.82,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3166,
+   "detector": "dream-alias",
+   "similarity": 0.787,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4084,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3170,
+   "detector": "dream-alias",
+   "similarity": 0.761,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3016,
+   "detector": "dream-alias",
+   "similarity": 0.734,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3267,
+   "detector": "dream-alias",
+   "similarity": 0.876,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4091,
+   "detector": "dream-alias",
+   "similarity": 0.79,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3153,
+   "detector": "dream-alias",
+   "similarity": 0.758,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3686,
+   "detector": "dream-alias",
+   "similarity": 0.755,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4357,
+   "detector": "dream-alias",
+   "similarity": 0.746,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3452,
+   "detector": "dream-alias",
+   "similarity": 0.74,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2406,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3611,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3253,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3254,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3359,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3432,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4444,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3001,
+   "detector": "dream-alias",
+   "similarity": 0.99,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3023,
+   "detector": "dream-alias",
+   "similarity": 0.987,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3448,
+   "detector": "dream-alias",
+   "similarity": 0.966,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3025,
+   "detector": "dream-alias",
+   "similarity": 0.909,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3924,
+   "detector": "dream-alias",
+   "similarity": 0.897,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3442,
+   "detector": "dream-alias",
+   "similarity": 0.759,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4178,
+   "detector": "dream-alias",
+   "similarity": 0.755,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4179,
+   "detector": "dream-alias",
+   "similarity": 0.68,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4048,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4049,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4050,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4156,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3009,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3010,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3013,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3693,
+   "detector": "dream-alias",
+   "similarity": 0.933,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3901,
+   "detector": "dream-alias",
+   "similarity": 0.845,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3778,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.8,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3540,
+   "detector": "dream-alias",
+   "similarity": 0.859,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3618,
+   "detector": "dream-alias",
+   "similarity": 0.829,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3586,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3334,
+   "detector": "dream-alias",
+   "similarity": 0.817,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3332,
+   "detector": "dream-alias",
+   "similarity": 0.739,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3233,
+   "detector": "dream-alias",
+   "similarity": 0.688,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4345,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4351,
+   "detector": "dream-alias",
+   "similarity": 0.774,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4341,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3793,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3794,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3795,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3388,
+   "detector": "dream-alias",
+   "similarity": 0.726,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3535,
+   "detector": "dream-alias",
+   "similarity": 0.689,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3346,
+   "detector": "dream-alias",
+   "similarity": 0.676,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2573,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2723,
+   "detector": "analyzer-duplicate",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4363,
+   "detector": "dream-alias",
+   "similarity": 0.979,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3987,
+   "detector": "dream-alias",
+   "similarity": 0.875,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2445,
+   "detector": "dream-alias",
+   "similarity": 0.902,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3616,
+   "detector": "dream-alias",
+   "similarity": 0.686,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3149,
+   "detector": "dream-alias",
+   "similarity": 0.856,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3451,
+   "detector": "dream-alias",
+   "similarity": 0.704,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3144,
+   "detector": "dream-alias",
+   "similarity": 0.832,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2813,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4268,
+   "detector": "dream-alias",
+   "similarity": 0.804,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4004,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3083,
+   "detector": "dream-alias",
+   "similarity": 0.797,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3539,
+   "detector": "dream-alias",
+   "similarity": 0.724,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3260,
+   "detector": "dream-alias",
+   "similarity": 0.772,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2917,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4061,
+   "detector": "dream-alias",
+   "similarity": 0.757,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4056,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3968,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3918,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4272,
+   "detector": "dream-alias",
+   "similarity": 0.733,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4087,
+   "detector": "dream-alias",
+   "similarity": 0.69,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2940,
+   "detector": "dream-alias",
+   "similarity": 0.7,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3915,
+   "detector": "dream-alias",
+   "similarity": 0.66,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2559,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2594,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3256,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3258,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3888,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3889,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2282,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2684,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4276,
+   "detector": "dream-alias",
+   "similarity": 0.989,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3185,
+   "detector": "dream-alias",
+   "similarity": 0.955,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4168,
+   "detector": "dream-alias",
+   "similarity": 0.911,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3383,
+   "detector": "dream-alias",
+   "similarity": 0.869,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4117,
+   "detector": "dream-alias",
+   "similarity": 0.853,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3029,
+   "detector": "dream-alias",
+   "similarity": 0.816,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3598,
+   "detector": "dream-alias",
+   "similarity": 0.807,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3012,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4370,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4101,
+   "detector": "dream-alias",
+   "similarity": 0.786,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4108,
+   "detector": "dream-alias",
+   "similarity": 0.774,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4344,
+   "detector": "dream-alias",
+   "similarity": 0.766,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3709,
+   "detector": "dream-alias",
+   "similarity": 0.758,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2528,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3255,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4095,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3244,
+   "detector": "dream-alias",
+   "similarity": 0.746,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3607,
+   "detector": "dream-alias",
+   "similarity": 0.737,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3916,
+   "detector": "dream-alias",
+   "similarity": 0.725,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4088,
+   "detector": "dream-alias",
+   "similarity": 0.714,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4241,
+   "detector": "dream-alias",
+   "similarity": 0.705,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3463,
+   "detector": "dream-alias",
+   "similarity": 0.696,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3591,
+   "detector": "dream-alias",
+   "similarity": 0.687,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3372,
+   "detector": "dream-alias",
+   "similarity": 0.679,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4007,
+   "detector": "dream-alias",
+   "similarity": 0.668,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2452,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2731,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2986,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3365,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3594,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3890,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4278,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4438,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3379,
+   "detector": "dream-alias",
+   "similarity": 0.659,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3596,
+   "detector": "dream-alias",
+   "similarity": 0.645,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3003,
+   "detector": "dream-alias",
+   "similarity": 0.618,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2486,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2856,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3593,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4158,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4501,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3480,
+   "detector": "dream-alias",
+   "similarity": 0.78,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4114,
+   "detector": "dream-alias",
+   "similarity": 0.77,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3021,
+   "detector": "dream-alias",
+   "similarity": 0.755,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3436,
+   "detector": "dream-alias",
+   "similarity": 0.751,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3015,
+   "detector": "dream-alias",
+   "similarity": 0.743,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3028,
+   "detector": "dream-alias",
+   "similarity": 0.726,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3788,
+   "detector": "dream-alias",
+   "similarity": 0.707,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3474,
+   "detector": "dream-alias",
+   "similarity": 0.675,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3829,
+   "detector": "dream-alias",
+   "similarity": 0.846,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3828,
+   "detector": "dream-alias",
+   "similarity": 0.842,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3830,
+   "detector": "dream-alias",
+   "similarity": 0.827,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3909,
+   "detector": "dream-alias",
+   "similarity": 0.759,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4180,
+   "detector": "dream-alias",
+   "similarity": 0.757,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3703,
+   "detector": "dream-alias",
+   "similarity": 0.749,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4008,
+   "detector": "dream-alias",
+   "similarity": 0.668,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3876,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3877,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3878,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3991,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4225,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4322,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3323,
+   "detector": "token-subset",
+   "similarity": 0.9847,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3273,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3274,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3364,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4335,
+   "detector": "dream-alias",
+   "similarity": 0.887,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4169,
+   "detector": "dream-alias",
+   "similarity": 0.787,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3797,
+   "detector": "dream-alias",
+   "similarity": 0.742,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3385,
+   "detector": "dream-alias",
+   "similarity": 0.637,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4247,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4248,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4329,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4446,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4064,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4065,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4066,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3807,
+   "detector": "dream-alias",
+   "similarity": 0.907,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3378,
+   "detector": "dream-alias",
+   "similarity": 0.741,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4167,
+   "detector": "dream-alias",
+   "similarity": 0.724,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3022,
+   "detector": "dream-alias",
+   "similarity": 0.85,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3349,
+   "detector": "dream-alias",
+   "similarity": 0.771,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3190,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3231,
+   "detector": "dream-alias",
+   "similarity": 0.815,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3345,
+   "detector": "dream-alias",
+   "similarity": 0.759,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3374,
+   "detector": "dream-alias",
+   "similarity": 0.725,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4006,
+   "detector": "dream-alias",
+   "similarity": 0.769,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4005,
+   "detector": "dream-alias",
+   "similarity": 0.764,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3879,
+   "detector": "dream-alias",
+   "similarity": 0.715,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4429,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3673,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3674,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3541,
+   "detector": "dream-alias",
+   "similarity": 0.716,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3544,
+   "detector": "dream-alias",
+   "similarity": 0.685,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3543,
+   "detector": "dream-alias",
+   "similarity": 0.638,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3067,
+   "detector": "analyzer-duplicate",
+   "similarity": 1.0,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3286,
+   "detector": "dream-alias",
+   "similarity": 0.792,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2353,
+   "detector": "substring",
+   "similarity": 0.9734,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2981,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4273,
+   "detector": "dream-alias",
+   "similarity": 0.897,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4182,
+   "detector": "dream-alias",
+   "similarity": 0.79,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3373,
+   "detector": "dream-alias",
+   "similarity": 0.855,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3458,
+   "detector": "dream-alias",
+   "similarity": 0.686,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3287,
+   "detector": "dream-alias",
+   "similarity": 0.829,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4075,
+   "detector": "dream-alias",
+   "similarity": 0.778,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3156,
+   "detector": "dream-alias",
+   "similarity": 0.8,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2481,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3923,
+   "detector": "dream-alias",
+   "similarity": 0.792,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4109,
+   "detector": "dream-alias",
+   "similarity": 0.756,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4347,
+   "detector": "dream-alias",
+   "similarity": 0.772,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2975,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3630,
+   "detector": "dream-alias",
+   "similarity": 0.753,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3625,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3989,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3990,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3998,
+   "detector": "dream-alias",
+   "similarity": 0.729,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2572,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3992,
+   "detector": "dream-alias",
+   "similarity": 0.697,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3988,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2642,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2668,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3588,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3548,
+   "detector": "dream-alias",
+   "similarity": 0.614,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4177,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4173,
+   "detector": "dream-alias",
+   "similarity": 0.571,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2295,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2999,
+   "detector": "write-dedup",
+   "similarity": 1.0,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 4354,
+   "detector": "dream-alias",
+   "similarity": 0.987,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4279,
+   "detector": "dream-alias",
+   "similarity": 0.953,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 3000,
+   "detector": "dream-alias",
+   "similarity": 0.906,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2320,
+   "detector": "dream-alias",
+   "similarity": 0.868,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3150,
+   "detector": "dream-alias",
+   "similarity": 0.847,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3691,
+   "detector": "dream-alias",
+   "similarity": 0.815,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3101,
+   "detector": "dream-alias",
+   "similarity": 0.806,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3076,
+   "detector": "write-dedup",
+   "similarity": 0.8,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3537,
+   "detector": "dream-alias",
+   "similarity": 0.794,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4076,
+   "detector": "dream-alias",
+   "similarity": 0.783,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3440,
+   "detector": "dream-alias",
+   "similarity": 0.773,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2653,
+   "detector": "dream-alias",
+   "similarity": 0.765,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 3999,
+   "detector": "dream-alias",
+   "similarity": 0.756,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2533,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3363,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4098,
+   "detector": "write-dedup",
+   "similarity": 0.75,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3595,
+   "detector": "dream-alias",
+   "similarity": 0.744,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4074,
+   "detector": "dream-alias",
+   "similarity": 0.734,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3370,
+   "detector": "dream-alias",
+   "similarity": 0.724,
+   "verdict": "reject",
+   "veto": "numeric-substitution"
+  },
+  {
+   "id": 4112,
+   "detector": "dream-alias",
+   "similarity": 0.714,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4275,
+   "detector": "dream-alias",
+   "similarity": 0.705,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3006,
+   "detector": "dream-alias",
+   "similarity": 0.695,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3082,
+   "detector": "dream-alias",
+   "similarity": 0.685,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3143,
+   "detector": "dream-alias",
+   "similarity": 0.678,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4160,
+   "detector": "dream-alias",
+   "similarity": 0.668,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2462,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 2738,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 2988,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "accept",
+   "veto": null
+  },
+  {
+   "id": 3433,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3627,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3919,
+   "detector": "write-dedup",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4321,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "leave",
+   "veto": null
+  },
+  {
+   "id": 4439,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.667,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3288,
+   "detector": "dream-alias",
+   "similarity": 0.652,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3162,
+   "detector": "dream-alias",
+   "similarity": 0.644,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4172,
+   "detector": "dream-alias",
+   "similarity": 0.617,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2637,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 2979,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3601,
+   "detector": "write-dedup",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 4227,
+   "detector": "analyzer-duplicate",
+   "similarity": 0.6,
+   "verdict": "reject",
+   "veto": null
+  },
+  {
+   "id": 3446,
+   "detector": "dream-alias",
+   "similarity": 0.587,
+   "verdict": "reject",
+   "veto": null
+  }
+ ]
+}

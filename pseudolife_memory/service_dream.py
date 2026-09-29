@@ -1162,6 +1162,7 @@ class DreamOps:
             import torch
             from pseudolife_memory.graph import norm_name
             from pseudolife_memory.memory.graph_consolidation import variant_conflict
+            from pseudolife_memory.memory.graph_review import merge_veto
             with self._lock:
                 self._ensure_init()
                 if (self._storage is None or self._embedder is None
@@ -1208,6 +1209,12 @@ class DreamOps:
                     continue
                 if variant_conflict(disp, target):
                     continue    # size/quant/version mismatch: never a merge
+                if merge_veto(disp, target):
+                    # The name-shape vetoes the write-dedup filing applies:
+                    # numbered siblings ('PR #368' / 'PR #364') embed at
+                    # 0.989 and were 36 of this screen's 524 rejected
+                    # proposals in the 2026-09-29 triage, none accepted.
+                    continue
                 matches.append((disp, target, pair, score))
             if not matches:
                 return 0
