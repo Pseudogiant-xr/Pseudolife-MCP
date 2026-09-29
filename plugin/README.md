@@ -231,10 +231,11 @@ listed for review and left alone. By hand:
 ## Updating
 
 The plugin lives in a cache Claude Code refreshes only on request, so it
-does not move when the daemon is redeployed. The repo's updater moves it
-with the daemon: `ops\update.ps1 -All` / `ops/update.sh --all` (or
-`python ops/update_clients.py` on its own) refreshes the marketplace
-clone, compares the plugin tree byte for byte against the cache, and
+does not move when the daemon is redeployed. The updater moves it with the
+daemon: `pseudolife-mcp update` (from a checkout, `ops\update.ps1 -All` /
+`ops/update.sh --all`, or `python ops/update_clients.py` on its own)
+refreshes the marketplace clone, compares the plugin tree byte for byte
+against the cache, and
 reinstalls the plugin only when they differ — the plugin's version string
 is pinned to the package version, so `/plugin update` alone says "already
 latest" after a plugin-only change. By hand, when the version did change:

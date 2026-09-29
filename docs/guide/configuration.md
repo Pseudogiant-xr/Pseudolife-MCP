@@ -34,6 +34,14 @@ every value is commented, a missing file runs entirely on defaults). The
 dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 [Dreaming](dreaming.md).
 
+On the Docker tier `config.yaml` is `/data/config.yaml` in the daemon's
+state volume (compose sets `PSEUDOLIFE_MCP_DATA_DIR=/data`; `docker exec
+pseudolife-mcp-daemon cat /data/config.yaml` shows it), read at startup, so
+a hand-edited value applies after the daemon restarts (`docker restart
+pseudolife-mcp-daemon`), while a `PSEUDOLIFE_MCP_TOKENS` change is an
+`ops/.env` change and needs the container recreated (`ops/update.*`, or
+`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`).
+
 An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
 reads such a file fine, but a value the shell installer read from it ended
 in a CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
@@ -2224,7 +2232,7 @@ The installers put the shim into its own **runtime** and register one
 | | Windows | Linux / macOS |
 |---|---|---|
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
-| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp` (not `~/.local/bin`, which pip --user and pipx own) |
+| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` (its directory goes on the user `PATH`) | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp`, linked from `~/.local/bin/pseudolife-mcp` |
 
 A runtime is a plain virtualenv holding the package (`pip install
 --no-deps`) and the shim's own dependencies — not torch, chromadb or the
@@ -2246,11 +2254,30 @@ backed up first and its permission bits kept (`shim_runtime.py migrate`); a
 mode argument such as `channel` stays. A registration that would spawn its
 own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon URL — the
 pip and lite tiers) is never moved onto a shim runtime, which cannot serve.
-The launcher directory is not on `PATH`; run `pseudolife-mcp doctor` and
-friends through its full path. Set `PSEUDOLIFE_SHIM_PYTHON`
-to choose the interpreter the runtimes are created from;
-`PSEUDOLIFE_SHIM_RUNTIMES` and `PSEUDOLIFE_SHIM_LAUNCHER` (together) move
-both paths. A host whose Python cannot make a virtualenv falls back to the
+The same steps make `pseudolife-mcp` typed in a terminal reach the
+launcher (`shim_runtime.py expose` runs that step alone). On POSIX
+`~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher: a free
+name is linked; an older pipx link into `venvs/pseudolife-mcp`, or a
+pip --user console script of this package, is moved aside as
+`pseudolife-mcp.<kind>-<stamp>` (never deleted; `pipx uninstall` removes a
+moved pipx link with its venv and leaves the new link, which resolves
+outside every pipx venv); anything else is left as it is and named. When
+`~/.local/bin` is not on `PATH` the step prints the one-line fix
+(`export PATH="$HOME/.local/bin:$PATH"` in your shell profile) and edits no
+profile; when an earlier `PATH` entry still wins, it names that entry. On
+Windows the launcher directory is prepended to the user `PATH`
+(`HKCU\Environment`, never the machine `PATH`) and a settings-change
+broadcast reaches consoles opened afterwards. A terminal that was already
+open keeps its old `PATH`, so the step says to open a new one when this
+one still runs another copy. An older pipx `pseudolife-mcp.exe` further
+down `PATH` is left in place; `pipx uninstall pseudolife-mcp` removes it
+once no session runs it. `pseudolife-mcp doctor` reports
+`path_resolution`: what the name resolves to, the launcher, and a warning
+when they differ. Set `PSEUDOLIFE_SHIM_PYTHON` to choose the interpreter
+the runtimes are created from; `PSEUDOLIFE_SHIM_RUNTIMES` and
+`PSEUDOLIFE_SHIM_LAUNCHER` (together) move both paths, and then no `PATH`
+is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
+from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 
@@ -2814,10 +2841,29 @@ must also be in `coordination.daemon_notice_principals` (`--schedule`
 prints one line saying so). On Linux the unit carries its own token file,
 so running `--schedule` with `PSEUDOLIFE_MCP_TOKEN_FILE` naming the
 dedicated principal's token (in that shell only) gives the timer its own
-bearer. The Windows task runs with the user's persistent environment, the
-same bearer the user's own clients read, so there it can post notices only
-if that principal is listed, which lets every session sharing it post them
-too; leaving the list empty keeps the log as the record. `--schedule` on Linux writes
+bearer. The Windows task runs with the user's User-scope environment
+variables, not the shell's, so its bearer is whatever
+`PSEUDOLIFE_MCP_TOKEN_FILE` (or `PSEUDOLIFE_MCP_TOKEN`) holds at User
+scope. No installer sets that: the installers give each client its own
+token file in that client's registration. There the run can post notices
+only if that principal is listed, which lets every other process reading
+the same User-scope bearer post them too; leaving the list empty keeps the
+log as the record.
+
+`--schedule` resolves the bearer the scheduled run will see (Linux: the
+token file it writes into the unit; Windows: the User-scope environment)
+and refuses with exit 2 when none resolves, naming the command that sets
+it: without a bearer the run cannot read the board, so it would hold off
+every day with exit 4, which the scheduler counts as success. On Windows
+that command is, in PowerShell, once:
+
+```powershell
+[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "<path to the token file>", "User")
+```
+
+`--allow-no-bearer` installs the schedule anyway, with a warning. Its
+output names the bearer the run will use. `--schedule` also refuses on a
+pip install, which has no daemon container to update. `--schedule` on Linux writes
 `~/.config/systemd/user/pseudolife-update.{service,timer}` with the
 daemon URL and the token file as `Environment=` lines (a token given only
 as `PSEUDOLIFE_MCP_TOKEN` is written to a private
@@ -2829,10 +2875,10 @@ timer runs only while that user has a session unless lingering is on:
 is for. On Windows it registers the task `Pseudolife Unattended Update`
 through `schtasks`, which on an administrator account needs an elevated
 PowerShell opened from the Start menu (the refusal says so); the task
-runs while the user is signed in, with the user's persistent environment
-variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` (the installer sets it as a
-User variable) and any `PSEUDOLIFE_MCP_DAEMON_URL` must be set there,
-not only in a shell. A `--daemon-url` given with `--schedule` rides
+runs while the user is signed in, with the user's User-scope environment
+variables, so `PSEUDOLIFE_MCP_TOKEN_FILE` and any
+`PSEUDOLIFE_MCP_DAEMON_URL` must be set at User scope (the command
+above), not only in a shell. A `--daemon-url` given with `--schedule` rides
 along in the task or unit. The task or timer runs the shim launcher
 (`pseudolife-mcp update --unattended`), so it follows the side-by-side
 runtimes; `--unschedule` removes the task or the unit, the timer and the

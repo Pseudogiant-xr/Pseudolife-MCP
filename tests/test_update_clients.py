@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -188,6 +189,12 @@ def cli(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.setattr(uc, "_RUNTIMES_MODULE", None, raising=False)
+    # This machine's extractor autostart tasks and units are not read either.
+    fake.autostart = {"registered": {}, "notes": {}}
+    monkeypatch.setattr(uc, "_autostart_module", lambda repo: SimpleNamespace(
+        KINDS={"claude": {}, "codex": {}},
+        _registered_command=lambda kind: fake.autostart["registered"].get(kind),
+        registration_note=lambda kind: fake.autostart["notes"].get(kind, "")))
     return fake
 
 
@@ -373,7 +380,32 @@ def test_a_pipx_registration_moves_to_the_launcher_and_names_the_environment(cli
     assert result["state"] == "installed:0.15.0", result
     assert _read(cli.home / ".claude.json")["mcpServers"]["pseudolife-memory"]["command"] == str(_layout(cli).launcher)
     assert "pipx uninstall pseudolife-mcp" in result["detail"]
+    # ops/shim_python.py may pick that venv for an extractor shim unit (POSIX).
+    assert "shim_autostart.py show claude|codex" in result["detail"]
     assert launcher.is_file()   # nothing of the old environment is touched
+
+
+def test_the_pipx_uninstall_advice_yields_to_an_extractor_shim_that_runs_from_it(cli, tmp_path):
+    """ops/shim_python.py can choose pipx's venv as an extractor shim unit's
+    interpreter and records it in ops/.env; uninstalling pipx's package then
+    breaks the unit (2026-09-29), so the advice names the setting instead."""
+    venv = tmp_path / "pipx-home" / "venvs" / "pseudolife-mcp"
+    launcher = venv / SCRIPTS / f"pseudolife-mcp{EXE}"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("", encoding="utf-8")
+    cli.pipx_list = (0, json.dumps({"venvs": {"pseudolife-mcp": {"metadata": {"main_package": {
+        "app_paths": [{"__Path__": str(launcher)}]}}}}}))
+    _register_claude(cli, str(launcher))
+    checkout = tmp_path / "checkout"
+    (checkout / "ops").mkdir(parents=True)
+    (checkout / "ops" / ".env").write_text(
+        f'PSEUDOLIFE_CLAUDE_SHIM_PORT=8766\nPSEUDOLIFE_CODEX_SHIM_PYTHON="{venv / SCRIPTS / "python"}"\n',
+        encoding="utf-8")
+    result = uc.update_shim(ROOT, repo=checkout)
+    assert result["state"] == "installed:0.15.0", result
+    assert "pipx uninstall" not in result["detail"]
+    assert "PSEUDOLIFE_CODEX_SHIM_PYTHON" in result["detail"] and "keep" in result["detail"]
 
 
 def test_a_virtualenv_launcher_elsewhere_moves_to_the_launcher(cli, tmp_path):
@@ -614,6 +646,69 @@ def test_pipx_bin_dir_copy_of_the_launcher_moves_to_the_launcher(cli, tmp_path):
     assert _read(cli.home / ".claude.json")["mcpServers"]["pseudolife-memory"]["command"] == str(_layout(cli).launcher)
     assert "pipx uninstall pseudolife-mcp" in result["detail"]
 
+
+def test_the_ladder_says_how_the_launcher_is_reached_by_name(cli, monkeypatch, capsys):
+    """After the runtime installs, `pseudolife-mcp` in a terminal is made to
+    reach the launcher (a ~/.local/bin link on POSIX, the user PATH on
+    Windows) and the ladder names what happened, with the new-terminal note;
+    the layout it is asked about is the one the runtime went into."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    seen = []
+
+    def expose(layout_, **kw):
+        seen.append(layout_)
+        return {"state": "added", "detail": f"added {layout_.launcher_dir} to the front of your user PATH",
+                "hint": "open a new terminal for `pseudolife-mcp` to resolve to the launcher; "
+                        "this one still runs C:/old/pseudolife-mcp.exe"}
+
+    monkeypatch.setattr(uc.runtimes_module(), "expose_launcher", expose)
+    assert uc.main(["--repo", str(ROOT), "--only", "shim"]) == 0
+    out = capsys.readouterr().out
+    assert seen == [layout]
+    assert f"added {layout.launcher_dir} to the front of your user PATH" in out
+    assert "open a new terminal for `pseudolife-mcp` to resolve to the launcher; this one still runs" in out
+
+
+def test_a_failed_path_step_is_named_but_does_not_fail_the_shim(cli, monkeypatch):
+    """Every registration names the launcher by its full path: a PATH step
+    that could not be done is reported, the installed runtime stands."""
+    _register_claude(cli, str(_layout(cli).launcher))
+    monkeypatch.setattr(uc.runtimes_module(), "expose_launcher", lambda layout_, **kw: {
+        "state": "failed", "detail": "could not add X to your user PATH (denied)", "hint": None})
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0", result
+    assert "could not add X to your user PATH (denied)" in result["detail"]
+
+
+def test_an_overridden_layout_touches_no_path(cli):
+    _register_claude(cli, str(_layout(cli).launcher))
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0"
+    assert "PATH" not in result["detail"] and "linked" not in result["detail"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the ~/.local/bin link is the POSIX mechanism")
+def test_the_old_pipx_link_in_the_user_bin_is_replaced_by_the_launcher(cli, monkeypatch):
+    """The Debian host of 2026-09-29: ~/.local/bin/pseudolife-mcp was pipx's
+    link to the old package. The update moves it aside and links the
+    launcher there, and the ladder says so."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    user_bin = cli.home / ".local" / "bin"
+    old = cli.home / ".local" / "share" / "pipx" / "venvs" / "pseudolife-mcp" / "bin" / "pseudolife-mcp"
+    old.parent.mkdir(parents=True)
+    old.write_text("#!/usr/bin/python3\nfrom pseudolife_memory.cli import main\n", encoding="utf-8")
+    user_bin.mkdir(parents=True)
+    os.symlink(str(old), str(user_bin / "pseudolife-mcp"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_USER_BIN", str(user_bin))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(user_bin), "/usr/bin", "/bin"]))
+    result = uc.update_shim(ROOT)
+    assert result["state"] == "installed:0.15.0", result
+    assert os.readlink(user_bin / "pseudolife-mcp") == str(layout.launcher)
+    assert f"linked {user_bin / 'pseudolife-mcp'} -> {layout.launcher}" in result["detail"]
+    assert "the old pipx entry is kept as" in result["detail"]
+
 # ── the plugin cache ────────────────────────────────────────────────────────
 
 def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True):
@@ -828,6 +923,43 @@ def test_main_json_output_is_machine_readable(cli, tmp_path, capsys):
     assert uc.main(["--repo", str(ROOT), "--only", "plugin", "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["plugin"]["state"] == "current:0.15.0" and report["ok"] is True
+
+
+def test_an_autostart_task_that_still_carries_the_model_is_named_after_the_ladder(cli, capsys):
+    """An extractor autostart task or unit registered before
+    ops/shim_autostart.py keeps starting the model on its own command line
+    at logon, whatever ops/.env says; no update said so. The note is
+    informational: it never fails the run, and an unregistered kind (no
+    CLI extractor shim here) says nothing."""
+    note = ("the scheduled task 'Pseudolife Claude Shim' still carries the model and the rest on its command "
+            "line: at logon it starts those, not ops/.env. Run ops/install-shim-autostart.ps1 once (elevated)")
+    cli.autostart["registered"] = {"claude": "old command line --model old-model"}
+    cli.autostart["notes"] = {"claude": note, "codex": "the unit is not registered"}
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["ok"] is True
+    assert report["autostart"]["state"] == "stale" and report["autostart"]["notes"] == [f"claude: {note}"]
+    uc.print_ladder(report)
+    assert f"[!] Extractor autostart" in capsys.readouterr().out
+    # registered and running the runner: current; nothing registered: no line at all
+    cli.autostart["notes"] = {}
+    assert uc.run_steps((), repo=ROOT, source="unused")["autostart"]["state"] == "current"
+    cli.autostart["registered"] = {}
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["autostart"]["state"] == "none"
+    uc.print_ladder(report)
+    assert "autostart" not in capsys.readouterr().out
+    # no checkout known: no autostart step
+    assert "autostart" not in uc.run_steps((), repo=None, source="unused")
+
+
+def test_an_unreadable_autostart_registration_never_fails_the_run(cli, monkeypatch):
+    def broken(repo):
+        raise OSError("no ops/shim_autostart.py in this checkout")
+
+    monkeypatch.setattr(uc, "_autostart_module", broken)
+    report = uc.run_steps((), repo=ROOT, source="unused")
+    assert report["ok"] is True and report["autostart"]["state"] == "unknown"
+    assert "no ops/shim_autostart.py" in report["autostart"]["detail"]
 
 
 def test_helper_runs_as_a_script():

@@ -134,6 +134,63 @@ def _read_toml(text: str) -> dict:
     return tomllib.loads(text)
 
 
+_TOKEN_KEYS = ("PSEUDOLIFE_MCP_TOKEN", "PSEUDOLIFE_MCP_TOKEN_FILE")
+_URL_KEY = "PSEUDOLIFE_MCP_DAEMON_URL"
+
+
+def _registration_env_blocks(env):
+    """``(label, env block)`` for this server's Claude Code registration
+    (``$CLAUDE_CONFIG_DIR/.claude.json``, else ``~/.claude.json``), then its
+    Codex one (``$CODEX_HOME/config.toml``, else ``~/.codex/config.toml``);
+    an absent or unreadable file yields nothing."""
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    claude = Path(config_dir) / ".claude.json" if config_dir else Path.home() / ".claude.json"
+    codex = Path(env.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
+    for label, path, parse, table in (
+            ("Claude Code", claude, json.loads, "mcpServers"),
+            ("Codex", codex, _read_toml, "mcp_servers")):
+        try:
+            data = parse(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError, ModuleNotFoundError):
+            continue
+        servers = data.get(table) if isinstance(data, dict) else None
+        server = servers.get(_CODEX_SERVER) if isinstance(servers, dict) else None
+        block = server.get("env") if isinstance(server, dict) else None
+        if isinstance(block, dict):
+            yield f"{label} registration ({path})", block
+
+
+def registration_credentials(env) -> tuple[dict, str | None]:
+    """The credential doctor should use when run outside a client: ``({},
+    "environment")`` when ``env`` already has ``PSEUDOLIFE_MCP_TOKEN`` or
+    ``PSEUDOLIFE_MCP_TOKEN_FILE``; else the token keys (and the daemon URL,
+    when ``env`` has none) from the first registration whose env block
+    carries a token, with a label naming it; ``({}, None)`` when none does.
+    A plain shell has neither key, and without them the handshake's shim
+    exits on its missing-credential line (2026-09-29)."""
+    if env.get("PSEUDOLIFE_MCP_TOKEN") or "PSEUDOLIFE_MCP_TOKEN_FILE" in env:
+        return {}, "environment"
+    for label, block in _registration_env_blocks(env):
+        found = {key: block[key] for key in _TOKEN_KEYS
+                 if isinstance(block.get(key), str) and block[key]}
+        if not found:
+            continue
+        if not env.get(_URL_KEY) and isinstance(block.get(_URL_KEY), str) and block[_URL_KEY]:
+            found[_URL_KEY] = block[_URL_KEY]
+        return found, label
+    return {}, None
+
+
+_BEARER_MISSING = (
+    "The daemon requires bearer authentication (/health reports auth=true) and doctor "
+    "found no credential: neither PSEUDOLIFE_MCP_TOKEN_FILE nor PSEUDOLIFE_MCP_TOKEN is "
+    "set in this shell, and no Claude Code (~/.claude.json) or Codex (config.toml) "
+    "registration of pseudolife-memory carries one in its env block. Set "
+    "PSEUDOLIFE_MCP_TOKEN_FILE=<path to a private file holding the token> (or "
+    "PSEUDOLIFE_MCP_TOKEN=<the token>) and retry; to fix a client, re-run "
+    "ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set.")
+
+
 def _claude_code_wake(health_enabled: bool | None) -> dict:
     """Claude Code's wake path is the plugin's Stop hook: the plugin must be
     installed (``plugins/installed_plugins.json``) and not disabled in
@@ -304,6 +361,11 @@ def run_doctor() -> None:
             report[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             report[package] = "not installed"
+    # Before anything reads the environment: the board line, the daemon URL
+    # and the handshake's shim all take the credential from it.
+    overrides, credential_source = registration_credentials(os.environ)
+    os.environ.update(overrides)
+    report["credential_source"] = credential_source or "none"
     report["board"] = _board_line(min(args.timeout, 2))
     health = None
     if _windows():
@@ -315,6 +377,11 @@ def run_doctor() -> None:
         if not health or health.get("status") != "ok":
             report["error"] = "DaemonUnavailable"
             report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
+        elif health.get("auth") and credential_source is None:
+            # The handshake's shim would exit on its own missing-credential
+            # line, which reaches doctor as an opaque ExceptionGroup.
+            report["error"] = "BearerMissing"
+            report["recovery"] = _BEARER_MISSING
         else:
             report["daemon_version"] = health.get("version") or "unknown"
             report["codex_hooks"] = _codex_hooks_line(health)
@@ -354,5 +421,32 @@ def run_doctor() -> None:
         if "error" not in report:
             report["error"] = "GitBashMissing"
             report["recovery"] = report["git_bash_recovery"]
+    # Which `pseudolife-mcp` a terminal runs, beside the launcher (informational).
+    report["path_resolution"] = path_resolution()
     print(json.dumps(report, indent=2))
     raise SystemExit(0 if report["ok"] else 1)
+
+
+# --- which `pseudolife-mcp` a terminal runs -----------------------------------
+# 2026-09-29: every registration named the launcher, while `pseudolife-mcp` on
+# PATH was still pipx's copy of the old package, so `pseudolife-mcp update`
+# ran old code.
+
+def path_resolution(which=shutil.which) -> dict:
+    """What ``pseudolife-mcp`` resolves to on this process's PATH, the
+    launcher path (``None`` when no launcher is installed), and a warning
+    when a launcher exists and the name does not reach it."""
+    from pseudolife_memory import runtimes
+    found = which("pseudolife-mcp")
+    try:
+        launcher = runtimes.default_layout().launcher
+    except ValueError:
+        launcher = None
+    report = {"on_path": found, "launcher": str(launcher) if launcher and launcher.is_file() else None}
+    if report["launcher"] and not (found and os.path.normcase(os.path.realpath(found))
+                                   == os.path.normcase(os.path.realpath(report["launcher"]))):
+        report["warning"] = (f"`pseudolife-mcp` on PATH is {found or 'not found'}, not the launcher "
+                             f"{report['launcher']}, so a terminal runs another install. Run "
+                             f"\"{report['launcher']}\" update --clients-only to point the name at the "
+                             "launcher, then open a new terminal")
+    return report

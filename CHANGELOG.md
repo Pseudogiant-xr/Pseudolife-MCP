@@ -45,6 +45,122 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ops/update.sh --all` / `ops/update.ps1 -All` from a checkout, or
   `pipx install --force` / `pip install --upgrade` of the release.
 
+### Fixed (2026-09-29 — doctor finds the credential a shell lacks, and the update advice matches today's paths)
+- `pseudolife-mcp doctor` run from a plain shell read the bearer only from
+  its own environment: on a token-gated Docker-tier daemon the handshake's
+  shim exited on its missing-credential line and doctor reported
+  `ExceptionGroup` with advice to reinstall the interpreter. When the shell
+  has neither `PSEUDOLIFE_MCP_TOKEN` nor `PSEUDOLIFE_MCP_TOKEN_FILE`, doctor
+  now takes them (and `PSEUDOLIFE_MCP_DAEMON_URL`, when unset) from this
+  server's Claude Code registration (`~/.claude.json`, honouring
+  `CLAUDE_CONFIG_DIR`), else its Codex one (`config.toml`), and names the
+  registration in a new `credential_source` field. When none carries one
+  and `/health` reports `auth: true`, it reports `BearerMissing` with the
+  exact env keys to set instead of running the handshake.
+- `ops/update.sh --clients-only` failed on "unknown argument", and
+  `ops/update.ps1 -ClientsOnly` silently ignored the flag and ran a full
+  daemon deploy. Both now print the same redirect as
+  `ops/update.py` (`python ops/update_clients.py` for the clients alone)
+  and exit 2 before running anything.
+- The shim update's advice to `pipx uninstall pseudolife-mcp` after moving
+  a pipx registration to the launcher now adds that an extractor shim
+  autostart may still run from that venv (`ops/shim_python.py` can choose
+  it on POSIX), and when the checkout's `ops/.env` names a
+  `PSEUDOLIFE_*_SHIM_PYTHON` inside it, says to keep the venv instead.
+- Docs: the GHCR-pull path updates with `pseudolife-mcp update` rather than
+  a bare `pull` + `up -d`; the troubleshooting and installer-migration notes
+  no longer say every session must close for a shim upgrade; the plugin,
+  provider and Codex-hook passages name `pseudolife-mcp update` beside the
+  checkout scripts; and the configuration guide says where `config.yaml`
+  lives on the Docker tier and what applies a change.
+  [Environment variables](docs/guide/configuration.md#connection--deployment-env-vars)
+
+### Fixed (2026-09-29 — updating a lite install keeps its embedded Postgres, and an unattended schedule that could never apply says so when it is installed)
+- `pseudolife-mcp update` on a pip or pipx install now asks for
+  `pseudolife-mcp[lite]==<version>` when the running install carries the
+  `lite` extra (its embedded Postgres provider, `pg0`, is importable), and
+  its step line names the requirement. It asked for the bare package:
+  `pipx install --force` rebuilds the venv, so `pg0-embedded` was gone
+  after the update and the daemon no longer started. The printed command
+  quotes the requirement, since the brackets are a glob in zsh.
+- `pseudolife-mcp update --schedule HH:MM` resolves the bearer the
+  scheduled run will see and refuses with exit 2 when none resolves,
+  naming the command that sets it; `--allow-no-bearer` installs the
+  schedule anyway, with a warning. Without a bearer the run cannot read
+  the board, so it held off every day with exit 4, which the scheduler
+  counts as success, and nothing said the updates never applied. On
+  Windows the task starts with the user's User-scope environment, not the
+  shell's, so that is what is read (`HKCU\Environment`); the fix is
+  `[Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", "<path>", "User")`.
+  On Linux the unit carries its own token file, the one the shell names or
+  one written from its `PSEUDOLIFE_MCP_TOKEN`. The output now names the
+  bearer the run will use. `--schedule` also refuses on a pip install,
+  which has no daemon container to update. The configuration guide said
+  the installer sets the token file as a User variable; none does, and
+  the sentence now says what the code does.
+  [Unattended daemon updates](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- `ops/preflight.sh` checks that python's `venv` can build the stdio
+  shim's side-by-side runtime (`import ensurepip, venv`) and names
+  `sudo apt install python3-venv` when it cannot (Debian and Ubuntu ship
+  ensurepip separately; Debian 13, 2026-09-29). It called pipx the
+  preferred installer; pipx is the fallback the installer takes when the
+  venv runtime cannot be built, and the line now says so.
+- The client-side ladder (`ops/update_clients.py`, and `pseudolife-mcp
+  update` in checkout mode) ends with an informational "Extractor
+  autostart" line when an extractor shim's scheduled task or systemd unit
+  was registered before `ops/shim_autostart.py` and still carries the
+  model on its command line, so at logon it starts that model, not
+  `ops/.env`. No update moves a registration; the line names the one
+  installer run that does. It never fails the run, and a host with no
+  extractor autostart registered prints nothing.
+
+### Fixed (2026-09-29 — an update's log reads in the order the steps ran)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`, behind
+  `ops/update.sh` and `ops/update.ps1`) flushes each `==> ...` step line,
+  each warning and the rollback text as it prints them, and flushes both
+  streams before a streamed child (the docker pull or build, the checkout's
+  backup and retention scripts) starts. With stdout a file (`ops/update.sh > log 2>&1` on a headless
+  host, 2026-09-29) Python block-buffered the step lines while the build
+  wrote to the file directly, so every step — "backing up the bank",
+  "tagged rollback image", "rebuilding the daemon only", "healthy" —
+  landed after the whole build output, and the log read as if the backup
+  had followed the build. A terminal run is unchanged.
+
+### Changed (2026-09-29 — `pseudolife-mcp` typed in a terminal runs the launcher, not an old pipx copy)
+- After the move to side-by-side shim runtimes every registration named the
+  launcher, but the name `pseudolife-mcp` in a terminal still resolved to
+  pipx's `~/.local/bin` link into its venv of the old package (Debian 13,
+  2026-09-29): `pseudolife-mcp update` ran old code, and after the
+  suggested `pipx uninstall` it ran nothing. The installers
+  (`ops/install.sh`, `ops/install.ps1`) and the update step
+  (`pseudolife-mcp update`, `ops/update_clients.py`) now make the name
+  reach the launcher; `python ops/shim_runtime.py expose` does it alone.
+- POSIX: `~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher.
+  A free name is linked; pipx's link into `venvs/pseudolife-mcp`, or a
+  pip --user console script of this package, is moved aside as
+  `pseudolife-mcp.<kind>-<stamp>` and never deleted; anything else is left
+  as it is and named. The link survives `pipx uninstall`, which removes
+  only bin-dir links that resolve into its own venv
+  (`pipx.commands.common.get_exposed_paths_for_package`). When
+  `~/.local/bin` is not on `PATH` the step prints the one-line fix
+  (`export PATH="$HOME/.local/bin:$PATH"`) and edits no profile; when an
+  earlier `PATH` entry still wins, it is named. `PSEUDOLIFE_SHIM_USER_BIN`
+  moves the directory.
+- Windows: the launcher directory is prepended to the user `PATH`
+  (`HKCU\Environment`, written back as an expandable string; the machine
+  `PATH` is never touched), skipped when already present, and
+  `WM_SETTINGCHANGE` is broadcast so consoles opened afterwards see it. A
+  terminal that still resolves the name elsewhere is told to open a new
+  one. pipx's `pseudolife-mcp.exe` further down `PATH` is left in place.
+  `ops/install.ps1` repeats the outcome in its summary ("Launcher on
+  PATH").
+- `pseudolife-mcp doctor` reports `path_resolution`: what
+  `pseudolife-mcp` resolves to, the launcher, and a warning when they
+  differ. A layout from `PSEUDOLIFE_SHIM_RUNTIMES` /
+  `PSEUDOLIFE_SHIM_LAUNCHER` changes no `PATH` unless
+  `PSEUDOLIFE_SHIM_USER_BIN` is set as well.
+  [Where the shim lives](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before

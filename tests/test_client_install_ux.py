@@ -831,3 +831,21 @@ def test_install_ps1_update_line_on_a_client_only_install_moves_the_clients(tmp_
 def test_the_client_only_notes_point_at_the_update_command() -> None:
     notes = "\n".join(_heredoc_payload(_marker_block(_read("ops/install.sh"), "client-only notes")))
     assert "--clients-only" in notes
+
+def test_install_ps1_puts_the_launcher_on_the_user_path_and_says_so_in_the_summary() -> None:
+    """Once the shim runtime installs, the launcher directory goes first on
+    the user PATH (ops/shim_runtime.py expose, HKCU only), so `pseudolife-mcp`
+    in a new terminal is the launcher rather than an older pipx copy
+    (2026-09-29); the outcome is repeated in the summary, before the board
+    line, marked [!] when the step failed."""
+    ps = _read("ops/install.ps1")
+    install_shim = ps[ps.index("function Install-ShimOnce"):]
+    install_shim = install_shim[:install_shim.index("\nfunction ")]
+    assert '(Join-Path $repo "ops\shim_runtime.py") --json expose' in install_shim
+    assert install_shim.index("--json expose") < install_shim.index("$script:shimInstallResult = $true")
+    summary = ps[ps.index('if ($script:shimPathNotes.Count -gt 0) {'):]
+    assert summary.index("Launcher on PATH") < summary.index("# >>> board line >>>")
+    assert '$pathMarker = if ($script:shimPathState -eq "failed") { "[!]" } else { "[x]" }' in summary
+    # the machine PATH is never written, here or in the module the step runs
+    assert "'Machine'" not in ps and '"Machine"' not in ps
+    assert "HKEY_LOCAL_MACHINE" not in _read("pseudolife_memory/runtimes.py")

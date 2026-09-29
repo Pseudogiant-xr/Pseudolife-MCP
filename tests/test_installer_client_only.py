@@ -966,3 +966,30 @@ def test_client_only_messages_match_across_installers():
         ps_block = "\n".join(_marker_block(ps, name))
         assert _messages(sh_block), name
         assert _messages(sh_block) == _messages(ps_block), name
+
+
+# -- ops/preflight.sh: the venv the shim runtime is built with -----------------
+
+@pytest.mark.parametrize("venv_exit", [0, 1])
+@BASH
+def test_preflight_checks_the_venv_the_shim_runtime_needs(bash, tmp_path, venv_exit):
+    """The installer builds the stdio shim in a side-by-side runtime with
+    ``python3 -m venv``; Debian and Ubuntu ship venv's ensurepip in the
+    separate python3-venv package, and without it the installer falls back
+    to pipx, then to ``pip --user``, which PEP 668 refuses. Preflight used
+    to call pipx the preferred installer and never looked at venv."""
+    shell = _Shell(bash, tmp_path)
+    _stub(shell.bin / "python3",
+          'case "$*" in *ensurepip*) exit "$FAKE_VENV_EXIT" ;; esac\nexit 0\n')
+    script = (ROOT / "ops" / "preflight.sh").read_text(encoding="utf-8")
+    proc = shell.run("set -- --client generic\n" + script, extra_env={"FAKE_VENV_EXIT": str(venv_exit)})
+    lines = proc.stdout.splitlines()
+    if venv_exit == 0:
+        assert any(re.search(r"OK\S*\s+python venv", line) for line in lines), proc.stdout
+        assert "python3-venv" not in proc.stdout
+    else:
+        [warned] = [i for i, line in enumerate(lines) if re.search(r"WARN\S*\s+python venv", line)]
+        assert "pip --user" in lines[warned] and "PEP 668" in lines[warned]
+        assert "sudo apt install python3-venv" in lines[warned + 1]
+    [pipx] = [line for line in lines if re.search(r"(OK|WARN)\S*\s+pipx", line)]
+    assert "fallback" in pipx and "preferred" not in proc.stdout

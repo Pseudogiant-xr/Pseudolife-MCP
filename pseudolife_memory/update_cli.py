@@ -83,6 +83,11 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
     returned is empty."""
     try:
         if stream:
+            # The child writes to the file descriptors directly, past this
+            # interpreter's buffers: with stdout a file (``update.sh > log
+            # 2>&1``) the buffered step lines would otherwise land after the
+            # whole build, and the log would read as if the backup followed it.
+            _flush_output()
             proc = subprocess.run([str(a) for a in argv], timeout=timeout, check=False,
                                   stdin=subprocess.DEVNULL, cwd=cwd, env=env)
             return proc.returncode, ""
@@ -92,6 +97,14 @@ def run_cli(argv, *, timeout: int = 3600, cwd: str | None = None,
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def _flush_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (AttributeError, OSError, ValueError):
+            pass
 
 
 def which(name: str) -> str | None:
@@ -137,6 +150,17 @@ def data_dir() -> Path:
     return Path(os.environ.get("PSEUDOLIFE_MCP_DATA_DIR") or home() / ".pseudolife-mcp")
 
 
+def lite_installed() -> bool:
+    """True when this install carries the ``lite`` extra: its embedded
+    Postgres provider (``pg0``, from ``pg0-embedded``) is importable here.
+    Looked up, not imported."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("pg0") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 # ── options ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -162,6 +186,7 @@ class Options:
     result_file: Path | None = None    # the exit code is written here at the end (an unattended caller reads it)
     unattended: bool = False           # the scheduled run: apply only when the knob is on and the board is idle
     schedule: str | None = None        # install the daily task / timer at HH:MM
+    allow_no_bearer: bool = False      # --schedule even when no bearer resolves for the scheduled run
     unschedule: bool = False           # remove it
     as_json: bool = False
     daemon_url: str = DEFAULT_DAEMON_URL
@@ -331,8 +356,10 @@ class Update:
                  warn: Callable[[str], None] | None = None):
         self.o = options
         self.report = Report()
-        self._log = log or (lambda line: print(f"==> {line}"))
-        self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr))
+        # Flushed per line: a log file (or a pipe) block-buffers stdout, and
+        # a step line is read while the step runs, not when the run exits.
+        self._log = log or (lambda line: print(f"==> {line}", flush=True))
+        self._warn = warn or (lambda line: print(f"WARNING: {line}", file=sys.stderr, flush=True))
         self.docker = docker_cmd()
         self.rollback_lines: list[str] = []
 
@@ -575,11 +602,19 @@ class Update:
                               f"upgrade it yourself: \"{sys.executable}\" -m pip install --upgrade pseudolife-mcp=={target}", 2)
         pipx_home = os.environ.get("PIPX_HOME") or str(home() / ".local" / "pipx")
         under_pipx = "pipx" in prefix.parts or str(prefix).lower().startswith(str(pipx_home).lower())
+        # pipx --force rebuilds the venv and pip installs only what it is
+        # named: without the extra, a lite install loses its embedded
+        # Postgres and the daemon no longer starts.
+        lite = lite_installed()
+        requirement = f"pseudolife-mcp[lite]=={target}" if lite else f"pseudolife-mcp=={target}"
         if under_pipx:
-            argv = [which("pipx") or "pipx", "install", "--force", f"pseudolife-mcp=={target}"]
+            argv = [which("pipx") or "pipx", "install", "--force", requirement]
         else:
-            argv = [sys.executable, "-m", "pip", "install", "--upgrade", f"pseudolife-mcp=={target}"]
-        shown = " ".join(argv)
+            argv = [sys.executable, "-m", "pip", "install", "--upgrade", requirement]
+        # Quoted where it is printed: the brackets are a glob in zsh.
+        shown = " ".join(f'"{part}"' if "[" in part else part for part in argv)
+        self.step(f"this install {'carries the lite extra (embedded Postgres), so the upgrade' if lite else 'has no lite extra; the upgrade'} "
+                  f"installs {requirement}")
         self.step("a pip install carries the bank with it: back it up first (pseudolife-mcp backup) if you have not")
         if os.name == "nt" or under_pipx:
             # pipx deletes the venv this command runs from; on Windows pip cannot
@@ -779,6 +814,7 @@ class Update:
             print("    Rolled-back deploy if ever needed:")
             for line in self.rollback_lines:
                 print(line)
+            sys.stdout.flush()   # ahead of a warning on stderr, or a streamed child
         return health
 
     def prune_cache(self, checkout: Path | None) -> None:
@@ -1165,6 +1201,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--schedule", metavar="HH:MM", default=None,
                         help="install a daily scheduled task (Windows) or systemd --user timer (Linux) that runs "
                              "`update --unattended` at this time")
+    parser.add_argument("--allow-no-bearer", action="store_true",
+                        help="--schedule even when no bearer resolves for the scheduled run (it then holds off "
+                             "every day with exit 4 until one does)")
     parser.add_argument("--unschedule", action="store_true", help="remove that task or timer")
     parser.add_argument("--check", action="store_true",
                         help="report whether a newer release exists: exit 0 when one does, 3 when current")
@@ -1204,7 +1243,8 @@ def options_from_args(args) -> Options:
                    env_file=Path(args.env_file) if args.env_file else None,
                    check=args.check, as_json=args.json, daemon_url=args.daemon_url,
                    result_file=Path(args.result_file) if args.result_file else None,
-                   unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule)
+                   unattended=args.unattended, schedule=args.schedule, unschedule=args.unschedule,
+                   allow_no_bearer=args.allow_no_bearer)
 
 
 def main(argv: list[str] | None = None) -> int:
