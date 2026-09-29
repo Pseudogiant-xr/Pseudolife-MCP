@@ -51,7 +51,9 @@
 # Client-only install (this machine runs no daemon; one runs elsewhere,
 # typically reached over a tailnet): no Docker, volumes, ops/.env, token
 # minting or local daemon. Shim, registrations, plugin, hooks and standing
-# instructions are set up as usual, aimed at the remote daemon.
+# instructions are set up as usual, aimed at the remote daemon. An
+# interactive run that names no daemon asks first where the bank lives:
+# answering "another machine" is this mode, with the URL and token asked for.
 #   --daemon-url <url>               the daemon's URL (default: the
 #                                    PSEUDOLIFE_MCP_DAEMON_URL environment
 #                                    variable). A host other than 127.0.0.1,
@@ -281,96 +283,6 @@ installer_python() {  # echoes an interpreter >= 3.10, or nothing
     return 0
 }
 
-# >>> client-only mode >>>
-# A client-only install wires this machine's clients to a daemon that runs
-# elsewhere (typically over a tailnet). The URL comes from --daemon-url,
-# else from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
-# loopback implies --client-only, since no local daemon answers there.
-daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
-    url_authority="${1#*://}"
-    url_authority="${url_authority%%/*}"
-    url_authority="${url_authority##*@}"
-    case "$url_authority" in
-        \[*) url_host="${url_authority#\[}"; url_host="${url_host%%]*}" ;;
-        *) url_host="${url_authority%%:*}" ;;
-    esac
-    printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
-}
-is_loopback_url() {  # $1 = URL; status 0 when it names this machine
-    # The shim's own answer (daemon_url._is_loopback_url), so the installer
-    # and the shim never disagree on a form such as 127.0.0.01 or
-    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
-    # an import that failed) falls back to the host rule below.
-    loopback_py="$(installer_python)"
-    if [ -n "$loopback_py" ]; then
-        loopback_rc=0
-        "$loopback_py" -c 'import sys
-sys.path.insert(0, sys.argv[1])
-from pseudolife_memory.daemon_url import _is_loopback_url
-sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)' "$repo" "$1" 2>/dev/null || loopback_rc=$?
-        case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
-    fi
-    loopback_host="$(daemon_url_host "$1")"
-    case "$loopback_host" in localhost|::1) return 0 ;; esac
-    # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
-    printf '%s' "$loopback_host" |
-        grep -Eq '^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'
-}
-CLIENT_ONLY_VIA=""
-daemon_url_from_env=""
-if [ -z "$DAEMON_URL" ] && [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
-    DAEMON_URL="$PSEUDOLIFE_MCP_DAEMON_URL"
-    daemon_url_from_env=1
-fi
-DAEMON_URL="${DAEMON_URL%/}"
-if [ -n "$DAEMON_URL" ]; then
-    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
-    # http(s), a host and an optional numeric port; no credentials, path,
-    # query, fragment or whitespace. The URL is not echoed: it may hold a
-    # password.
-    url_authority="${DAEMON_URL#*://}"
-    url_port=""
-    case "$url_authority" in
-        \[*\]:*) url_port="${url_authority##*]:}" ;;
-        \[*) ;;
-        *:*) url_port="${url_authority#*:}" ;;
-    esac
-    url_ok=1
-    case "$DAEMON_URL" in http://?*|https://?*) ;; *) url_ok="" ;; esac
-    case "$url_authority" in *[/?#@[:space:]]*) url_ok="" ;; esac
-    case "$url_port" in *[!0-9]*) url_ok="" ;; esac
-    [ -n "$(daemon_url_host "$DAEMON_URL")" ] || url_ok=""
-    if [ -z "$url_ok" ]; then
-        echo "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)" >&2
-        exit 2
-    fi
-    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_url "$DAEMON_URL"; then
-        CLIENT_ONLY=1
-        [ -z "$daemon_url_from_env" ] || CLIENT_ONLY_VIA=" (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
-    fi
-fi
-if [ -n "$CLIENT_ONLY" ]; then
-    if [ -z "$DAEMON_URL" ]; then
-        echo "--client-only needs the daemon's URL: pass --daemon-url http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL" >&2
-        exit 2
-    fi
-    local_flags=""
-    [ -z "$EXTRACTOR" ] || local_flags="$local_flags --extractor"
-    [ -z "${EXTRACTOR_URL:-}" ] || local_flags="$local_flags --extractor-url"
-    [ -z "$MODEL" ] || local_flags="$local_flags --model"
-    [ "$SHIM_PORT" = 0 ] || local_flags="$local_flags --shim-port"
-    [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
-    [ "$TRANSPORT" = shim ] || local_flags="$local_flags --transport http"
-    if [ -n "$local_flags" ]; then
-        echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
-        exit 2
-    fi
-elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ]; then
-    echo "client-only install: --token-file and --read-token name a remote daemon's token, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
-    exit 2
-fi
-# <<< client-only mode <<<
-
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
@@ -505,6 +417,30 @@ PL_CLIENT_ONLY
 }
 # <<< client-only notes <<<
 
+# >>> shared bank notes >>>
+show_shared_bank_notes() {
+    cat <<'PL_SHARED_BANK'
+  Other machines will use this bank: three steps here, then the
+  installer on each of them (docs/guide/remote-bank.md has the detail
+  and the other ways to expose the daemon).
+  1. Expose the daemon, after checking that
+     curl -s http://127.0.0.1:8765/health reports "auth": true. Over
+     Tailscale, no certificate needed:
+       tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765
+     The others then use http://<this machine's tailnet IP>:8765.
+  2. Give each of their clients its own principal, in ops/.env:
+       PSEUDOLIFE_MCP_TOKENS=<token>:<machine>-claude-code
+       PSEUDOLIFE_MCP_TIER_MAP=<machine>-claude-code:full
+     then redeploy (ops/update.sh, or ops\update.ps1 on Windows).
+  3. Admit those principals to the agent board: list them, with default,
+     in coordination.allowed_principals in the daemon's config.yaml, and
+     restart the daemon.
+  On each other machine, run the installer, answer 2 and give it the
+  daemon's URL and that client's token.
+PL_SHARED_BANK
+}
+# <<< shared bank notes <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 normalize_clients() {
     raw="$(printf '%s' "$1" | tr ',' ' ')"
@@ -526,6 +462,228 @@ normalize_clients() {
 }
 
 show_banner
+
+# >>> bank location >>>
+# The installer's first question, for an interactive run that does not name
+# the daemon already (--daemon-url, --client-only, or PSEUDOLIFE_MCP_DAEMON_URL
+# in the environment): where the memory bank lives. "Another machine" is the
+# client-only install, with the daemon's URL asked for here and its token
+# after the agents are chosen; "shared" is a local install that ends with the
+# steps to expose it. --token-file or --read-token already mean another
+# machine, so with either only the URL is asked. The mode block below then
+# resolves and checks the answer exactly as it does the flags. Without a
+# terminal nothing is asked; end of input at one is no answer (exit 2).
+BANK_LOCATION=local
+show_bank_location_question() {
+    cat <<'PL_BANK_LOCATION'
+
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+PL_BANK_LOCATION
+}
+bank_can_ask() {  # status 0 when there is a terminal to ask on
+    [ -t 0 ]
+}
+bank_read() {  # $1 = the prompt; sets BANK_REPLY; fails at end of input
+    printf '%s' "$1"
+    BANK_REPLY=""
+    IFS= read -r BANK_REPLY || [ -n "$BANK_REPLY" ] || return 1
+}
+bank_trimmed() {  # $1 = a reply; echoes it without surrounding whitespace or one pair of quotes
+    bank_value="$(printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    # A path pasted from a file manager, or a URL copied with its quotes.
+    case "$bank_value" in
+        \"*\") bank_value="${bank_value#\"}"; bank_value="${bank_value%\"}" ;;
+        \'*\') bank_value="${bank_value#\'}"; bank_value="${bank_value%\'}" ;;
+    esac
+    printf '%s' "$bank_value"
+}
+choose_bank_location() {
+    if [ -n "$DAEMON_URL" ] || [ -n "$CLIENT_ONLY" ] || [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
+        return 0
+    fi
+    bank_can_ask || return 0
+    if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ]; then
+        show_bank_location_question
+        while :; do
+            if ! bank_read "Choose 1-3 (Enter = 1): "; then
+                echo "no answer was given: re-run and answer, or pass --daemon-url <url> to use a daemon on another machine" >&2
+                exit 2
+            fi
+            case "$(bank_trimmed "$BANK_REPLY")" in
+                ""|1) return 0 ;;
+                2) break ;;
+                3)
+                    if [ -n "$NO_TOKEN" ]; then
+                        echo "--no-token installs a bank without a bearer token, and an unauthenticated bank must never be exposed to other machines (docs/guide/remote-bank.md). Drop --no-token, or answer 1" >&2
+                        exit 2
+                    fi
+                    BANK_LOCATION=shared; return 0 ;;
+                *) echo "  please answer 1, 2 or 3" ;;
+            esac
+        done
+    fi
+    BANK_LOCATION=remote
+    CLIENT_ONLY=1
+    while [ -z "$DAEMON_URL" ]; do
+        if ! bank_read "The daemon's URL (for example http://100.64.0.2:8765): "; then
+            echo "no daemon URL was given: re-run and answer, or pass --daemon-url <url>" >&2
+            exit 2
+        fi
+        DAEMON_URL="$(bank_trimmed "$BANK_REPLY")"
+    done
+}
+choose_bank_token() {  # the other machine's token file: an existing one, or a new one from a pasted token
+    [ "$BANK_LOCATION" = remote ] || return 0
+    [ -z "$TOKEN_FILE" ] || return 0
+    if [ -z "$READ_TOKEN" ] && [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+        step "Token file: $PSEUDOLIFE_MCP_TOKEN_FILE (PSEUDOLIFE_MCP_TOKEN_FILE in the environment)."
+        return 0
+    fi
+    # One token file per principal: named for the one client this run
+    # wires, as docs/guide/remote-bank.md recommends, else shared.
+    bank_token_name=shared
+    case "$CLIENTS" in
+        claude) bank_token_name=claude-code ;;
+        claude-desktop|codex|gemini) bank_token_name="$CLIENTS" ;;
+        generic) bank_token_name=mcp-client ;;
+    esac
+    if [ -z "$READ_TOKEN" ]; then
+        echo ""
+        echo "The daemon's bearer token:"
+        echo "  1) Paste it now: it is written to a new owner-only token file (default)"
+        echo "  2) It is already in a token file on this machine"
+        while :; do
+            if ! bank_read "Choose 1-2 (Enter = 1): "; then
+                echo "no answer was given: re-run and answer, or pass --token-file <path>" >&2
+                exit 2
+            fi
+            case "$(bank_trimmed "$BANK_REPLY")" in
+                ""|1) READ_TOKEN=1; break ;;
+                2) break ;;
+                *) echo "  please answer 1 or 2" ;;
+            esac
+        done
+    fi
+    while [ -z "$TOKEN_FILE" ]; do
+        if [ -n "$READ_TOKEN" ]; then
+            bank_prompt="The token file to write (Enter = ~/.pseudolife-mcp/$bank_token_name.token): "
+        else
+            bank_prompt="The token file: "
+        fi
+        if ! bank_read "$bank_prompt"; then
+            echo "no token file was given: re-run and answer, or pass --token-file <path>" >&2
+            exit 2
+        fi
+        TOKEN_FILE="$(bank_trimmed "$BANK_REPLY")"
+        if [ -z "$TOKEN_FILE" ] && [ -n "$READ_TOKEN" ]; then
+            TOKEN_FILE="~/.pseudolife-mcp/$bank_token_name.token"
+        fi
+        case "$TOKEN_FILE" in
+            "~") TOKEN_FILE="$HOME" ;;
+            "~/"*) TOKEN_FILE="$HOME/${TOKEN_FILE#"~/"}" ;;
+        esac
+        # A pasted token only ever goes to a new file.
+        if [ -n "$READ_TOKEN" ] && { [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; }; then
+            echo "  $TOKEN_FILE exists already: name another file, or re-run and answer 2 to use it"
+            TOKEN_FILE=""
+        fi
+    done
+}
+# <<< bank location <<<
+choose_bank_location
+
+# >>> client-only mode >>>
+# A client-only install wires this machine's clients to a daemon that runs
+# elsewhere (typically over a tailnet). The URL comes from --daemon-url,
+# else from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
+# loopback implies --client-only, since no local daemon answers there.
+daemon_url_host() {  # $1 = URL; echoes its host, lowercased, without brackets
+    url_authority="${1#*://}"
+    url_authority="${url_authority%%/*}"
+    url_authority="${url_authority##*@}"
+    case "$url_authority" in
+        \[*) url_host="${url_authority#\[}"; url_host="${url_host%%]*}" ;;
+        *) url_host="${url_authority%%:*}" ;;
+    esac
+    printf '%s' "$url_host" | tr '[:upper:]' '[:lower:]'
+}
+is_loopback_url() {  # $1 = URL; status 0 when it names this machine
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    loopback_py="$(installer_python)"
+    if [ -n "$loopback_py" ]; then
+        loopback_rc=0
+        "$loopback_py" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from pseudolife_memory.daemon_url import _is_loopback_url
+sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)' "$repo" "$1" 2>/dev/null || loopback_rc=$?
+        case "$loopback_rc" in 10) return 0 ;; 11) return 1 ;; esac
+    fi
+    loopback_host="$(daemon_url_host "$1")"
+    case "$loopback_host" in localhost|::1) return 0 ;; esac
+    # 127.0.0.0/8 as Python's ipaddress reads it: no leading zeros, <= 255.
+    printf '%s' "$loopback_host" |
+        grep -Eq '^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'
+}
+CLIENT_ONLY_VIA=""
+daemon_url_from_env=""
+if [ -z "$DAEMON_URL" ] && [ -n "${PSEUDOLIFE_MCP_DAEMON_URL:-}" ]; then
+    DAEMON_URL="$PSEUDOLIFE_MCP_DAEMON_URL"
+    daemon_url_from_env=1
+fi
+DAEMON_URL="${DAEMON_URL%/}"
+if [ -n "$DAEMON_URL" ]; then
+    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
+    # http(s), a host and an optional numeric port; no credentials, path,
+    # query, fragment or whitespace. The URL is not echoed: it may hold a
+    # password.
+    url_authority="${DAEMON_URL#*://}"
+    url_port=""
+    case "$url_authority" in
+        \[*\]:*) url_port="${url_authority##*]:}" ;;
+        \[*) ;;
+        *:*) url_port="${url_authority#*:}" ;;
+    esac
+    url_ok=1
+    case "$DAEMON_URL" in http://?*|https://?*) ;; *) url_ok="" ;; esac
+    case "$url_authority" in *[/?#@[:space:]]*) url_ok="" ;; esac
+    case "$url_port" in *[!0-9]*) url_ok="" ;; esac
+    [ -n "$(daemon_url_host "$DAEMON_URL")" ] || url_ok=""
+    if [ -z "$url_ok" ]; then
+        echo "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)" >&2
+        exit 2
+    fi
+    if [ -z "$CLIENT_ONLY" ] && ! is_loopback_url "$DAEMON_URL"; then
+        CLIENT_ONLY=1
+        [ -z "$daemon_url_from_env" ] || CLIENT_ONLY_VIA=" (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
+    fi
+fi
+if [ -n "$CLIENT_ONLY" ]; then
+    if [ -z "$DAEMON_URL" ]; then
+        echo "--client-only needs the daemon's URL: pass --daemon-url http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL" >&2
+        exit 2
+    fi
+    local_flags=""
+    [ -z "$EXTRACTOR" ] || local_flags="$local_flags --extractor"
+    [ -z "${EXTRACTOR_URL:-}" ] || local_flags="$local_flags --extractor-url"
+    [ -z "$MODEL" ] || local_flags="$local_flags --model"
+    [ "$SHIM_PORT" = 0 ] || local_flags="$local_flags --shim-port"
+    [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
+    [ "$TRANSPORT" = shim ] || local_flags="$local_flags --transport http"
+    if [ -n "$local_flags" ]; then
+        echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
+        exit 2
+    fi
+elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ]; then
+    echo "client-only install: --token-file and --read-token name a remote daemon's token, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
+    exit 2
+fi
+# <<< client-only mode <<<
 
 # ── 1. provider selection (before preflight, so it checks what you picked) ─
 if [ -z "$CLIENT" ]; then
@@ -576,6 +734,7 @@ if [ -t 0 ] && [ -t 1 ]; then
     show_matrix
     echo ""
 fi
+choose_bank_token
 
 # ── 2. preflight ───────────────────────────────────────────────────────────
 # >>> client-only preflight >>>
@@ -1186,309 +1345,10 @@ describe_legacy_hooks() {  # $1 = state
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
 # Gemini/generic have no hook system.
-instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
-if grep -q "pseudolife-memory@pseudolife-mcp" \
-        "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
-    CLAUDE_PLUGIN_INSTALLED=1
-    case " $CLIENTS " in *" claude "*)
-        step "pseudolife-memory Claude Code plugin detected — skipping Claude"
-        if [ "$instruction_choice" = append ]; then
-            echo "    hook (the plugin provides it, serving a compact memory core); the full"
-            echo "    CLAUDE.md block is still appended, as requested. The plugin no longer"
-            echo "    bundles an MCP server, so the transport is still wired below."
-        else
-            echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
-            echo "    compact memory core; the full block stays optional). The plugin no"
-            echo "    longer bundles an MCP server, so the transport is still wired below."
-        fi ;;
-    esac
-else
-    CLAUDE_PLUGIN_INSTALLED=""
-fi
-
-HOOK_CLAUDE=""
-HOOK_CODEX=""
-INSTR_CODEX=""
-CODEX_HOOK_SOURCE=skip
-CODEX_HOOK_RECOVERY=""
-CODEX_SETUP_VALID=""
-CODEX_CREDENTIAL_FILE=""
-CODEX_CREDENTIAL_URL=""
-CODEX_CONNECTION_CONFIGURED=""
-CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
-CODEX_RUNTIME_DEFAULTS=""
-CODEX_RUNTIME_RECOVERY=""
-briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
-for selected_client in $CLIENTS; do
-    case "$selected_client" in claude|codex) ;; *) continue ;; esac
-    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
-        HOOK_CLAUDE=plugin
-        cleanup_claude_legacy_hooks
-        continue
-    fi
-    if [ "$selected_client" = codex ]; then
-        HOOK_CODEX=unavailable
-        INSTR_CODEX=skipped
-        CODEX_HOOK_RECOVERY="Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
-        codex_python=""
-        for candidate in python3 python; do
-            if command -v "$candidate" >/dev/null 2>&1 &&
-                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
-                codex_python="$candidate"
-                break
-            fi
-        done
-        if [ -n "$codex_python" ]; then
-            credential_exit=0
-            installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
-            installer_url="${DAEMON_URL:-$(get_env PSEUDOLIFE_MCP_DAEMON_URL)}"
-            installer_url="${installer_url:-http://127.0.0.1:8765}"
-            credential_args=("$repo/ops/setup-codex-coordination.py" --credentials
-                --installer-daemon-url "$installer_url")
-            if [ -n "${CLIENT_ONLY:-}" ]; then
-                # The remote daemon's token, from the operator's file on stdin.
-                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
-                    --credentials --installer-token-stdin \
-                    --installer-daemon-url "$installer_url" < "$TOKEN_FILE") || credential_exit=$?
-            elif [ -n "$installer_token" ]; then
-                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
-                    --credentials --installer-token-stdin \
-                    --installer-daemon-url "$installer_url" <<< "$installer_token") || credential_exit=$?
-            else
-                credential_output=$("$codex_python" "${credential_args[@]}") || credential_exit=$?
-            fi
-            if [ "$credential_exit" -eq 0 ] && credential_fields=$("$codex_python" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-r = json.load(sys.stdin)
-assert r["status"] in ("ready", "tokenless")
-assert isinstance(r.get("credential_file_configured"), bool)
-assert isinstance(r.get("connection_configured"), bool)
-print("1" if r["credential_file_configured"] else "0")
-print("1" if r["connection_configured"] else "0")
-print(r.get("credential_file_path") or "")
-print(r.get("daemon_url") or "")
-' <<< "$credential_output" 2>/dev/null); then
-                {
-                    IFS= read -r credential_configured
-                    IFS= read -r CODEX_CONNECTION_CONFIGURED
-                    IFS= read -r CODEX_CREDENTIAL_FILE || true
-                    IFS= read -r CODEX_CREDENTIAL_URL || true
-                } <<< "$credential_fields"
-                if [ "$CODEX_CONNECTION_CONFIGURED" != 1 ]; then
-                    CODEX_CONNECTION_CONFIGURED=""
-                fi
-                if [ "$credential_configured" = 1 ]; then
-                    step "Codex credential file ready; future rotations are picked up by new requests."
-                fi
-                # An existing Codex registration keeps its own daemon URL.
-                if [ -n "${CLIENT_ONLY:-}" ] && [ "${CODEX_CREDENTIAL_URL%/}" != "$DAEMON_URL" ]; then
-                    CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
-                    CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL in [mcp_servers.pseudolife-memory.env], then re-run."
-                fi
-            else
-                CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
-                CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
-            fi
-            if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
-                setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
-                    --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
-                if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
-                setup_exit=0
-                if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
-                    if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
-                    else
-                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
-                    fi
-                elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
-                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
-                else
-                    setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
-                fi
-                # Parse only data, never shell code. A failed helper must leave the
-                # remaining provider setup available and must never imply readiness.
-                if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
-import json, sys
-sys.stdout.reconfigure(encoding="utf-8", newline="\n")
-r = json.load(sys.stdin)
-assert r["status"] in ("ready", "pending", "unavailable", "skipped")
-assert r["source"] in ("manual", "plugin", "skip")
-assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks")
-for key in ("status", "source", "instructions", "recovery"):
-    print(" ".join(str(r.get(key) or "").splitlines()))
-' <<< "$setup_output" 2>/dev/null); then
-                    {
-                        IFS= read -r HOOK_CODEX
-                        IFS= read -r CODEX_HOOK_SOURCE
-                        IFS= read -r INSTR_CODEX
-                        IFS= read -r CODEX_HOOK_RECOVERY || true
-                    } <<< "$setup_fields"
-                    CODEX_SETUP_VALID=1
-                else
-                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
-                fi
-            fi
-        fi
-        step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
-        if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
-        continue
-    fi
-    if [ -n "${CLIENT_ONLY:-}" ]; then
-        # No daemon container here: the hook runs the installed shim by its
-        # path, known once section 11 installed it (after section 12's check).
-        HOOK_CLAUDE=deferred
-        continue
-    fi
-    step "Installing $selected_client session hook..."
-    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
-    if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
-done
-
-# ── 10. standing memory instructions (consent; never edited without it) ────
-# Codex instructions are resolved by the setup helper after hook verification.
-# Other clients retain the existing auto/append/skip behavior and prompts.
-INSTR_CLAUDE=""
-INSTR_GEMINI=""
-INSTR_GENERIC=""
-
-record_instr() {
-    case "$1" in
-        claude)  INSTR_CLAUDE="$2" ;;
-        codex)   INSTR_CODEX="$2" ;;
-        gemini)  INSTR_GEMINI="$2" ;;
-        generic) INSTR_GENERIC="$2" ;;
-    esac
-}
-
-append_block() {  # $1 = target path, $2 = provider
-    # Presence check HERE, not only at the loop top: the generic prompt
-    # resolves its target path after that check ran against an empty
-    # --agents-file, and a re-run must never double-append.
-    if grep -q "pseudolife-memory" "$1" 2>/dev/null; then
-        step "Memory block already present in $1 — skipping."
-        record_instr "$2" "present:$1"
-        return 0
-    fi
-    mkdir -p "$(dirname "$1")"
-    cat "$repo/examples/CLAUDE.memory.md" >> "$1"
-    step "Appended memory block to $1"
-    record_instr "$2" "appended:$1"
-}
-
-for selected_client in $CLIENTS; do
-    if [ "$selected_client" = codex ]; then
-        # A valid helper result owns the fallback. Otherwise preserve explicit
-        # append consent even when Python is missing or setup cannot run.
-        if [ -z "$CODEX_SETUP_VALID" ] && { [ "$instruction_choice" = append ] ||
-            { [ "$instruction_choice" = auto ] && [ "$CODEX_HOOK_TRUST" = yes ]; }; }; then
-            codex_home="${CODEX_HOME:-$HOME/.codex}"
-            fallback_path="$codex_home/AGENTS.md"
-            if [ -f "$codex_home/AGENTS.override.md" ] &&
-                grep -q '[^[:space:]]' "$codex_home/AGENTS.override.md"; then
-                fallback_path="$codex_home/AGENTS.override.md"
-            fi
-            if grep -Eq '^## Memory([[:space:]]|$)' "$fallback_path" 2>/dev/null &&
-                grep -q 'pseudolife-memory' "$fallback_path" &&
-                grep -q 'RECALL' "$fallback_path" && grep -q 'CAPTURE' "$fallback_path" &&
-                grep -q 'REFLECT' "$fallback_path"; then
-                INSTR_CODEX=present
-            else
-                fallback_ok=1
-                mkdir -p "$codex_home" || fallback_ok=""
-                if [ -n "$fallback_ok" ] && [ -f "$fallback_path" ]; then
-                    saved=$(mktemp "$fallback_path.bak-pseudolife-XXXXXXXX") &&
-                        cp "$fallback_path" "$saved" || fallback_ok=""
-                    if [ -n "$fallback_ok" ]; then step "Backed up Codex standing instructions to $saved"; fi
-                fi
-                if [ -n "$fallback_ok" ] && [ -r "$repo/examples/CLAUDE.memory.md" ] &&
-                    { printf '\n\n'; cat "$repo/examples/CLAUDE.memory.md"; } >> "$fallback_path"; then
-                    INSTR_CODEX=appended
-                else
-                    CODEX_HOOK_RECOVERY="$CODEX_HOOK_RECOVERY Could not write standing instructions; check the Codex home and file permissions."
-                    step "$CODEX_HOOK_RECOVERY"
-                fi
-            fi
-            step "Codex standing instructions: $INSTR_CODEX ($fallback_path). Hooks still require setup."
-        fi
-        continue
-    fi
-    if [ "$selected_client" = claude-desktop ]; then
-        # Desktop reads no standing file; the MCP instructions field is its
-        # only briefing channel.
-        continue
-    fi
-    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
-        # The plugin's SessionStart hook serves a compact memory core, not
-        # this block: auto and skip leave CLAUDE.md alone (the summary says
-        # so), and an explicit append still writes it.
-        if [ "$instruction_choice" != append ]; then
-            record_instr claude "covered-by-plugin"
-            continue
-        fi
-    fi
-    case "$selected_client" in
-        gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
-        generic) instruction_path="$AGENTS_FILE" ;;
-        *)       instruction_path="$HOME/.claude/CLAUDE.md" ;;
-    esac
-    if [ -n "$instruction_path" ] \
-            && grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
-        step "Memory block already present in $instruction_path — skipping."
-        record_instr "$selected_client" "present:$instruction_path"
-        continue
-    fi
-    choice="$instruction_choice"
-    if [ "$choice" = auto ]; then
-        case "$selected_client" in
-            claude)
-                # Skipped by default. The settings.json SessionStart hook
-                # serves the compact memory core and the live briefing, not
-                # this block; the summary names the file to append it to.
-                choice=skip ;;
-            gemini)
-                if [ -t 0 ]; then
-                    printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
-                    read -r yn
-                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
-                else
-                    choice=skip
-                fi ;;
-            generic)
-                if [ -n "$AGENTS_FILE" ]; then
-                    choice=append
-                elif [ -t 0 ]; then
-                    printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
-                    read -r answer
-                    if [ "$answer" = "-" ]; then
-                        choice=skip
-                    else
-                        instruction_path="${answer:-$HOME/AGENTS.md}"
-                        choice=append
-                    fi
-                else
-                    choice=skip
-                fi ;;
-        esac
-    fi
-    if [ "$choice" = append ] && [ "$selected_client" = generic ] \
-            && [ -z "$instruction_path" ]; then
-        echo "NOTE: generic append needs a target — pass --agents-file <path>." >&2
-        choice=skip
-    fi
-    if [ "$choice" = append ]; then
-        append_block "$instruction_path" "$selected_client"
-    else
-        hint_path="${instruction_path:-<your AGENTS.md>}"
-        step "Standing memory block not written for $selected_client. To add it:"
-        echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
-        record_instr "$selected_client" "skipped:$hint_path"
-    fi
-done
-
-# ── 11. wire into selected MCP clients ─────────────────────────────────────
-# Runs even with the plugin installed: the plugin is the hooks/commands layer
-# only, so the MCP transport (shim by default) always comes from here.
+# The stdio shim helpers come first: a client-only install runs the
+# installed shim's connect (the client-only connect block) before the
+# Codex credential setup here and the registrars in section 11.
+#
 # The shim install itself is client-agnostic; memoize one attempt so
 # multi-provider runs don't run pipx/pip twice. Every install command runs as
 # an `if` condition so `set -e` is suspended around it: a failed pipx/pip —
@@ -1769,6 +1629,430 @@ MCP_CLAUDE_DESKTOP=""
 MCP_CODEX=""
 MCP_GEMINI=""
 
+# >>> client-only connect >>>
+# A client-only install re-points the registrations this machine already has
+# (an earlier install's, naming another daemon) with the installed shim's
+# `connect`, before the Codex credential setup below and the registrars in
+# section 11: those create only what is still missing, and the Codex setup
+# refuses a daemon URL its configured server does not name. The dry run sends
+# no token and writes nothing; when it finds no registration (exit 3),
+# connect is not run again. A failed connect stops the install.
+CONNECTED_CLIENTS=""
+CONNECT_CHECKED=""
+connect_client_names() {  # the selected clients as connect names them, comma-separated
+    connect_names=""
+    for selected_client in $CLIENTS; do
+        case "$selected_client" in
+            claude) connect_name=claude-code ;;
+            claude-desktop|codex|gemini) connect_name="$selected_client" ;;
+            *) continue ;;
+        esac
+        connect_names="${connect_names:+$connect_names,}$connect_name"
+    done
+    printf '%s' "$connect_names"
+}
+connect_report_lines() {  # $1 = valid|error|plan|manual|handled; connect's --json report on stdin
+    "$(installer_python)" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+try:
+    report = json.load(sys.stdin)
+except ValueError:
+    report = None
+# connect'"'"'s report, or nothing to trust: a JSON object with rows and exit.
+valid = isinstance(report, dict) and isinstance(report.get("rows"), list) and "exit" in report
+if sys.argv[1] == "valid":
+    sys.exit(0 if valid else 1)
+if not valid:
+    sys.exit(0)
+if sys.argv[1] == "error":
+    print(report.get("error") or "")
+    sys.exit(0)
+rows = [row for row in report["rows"] if isinstance(row, dict)]
+if sys.argv[1] == "handled":
+    print(" ".join(row["client"] for row in rows if row.get("place") == "registration"
+                   and row.get("state") in ("current", "change")))
+    sys.exit(0)
+for row in rows:
+    # An absent client is for the registrars to create, not a connect action.
+    if row.get("state") == "absent" or (sys.argv[1] == "manual" and row.get("state") != "manual"):
+        continue
+    where = " ".join(part for part in (row.get("file") or "", "[%s]" % row["key"] if row.get("key") else "") if part)
+    print("    %-8s %s %s%s" % (row.get("state"), row.get("client"), row.get("place"), ": " + where if where else ""))
+    for key, change in (row.get("changes") or {}).items():
+        old, new = (list(change) + [None, None])[:2]
+        print("             %s: %s -> %s" % (key, "(unset)" if old is None else old, "(removed)" if new is None else new))
+    if row.get("detail"):
+        print("             " + row["detail"])
+' "$1"
+}
+connect_existing_registrations() {
+    connect_names="$(connect_client_names)"
+    [ -n "$connect_names" ] || return 0
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: existing registrations were not checked against $DAEMON_URL: the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is." >&2
+        return 0
+    fi
+    connect_rc=0
+    connect_report=$("$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_names" --dry-run --json </dev/null) || connect_rc=$?
+    # Only connect's own report is trusted. Anything else (a shim from before
+    # connect, a held one, one that cannot start) leaves the install as it
+    # was: the registrars run, with their earlier advice for a mismatch.
+    if ! printf '%s' "$connect_report" | connect_report_lines valid; then
+        connect_why="$SHIM_PATH did not answer with connect's plan (exit $connect_rc; a shim from before connect has none)"
+        [ -z "${SHIM_HELD:-}" ] || connect_why="$connect_why. It is the shim left in place: $SHIM_HELD"
+        echo "WARNING: existing registrations were not checked against $DAEMON_URL: $connect_why. One that names another daemon stays as it is." >&2
+        return 0
+    fi
+    CONNECT_CHECKED=1
+    case "$connect_rc" in
+        0) ;;
+        3)  # No registration connect can write: the registrars create them.
+            connect_manual=$(printf '%s' "$connect_report" | connect_report_lines manual) || true
+            if [ -n "$connect_manual" ]; then
+                echo "WARNING: pseudolife-mcp connect found entries it does not rewrite; change them by hand:" >&2
+                printf '%s\n' "$connect_manual" >&2
+            fi
+            return 0 ;;
+        *)
+            # Under --json the reason is only in the report.
+            connect_error=$(printf '%s' "$connect_report" | connect_report_lines error) || connect_error=""
+            echo "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $connect_rc${connect_error:+: $connect_error}). Nothing was changed; fix that, then re-run" >&2
+            exit 1 ;;
+    esac
+    step "Existing registrations: pseudolife-mcp connect points them at $DAEMON_URL:"
+    printf '%s' "$connect_report" | connect_report_lines plan || true
+    connect_rc=0
+    "$SHIM_PATH" connect "$DAEMON_URL" --token-file "$TOKEN_FILE" --client "$connect_names" --yes </dev/null || connect_rc=$?
+    if [ "$connect_rc" -ne 0 ]; then
+        case "$connect_rc" in
+            1) connect_meaning="a write failed, and every file it wrote was rolled back" ;;
+            4) connect_meaning="the daemon refused the token file or the MCP handshake, and nothing was written" ;;
+            5) connect_meaning="the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" ;;
+            *) connect_meaning="see its message above" ;;
+        esac
+        echo "client-only install: pseudolife-mcp connect exited $connect_rc: $connect_meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run" >&2
+        exit 1
+    fi
+    CONNECTED_CLIENTS=$(printf '%s' "$connect_report" | connect_report_lines handled) || CONNECTED_CLIENTS=""
+}
+# <<< client-only connect <<<
+[ -z "${CLIENT_ONLY:-}" ] || connect_existing_registrations
+
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+if grep -q "pseudolife-memory@pseudolife-mcp" \
+        "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
+    CLAUDE_PLUGIN_INSTALLED=1
+    case " $CLIENTS " in *" claude "*)
+        step "pseudolife-memory Claude Code plugin detected — skipping Claude"
+        if [ "$instruction_choice" = append ]; then
+            echo "    hook (the plugin provides it, serving a compact memory core); the full"
+            echo "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+            echo "    bundles an MCP server, so the transport is still wired below."
+        else
+            echo "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+            echo "    compact memory core; the full block stays optional). The plugin no"
+            echo "    longer bundles an MCP server, so the transport is still wired below."
+        fi ;;
+    esac
+else
+    CLAUDE_PLUGIN_INSTALLED=""
+fi
+
+HOOK_CLAUDE=""
+HOOK_CODEX=""
+INSTR_CODEX=""
+CODEX_HOOK_SOURCE=skip
+CODEX_HOOK_RECOVERY=""
+CODEX_SETUP_VALID=""
+CODEX_CREDENTIAL_FILE=""
+CODEX_CREDENTIAL_URL=""
+CODEX_CONNECTION_CONFIGURED=""
+CODEX_CREDENTIAL_BOOTSTRAP_FAILED=""
+CODEX_RUNTIME_DEFAULTS=""
+CODEX_RUNTIME_RECOVERY=""
+briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+for selected_client in $CLIENTS; do
+    case "$selected_client" in claude|codex) ;; *) continue ;; esac
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        HOOK_CLAUDE=plugin
+        cleanup_claude_legacy_hooks
+        continue
+    fi
+    if [ "$selected_client" = codex ]; then
+        HOOK_CODEX=unavailable
+        INSTR_CODEX=skipped
+        CODEX_HOOK_RECOVERY="Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+        codex_python=""
+        for candidate in python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1 &&
+                "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+                codex_python="$candidate"
+                break
+            fi
+        done
+        if [ -n "$codex_python" ]; then
+            credential_exit=0
+            installer_token="$(get_env PSEUDOLIFE_MCP_TOKEN)"
+            installer_url="${DAEMON_URL:-$(get_env PSEUDOLIFE_MCP_DAEMON_URL)}"
+            installer_url="${installer_url:-http://127.0.0.1:8765}"
+            credential_args=("$repo/ops/setup-codex-coordination.py" --credentials
+                --installer-daemon-url "$installer_url")
+            if [ -n "${CLIENT_ONLY:-}" ]; then
+                # The remote daemon's token, from the operator's file on stdin.
+                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
+                    --credentials --installer-token-stdin \
+                    --installer-daemon-url "$installer_url" < "$TOKEN_FILE") || credential_exit=$?
+            elif [ -n "$installer_token" ]; then
+                credential_output=$("$codex_python" "$repo/ops/setup-codex-coordination.py" \
+                    --credentials --installer-token-stdin \
+                    --installer-daemon-url "$installer_url" <<< "$installer_token") || credential_exit=$?
+            else
+                credential_output=$("$codex_python" "${credential_args[@]}") || credential_exit=$?
+            fi
+            if [ "$credential_exit" -eq 0 ] && credential_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "tokenless")
+assert isinstance(r.get("credential_file_configured"), bool)
+assert isinstance(r.get("connection_configured"), bool)
+print("1" if r["credential_file_configured"] else "0")
+print("1" if r["connection_configured"] else "0")
+print(r.get("credential_file_path") or "")
+print(r.get("daemon_url") or "")
+' <<< "$credential_output" 2>/dev/null); then
+                {
+                    IFS= read -r credential_configured
+                    IFS= read -r CODEX_CONNECTION_CONFIGURED
+                    IFS= read -r CODEX_CREDENTIAL_FILE || true
+                    IFS= read -r CODEX_CREDENTIAL_URL || true
+                } <<< "$credential_fields"
+                if [ "$CODEX_CONNECTION_CONFIGURED" != 1 ]; then
+                    CODEX_CONNECTION_CONFIGURED=""
+                fi
+                if [ "$credential_configured" = 1 ]; then
+                    step "Codex credential file ready; future rotations are picked up by new requests."
+                fi
+                # pseudolife-mcp connect (the client-only connect block)
+                # re-pointed an existing registration already; one still
+                # naming another daemon is one it could not write, or
+                # connect did not run (a shim from before it).
+                if [ -n "${CLIENT_ONLY:-}" ] && [ "${CODEX_CREDENTIAL_URL%/}" != "$DAEMON_URL" ]; then
+                    CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                    if [ -n "${CONNECT_CHECKED:-}" ]; then
+                        CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL where that Codex configuration sets it, or run pseudolife-mcp connect $DAEMON_URL --client codex --token-file $TOKEN_FILE, then re-run."
+                    else
+                        CODEX_HOOK_RECOVERY="The existing Codex registration names the daemon at ${CODEX_CREDENTIAL_URL:-(none)}, not the daemon at $DAEMON_URL. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DAEMON_URL in [mcp_servers.pseudolife-memory.env], then re-run."
+                    fi
+                fi
+            else
+                CODEX_CREDENTIAL_BOOTSTRAP_FAILED=1
+                CODEX_HOOK_RECOVERY="Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            fi
+            if [ -z "$CODEX_CREDENTIAL_BOOTSTRAP_FAILED" ]; then
+                setup_args=("$repo/ops/setup-codex-hooks.py" --source "$CODEX_HOOKS"
+                    --trust "$CODEX_HOOK_TRUST" --instructions "$instruction_choice")
+                if ! [ -t 0 ]; then setup_args+=(--non-interactive); fi
+                setup_exit=0
+                if [ -n "$CODEX_CONNECTION_CONFIGURED" ]; then
+                    if [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    else
+                        setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN -u PSEUDOLIFE_MCP_TOKEN_FILE PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                    fi
+                elif [ -n "$CODEX_CREDENTIAL_FILE" ]; then
+                    setup_output=$(env -u PSEUDOLIFE_MCP_TOKEN PSEUDOLIFE_MCP_TOKEN_FILE="$CODEX_CREDENTIAL_FILE" PSEUDOLIFE_MCP_DAEMON_URL="$CODEX_CREDENTIAL_URL" "$codex_python" "${setup_args[@]}") || setup_exit=$?
+                else
+                    setup_output=$("$codex_python" "${setup_args[@]}") || setup_exit=$?
+                fi
+                # Parse only data, never shell code. A failed helper must leave the
+                # remaining provider setup available and must never imply readiness.
+                if [ "$setup_exit" -le 1 ] && setup_fields=$("$codex_python" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+r = json.load(sys.stdin)
+assert r["status"] in ("ready", "pending", "unavailable", "skipped")
+assert r["source"] in ("manual", "plugin", "skip")
+assert r["instructions"] in ("present", "appended", "skipped", "covered-by-hooks")
+for key in ("status", "source", "instructions", "recovery"):
+    print(" ".join(str(r.get(key) or "").splitlines()))
+' <<< "$setup_output" 2>/dev/null); then
+                    {
+                        IFS= read -r HOOK_CODEX
+                        IFS= read -r CODEX_HOOK_SOURCE
+                        IFS= read -r INSTR_CODEX
+                        IFS= read -r CODEX_HOOK_RECOVERY || true
+                    } <<< "$setup_fields"
+                    CODEX_SETUP_VALID=1
+                else
+                    CODEX_HOOK_RECOVERY="Codex setup did not return a valid result. Run python3 ops/setup-codex-hooks.py to retry."
+                fi
+            fi
+        fi
+        step "Codex hooks: $HOOK_CODEX; standing instructions: $INSTR_CODEX."
+        if [ -n "$CODEX_HOOK_RECOVERY" ]; then echo "    $CODEX_HOOK_RECOVERY"; fi
+        continue
+    fi
+    if [ -n "${CLIENT_ONLY:-}" ]; then
+        # No daemon container here: the hook runs the installed shim by its
+        # path, known once section 11 installed it (after section 12's check).
+        HOOK_CLAUDE=deferred
+        continue
+    fi
+    step "Installing $selected_client session hook..."
+    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
+    if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
+done
+
+# ── 10. standing memory instructions (consent; never edited without it) ────
+# Codex instructions are resolved by the setup helper after hook verification.
+# Other clients retain the existing auto/append/skip behavior and prompts.
+INSTR_CLAUDE=""
+INSTR_GEMINI=""
+INSTR_GENERIC=""
+
+record_instr() {
+    case "$1" in
+        claude)  INSTR_CLAUDE="$2" ;;
+        codex)   INSTR_CODEX="$2" ;;
+        gemini)  INSTR_GEMINI="$2" ;;
+        generic) INSTR_GENERIC="$2" ;;
+    esac
+}
+
+append_block() {  # $1 = target path, $2 = provider
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # --agents-file, and a re-run must never double-append.
+    if grep -q "pseudolife-memory" "$1" 2>/dev/null; then
+        step "Memory block already present in $1 — skipping."
+        record_instr "$2" "present:$1"
+        return 0
+    fi
+    mkdir -p "$(dirname "$1")"
+    cat "$repo/examples/CLAUDE.memory.md" >> "$1"
+    step "Appended memory block to $1"
+    record_instr "$2" "appended:$1"
+}
+
+for selected_client in $CLIENTS; do
+    if [ "$selected_client" = codex ]; then
+        # A valid helper result owns the fallback. Otherwise preserve explicit
+        # append consent even when Python is missing or setup cannot run.
+        if [ -z "$CODEX_SETUP_VALID" ] && { [ "$instruction_choice" = append ] ||
+            { [ "$instruction_choice" = auto ] && [ "$CODEX_HOOK_TRUST" = yes ]; }; }; then
+            codex_home="${CODEX_HOME:-$HOME/.codex}"
+            fallback_path="$codex_home/AGENTS.md"
+            if [ -f "$codex_home/AGENTS.override.md" ] &&
+                grep -q '[^[:space:]]' "$codex_home/AGENTS.override.md"; then
+                fallback_path="$codex_home/AGENTS.override.md"
+            fi
+            if grep -Eq '^## Memory([[:space:]]|$)' "$fallback_path" 2>/dev/null &&
+                grep -q 'pseudolife-memory' "$fallback_path" &&
+                grep -q 'RECALL' "$fallback_path" && grep -q 'CAPTURE' "$fallback_path" &&
+                grep -q 'REFLECT' "$fallback_path"; then
+                INSTR_CODEX=present
+            else
+                fallback_ok=1
+                mkdir -p "$codex_home" || fallback_ok=""
+                if [ -n "$fallback_ok" ] && [ -f "$fallback_path" ]; then
+                    saved=$(mktemp "$fallback_path.bak-pseudolife-XXXXXXXX") &&
+                        cp "$fallback_path" "$saved" || fallback_ok=""
+                    if [ -n "$fallback_ok" ]; then step "Backed up Codex standing instructions to $saved"; fi
+                fi
+                if [ -n "$fallback_ok" ] && [ -r "$repo/examples/CLAUDE.memory.md" ] &&
+                    { printf '\n\n'; cat "$repo/examples/CLAUDE.memory.md"; } >> "$fallback_path"; then
+                    INSTR_CODEX=appended
+                else
+                    CODEX_HOOK_RECOVERY="$CODEX_HOOK_RECOVERY Could not write standing instructions; check the Codex home and file permissions."
+                    step "$CODEX_HOOK_RECOVERY"
+                fi
+            fi
+            step "Codex standing instructions: $INSTR_CODEX ($fallback_path). Hooks still require setup."
+        fi
+        continue
+    fi
+    if [ "$selected_client" = claude-desktop ]; then
+        # Desktop reads no standing file; the MCP instructions field is its
+        # only briefing channel.
+        continue
+    fi
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
+        if [ "$instruction_choice" != append ]; then
+            record_instr claude "covered-by-plugin"
+            continue
+        fi
+    fi
+    case "$selected_client" in
+        gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
+        generic) instruction_path="$AGENTS_FILE" ;;
+        *)       instruction_path="$HOME/.claude/CLAUDE.md" ;;
+    esac
+    if [ -n "$instruction_path" ] \
+            && grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
+        step "Memory block already present in $instruction_path — skipping."
+        record_instr "$selected_client" "present:$instruction_path"
+        continue
+    fi
+    choice="$instruction_choice"
+    if [ "$choice" = auto ]; then
+        case "$selected_client" in
+            claude)
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
+                choice=skip ;;
+            gemini)
+                if [ -t 0 ]; then
+                    printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
+                    read -r yn
+                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
+                else
+                    choice=skip
+                fi ;;
+            generic)
+                if [ -n "$AGENTS_FILE" ]; then
+                    choice=append
+                elif [ -t 0 ]; then
+                    printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
+                    read -r answer
+                    if [ "$answer" = "-" ]; then
+                        choice=skip
+                    else
+                        instruction_path="${answer:-$HOME/AGENTS.md}"
+                        choice=append
+                    fi
+                else
+                    choice=skip
+                fi ;;
+        esac
+    fi
+    if [ "$choice" = append ] && [ "$selected_client" = generic ] \
+            && [ -z "$instruction_path" ]; then
+        echo "NOTE: generic append needs a target — pass --agents-file <path>." >&2
+        choice=skip
+    fi
+    if [ "$choice" = append ]; then
+        append_block "$instruction_path" "$selected_client"
+    else
+        hint_path="${instruction_path:-<your AGENTS.md>}"
+        step "Standing memory block not written for $selected_client. To add it:"
+        echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
+        record_instr "$selected_client" "skipped:$hint_path"
+    fi
+done
+
+# ── 11. wire into selected MCP clients ─────────────────────────────────────
+# Runs even with the plugin installed: the plugin is the hooks/commands layer
+# only, so the MCP transport (shim by default) always comes from here.
+# Its shim helpers (ensure_shim and the registration checks) are defined at
+# the top of section 9, where a client-only install first needs them.
+#
 # Claude Desktop launches MCP servers with a sanitized environment, so a
 # token-gated daemon needs a token FILE path on the entry — never the value,
 # and never an OS env var, which Desktop cannot see (2026-09-19 incident).
@@ -2183,8 +2467,10 @@ for selected_client in $CLIENTS; do
                 MCP_GEMINI=present
             fi
             # `gemini mcp list` shows no env, so the installer cannot tell
-            # whether this registration carries a token; say how to add one.
-            if [ -n "${GEMINI_TOKEN_FILE:-}" ]; then
+            # whether this registration carries a token; say how to add one,
+            # unless pseudolife-mcp connect just wrote or confirmed it.
+            case " ${CONNECTED_CLIENTS:-} " in *" gemini "*) gemini_connected=1 ;; *) gemini_connected="" ;; esac
+            if [ -n "${GEMINI_TOKEN_FILE:-}" ] && [ -z "$gemini_connected" ]; then
                 echo "WARNING: the daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$GEMINI_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
             fi
         elif [ "$TRANSPORT" = "shim" ]; then
@@ -2328,14 +2614,20 @@ for selected_client in $CLIENTS; do
                 ! printf '%s\n' "$existing_claude" | grep -q 'PSEUDOLIFE_MCP_TOKEN'; then
             echo "WARNING: the daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with --no-token." >&2
         fi
-        # The in-place edit above only adds what is missing, so a registration
-        # from an earlier local install may still name that daemon.
+        # pseudolife-mcp connect (the client-only connect block) re-pointed
+        # an existing registration already; one still naming another daemon
+        # is one it could not write (a project scope, an HTTP entry), or
+        # connect did not run (a shim from before it).
         # Captured, then matched: a `grep -q` that exits early under
         # pipefail would read the CLI's SIGPIPE as a mismatch.
         if [ -n "${CLIENT_ONLY:-}" ]; then
             claude_registration_now=$(claude mcp get pseudolife-memory 2>/dev/null || true)
             case "$claude_registration_now" in *"$CLIENT_DAEMON_URL"*) ;; *)
-                echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE." >&2 ;;
+                if [ -n "${CONNECT_CHECKED:-}" ]; then
+                    echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE in the entry it names, or run pseudolife-mcp connect $CLIENT_DAEMON_URL --client claude-code --token-file $CLAUDE_TOKEN_FILE." >&2
+                else
+                    echo "WARNING: the existing Claude Code registration does not name the daemon at $CLIENT_DAEMON_URL. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$CLIENT_DAEMON_URL and PSEUDOLIFE_MCP_TOKEN_FILE=$CLAUDE_TOKEN_FILE." >&2
+                fi ;;
             esac
         fi
     elif [ "$TRANSPORT" = "shim" ]; then
@@ -2669,6 +2961,7 @@ if [ -n "$codex_shim_mode" ]; then
     echo "Note: Codex-served extraction quality is unmeasured — see the 'OpenAI primary' section of docs/guide/dreaming.md."
 fi
 if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
+if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
