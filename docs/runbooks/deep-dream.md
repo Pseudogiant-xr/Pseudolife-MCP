@@ -12,7 +12,7 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 
 | queue | knob | what `auto` applies |
 |---|---|---|
-| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean, only when the second opinion came from a different model (since 2026-09-30); `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, under the same different-model rule (`judge_second_model`, optionally on its own endpoint `judge_second_url`; Console: Deep dream → Merge judge second model / second endpoint URL, live) |
+| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean, only when the second opinion came from a different model (since 2026-09-30); a `relate` verdict (distinct, but related FROM → INTO; since 2026-09-30) counts as a reject in both gates, and an applied reject with a relate vote also files that relation as a link proposal (source `merge-judge-relate`) for the link judge; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, under the same different-model rule (`judge_second_model`, optionally on its own endpoint `judge_second_url`; Console: Deep dream → Merge judge second model / second endpoint URL, live) |
 | link proposals | `link_judge_mode` | accept >= `link_accept_min_confidence` becomes a live edge, `decided_by='dream-judge'`; reject >= `link_reject_min_confidence`; a retype is recorded (`judge_relation`) for a reviewer to apply |
 | junk proposals | `junk_judge_mode` | keep >= `junk_keep_min_confidence`; delete >= `junk_delete_min_confidence` only under the evidence bar (degree <= `junk_max_auto_degree`, at most one fact slot) |
 | lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also retire the losing slot (reversible — `restore_slot` / `POST /api/lessons/restore`) after folding the carry-over into the surviving lesson |
@@ -165,6 +165,10 @@ subagents for large batches — reuse the
 snippets/scopes. A proposal a background sweep has already judged carries a
 `judge` block (verdict/confidence/note/model, schema v30) — treat it as a
 lead, never a decision: read the evidence yourself and disagree freely.
+A `relate` verdict (since 2026-09-30) says the pair is distinct but
+related, with its `relation` on the block (FROM → INTO as listed): if you
+agree, reject the merge and relate the pair (`action="relate"`) rather
+than only rejecting it.
 A `low_differential: true` item warrants extra skepticism: its shown
 evidence cannot tell the two names apart, so a merge needs support beyond
 the snippets (name shape alone is not enough — rule 1 of the judge prompt).

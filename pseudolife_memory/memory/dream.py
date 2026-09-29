@@ -365,6 +365,19 @@ _EVENTS_SYSTEM_PROMPT = (
     '{"events":[]} if nothing qualifies.'
 )
 
+# The typed-edge vocabulary the graph judges name relations from: the link
+# and candidate judges, and since 2026-09-30 the merge judge's "relate".
+_RELATION_VOCAB = (
+    "depends-on (src needs dst), part-of (src is a component of dst), "
+    "runs-on (src executes on host/platform dst), hosts (src serves dst), "
+    "uses (src makes use of dst), configures (src sets up dst), "
+    "stores-data-in, tests (src is a test of dst), implements (src code "
+    "realizes concept dst), superseded-by (src replaced by dst), related-to "
+    "(untyped; weakest)")
+# The bare relation names: the only relations a merge "relate" may carry.
+_RELATION_NAMES = tuple(part.split(" (")[0].strip()
+                        for part in _RELATION_VOCAB.split(", "))
+
 # Merge-proposal judge (autonomous Step C, 2026-08-16 design). The rules are
 # the distilled house judgment brief the 2026-08-16 Opus panel ran with,
 # grounded in 761 recorded verdicts (23% accept rate — hence the skeptical
@@ -386,14 +399,18 @@ _JUDGE_SYSTEM_PROMPT = (
     "3. A dated run/session slug paired with a broader name (a project, a "
     "process) is one event vs a category — reject.\n"
     "4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool "
-    "pairs are related but distinct — reject.\n"
+    "pairs are related but distinct — \"relate\", naming the relation that "
+    "holds from FROM to INTO; \"reject\" when no relation below fits.\n"
     "5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the "
     "same file, bare-vs-qualified name, abbreviation-vs-full name — when "
     "the evidence agrees.\n"
     "6. Use \"leave\" only when the evidence is genuinely insufficient to "
     "decide; do not use it to avoid judging.\n"
+    "Relations for \"relate\" (src is FROM, dst is INTO): "
+    + _RELATION_VOCAB + ".\n"
     'Return JSON only: {"verdicts":[{"id":<proposal number>,'
-    '"verdict":"accept"|"reject"|"leave","confidence":<0..1>,'
+    '"verdict":"accept"|"reject"|"relate"|"leave","confidence":<0..1>,'
+    '"relation":<vocab, with relate only>,'
     '"note":"<reason, max 25 words>"}]} — one entry per proposal, '
     "confidence is your honest probability that the verdict is correct."
 )
@@ -439,14 +456,6 @@ def format_judge_proposal(p: dict) -> str:
 # junk, 40 slot pairs, every verdict ratified and applied). SHARED with
 # evals/queue_judge_ladder.py so measured arms and the shipped judges are
 # byte-identical; change them only through a new ladder run.
-
-_RELATION_VOCAB = (
-    "depends-on (src needs dst), part-of (src is a component of dst), "
-    "runs-on (src executes on host/platform dst), hosts (src serves dst), "
-    "uses (src makes use of dst), configures (src sets up dst), "
-    "stores-data-in, tests (src is a test of dst), implements (src code "
-    "realizes concept dst), superseded-by (src replaced by dst), related-to "
-    "(untyped; weakest)")
 
 _LINK_JUDGE_SYSTEM_PROMPT = (
     "You judge LINK PROPOSALS for a knowledge graph. Each numbered proposal "
@@ -1600,10 +1609,14 @@ class OpenAICompatExtractor:
         carries ``n`` (1-based number), ``from``/``into`` sides (display,
         degree, scopes, snippets), ``reason`` and ``score`` — see
         :func:`format_judge_proposal`. Returns validated verdict dicts
-        ``{"n", "verdict", "confidence", "note"}``; proposals the model
-        skipped are simply absent. Raises :class:`ExtractorError` on
-        transport/parse failure so the caller can tell failure from a
-        genuine empty result."""
+        ``{"n", "verdict", "confidence", "note", "relation"}``; proposals
+        the model skipped are simply absent. ``relation`` is set only on
+        ``relate`` (distinct, but related FROM -> INTO), normalized into
+        the link judge's vocabulary; a relate naming no vocabulary
+        relation degrades to ``reject``, since the pair is still distinct.
+        Raises :class:`ExtractorError` on transport/parse failure so the
+        caller can tell failure from a genuine empty result."""
+        from pseudolife_memory.graph import norm_name
         proposals = [p for p in (proposals or []) if p]
         if not proposals:
             return []
@@ -1621,15 +1634,20 @@ class OpenAICompatExtractor:
             except (TypeError, ValueError):
                 continue
             verdict = str(v.get("verdict", "")).strip().lower()
-            if n not in known or verdict not in ("accept", "reject", "leave"):
+            if n not in known or verdict not in ("accept", "reject", "relate", "leave"):
                 continue
             try:
                 conf = max(0.0, min(1.0, float(v.get("confidence", 0.5))))
             except (TypeError, ValueError):
                 conf = 0.5
             note = str(v.get("note", "")).strip()[:200]
+            relation = None
+            if verdict == "relate":
+                relation = norm_name(str(v.get("relation") or ""))
+                if relation not in _RELATION_NAMES:
+                    verdict, relation = "reject", None
             out.append({"n": n, "verdict": verdict, "confidence": conf,
-                        "note": note})
+                        "note": note, "relation": relation})
         return out
 
     def infer_outcomes(self, context_text: str, *,

@@ -8631,16 +8631,33 @@ class MemoryService(DreamOps):
             return dict(self._GRAPH_UNAVAILABLE)
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
+        by_id = None
         for p in proposals:
-            src, dst = str(p.get("src", "")), str(p.get("dst", ""))
+            # A proposal naming its endpoints by entity id (the merge
+            # judge's relate, 2026-09-30) links exactly those entities: a
+            # display name need not resolve back to its own entity, and a
+            # miss would mint a new one. The gate reads their displays.
+            ids = (p.get("src_id"), p.get("dst_id"))
+            if None not in ids:
+                if by_id is None:
+                    by_id = {e["id"]: e for e in self._storage.load_graph()["entities"]}
+                se, de = by_id.get(ids[0]), by_id.get(ids[1])
+                if se is None or de is None or se["id"] == de["id"]:
+                    skipped += 1
+                    continue
+                src = se["display"] or se["canonical"]
+                dst = de["display"] or de["canonical"]
+            else:
+                src, dst = str(p.get("src", "")), str(p.get("dst", ""))
             resolved, _ = G.resolve_relation(known, str(p.get("relation", "")))
             relation = resolved or "related-to"
             if not src or not dst or G.norm_name(src) == G.norm_name(dst) \
                     or is_hard_type_violation(src, relation, dst):
                 skipped += 1
                 continue
-            se = self._resolve_or_create_entity(src)
-            de = self._resolve_or_create_entity(dst)
+            if None in ids:
+                se = self._resolve_or_create_entity(src)
+                de = self._resolve_or_create_entity(dst)
             conf = edge_confidence(src, relation, dst)
             pid = self._storage.insert_proposal(
                 se["id"], relation, de["id"], conf,

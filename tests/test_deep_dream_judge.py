@@ -34,7 +34,8 @@ class _StubJudge:
     model = "stub-judge"
 
     def __init__(self, verdicts):
-        self._verdicts = verdicts       # {(from, into): (verdict, conf)}
+        # {(from, into): (verdict, conf[, relation])}
+        self._verdicts = verdicts
         self.seen: list[tuple[str, str]] = []
 
     def judge_merges(self, proposals):
@@ -45,7 +46,8 @@ class _StubJudge:
             v = self._verdicts.get(key)
             if v is not None:
                 out.append({"n": p["n"], "verdict": v[0],
-                            "confidence": v[1], "note": "stub"})
+                            "confidence": v[1], "note": "stub",
+                            "relation": v[2] if len(v) > 2 else None})
         return out
 
 
@@ -533,3 +535,158 @@ def test_judge_payload_carries_low_differential_flag(svc):
     out = svc.deep_dream_judge(extractor=judge)
     assert out["judged"] == 1
     assert judge.proposals[0]["low_differential"] is True
+
+
+# ── the "relate" verdict (2026-09-30) ─────────────────────────────────────
+# Most merge rejects in the 2026-09-29 triage (795 of 1,016 proposals) were
+# RELATED-but-not-same pairs, and a reject dropped the relationship. The
+# judge may now answer "relate" with a link-judge vocabulary relation, FROM
+# as src and INTO as dst: reject-class for the merge, and a link proposal
+# for the link judge once the reject is applied.
+
+def _judge_merges_returning(verdicts):
+    """Run the shipped parser over a canned model response."""
+    import json
+    from unittest import mock
+
+    from pseudolife_memory.memory import dream as D
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            content = json.dumps({"verdicts": verdicts})
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+
+    proposals = [{"n": i + 1, "from": {"display": f"a{i}"},
+                  "into": {"display": f"b{i}"}, "reason": "t"}
+                 for i in range(len(verdicts))]
+    with mock.patch("pseudolife_memory.utils.no_redirect.urlopen",
+                    lambda req, timeout=None: _Resp()):
+        return D.OpenAICompatExtractor("http://x/v1", "m").judge_merges(proposals)
+
+
+def test_judge_merges_accepts_relate_only_with_a_vocabulary_relation():
+    out = _judge_merges_returning([
+        {"id": 1, "verdict": "relate", "relation": "part-of", "confidence": 0.9, "note": "n1"},
+        {"id": 2, "verdict": "RELATE", "relation": "Stores Data In", "confidence": 0.8, "note": "n2"},
+        {"id": 3, "verdict": "relate", "relation": "sibling-of", "confidence": 0.9, "note": "n3"},
+        {"id": 4, "verdict": "relate", "confidence": 0.9, "note": "n4"},
+        {"id": 5, "verdict": "reject", "relation": "uses", "confidence": 0.9, "note": "n5"},
+        {"id": 6, "verdict": "accept", "confidence": 0.7, "note": "n6"},
+    ])
+    by_n = {v["n"]: v for v in out}
+    assert (by_n[1]["verdict"], by_n[1]["relation"]) == ("relate", "part-of")
+    assert (by_n[2]["verdict"], by_n[2]["relation"]) == ("relate", "stores-data-in")
+    # A relation outside the vocabulary, or none at all, cannot be filed as
+    # a link; the pair is still distinct for merge purposes.
+    for n in (3, 4):
+        assert (by_n[n]["verdict"], by_n[n]["relation"]) == ("reject", None)
+        assert by_n[n]["confidence"] == 0.9
+    # Only relate carries a relation.
+    assert by_n[5]["relation"] is None and by_n[6]["relation"] is None
+    assert by_n[6]["verdict"] == "accept"
+
+
+def test_relation_names_are_the_link_judge_vocabulary():
+    from pseudolife_memory.memory import dream as D
+    assert D._RELATION_NAMES == (
+        "depends-on", "part-of", "runs-on", "hosts", "uses", "configures",
+        "stores-data-in", "tests", "implements", "superseded-by", "related-to")
+    # The merge prompt offers relate with that same vocabulary.
+    assert '"relate"' in D._JUDGE_SYSTEM_PROMPT
+    assert D._RELATION_VOCAB in D._JUDGE_SYSTEM_PROMPT
+
+
+def test_relate_note_round_trips_both_opinions():
+    from pseudolife_memory.memory.graph_review import (
+        merge_verdict_token, relate_note, relate_relations)
+    first = relate_note("implements", "code for the concept")
+    assert first == "relate:implements | code for the concept"
+    assert relate_note("uses", None) == "relate:uses"
+    combined = (f"{first[:160]} | 2nd (model (x)): "
+                f"{merge_verdict_token('relate', 'part-of')} 0.85 [agree]")
+    assert relate_relations(combined) == ("implements", "part-of")
+    assert relate_relations("plain note | 2nd (m): reject 0.90 [agree]") == (None, None)
+    assert relate_relations(None) == (None, None)
+    assert merge_verdict_token("reject", None) == "reject"
+
+
+def _note(svc, pid):
+    return svc._storage.conn.execute(
+        "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]
+
+
+def _pending_links(svc):
+    return [(p["src"], p["relation"], p["dst"], p["source"])
+            for p in svc._storage.pending_proposals()]
+
+
+def test_single_vote_relate_rejects_the_merge_and_files_a_link(svc):
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    svc.config.memory.deep_dream.judge_reject_min_confidence = 0.8
+    pid = _propose(svc, "kappa module", "kappa concept")
+    low = _propose(svc, "lambda module", "lambda concept")
+    judge = _StubJudge({
+        ("kappa module", "kappa concept"): ("relate", 0.9, "implements"),
+        ("lambda module", "lambda concept"): ("relate", 0.5, "implements"),
+    })
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 2 and out["auto_rejected"] == 1
+    assert out["relate_links_filed"] == 1
+    decided = svc._storage.get_entity_proposal(pid)
+    assert decided["status"] == "rejected" and decided["decided_by"] == "dream-judge"
+    assert decided["judge_verdict"] == "relate"
+    assert _note(svc, pid).startswith("relate:implements")
+    # The link goes to the link judge's queue, never straight to an edge.
+    assert _pending_links(svc) == [
+        ("kappa module", "implements", "kappa concept", "merge-judge-relate")]
+    assert not svc._storage.load_graph()["edges"]
+    # Filed by entity id: these canonicals ("kappa module") are not what
+    # norm_name(display) gives, so a by-name filing would mint new nodes.
+    (link,) = svc._storage.pending_proposals()
+    merge = svc._storage.get_entity_proposal(pid)
+    assert (link["src_id"], link["dst_id"]) == (merge["entity_id"], merge["into_id"])
+    # Below the gate: an opinion only, nothing filed.
+    assert _row(svc, low)["status"] == "pending"
+    assert _row(svc, low)["judge_verdict"] == "relate"
+
+
+def test_shadow_relate_records_and_files_nothing(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "mu module", "mu concept")
+    judge = _StubJudge({("mu module", "mu concept"): ("relate", 0.95, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 1 and out["auto_rejected"] == 0
+    assert out["relate_links_filed"] == 0
+    assert _row(svc, pid)["judge_verdict"] == "relate"
+    assert _pending_links(svc) == []
+    # The reviewer sees the relation beside the verdict.
+    deep = svc.deep_dream(apply=False)
+    row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
+    assert row["judge"]["verdict"] == "relate"
+    assert row["judge"]["relation"] == "implements"
+
+
+def test_relate_link_follows_the_orientation_the_judge_saw(svc):
+    """The pack re-derives fold direction from current evidence: a stored
+    FROM with more edges than its INTO is SHOWN as the INTO. The relation
+    reads FROM -> INTO as shown, so the link must be filed that way."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pid = _propose(svc, "nu concept", "nu module")        # stored nu concept -> nu module
+    st = svc._storage
+    concept = st.find_entity("nu concept")["id"]
+    for other in ("nu doc one", "nu doc two"):
+        st.ensure_entity(other, display=other)
+        svc._graph.upsert_edge(concept, "related-to", st.find_entity(other)["id"],
+                               confidence=0.7, origin="action")
+    judge = _StubJudge({("nu module", "nu concept"): ("relate", 0.9, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert judge.seen == [("nu module", "nu concept")]   # shown flipped
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
+    assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+    assert ("nu module", "implements", "nu concept", "merge-judge-relate") in _pending_links(svc)

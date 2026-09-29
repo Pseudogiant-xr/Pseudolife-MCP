@@ -909,7 +909,20 @@ default `shadow`; the dream extractor, or a dedicated `judge_url` serving
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
-(`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
+(`decided_by='dream-judge'`, pair dismissed). Besides accept, reject and
+leave, the merge judge may answer **relate** (since 2026-09-30): the two
+are distinct, but a relation from the link judge's vocabulary holds from
+FROM to INTO as the judge was shown them (a file and the concept it
+implements, a component and its parent). For the merge, relate counts as a
+reject in every gate, and a reject beside a relate is agreement, not a
+`split`. The relation rides on the row's note (`relate:<relation> | …`, and
+`2nd (<model>): relate:<relation> …` for a second opinion); the review
+payloads' `judge` / `judge2` blocks carry it as `relation`. When an
+automatic reject applies and a relate vote was one of its votes, the sweep
+also files that relation (the more confident vote's, if both related) as a
+link proposal with source `merge-judge-relate`, through the ordinary filing
+gate. The link judge then settles it at its own gates; the merge judge
+never writes an edge, and a shadow verdict files nothing. A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
 so an independent sample. The second opinion is asked on the first
@@ -919,8 +932,9 @@ the two opinions can come from different providers; that endpoint's bearer
 key is env-only (`PSEUDOLIFE_JUDGE_SECOND_API_KEY`) and goes nowhere else.
 Two rejects at mean >= `judge_reject_min_confidence_2` apply only when the
 two votes came from different models (since 2026-09-30; the same model
-asked twice is one opinion); a disagreement stamps `split` on the note and
-leaves the row for a human. `judge_mode: auto` goes one step further and folds a pair when two
+asked twice is one opinion; reject and relate are both rejects here); an
+accept against a reject or relate stamps `split` on the note and leaves the
+row for a human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts from different models agree on a row that is not
 `low_differential` at mean >= `judge_accept_min_confidence` — the only path
 that ever auto-applies an accept. "Different" is decided on what the

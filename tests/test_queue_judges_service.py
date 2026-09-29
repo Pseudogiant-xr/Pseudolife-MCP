@@ -99,7 +99,8 @@ class _MergeJudge:
     served_model = "stub-merge-judge"
 
     def __init__(self, *rounds):
-        self._rounds = list(rounds)   # [{(from, into): (verdict, conf)}, ...]
+        # [{(from, into): (verdict, conf[, relation])}, ...]
+        self._rounds = list(rounds)
         self.calls = 0
 
     def judge_merges(self, proposals):
@@ -110,7 +111,8 @@ class _MergeJudge:
             v = verdicts.get((p["from"]["display"], p["into"]["display"]))
             if v:
                 out.append({"n": p["n"], "verdict": v[0], "confidence": v[1],
-                            "note": "stub"})
+                            "note": "stub",
+                            "relation": v[2] if len(v) > 2 else None})
         return out
 
 
@@ -1089,3 +1091,88 @@ def test_sweep_runs_every_judge_stage():
     assert "analyzer_tick" in out["timings"]
     assert out["deep_judge_links"] == {"judged": 1, "applied": 1}
     assert "judge_links" in out["timings"]
+
+
+# ── the merge judge's "relate" verdict (2026-09-30) ──────────────────────
+
+def _merge_links(svc):
+    return [(p["src"], p["relation"], p["dst"], p["source"])
+            for p in svc._storage.pending_proposals()]
+
+
+def _two_vote_auto_reject(svc):
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto-reject"
+    cfg.judge_reject_min_confidence = 0.8
+    cfg.judge_second_opinion = True
+    cfg.judge_reject_min_confidence_2 = 0.7
+
+
+def test_two_vote_reject_plus_relate_applies_and_files_the_link(svc):
+    """reject + relate from DIFFERENT models is two reject-class votes: the
+    merge is rejected and the relate vote's relation is filed as a link."""
+    _two_vote_auto_reject(svc)
+    pid = _propose(svc, "omicron module", "omicron concept")
+    pair = ("omicron module", "omicron concept")
+    judge = _MergeJudge({pair: ("reject", 0.6)})
+    second = _SecondJudge({pair: ("relate", 0.85, "implements")})
+    assert svc.deep_dream_judge(judge)["auto_rejected"] == 0
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["second_opinions"] == 1 and out["auto_rejected"] == 1
+    assert out["relate_links_filed"] == 1
+    row = svc._storage.get_entity_proposal(pid)
+    assert row["status"] == "rejected" and row["decided_by"] == "dream-judge"
+    assert row["judge2_verdict"] == "relate"
+    # Reject vs relate is agreement on the merge, not a split.
+    note = svc._storage.conn.execute(
+        "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]
+    assert "[agree]" in note and "relate:implements" in note
+    assert _merge_links(svc) == [
+        ("omicron module", "implements", "omicron concept", "merge-judge-relate")]
+
+
+def test_two_relate_votes_file_the_more_confident_relation(svc):
+    _two_vote_auto_reject(svc)
+    _propose(svc, "pi module", "pi service")
+    pair = ("pi module", "pi service")
+    judge = _MergeJudge({pair: ("relate", 0.75, "part-of")})
+    second = _SecondJudge({pair: ("relate", 0.9, "uses")})
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
+    assert _merge_links(svc) == [("pi module", "uses", "pi service", "merge-judge-relate")]
+
+
+def test_accept_vs_relate_is_a_split_and_applies_nothing(svc):
+    cfg = svc.config.memory.deep_dream
+    _two_vote_auto_reject(svc)
+    cfg.judge_mode = "auto"
+    pid = _propose(svc, "rho module", "rho concept")
+    pair = ("rho module", "rho concept")
+    judge = _MergeJudge({pair: ("accept", 0.9)})
+    second = _SecondJudge({pair: ("relate", 0.95, "implements")})
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["second_opinions"] == 1
+    assert out["auto_rejected"] == 0 and out["auto_accepted"] == 0
+    assert out["relate_links_filed"] == 0
+    row = _merge_row(svc, pid)
+    assert row["status"] == "pending" and row["judge2_verdict"] == "relate"
+    assert "[split]" in row["judge_note"]
+    assert _merge_links(svc) == []
+
+
+def test_same_model_reject_class_pair_files_nothing(svc):
+    """The distinct-model rule holds for relate too: one model's reject +
+    relate is refused, so no reject and no link."""
+    _two_vote_auto_reject(svc)
+    pid = _propose(svc, "sigma module", "sigma concept")
+    pair = ("sigma module", "sigma concept")
+    judge = _MergeJudge({pair: ("relate", 0.6, "implements")},
+                        {pair: ("relate", 0.9, "implements")})
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=None)
+    assert out["auto_rejected"] == 0 and out["auto_reject_refused_same_model"] == 1
+    assert out["relate_links_filed"] == 0
+    assert _merge_row(svc, pid)["status"] == "pending"
+    assert _merge_links(svc) == []

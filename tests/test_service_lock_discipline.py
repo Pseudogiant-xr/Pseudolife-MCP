@@ -86,6 +86,9 @@ CALLER_HOLDS_LOCK = {
     # ReviewJudgments invokes these evidence reads while locked; the
     # *_from pack builders that consume them touch no storage.
     "_judge_evidence_locked",
+    # The merge judge's relate filing (2026-09-30), called inside the
+    # locked reject loop of deep_dream_judge.
+    "_file_relate_link",
     "_link_evidence_locked",
     "_junk_evidence_locked",
     "_graph_accept_proposal_locked",
