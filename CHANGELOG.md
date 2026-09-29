@@ -33,9 +33,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   background (a new shim runtime beside the running one, the plugin cache
   refreshed; log `~/.pseudolife-mcp/update-clients.log`), at most once per
   release per hour, and its served instructions say so instead of asking
-  for the command; the run writes its exit code to a result file, and the
-  next session says when the last attempt failed rather than trying
-  again. Only a Docker-tier registration on this host (loopback daemon
+  for the command; the run writes its exit code to a result file (a
+  failed client step — the runtime install, the plugin refresh — is exit
+  5, on every update path, not a warning beside exit 0), and the next
+  session says when the last attempt failed rather than trying again.
+  Only a Docker-tier registration on this host (loopback daemon
   URL, `PSEUDOLIFE_MCP_NO_SPAWN` set) takes it: elsewhere the command
   could not succeed. The running session keeps its runtime; the next
   starts on the new one. The daemon recreate, with its backup and rollback
