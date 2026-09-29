@@ -3695,9 +3695,9 @@ and the SessionStart hook output carry one line naming the count, the
 oldest age, the merge judge's mode and the remedy (`/dream`, and the
 judge modes or the judge endpoint); the plugin's hook, which reports
 the session's start source, leaves it out on a resume or compaction.
-The defaults come from the 2026-09-11..09-29
-episode: with the merge judge contained to `shadow`, the pending merge
-queue grew from about 100 rows to 1,016 in 18 days and nothing said so.
+The defaults come from the live bank: a triage settled the merge queue on
+2026-09-02, and by 2026-09-29 it held 1,016 pending proposals (the merge
+judge in `shadow` from 09-11) without anything saying so.
 
 A
 dry-run (default) returns a preview of what it would change: re-scored

@@ -535,21 +535,22 @@ class DeepDreamConfig:
     auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
     auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
     # Review-queue health (dream_status["review_queue"], and one briefing
-    # line while it needs attention). Measured on the live bank
-    # 2026-09-11..09-29: with the merge judge contained to "shadow", the
-    # pending merge queue grew from ~100 rows to 1,016 in 18 days (~50 a
-    # day) and nothing reported it until a human looked.
-    # Any judge mode: 500 is five times the ~100 the queue held when the
-    # judge went to shadow; that episode crossed it around day 8. 0 disables.
+    # line while it needs attention). Measured on the live bank: a full
+    # triage settled the merge queue on 2026-09-02 (63 rows); by 2026-09-29
+    # it held 1,016 pending (~38 a day over 27 days, the merge judge in
+    # shadow from 09-11) and nothing reported it until a human looked.
+    # Any judge mode: 500 is about twice the largest backlog ever cleared by
+    # hand (239 merges, 2026-08-05); that episode crossed it around day 13.
+    # 0 disables.
     review_queue_alert_pending: int = 500
     # While no judge applies merge verdicts (judge_mode off/shadow, or
     # judges_enabled false), alert once the oldest pending merge is older
     # than this AND at least review_queue_alert_min_pending rows wait. In
     # auto-reject/auto the same rule reads the oldest merge no judge has
     # recorded a verdict on, which catches a judge that is configured but
-    # not running (no endpoint). The floor is the ~100 rows pending at the
-    # 2026-09-11 switch, so a handful of old rows on a small bank stays
-    # quiet. 0 disables the age rule.
+    # not running (no endpoint). The floor is about one routine hand triage
+    # (109 merges on 2026-08-21), so a handful of old rows on a small bank
+    # stays quiet. 0 disables the age rule.
     review_queue_alert_age_days: float = 14.0
     review_queue_alert_min_pending: int = 100
     # Autonomous Step-C judge (2026-08-16 design, extended 2026-09-02): the
