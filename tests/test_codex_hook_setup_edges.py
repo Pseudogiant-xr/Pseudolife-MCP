@@ -224,7 +224,8 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
 
 def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    the six memory, memory-policy and coordination hooks are still approved."""
+    the six memory, memory-policy and coordination hooks and the child
+    park gate (SubagentStop) are still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     [stop] = [h for h in hooks if h["eventName"] == "stop"]
@@ -232,7 +233,7 @@ def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == 6
+    assert len(writes[0]["edits"]) == 7
     assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
 
 
