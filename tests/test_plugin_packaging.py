@@ -358,6 +358,14 @@ def test_memory_loop_block_explains_tier_removal_notices():
     assert "not an outage" in MEMORY_LOOP_BLOCK
 
 
+def test_dream_command_reads_the_review_queue_health_block():
+    """The judgment session starts from dream status; it must look at the
+    review_queue block the status now carries, or a piling-up queue with its
+    judge in shadow goes unnoticed by the very session meant to clear it."""
+    text = _read("plugin/commands/dream.md")
+    assert "`review_queue`" in text and "attention" in text
+
+
 def test_plugin_dream_command_matches_examples():
     plugin = _read("plugin/commands/dream.md")
     examples = _strip_leading_html_comment(_read("examples/commands/dream.md"))

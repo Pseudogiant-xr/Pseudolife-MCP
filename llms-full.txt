@@ -3697,7 +3697,40 @@ for review unless an existing, separately guarded maintenance path applies.
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is
-worth scheduling. A
+worth scheduling.
+
+Beside it rides a `review_queue` block, the health of the queues that
+Step C drains: `pending` counts for the merge, junk and link queues, the
+age of the oldest pending merge proposal (`oldest_merge_age_days`) and of
+the oldest one no judge has recorded a verdict on
+(`oldest_unjudged_merge_age_days`), the
+configured mode of every judge (`judges_enabled`, `judge_mode`,
+`link_judge_mode`, `junk_judge_mode`, `curation_judge_mode`,
+`candidate_judge_mode`) and `attention: {needed, reasons}`. It costs two
+aggregate queries and never fails the status call (a failure is an
+`error` field). The store-curation listing is not counted: it is
+recomputed on demand and capped at `curation_top_k` per store, so it
+cannot pile up. Attention covers the merge queue, the one that piled
+up; the junk and link counts are reported only. It is needed when the
+pending merge queue reaches
+`memory.deep_dream.review_queue_alert_pending` (default 500) in any
+mode, or when at least `review_queue_alert_min_pending` (default 100)
+merges wait and one of them has waited longer than
+`review_queue_alert_age_days` (default 14): the oldest pending merge
+while no judge applies merge verdicts (`judge_mode` `off` or `shadow`,
+or `judges_enabled: false`), or the oldest merge no judge has recorded
+a verdict on in `auto-reject` / `auto`, which catches a judge that is
+configured but not running. 0 disables either rule. While it is needed,
+the session briefing (`GET /api/briefing`, `pseudolife-mcp briefing`)
+and the SessionStart hook output carry one line naming the count, the
+oldest age, the merge judge's mode and the remedy (`/dream`, and the
+judge modes or the judge endpoint); the plugin's hook, which reports
+the session's start source, leaves it out on a resume or compaction.
+The defaults come from the live bank: a triage settled the merge queue on
+2026-09-02, and by 2026-09-29 it held 1,016 pending proposals (the merge
+judge in `shadow` from 09-11) without anything saying so.
+
+A
 dry-run (default) returns a preview of what it would change: re-scored
 edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across

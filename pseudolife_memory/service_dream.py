@@ -2700,6 +2700,9 @@ class DreamOps:
                 # user. Computed outside the lock above — deep_dream_need
                 # takes the (non-reentrant) service lock itself.
                 "deep_dream": self.deep_dream_need(),
+                # Review-queue health: pending counts, judge modes and an
+                # attention flag. Also outside the lock; never raises.
+                "review_queue": self.review_queue_health(),
                 # Dream-stall signal: null while dreams are served; see
                 # DreamStallTracker. ``last_stall`` is the latest closed one.
                 "stall": stall_state["stall"],
@@ -3292,6 +3295,77 @@ class DreamOps:
             out.update(recommended=True,
                        reason=f"{days:.1f} days since the last deep apply")
         return out
+
+    # The judge-mode knobs the review_queue block reports, by config name.
+    _REVIEW_QUEUE_JUDGE_FIELDS = (
+        "judges_enabled", "judge_mode", "link_judge_mode", "junk_judge_mode",
+        "curation_judge_mode", "candidate_judge_mode")
+
+    def review_queue_health(self) -> dict[str, Any]:
+        """Cheap health signal for the review queues, beside
+        ``deep_dream_need`` in ``dream_status``: pending rows per queue
+        (merge, junk, link), the ages of the oldest pending merge and of the
+        oldest one no judge has recorded a verdict on, each judge's
+        configured mode, and ``attention: {needed, reasons}`` for the merge
+        queue. The curation
+        duplicate listing is not counted: it is recomputed from slot
+        embeddings on demand and capped at ``curation_top_k`` per store, so
+        it cannot pile up. Never raises: a failure is an ``error`` field.
+
+        From 2026-09-11 to 09-29 the merge judge sat in "shadow" and the
+        pending merge queue grew from ~100 rows to 1,016 while nothing
+        reported it; see the ``review_queue_alert_*`` thresholds."""
+        import time as _t
+        quiet = {"needed": False, "reasons": []}
+        try:
+            cfg = self.config.memory.deep_dream
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"available": False, "reason": "no_storage",
+                            "attention": quiet}
+                counts = self._storage.review_queue_counts()
+            judges = {k: getattr(cfg, k) for k in self._REVIEW_QUEUE_JUDGE_FIELDS}
+            merge = counts["merge"]
+            now = _t.time()
+
+            def _age(ts):
+                return None if ts is None else round(max(0.0, now - ts) / 86400.0, 2)
+            age = _age(counts["oldest_merge_at"])
+            unjudged_age = _age(counts["oldest_unjudged_merge_at"])
+            reasons: list[str] = []
+            if cfg.review_queue_alert_pending and merge >= cfg.review_queue_alert_pending:
+                reasons.append(f"{merge} merge proposals pending "
+                               f"(alert at {cfg.review_queue_alert_pending})")
+            # Only "auto-reject" and "auto" apply merge verdicts; every
+            # other mode (off, shadow) leaves the queue for a human. A
+            # judge configured to drain is only draining if it runs, so in
+            # those modes the age rule reads the oldest row no judge has
+            # recorded a verdict on: a missing or failing judge endpoint
+            # leaves rows unjudged and trips it, while rows the judge has
+            # seen and left for a human fall to the count rule.
+            draining = (cfg.judges_enabled
+                        and cfg.judge_mode in ("auto-reject", "auto"))
+            judge = (cfg.judge_mode if cfg.judges_enabled
+                     else "disabled (judges_enabled false)")
+            waited = unjudged_age if draining else age
+            if (cfg.review_queue_alert_age_days and waited is not None
+                    and waited >= cfg.review_queue_alert_age_days
+                    and merge >= cfg.review_queue_alert_min_pending):
+                what = ("unjudged merge proposal" if draining
+                        else "pending merge proposal")
+                reasons.append(
+                    f"oldest {what} {waited:.0f} days old "
+                    f"({merge} pending) while the merge judge is {judge}")
+            return {"pending": {"merge": merge, "junk": counts["junk"],
+                                "link": counts["link"]},
+                    "oldest_merge_age_days": age,
+                    "oldest_unjudged_merge_age_days": unjudged_age,
+                    "judges": judges,
+                    "attention": {"needed": bool(reasons), "reasons": reasons}}
+        except Exception as exc:  # noqa: BLE001 — a status block never raises
+            logger.warning("review-queue health failed: %s", exc)
+            return {"error": f"{type(exc).__name__}: {exc}", "attention": quiet}
 
     def deep_dream_tick(self) -> dict[str, Any]:
         """Sweep-tick automation of the deep dream's MECHANICAL half: when
