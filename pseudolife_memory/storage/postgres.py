@@ -30,7 +30,9 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Sequence
 
-import numpy as np
+# numpy is imported where it is used: the stdio shim reaches this module
+# through storage.coordination (the board's constants) and must not need
+# numpy, which a shim runtime does not install (2026-09-29).
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
@@ -199,6 +201,7 @@ def _embedding_in(value: Any):
     """Accept numpy / torch / list; hand pgvector a float32 numpy array."""
     if value is None:
         return None
+    import numpy as np
     if hasattr(value, "detach"):  # torch.Tensor without importing torch here
         value = value.detach().cpu().numpy()
     return np.asarray(value, dtype=np.float32)
@@ -210,6 +213,7 @@ def _embedding_out(value: Any):
     objects, which ``np.asarray`` cannot coerce (TypeError)."""
     if value is None:
         return None
+    import numpy as np
     if hasattr(value, "to_numpy"):  # pgvector.Vector (0.5+ psycopg reads)
         value = value.to_numpy()
     return np.asarray(value, dtype=np.float32)

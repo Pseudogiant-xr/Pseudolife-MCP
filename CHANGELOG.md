@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
+- A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
+  --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
+  first session on a Docker-tier host that started from a runtime crashed
+  in the shim at its first import (`coordination_adapter` imports `httpx`
+  and `anyio` itself, and reaches `storage/postgres.py` through the board's
+  constants). The pipx venv had carried both transitively through the
+  daemon's dependencies; mcp 2.1 depends on `httpx2`, not `httpx`. `httpx`
+  and `anyio` are now declared in `pyproject.toml` and in
+  `SHIM_REQUIREMENTS`, `storage/postgres.py` imports numpy where it uses
+  it, and `tests/test_shim_runtimes.py` pins the module-level import
+  closure of every client-side mode to the distributions the runtime
+  installs, and imports that closure with numpy and torch blocked.
+
 ### Fixed (2026-09-29 — the update command the install names runs, on every kind of machine, and never replaces a checkout's shim with an older release)
 - The installers' closing line and the served update notices named a bare
   `pseudolife-mcp update`, but the shim launcher's directory is not on

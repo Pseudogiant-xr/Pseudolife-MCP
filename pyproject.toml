@@ -29,6 +29,13 @@ dependencies = [
     # exactly that on the first remote client; the lock pins 2.1.0. Raise
     # both sides together, never the shim alone.
     "mcp>=2.1,<2.2",
+    # First-party imports of the client side (2026-09-29): the coordination
+    # adapter imports httpx and anyio itself, so they are declared here and
+    # in SHIM_REQUIREMENTS (pseudolife_memory/runtimes.py); mcp 2.1 depends
+    # on httpx2, not httpx, and a shim runtime is built with --no-deps, so a
+    # transitive httpx from the daemon's dependencies never reached it.
+    "httpx>=0.27",
+    "anyio>=4",
     # Declared 2026-08-25: `mcp_server.py` imports `pydantic.Field` directly
     # to attach per-argument descriptions to the tool inputSchemas, so it is
     # a first-party import now, not merely mcp's transitive dependency. The

@@ -1052,3 +1052,162 @@ def test_the_checkout_script_exposes_nothing_for_an_overridden_layout(tmp_path):
                           capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout)["state"] == "skipped"
+
+
+# ── the runtime holds every module the client-side modes import ────────────
+#
+# 2026-09-29, the first runtime installed on a Docker-tier host: a session's
+# shim crashed on `import httpx` (coordination_adapter.py) and then on
+# `import numpy` (storage/postgres.py, reached through storage/coordination
+# for the board's constants). SHIM_REQUIREMENTS listed neither; the pipx
+# venv had carried both transitively through the daemon's dependencies.
+
+_CLIENT_ENTRY_MODULES = (
+    "pseudolife_memory.cli", "pseudolife_memory.shim", "pseudolife_memory.coordination_adapter",
+    "pseudolife_memory.coordination_identity", "pseudolife_memory.credentials", "pseudolife_memory.doctor_cli",
+    "pseudolife_memory.briefing_cli", "pseudolife_memory.update_cli", "pseudolife_memory.client_updates",
+    "pseudolife_memory.unattended_update", "pseudolife_memory.release_check", "pseudolife_memory.runtimes",
+)
+
+
+def _module_level_imports(path: Path) -> set[str]:
+    """Top-level names imported at module level (not inside a function or a
+    ``TYPE_CHECKING`` block): what importing the module needs at once."""
+    import ast
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names: set[str] = set()
+
+    def visit(nodes):
+        for node in nodes:
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".")[0])
+            elif isinstance(node, ast.If):
+                test = node.test
+                if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+                    visit(node.orelse)
+                else:
+                    visit(node.body); visit(node.orelse)
+            elif isinstance(node, ast.Try):
+                # `try: import x / except ImportError:` is an optional import
+                guarded = any(_catches_import_error(h) for h in node.handlers)
+                if not guarded:
+                    visit(node.body)
+                for handler in node.handlers:
+                    visit(handler.body)
+                visit(node.orelse); visit(node.finalbody)
+            elif isinstance(node, ast.With):
+                visit(node.body)
+    visit(tree.body)
+    return names
+
+
+def _catches_import_error(handler) -> bool:
+    import ast
+    names = []
+    t = handler.type
+    if isinstance(t, ast.Tuple):
+        names = [getattr(e, "id", getattr(e, "attr", "")) for e in t.elts]
+    elif t is not None:
+        names = [getattr(t, "id", getattr(t, "attr", ""))]
+    return any(n in ("ImportError", "ModuleNotFoundError", "Exception") for n in names)
+
+
+def _import_closure(entry_modules) -> tuple[set[str], set[str]]:
+    """``(package modules reached, third-party top-level names)`` by
+    following module-level imports inside ``pseudolife_memory``."""
+    import ast, sys
+    root = ROOT / "pseudolife_memory"
+    seen: set[str] = set()
+    third: set[str] = set()
+    queue = list(entry_modules)
+    stdlib = set(sys.stdlib_module_names)
+    while queue:
+        module = queue.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        rel = module.split(".")[1:]
+        path = root.joinpath(*rel).with_suffix(".py")
+        if not path.is_file():
+            path = root.joinpath(*rel, "__init__.py")
+        if not path.is_file():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for name in _module_level_imports(path):
+            if name == "pseudolife_memory":
+                continue
+            if name in stdlib or name == "__future__":
+                continue
+            third.add(name)
+        # package-internal imports, module-level only; a relative import is
+        # resolved against this module's package
+        package = module.split(".")[:-1] if path.name != "__init__.py" else module.split(".")
+        def internal(node):
+            if isinstance(node, ast.ImportFrom):
+                if node.level:
+                    base = package[: len(package) - node.level + 1]
+                    head = ".".join(base + ([node.module] if node.module else []))
+                elif node.module and node.module.startswith("pseudolife_memory"):
+                    head = node.module
+                else:
+                    return []
+                return [head] + [f"{head}.{alias.name}" for alias in node.names]
+            if isinstance(node, ast.Import):
+                return [alias.name for alias in node.names if alias.name.startswith("pseudolife_memory")]
+            return []
+        for node in tree.body:
+            if isinstance(node, ast.If) and not (isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING"):
+                for inner in node.body:
+                    queue.extend(internal(inner))
+            else:
+                queue.extend(internal(node))
+    return seen, third
+
+
+def test_the_shim_requirements_cover_every_module_level_import_of_the_client_modes():
+    """Every third-party name the client-side modes import at module level
+    must come from a distribution SHIM_REQUIREMENTS names directly: a
+    runtime is built with ``--no-deps`` plus that list, and what a listed
+    distribution pulls in transitively differs between its versions
+    (pgvector stopped requiring numpy), so anything else is a crash at the
+    shim's first import. An optional import (``try: ... except
+    ImportError``) does not count."""
+    import importlib.metadata as md
+    reached, third = _import_closure(_CLIENT_ENTRY_MODULES)
+    assert "pseudolife_memory.shim" in reached
+    provided: set[str] = set()
+    for requirement in rt.SHIM_REQUIREMENTS:
+        dist = requirement.split("[")[0].split(">")[0].split("<")[0].split("=")[0].strip()
+        provided.add(dist.lower().replace("-", "_"))
+    module_to_dists = {m: {d.lower().replace("-", "_") for d in ds} for m, ds in md.packages_distributions().items()}
+    missing = sorted(name for name in third
+                     if name in module_to_dists and not (module_to_dists[name] & provided)
+                     or name not in module_to_dists and name != "pip")
+    assert not missing, (f"module-level imports of the client modes not covered by SHIM_REQUIREMENTS: {missing}; "
+                         f"add the distribution to SHIM_REQUIREMENTS (and pyproject) or defer the import")
+
+
+
+def test_the_client_modes_import_without_the_daemons_heavy_dependencies(tmp_path):
+    """The same closure, live: importing the client-side modules in a fresh
+    interpreter where torch, sentence_transformers, chromadb, networkx and
+    pypdf are blocked (``sys.modules[name] = None`` makes their import
+    raise) must succeed — a shim runtime never installs them. numpy is not
+    blocked here: pgvector releases before 0.4 import it themselves (this
+    host's does), and the runtime's requirements step resolves that; the
+    static test above keeps this package's own code off numpy."""
+    import subprocess, sys, textwrap
+    script = textwrap.dedent("""
+        import sys
+        for name in ("torch", "sentence_transformers", "chromadb", "networkx", "pypdf"):
+            sys.modules[name] = None
+        import importlib
+        for module in %r:
+            importlib.import_module(module)
+        print("ok")
+    """) % (_CLIENT_ENTRY_MODULES,)
+    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120,
+                          cwd=str(ROOT), env={**os.environ, "PYTHONPATH": str(ROOT)})
+    assert proc.returncode == 0 and proc.stdout.strip() == "ok", proc.stderr[-2000:]
