@@ -3296,6 +3296,26 @@ def _opus55(queue, metric, field):
     return lambda d: d["arms"]["opus-5-5"]["queues"][queue][metric][field]
 
 
+LADDERS_0929 = tuple(
+    f"evals/results/queue-judge-ladder-20260929-{t}.json"
+    for t in ("opus55", "sonnet55", "fable51", "astra", "sol", "luna"))
+
+
+def _arms_accepting(rid):
+    def count(*docs):
+        return sum(
+            1 for d in docs for a in d["arms"].values()
+            for r in a["queues"]["merges"]["per_row"]
+            if r["id"] == rid and r["votes"][0]
+            and r["votes"][0]["verdict"] == "accept")
+    return count
+
+
+CLAIMS.append(Claim(
+    id="cross-contested-row-accepting-arms", doc=CHANGELOG,
+    needle="accepted by five of the six arms", artifacts=LADDERS_0929,
+    value=_arms_accepting(2016), stated=5, places=0))
+
 for _cid, _needle, _art, _val, _stated in [
     ("cross-sonnet-reject-n", "two-vote rejects 18/18", CROSS_0929,
      _pair("sonnet55", 0, "two_vote_reject", "n"), 18),

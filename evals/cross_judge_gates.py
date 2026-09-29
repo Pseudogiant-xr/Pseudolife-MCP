@@ -100,13 +100,20 @@ def main(argv=None) -> int:
                                  accept_gate=args.accept_gate)
                            for k in range(reps)]}
 
+    def first_vote(arm_votes, rid):
+        """Replicate 1's vote on a row, or None when the row is missing or
+        its batch failed (the ladder writes a null vote)."""
+        row = arm_votes.get(rid)
+        return row["votes"][0] if row and row["votes"] else None
+
     split_arm = args.split_pair or names[0]
-    split_rows = [rid for rid, row in first.items()
-                  if row["votes"][0]["verdict"]
-                  != votes[split_arm][rid]["votes"][0]["verdict"]]
+    split_rows = [rid for rid in first
+                  if (a := first_vote(first, rid))
+                  and (b := first_vote(votes[split_arm], rid))
+                  and a["verdict"] != b["verdict"]]
     correct = {n: sum(1 for rid in split_rows
-                      if votes[n].get(rid) and votes[n][rid]["votes"][0]["verdict"]
-                      == first[rid]["label"])
+                      if (v := first_vote(votes[n], rid))
+                      and v["verdict"] == first[rid]["label"])
                for n in votes}
 
     calibration = {}

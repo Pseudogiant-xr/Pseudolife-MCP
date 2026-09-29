@@ -23,8 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Opus 5.5 first, Sonnet 5.5 second: two-vote rejects 18/18
   (17/17 on the second replicate), which supports `auto-reject`; two-vote
   non-low-differential accepts 6/7, which does not support `auto`. The
-  miss, panel row 2016, is accepted by every arm and was labelled reject at
-  panel confidence 0.62.
+  miss, panel row 2016, is accepted by five of the six arms (GPT-6 Luna
+  rejects it) and was labelled reject at panel confidence 0.62.
 - GPT-6 second opinions let false rejects through the two-vote gate:
   Astra 25/26, Sol 27/30, Luna 25/28. Their confidence does not separate
   right from wrong: 55 of 55 Astra reject votes sit at or above the 0.8
