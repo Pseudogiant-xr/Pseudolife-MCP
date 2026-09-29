@@ -482,16 +482,25 @@ def _accept_health(url: str, health: dict) -> dict:
             file=sys.stderr,
         )
     if _version_note(url, health) and not _unattended_clients(url, health):
+        command = _update_command()
         print(
             f"[shim] this shim is pseudolife-mcp {__version__} but the daemon "
-            f"at {url} is {health['version']} — run pseudolife-mcp update --clients-only "
+            f"at {url} is {health['version']} — run {command} update --clients-only "
             f"--tag {health['version']} (installs the daemon's release as a new shim runtime "
             f"beside this one and refreshes the plugin cache; from a checkout: python "
-            f"ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp "
+            f"ops/update_clients.py --only shim), or update the daemon ({command} "
             f"update); then start a new session.",
             file=sys.stderr,
         )
     return _notice_if_cortex_is_inert(health)
+
+
+def _update_command() -> str:
+    """How this shim's notices name the command: plain ``pseudolife-mcp``
+    when PATH finds this user's launcher, else the launcher's full path
+    (the installers do not put its directory on PATH)."""
+    from pseudolife_memory import runtimes
+    return runtimes.launcher_command()
 
 
 def _version_note(url: str, health: dict) -> str:
@@ -511,10 +520,11 @@ def _version_note(url: str, health: dict) -> str:
     started = _UNATTENDED_NOTES.get((url, daemon_version))
     if started:
         return started
+    command = _update_command()
     return (f"Pseudolife-MCP: this shim is pseudolife-mcp {__version__} but the "
-            f"daemon at {url} is {daemon_version}; run pseudolife-mcp update --clients-only "
+            f"daemon at {url} is {daemon_version}; run {command} update --clients-only "
             f"--tag {daemon_version} (from a checkout: python ops/update_clients.py --only shim) "
-            f"or update the daemon with pseudolife-mcp update, then start a new session.")
+            f"or update the daemon with {command} update, then start a new session.")
 
 
 # The unattended client half: what this process started, keyed by daemon URL
@@ -595,7 +605,7 @@ def _unattended_clients(url: str, health: dict) -> str:
         if outcome and outcome != "0":
             note = (f"Pseudolife-MCP: the unattended client update to {daemon_version} started at {when} "
                     f"failed (exit {outcome}; log {log}); this shim is still {__version__}. Run "
-                    f"pseudolife-mcp update --clients-only --tag {daemon_version} yourself.")
+                    f"{_update_command()} update --clients-only --tag {daemon_version} yourself.")
         else:
             codex_file = result.with_suffix(".codex")
             codex = (f" Codex's hook copy needs re-approval: the steps are in {codex_file}."

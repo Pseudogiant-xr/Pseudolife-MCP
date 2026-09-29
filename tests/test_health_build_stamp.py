@@ -24,7 +24,7 @@ import pytest
 from pseudolife_memory.daemon import _build_health_payload
 
 _ENV = ("PSEUDOLIFE_BUILD_GIT_SHA", "PSEUDOLIFE_BUILD_DIRTY",
-        "PSEUDOLIFE_BUILD_TIME")
+        "PSEUDOLIFE_BUILD_TIME", "PSEUDOLIFE_BUILD_SOURCE")
 
 
 class _Svc:
@@ -53,6 +53,7 @@ def test_a_stamped_image_names_its_commit(monkeypatch):
         "git_sha": "59b87631" + "0" * 32,
         "dirty": False,
         "built_at": "2026-09-25T03:00:00Z",
+        "source": "unknown",
     }
     assert payload["status"] == "ok"
 
@@ -76,7 +77,18 @@ def test_an_unstamped_image_reports_unknown_not_a_guess(monkeypatch):
     build = _build_health_payload(_Svc(), token_present=False)["build"]
 
     assert build == {"git_sha": "unknown", "dirty": None,
-                     "built_at": "unknown"}
+                     "built_at": "unknown", "source": "unknown"}
+
+
+def test_the_build_says_whether_a_checkout_or_the_release_built_it(monkeypatch):
+    """Release images carry a commit too (release.yml), so the commit alone
+    cannot tell a checkout build from a release: the update notices need
+    to know which (a checkout build still reports the last release's
+    version, 2026-09-29)."""
+    monkeypatch.setenv("PSEUDOLIFE_BUILD_GIT_SHA", "a" * 40)
+    for source in ("checkout", "release"):
+        monkeypatch.setenv("PSEUDOLIFE_BUILD_SOURCE", source)
+        assert _build_health_payload(_Svc(), token_present=False)["build"]["source"] == source
 
 
 def test_a_pip_install_has_no_image_and_no_build_block():
@@ -134,3 +146,15 @@ def test_release_images_are_stamped_too():
     assert "GIT_SHA=${{ github.sha }}" in workflow
     assert "GIT_DIRTY=false" in workflow
     assert re.search(r"BUILD_TIME=\$\{\{ env\.BUILD_TIME \}\}", workflow)
+
+
+def test_the_build_source_is_baked_in_and_set_by_each_builder():
+    text = " ".join(_instructions())
+    assert re.search(r"\bARG BUILD_SOURCE=unknown\b", text)
+    assert re.search(r"\bPSEUDOLIFE_BUILD_SOURCE=\$BUILD_SOURCE\b", text)
+    for compose in (_REPO / "ops" / "docker-compose.yml",
+                    _REPO / "pseudolife_memory" / "compose" / "docker-compose.yml"):
+        assert re.search(r"^\s+BUILD_SOURCE: checkout\s*$", compose.read_text(encoding="utf-8"),
+                         re.MULTILINE), compose
+    workflow = (_REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "BUILD_SOURCE=release" in workflow

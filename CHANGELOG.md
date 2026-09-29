@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — the update command the install names runs, on every kind of machine, and never replaces a checkout's shim with an older release)
+- The installers' closing line and the served update notices named a bare
+  `pseudolife-mcp update`, but the shim launcher's directory is not on
+  `PATH`: on a Debian 13 Docker-tier host the name found the old pipx
+  install, and after the suggested `pipx uninstall` nothing (2026-09-29).
+  `ops/install.sh` and `ops/install.ps1` now print the launcher's full path
+  when `PATH` does not find it, with how to add its directory; on a
+  client-only install the line names `update --clients-only`. The plugin's
+  SessionStart hooks (and `briefing --hook-json`) report the launcher's
+  path on the query string when `PATH` misses it, the daemon shape-checks
+  it and the update, version and hooks-differ notices name it; the shim's
+  own version notices do the same. Nothing changes `PATH` or pipx's link.
+  [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+- `pseudolife-mcp update` on a client-only machine (run from a shim runtime,
+  no daemon container) refused with "Start Docker and retry", and
+  `--clients-only` with "this is a pip install". Both now install the
+  daemon's release (the newest release when the daemon does not answer)
+  as a new shim runtime and refresh the plugin cache; `--daemon-only` is
+  refused naming the daemon's host.
+- The hooks-differ notice led a checkout user into a downgrade: it named
+  `update --clients-only --tag <daemon version>` first, a checkout-built
+  daemon still reports the last release's version, the launcher starts the
+  newest runtime, and shims through 0.15.0 cannot read
+  `PSEUDOLIFE_MCP_TOKEN_FILE`. `update --clients-only` now refuses a release
+  whose version equals the current shim runtime's when that runtime was
+  built from a checkout, and names the checkout command (`--reinstall`
+  overrides). `/health` `build` gains `source` (`checkout` from
+  `ops/docker-compose.yml`, `release` from the release workflow; the commit
+  cannot tell them apart, since release images carry one too), and a
+  checkout-built daemon's hooks-differ notice names the checkout command
+  first.
+- `pseudolife-mcp --version` (and `version`) answered "unknown mode"; it
+  prints the package version and, from a shim runtime, that runtime's
+  directory and source commit.
+- The README and the configuration guide say how to take the first update
+  from 0.15.0 or earlier, which has no `update` command: `git pull` and
+  `ops/update.sh --all` / `ops/update.ps1 -All` from a checkout, or
+  `pipx install --force` / `pip install --upgrade` of the release.
+
 ### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
 - `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
   line endings (one copied from a Windows host) with LF endings before

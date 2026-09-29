@@ -87,8 +87,13 @@ def _build_stamp() -> dict | None:
         return None
     dirty = {"true": True, "false": False}.get(
         os.environ.get("PSEUDOLIFE_BUILD_DIRTY", "").strip().lower())
+    # "checkout" (ops/docker-compose.yml) or "release" (the release
+    # workflow): a release image carries a commit too, and a checkout build
+    # still reports the last release's version, so the update notices need
+    # to know which built this image (2026-09-29).
     return {"git_sha": sha, "dirty": dirty,
-            "built_at": os.environ.get("PSEUDOLIFE_BUILD_TIME", "unknown")}
+            "built_at": os.environ.get("PSEUDOLIFE_BUILD_TIME", "unknown"),
+            "source": os.environ.get("PSEUDOLIFE_BUILD_SOURCE") or "unknown"}
 
 
 def _extractor_status(svc) -> str | None:

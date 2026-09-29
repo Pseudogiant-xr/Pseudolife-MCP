@@ -150,6 +150,27 @@ def test_hooks_notice_fires_only_for_equal_versions_with_different_digests():
     assert session_hook.hooks_notice("0.14.0", OTHER, "0.15.0", GOOD) == ""
 
 
+def test_hooks_notice_leads_a_checkout_built_daemon_to_the_checkout_command():
+    """A checkout-built daemon still reports the last release's version:
+    `--clients-only --tag <that version>` would install the older release
+    as the newest runtime, and shims through 0.15.0 cannot read
+    PSEUDOLIFE_MCP_TOKEN_FILE (2026-09-29 audit)."""
+    checkout = session_hook.hooks_notice("0.15.0", OTHER, "0.15.0", GOOD, checkout_built=True)
+    assert checkout.index("ops/update.sh --all") < checkout.index("--clients-only")
+    assert "git pull" in checkout
+    release = session_hook.hooks_notice("0.15.0", OTHER, "0.15.0", GOOD, checkout_built=False)
+    assert release.index("--clients-only") < release.index("ops/update.sh --all")
+
+
+def test_the_daemon_reads_its_build_source_for_the_hooks_notice(monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_BUILD_SOURCE", "checkout")
+    checkout = session_hook.hooks_notice("0.15.0", OTHER, "0.15.0", GOOD)
+    assert checkout.index("ops/update.sh --all") < checkout.index("--clients-only")
+    monkeypatch.setenv("PSEUDOLIFE_BUILD_SOURCE", "release")
+    release = session_hook.hooks_notice("0.15.0", OTHER, "0.15.0", GOOD)
+    assert release.index("--clients-only") < release.index("ops/update.sh --all")
+
+
 def test_hooks_notice_is_silent_without_both_digests():
     assert session_hook.hooks_notice("0.15.0", None, "0.15.0", GOOD) == ""
     assert session_hook.hooks_notice("0.15.0", OTHER, "0.15.0", None) == ""
@@ -266,3 +287,52 @@ def test_a_manual_codex_bundle_sends_no_digest(tmp_path, hook):
         server.shutdown(); server.server_close(); worker.join(timeout=2)
     sent = _sent(paths)
     assert "plugin_hooks_digest" not in sent and "plugin_version" not in sent
+
+
+# ── the hooks report the launcher when PATH does not find it ───────────────
+
+def _fake_launcher(tmp_path: Path, windows: bool) -> Path:
+    launcher = tmp_path / "launcher bin" / ("pseudolife-mcp.exe" if windows else "pseudolife-mcp")
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    return launcher
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_the_hooks_report_a_launcher_path_does_not_find(tmp_path, hook):
+    import os
+    launcher = _fake_launcher(tmp_path, windows=(hook == "native" and os.name == "nt"))
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(launcher)
+        if hook == "bash":
+            bash_run(ROOT / "plugin/hooks/session-start.sh", input="{}", env=env)
+        else:
+            pwsh_run("-Command", f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event SessionStart",
+                     input="{}", env=env)
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=2)
+    sent = _sent(paths)
+    reported = sent["launcher"][0]
+    assert "launcher bin" in reported and reported.endswith(launcher.name)
+
+
+@pytest.mark.parametrize("hook", ["bash", "native"])
+def test_the_hooks_send_no_launcher_when_path_finds_it(tmp_path, hook):
+    import os
+    launcher = _fake_launcher(tmp_path, windows=(hook == "native" and os.name == "nt"))
+    server, worker, paths = _recording_daemon()
+    try:
+        env = _hook_env(tmp_path, server.server_port)
+        env["PSEUDOLIFE_SHIM_LAUNCHER"] = str(launcher)
+        env["PATH"] = str(launcher.parent) + os.pathsep + env["PATH"]
+        if hook == "bash":
+            bash_run(ROOT / "plugin/hooks/session-start.sh", input="{}", env=env)
+        else:
+            pwsh_run("-Command", f"& '{ROOT.as_posix()}/plugin/hooks/lifecycle.ps1' -Event SessionStart",
+                     input="{}", env=env)
+    finally:
+        server.shutdown(); server.server_close(); worker.join(timeout=2)
+    assert "launcher" not in _sent(paths)

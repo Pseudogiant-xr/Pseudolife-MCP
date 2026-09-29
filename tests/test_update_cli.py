@@ -541,12 +541,8 @@ def test_a_failed_pip_upgrade_is_named(world, capsys):
     assert "WinError 32" in capsys.readouterr().err
 
 
-def test_a_pip_upgrade_never_lands_on_a_shim_runtime_or_an_editable_checkout(world, monkeypatch, capsys):
+def test_a_pip_upgrade_never_lands_on_an_editable_checkout(world, monkeypatch, capsys):
     world.pypi = "99.0.0"
-    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(Path(sys.prefix).parent))
-    assert _run([]) == 2
-    assert "shim runtime" in capsys.readouterr().err
-    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(world.tmp / "elsewhere"))
     monkeypatch.setattr(client_updates, "install_kind", lambda interpreter: ("editable", str(ROOT)))
     assert _run([]) == 2
     assert "editable install" in capsys.readouterr().err
@@ -920,3 +916,99 @@ def test_the_builtin_backup_rotates_only_its_own_old_files(world, clients, tmp_p
     assert recent.exists() and foreign.exists()
     # states: the run's own plus the two old ones are three; nothing goes
     assert all(p.exists() for p in old_states)
+
+
+# ── a client-only machine (2026-09-29 first-update findings) ───────────────
+
+def _on_a_shim_runtime(monkeypatch):
+    """This interpreter runs from a shim runtime (the real check: the
+    runtimes root holds ``sys.prefix``)."""
+    monkeypatch.setattr(up, "_on_shim_runtime", lambda: True)
+
+
+def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world, clients, monkeypatch, capsys):
+    """No daemon container here and the command runs from a shim runtime:
+    the daemon is on another host, so `update` and `--clients-only` move
+    this machine's clients to the daemon's release and never mention
+    Docker (they used to refuse with "Start Docker and retry")."""
+    _on_a_shim_runtime(monkeypatch)
+    world.health = [{"status": "ok", "version": "0.15.1", "hooks_digest": "d" * 64}]
+    for argv in ([], ["--clients-only"]):
+        clients.clear()
+        assert _run(argv + ["--daemon-url", "http://10.0.0.7:8765"]) == 0, argv
+        assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None,
+                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64}]
+        captured = capsys.readouterr()
+        assert "docker" not in (captured.out + captured.err).lower()
+    assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
+
+
+def test_a_client_only_machine_takes_the_newest_release_when_the_daemon_is_silent(world, clients, monkeypatch):
+    _on_a_shim_runtime(monkeypatch)
+    world.health = []
+    world.pypi = "0.16.0"
+    assert _run(["--clients-only"]) == 0
+    assert clients[0]["source"] == "pseudolife-mcp==0.16.0" and clients[0]["daemon_digest"] is None
+
+
+def test_a_client_only_machine_refuses_daemon_only_naming_the_daemon_host(world, clients, monkeypatch, capsys):
+    _on_a_shim_runtime(monkeypatch)
+    world.health = [{"status": "ok", "version": "0.15.1"}]
+    assert _run(["--daemon-only", "--daemon-url", "http://10.0.0.7:8765"]) == 2
+    err = capsys.readouterr().err
+    assert "10.0.0.7" in err and "docker" not in err.lower()
+    assert clients == []
+
+
+def _runtime(world: World, *, version: str, source: str, commit: str | None) -> Path:
+    """A complete shim runtime in the fixture's layout, as runtimes.install leaves it."""
+    windows = os.name == "nt"
+    path = world.tmp / "rt" / "000001"
+    scripts = path / ("Scripts" if windows else "bin")
+    scripts.mkdir(parents=True)
+    (scripts / ("pseudolife-mcp.exe" if windows else "pseudolife-mcp")).write_text("console", encoding="utf-8")
+    (path / "runtime.json").write_text(json.dumps({"version": version, "source": source,
+                                                   "source_commit": commit}), encoding="utf-8")
+    return path
+
+
+def test_a_checkout_runtime_is_not_replaced_by_the_same_release(world, clients, tmp_path, capsys):
+    """A checkout-built daemon reports the last release's version, so
+    `--clients-only --tag <that version>` would install PyPI's older build
+    as the newest runtime, the one the launcher starts, and shims through
+    0.15.0 cannot read PSEUDOLIFE_MCP_TOKEN_FILE."""
+    _project(world, tmp_path, version="0.15.0")
+    _runtime(world, version="0.15.0", source=str(tmp_path / "checkout"), commit="f" * 40)
+    assert _run(["--clients-only", "--tag", "0.15.0"]) == 2
+    err = capsys.readouterr().err
+    assert "checkout" in err and "ops/update.sh --all" in err and "--reinstall" in err
+    assert clients == []
+    assert _run(["--clients-only", "--tag", "0.15.0", "--reinstall"]) == 0
+    assert clients[0]["source"] == "pseudolife-mcp==0.15.0"
+
+
+def test_a_release_runtime_or_a_newer_release_is_not_refused(world, clients, tmp_path):
+    _project(world, tmp_path, version="0.15.0")
+    _runtime(world, version="0.15.0", source="pseudolife-mcp==0.15.0", commit=None)
+    assert _run(["--clients-only", "--tag", "0.15.0"]) == 0
+    runtime_json = world.tmp / "rt" / "000001" / "runtime.json"
+    runtime_json.write_text(json.dumps({"version": "0.15.0", "source": str(tmp_path / "checkout"),
+                                        "source_commit": "f" * 40}), encoding="utf-8")
+    world.health = [{"status": "ok", "version": "0.15.1"}]
+    assert _run(["--clients-only", "--tag", "0.15.1"]) == 0
+    assert [c["source"] for c in clients] == ["pseudolife-mcp==0.15.0", "pseudolife-mcp==0.15.1"]
+
+
+def test_the_shim_runtime_check_reads_the_runtimes_root(world, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(Path(sys.prefix).parent))
+    assert up._on_shim_runtime() is True
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(world.tmp / "elsewhere"))
+    assert up._on_shim_runtime() is False
+
+
+def test_a_client_only_machine_keeps_a_checkout_runtime_too(world, clients, monkeypatch, capsys):
+    _on_a_shim_runtime(monkeypatch)
+    _runtime(world, version="0.15.0", source="/src/checkout", commit="f" * 40)
+    world.health = [{"status": "ok", "version": "0.15.0"}]
+    assert _run(["--clients-only"]) == 2
+    assert "checkout" in capsys.readouterr().err and clients == []

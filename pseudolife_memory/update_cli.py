@@ -33,7 +33,9 @@ guard against an unvalidated build, ``docker compose up -d --no-deps
 
 Pip / lite tier (no daemon container) upgrades the package in the
 interpreter that holds it (pip, or pipx when it is pipx's venv) and
-restarts nothing: it says what to restart.
+restarts nothing: it says what to restart. Run from a shim runtime with no
+daemon container, the machine is a client of a daemon elsewhere: ``update``
+and ``--clients-only`` move its clients to the daemon's release.
 
 Every external command goes through :func:`run_cli` (``docker`` is named
 by ``PSEUDOLIFE_DOCKER`` for the tests) and every HTTP read through
@@ -112,6 +114,19 @@ def fetch_json(url: str, timeout: float = 5.0) -> dict | None:
 
 def sleep(seconds: float) -> None:
     time.sleep(seconds)
+
+
+def _on_shim_runtime() -> bool:
+    """Whether this interpreter runs from one of the side-by-side shim
+    runtimes (``pseudolife_memory.runtimes``): such a runtime holds no
+    daemon, so a machine where it finds no daemon container is a client
+    of a daemon elsewhere."""
+    from pseudolife_memory import runtimes
+    try:
+        root = runtimes.default_layout().root
+    except ValueError:      # a half-set layout override: no runtime root to compare with
+        return False
+    return runtimes._under(str(Path(sys.prefix)), root)
 
 
 def docker_cmd() -> str:
@@ -400,6 +415,13 @@ class Update:
         if self.o.check:
             self.check_for_release(tier)
             return
+        if tier == "pip" and _on_shim_runtime():
+            # No daemon container here and no daemon in this runtime: the
+            # daemon runs on another host (a client-only install).
+            self.report.tier = "client"
+            with UpdateLock():
+                self.update_client_machine()
+            return
         if tier == "pip":
             if self.o.daemon_only or self.o.clients_only:
                 raise UpdateError("no daemon container here: this is a pip install, which has no daemon/client "
@@ -482,15 +504,63 @@ class Update:
         self.step(f"current: {current} is the newest release")
         self.report.exit_code = 3
 
+    # -- client-only machine -----------------------------------------------
+    def update_client_machine(self) -> None:
+        """A shim runtime on a machine with no daemon container: the daemon
+        runs elsewhere, so ``update`` and ``--clients-only`` move this
+        machine's clients (a new shim runtime, the plugin cache, the Codex
+        step) to the daemon's release, or to the newest release when the
+        daemon does not answer; ``--daemon-only`` has nothing to act on."""
+        from urllib.parse import urlsplit
+        host = urlsplit(self.o.daemon_url).hostname or self.o.daemon_url
+        if self.o.daemon_only:
+            raise UpdateError(f"the daemon is not on this machine (it is configured at {self.o.daemon_url}): "
+                              f"run pseudolife-mcp update on {host}, where it runs. Nothing was changed", 2)
+        health = self.daemon_health()
+        daemon_version = (health or {}).get("version")
+        daemon_version = daemon_version if isinstance(daemon_version, str) and version_key(daemon_version) else None
+        target = self.o.tag or daemon_version or self.target_version()
+        self.report.mode = "clients"
+        self.report.current, self.report.target = daemon_version, target
+        self.refuse_downgrade(daemon_version, target)
+        if daemon_version is None:
+            self.warn(f"the daemon at {self.o.daemon_url} did not answer; installing the newest release, {target}")
+        self.refuse_checkout_shadow(target)
+        self.step(f"the daemon runs on {host}; updating this machine's clients to {target}")
+        self.clients(None, f"pseudolife-mcp=={target}", health)
+
+    def refuse_checkout_shadow(self, target: str) -> None:
+        """Refuse to install the release ``target`` as a new runtime when
+        the current runtime (the one the launcher starts) was built from a
+        checkout at that same version: a checkout-built daemon reports the
+        last release's version, the launcher always starts the newest
+        runtime, and the release build would replace the checkout's code
+        (shims through 0.15.0 cannot read PSEUDOLIFE_MCP_TOKEN_FILE)."""
+        from pseudolife_memory import runtimes
+        if self.o.reinstall:
+            return
+        try:
+            current = runtimes.current_runtime(runtimes.default_layout())
+        except ValueError:
+            return
+        if current is None or current.version != target or not runtimes.from_checkout(current):
+            return
+        commit = f", commit {current.source_commit[:8]}" if current.source_commit else ""
+        raise UpdateError(f"the current shim runtime {current.name} is {current.version} built from the checkout "
+                          f"{current.source}{commit}; the {target} release would replace it as the runtime new "
+                          f"sessions start. Update from the checkout instead: git pull, then ops/update.ps1 -All "
+                          f"(Windows) or ops/update.sh --all (python ops/update_clients.py for the clients alone), "
+                          f"or pass --reinstall to install the release anyway. Nothing was changed", 2)
+
     # -- pip tier ----------------------------------------------------------
     def upgrade_pip(self) -> None:
         """The pip / lite tier: the package is upgraded in the interpreter
-        that holds it. Never in place over a shim runtime (the daemon is a
-        container that was not reachable), an editable checkout (the
+        that holds it. Never in place over a shim runtime (``_run`` sends
+        one to :meth:`update_client_machine`), an editable checkout (the
         2026-09-21 incident) or, on Windows, the running install itself
         (pip cannot replace a running console script); those get the
         command printed instead."""
-        from pseudolife_memory import client_updates, runtimes
+        from pseudolife_memory import client_updates
         target = self.target_version()
         self.report.target, self.report.current = target, __version__
         self.refuse_downgrade(__version__, target)
@@ -498,14 +568,6 @@ class Update:
             self.step(f"pseudolife-mcp {__version__} is already the target version; --reinstall to reinstall")
             return
         prefix = Path(sys.prefix)
-        try:
-            root = runtimes.default_layout().root
-        except ValueError:      # a half-set layout override: no runtime root to compare with
-            root = None
-        if root is not None and runtimes._under(str(prefix), root):
-            raise UpdateError(f"this command runs from the shim runtime {prefix}, which serves no daemon: the "
-                              f"daemon is a container this run could not see. Start Docker and retry; a shim "
-                              f"runtime is never pip-upgraded in place", 2)
         kind, where = client_updates.install_kind(Path(sys.executable))
         if kind in ("editable", "unknown"):
             raise UpdateError(f"the running package is {'an editable install of ' + where if kind == 'editable' else 'of a kind this cannot tell'} "
@@ -850,6 +912,7 @@ class Update:
             self.report.current = current
         self.refuse_downgrade(current, target)
         if self.o.clients_only:
+            self.refuse_checkout_shadow(target)
             self.clients(None, f"pseudolife-mcp=={target}", self.daemon_health())
             return
         if current == target and not self.o.reinstall:

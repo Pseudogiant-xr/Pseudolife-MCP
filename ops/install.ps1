@@ -459,8 +459,8 @@ function Show-ClientOnlyNotes {
   - A new token there: write it into the token file here. The shims and
     the Claude Code hooks read that file on every call. Codex keeps its
     own copy in ~/.codex/pseudolife/token: write it there too.
-  - A daemon upgrade there: bring this checkout to the same release and
-    re-run this installer, so the shim matches the daemon.
+  - A daemon upgrade there: run the update command below with
+    --clients-only here, so the shim matches the daemon.
 '@
 }
 # <<< client-only notes <<<
@@ -2598,5 +2598,28 @@ if ($codexShimMode) {
 }
 if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
-Write-Host "Update later with one command, no checkout needed: pseudolife-mcp update (--check reports whether a newer release exists); from this checkout, ops\update.ps1 -All does the same after a git pull."
+# >>> update line >>>
+# The installers do not put the shim launcher's directory on PATH, so a bare
+# `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
+# run installed by its path until PATH finds it.
+function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly) {
+    $updCmd = "pseudolife-mcp"
+    $updPath = ""
+    if ($ShimPath) {
+        $found = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        $foundPath = if ($found) { (Resolve-Path -LiteralPath $found.Source).Path } else { $null }
+        $comparison = if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        if (-not ($foundPath -and [string]::Equals($foundPath, $ShimPath, $comparison))) {
+            $updCmd = "& `"$ShimPath`""
+            $updPath = " (add $(Split-Path -Parent $ShimPath) to PATH to run it as plain pseudolife-mcp)"
+        }
+    }
+    if ($ClientOnly) {
+        Write-Host "Update this machine's clients later with one command, no checkout needed: $updCmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$updPath."
+    } else {
+        Write-Host "Update later with one command, no checkout needed: $updCmd update (--check reports whether a newer release exists)$updPath; from this checkout, ops\update.ps1 -All does the same after a git pull."
+    }
+}
+# <<< update line <<<
+Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly)
 Write-Host "Done. First session: tell your coding agent to remember something."

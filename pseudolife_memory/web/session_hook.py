@@ -47,19 +47,62 @@ HOOK_CONTEXT_MAX_CHARS = 9_500
 # A plugin version arrives on the hook's query string. Only a version-shaped
 # value may be echoed into the model's context; anything else is dropped.
 _VERSION_SHAPE = re.compile(r"[0-9A-Za-z.+-]{1,32}")  # used with fullmatch: `$` would admit a trailing newline
+# The command the notices name. The installers do not put the shim
+# launcher's directory on PATH, so a bare `pseudolife-mcp` finds an older
+# pipx install, or nothing (the first update on a Debian host, 2026-09-29):
+# the SessionStart hook reports the launcher's path (``launcher`` on its
+# query string) when PATH does not find it, and the notices name that.
+UPDATE_COMMAND = "pseudolife-mcp"
+# Only an absolute path to a file named pseudolife-mcp(.exe), in plain path
+# characters, may be echoed into the model's context.
+_LAUNCHER_SHAPE = re.compile(r"(?:[A-Za-z]:[\\/]|/)[A-Za-z0-9 _.~()+,@\\/-]{0,250}[\\/]pseudolife-mcp(?:\.exe)?")
+
+
+def launcher_command(launcher: str | None) -> str:
+    """The command a notice names: the launcher path the hook reported,
+    quoted when it holds a space, or plain ``pseudolife-mcp`` when the hook
+    reported none (PATH finds the launcher, or an older plugin) or a value
+    that is not a launcher path."""
+    if not isinstance(launcher, str) or not _LAUNCHER_SHAPE.fullmatch(launcher):
+        return UPDATE_COMMAND
+    return f'"{launcher}"' if " " in launcher else launcher
+
+
+def _checkout_built() -> bool:
+    """Whether this daemon's image was built from a checkout
+    (``build.source`` in /health; ``ops/docker-compose.yml`` sets it, the
+    release workflow sets ``release``). The commit alone cannot tell: the
+    release images carry one too."""
+    import os
+    return os.environ.get("PSEUDOLIFE_BUILD_SOURCE", "").strip().lower() == "checkout"
+
+
 # The client half pinned to the daemon's own release: without --tag it
 # would install the newest release on PyPI, which may be newer than the
 # daemon, and the mismatch would only change direction.
-PLUGIN_UPDATE_COMMANDS = (f"pseudolife-mcp update --clients-only --tag {DAEMON_VERSION}, or in Claude Code "
-                          "/plugin marketplace update pseudolife-mcp, then "
-                          "/plugin update pseudolife-memory@pseudolife-mcp")
-DAEMON_UPDATE_COMMANDS = ("pseudolife-mcp update, or from a checkout git pull, then "
-                          "ops/update.ps1 or ops/update.sh")
-ALL_UPDATE_COMMANDS = (f"pseudolife-mcp update --clients-only --tag {DAEMON_VERSION}, or from a checkout "
-                       "ops/update.ps1 -All on Windows or ops/update.sh --all")
-# The offer, when the daemon knows of a newer release (pseudolife_memory.
-# release_check): the one command that moves the whole install.
-RELEASE_UPDATE_COMMAND = "pseudolife-mcp update"
+def plugin_update_commands(command: str = UPDATE_COMMAND) -> str:
+    return (f"{command} update --clients-only --tag {DAEMON_VERSION}, or in Claude Code "
+            "/plugin marketplace update pseudolife-mcp, then "
+            "/plugin update pseudolife-memory@pseudolife-mcp")
+
+
+def daemon_update_commands(command: str = UPDATE_COMMAND) -> str:
+    return (f"{command} update, or from a checkout git pull, then "
+            "ops/update.ps1 or ops/update.sh")
+
+
+def all_update_commands(command: str = UPDATE_COMMAND, checkout_built: bool = False) -> str:
+    """The client half at the daemon's version. A checkout-built daemon
+    still reports the last release's version, so for it the checkout
+    command comes first: the release command would install that older
+    release as the newest runtime, the one the launcher starts."""
+    release = f"{command} update --clients-only --tag {DAEMON_VERSION}"
+    checkout = "git pull, then ops/update.ps1 -All on Windows or ops/update.sh --all"
+    if checkout_built:
+        return f"in the checkout this daemon was built from: {checkout} (on a release install: {release})"
+    return f"{release}, or from a checkout {checkout}"
+
+
 # A hooks digest is 64 lowercase hex characters (pseudolife_memory.plugin_hooks).
 _DIGEST_SHAPE = re.compile(r"[0-9a-f]{64}")
 
@@ -68,7 +111,8 @@ _DAEMON_DIGEST_UNSET = object()
 
 
 def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
-                 daemon_version: str | None = None, daemon_digest=_DAEMON_DIGEST_UNSET) -> str:
+                 daemon_version: str | None = None, daemon_digest=_DAEMON_DIGEST_UNSET, *,
+                 command: str = UPDATE_COMMAND, checkout_built: bool | None = None) -> str:
     """One line when the plugin is the daemon's version but its hook scripts
     are not the daemon's, else ''.
 
@@ -79,8 +123,11 @@ def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
     version difference is left to :func:`version_notice`, so a session
     never opens with two lines about the same thing. Both digests are
     shape-checked: the plugin's arrives on a query string and is echoed
-    into the model's context.
+    into the model's context. ``checkout_built`` (default: this daemon's
+    build source) puts the checkout command first.
     """
+    if checkout_built is None:
+        checkout_built = _checkout_built()
     if daemon_version is None:
         daemon_version = DAEMON_VERSION
     if daemon_digest is _DAEMON_DIGEST_UNSET:
@@ -95,7 +142,7 @@ def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
     if plugin_digest == daemon_digest:
         return ""
     return (f"Pseudolife-MCP: plugin {plugin_version} matches the daemon's version but "
-            f"its hooks differ from the daemon's copy — run {ALL_UPDATE_COMMANDS} to "
+            f"its hooks differ from the daemon's copy — run {all_update_commands(command, checkout_built)} to "
             f"refresh the plugin cache and shim, then start a new session.")
 
 
@@ -108,7 +155,7 @@ def _version_key(value: str) -> tuple[int, ...] | None:
 
 
 def update_notice(daemon_version: str | None, latest_release: str | None,
-                  plugin_version: str | None) -> str:
+                  plugin_version: str | None, command: str = UPDATE_COMMAND) -> str:
     """One line when the daemon knows of a release newer than itself, else
     ''. It names the one command that moves the whole install, and the
     plugin's version when that differs too, so a session never opens with
@@ -126,10 +173,11 @@ def update_notice(daemon_version: str | None, latest_release: str | None,
     if plugin_version and _VERSION_SHAPE.fullmatch(plugin_version) and plugin_version != daemon_version:
         where += f", plugin {plugin_version}"
     return (f"Pseudolife-MCP: release {latest_release} is available ({where}) — run "
-            f"{RELEASE_UPDATE_COMMAND}, then start a new session.")
+            f"{command} update, then start a new session.")
 
 
-def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERSION) -> str:
+def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERSION,
+                   command: str = UPDATE_COMMAND) -> str:
     """One line when the plugin release differs from the daemon's, else ''.
 
     The plugin's hooks run from a cache that moves only on an explicit
@@ -147,13 +195,13 @@ def version_notice(plugin_version: str | None, daemon_version: str = DAEMON_VERS
     head = f"Pseudolife-MCP: plugin {plugin_version} and daemon {daemon_version} differ"
     plugin_key, daemon_key = _version_key(plugin_version), _version_key(daemon_version)
     if plugin_key is not None and daemon_key is not None and plugin_key < daemon_key:
-        return (f"{head} — update the plugin ({PLUGIN_UPDATE_COMMANDS}) and start "
+        return (f"{head} — update the plugin ({plugin_update_commands(command)}) and start "
                 f"a new session; until then its hooks may lack what the daemon serves.")
     if plugin_key is not None and daemon_key is not None and plugin_key > daemon_key:
-        return (f"{head} — update the daemon ({DAEMON_UPDATE_COMMANDS}); until then the "
+        return (f"{head} — update the daemon ({daemon_update_commands(command)}); until then the "
                 f"plugin may call what the daemon does not serve.")
-    return (f"{head} — update the older one: plugin via {PLUGIN_UPDATE_COMMANDS}; "
-            f"daemon via {DAEMON_UPDATE_COMMANDS}.")
+    return (f"{head} — update the older one: plugin via {plugin_update_commands(command)}; "
+            f"daemon via {daemon_update_commands(command)}.")
 
 MEMORY_LOOP_BLOCK = """\
 ## Memory — your long-term memory; use it every session (tools: `mcp__pseudolife-memory__*`)
@@ -581,7 +629,7 @@ def _dream_stall_line(service: Any) -> str:
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
-    plugin_hooks_digest: str | None = None,
+    plugin_hooks_digest: str | None = None, launcher: str | None = None,
 ) -> str:
     """``session_start_context`` plus (when ``session_id`` is given) identity
     registration: opens/re-fires the session's episode, sets it as the active
@@ -590,15 +638,18 @@ def hook_session_start(
     :func:`update_notice` first of all; else a ``plugin_version`` that
     differs from the daemon's puts :func:`version_notice` there; else an
     equal version whose ``plugin_hooks_digest`` differs puts
-    :func:`hooks_notice` there. Without ``session_id`` or a mismatch this
+    :func:`hooks_notice` there. Each names the ``launcher`` path the hook
+    reported (:func:`launcher_command`). Without ``session_id`` or a mismatch this
     is exactly ``session_start_context``'s behaviour. A ``source`` in
     :data:`CONTINUED_SOURCES` keeps the notices and the handle line but
     replaces that body with :func:`_continued_context`. Never raises; the
     endpoint always answers 200."""
     from pseudolife_memory import release_check
     prefix_parts = []
-    notice = (update_notice(DAEMON_VERSION, release_check.latest_release(), plugin_version)
-              or version_notice(plugin_version) or hooks_notice(plugin_version, plugin_hooks_digest))
+    command = launcher_command(launcher)
+    notice = (update_notice(DAEMON_VERSION, release_check.latest_release(), plugin_version, command)
+              or version_notice(plugin_version, command=command)
+              or hooks_notice(plugin_version, plugin_hooks_digest, command=command))
     if notice:
         prefix_parts.append(notice)
     if authorized:

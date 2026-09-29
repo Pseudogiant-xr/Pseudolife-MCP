@@ -499,8 +499,8 @@ show_client_only_notes() {
   - A new token there: write it into the token file here. The shims and
     the Claude Code hooks read that file on every call. Codex keeps its
     own copy in ~/.codex/pseudolife/token: write it there too.
-  - A daemon upgrade there: bring this checkout to the same release and
-    re-run this installer, so the shim matches the daemon.
+  - A daemon upgrade there: run the update command below with
+    --clients-only here, so the shim matches the daemon.
 PL_CLIENT_ONLY
 }
 # <<< client-only notes <<<
@@ -2665,5 +2665,26 @@ if [ -n "$codex_shim_mode" ]; then
 fi
 if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
-echo "Update later with one command, no checkout needed: pseudolife-mcp update (--check reports whether a newer release exists); from this checkout, ops/update.sh --all does the same after a git pull."
+# >>> update line >>>
+# The installers do not put the shim launcher's directory on PATH, so a bare
+# `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this
+# run installed by its path until PATH finds it.
+print_update_line() {
+    upd_cmd="pseudolife-mcp"
+    upd_path=""
+    if [ -n "${SHIM_PATH:-}" ]; then
+        upd_found="$(command -v pseudolife-mcp 2>/dev/null || true)"
+        if [ -z "$upd_found" ] || ! [ "$upd_found" -ef "$SHIM_PATH" ]; then
+            upd_cmd="\"$SHIM_PATH\""
+            upd_path=" (add $(dirname "$SHIM_PATH") to PATH to run it as plain pseudolife-mcp)"
+        fi
+    fi
+    if [ -n "${CLIENT_ONLY:-}" ]; then
+        echo "Update this machine's clients later with one command, no checkout needed: $upd_cmd update --clients-only (installs the daemon's release as a new shim runtime and refreshes the plugin cache; the daemon is updated on its own host)$upd_path."
+    else
+        echo "Update later with one command, no checkout needed: $upd_cmd update (--check reports whether a newer release exists)$upd_path; from this checkout, ops/update.sh --all does the same after a git pull."
+    fi
+}
+# <<< update line <<<
+print_update_line
 echo "Done. First session: tell your coding agent to remember something."

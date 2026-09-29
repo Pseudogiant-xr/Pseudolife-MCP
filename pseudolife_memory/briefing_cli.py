@@ -56,6 +56,21 @@ def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: i
     return (data or {}).get("markdown", "") or ""
 
 
+def _session_start_query() -> str:
+    """``?launcher=<path>`` when PATH does not find this user's shim
+    launcher, so the served update notices name the command that runs;
+    ``""`` otherwise. Never raises: a briefing must not break a session."""
+    from urllib.parse import quote
+    try:
+        from pseudolife_memory import runtimes
+        command = runtimes.launcher_command()
+    except Exception:  # noqa: BLE001
+        return ""
+    if command == "pseudolife-mcp":
+        return ""
+    return "?launcher=" + quote(command.strip('"'), safe="")
+
+
 def _fetch_session_start(url: str, token: str | None) -> str:
     """GET ``/api/hook/session-start`` — the plugin hook's plain-text context:
     the memory core, then (when authorized) the bounded briefing, already
@@ -63,7 +78,7 @@ def _fetch_session_start(url: str, token: str | None) -> str:
     registers no episode. A redirect is refused rather than followed, since
     urllib would carry the bearer to its target."""
     from pseudolife_memory.daemon_url import _NoRedirectHandler
-    req = urllib.request.Request(f"{url}/api/hook/session-start")
+    req = urllib.request.Request(f"{url}/api/hook/session-start{_session_start_query()}")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     opener = urllib.request.build_opener(_NoRedirectHandler)
