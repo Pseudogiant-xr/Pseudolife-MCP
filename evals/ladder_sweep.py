@@ -158,8 +158,9 @@ RUNGS: dict[str, dict] = {
     # Luna rides the shim's per-request override (a concrete gpt-* name in
     # the request wins over the launch default), so one shim serves both
     # rungs without a restart. NOTE: neither Codex-shim rung pins
-    # model_reasoning_effort — calls inherit the host's ~/.codex/config.toml
-    # (the 2026-09-01 measurements ran at "high").
+    # model_reasoning_effort. The 2026-09-01 measurements inherited "high"
+    # from the host's ~/.codex/config.toml; since 2026-09-29 the shim skips
+    # that file, so an unpinned call runs at the CLI's per-model default.
     "luna": {"kind": "llm",
              "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
              "base_url": os.environ.get("PSEUDOLIFE_BENCH_CODEX_URL",

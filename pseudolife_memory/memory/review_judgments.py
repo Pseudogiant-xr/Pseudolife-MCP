@@ -27,10 +27,28 @@ def fingerprint(value) -> str:
                                      default=_fingerprint_default).encode()).hexdigest()
 
 
+# deep_dream knobs added after review fingerprints existed (2026-09-14),
+# signed only while set. Every pending verdict and automatic decision is
+# fingerprinted over the deep_dream config, so a new knob signed at its
+# unset default would change every fingerprint: the first tick after the
+# deploy would clear every recorded verdict and reopen every automatic
+# reject. Setting one changes the policy, as any other knob does.
+_SIGNED_WHEN_SET = ("judge_second_url",)
+
+
+def signed_deep_dream(deep_dream) -> dict:
+    """The deep_dream config as review fingerprints sign it."""
+    view = dataclasses.asdict(deep_dream)
+    for key in _SIGNED_WHEN_SET:
+        if not view.get(key):
+            view.pop(key, None)
+    return view
+
+
 def judging_policy(service, extractor, prompt):
     cfg = service.config.memory
     return {"version": 1, "prompt": prompt,
-            "deep_dream": dataclasses.asdict(cfg.deep_dream),
+            "deep_dream": signed_deep_dream(cfg.deep_dream),
             "model": getattr(extractor, "model", None),
             "endpoint": getattr(extractor, "base_url", None),
             "max_tokens": getattr(extractor, "max_tokens", None),
@@ -103,7 +121,7 @@ def candidate_generation(service, *, decision_inputs=True, inputs=None):
                         "fact_texts": inputs["fact_texts"],
                         "pending_entities": [_evidence(p) for p in inputs["pending_entities"]],
                         "lesson_refs": inputs["lesson_refs"],
-                        "config": dataclasses.asdict(service.config.memory.deep_dream)}
+                        "config": signed_deep_dream(service.config.memory.deep_dream)}
     if decision_inputs:
         evidence["pending_links"] = [_evidence(p) for p in inputs["pending_links"]]
         evidence["dismissed"] = sorted(inputs["dismissed"])
