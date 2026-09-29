@@ -771,5 +771,6 @@ class FixtureService:
                 "superseded_ids": [entry_id] if entry_id is not None else [],
                 "new_memory_stored": True}
 
-    def delete(self, text=None, substring=None, source=None, episode=None, tag=None):
+    def delete(self, text=None, substring=None, source=None, episode=None, tag=None,
+               confirm_bulk=False):
         return {"deleted_count": 3, "deleted_texts": ["(fixture) deleted entry"]}

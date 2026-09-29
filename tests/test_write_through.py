@@ -93,6 +93,35 @@ def test_delete_removes_rows(cms, storage):
     _assert_consistent(cms, storage)
 
 
+def test_delete_filters_narrow_the_match_in_storage_too(cms, storage):
+    # 2026-09-29: text+source once OR-combined and deleted a whole source.
+    cms.store("probe", _emb(11), source="status")
+    cms.store("probe", _emb(12), source="notes")
+    cms.store("status line", _emb(13), source="status")
+    removed = cms.delete_entries(text="probe", source="status")
+    assert removed == ["probe"]
+    assert _pg_view(storage)["probe"]["source"] == "notes"
+    assert set(_pg_view(storage)) == {"probe", "status line"}
+    _assert_consistent(cms, storage)
+
+
+def test_delete_over_max_removed_touches_neither_view(cms, storage):
+    from pseudolife_memory.memory.cms import BulkDeleteRefused
+
+    for i in range(3):
+        cms.store(f"bulk {i}", _emb(20 + i), source="bulk")
+    with pytest.raises(BulkDeleteRefused) as info:
+        cms.delete_entries(source="bulk", max_removed=2)
+    assert info.value.count == 3
+    assert info.value.limit == 2
+    assert len(info.value.texts) == 3
+    assert set(_pg_view(storage)) == {"bulk 0", "bulk 1", "bulk 2"}
+    _assert_consistent(cms, storage)
+    # At the limit the delete goes through.
+    assert len(cms.delete_entries(substring="bulk 1", max_removed=1)) == 1
+    _assert_consistent(cms, storage)
+
+
 def test_hydration_restores_bank(cms, storage):
     cms.store("survives restart alpha", _emb(6), source="t", tags=["h"])
     cms.store("survives restart beta", _emb(7), source="t")
