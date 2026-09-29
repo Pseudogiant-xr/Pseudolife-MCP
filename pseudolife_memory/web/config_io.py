@@ -385,7 +385,9 @@ KNOBS: list[dict[str, Any]] = [
              "of the dream extractor. Empty = the dream extractor. From "
              "inside the container the host is host.docker.internal "
              "(Claude CLI shim = :8082, Codex CLI shim = :8086). Sends no "
-             "API key. Read on every judge call."},
+             "API key. Read on every judge call. " "Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
     {"path": "memory.deep_dream.judge_model", "group": "Deep dream",
      "label": "Judge model", "type": "string", "default": None,
      "restart": False,
@@ -408,7 +410,9 @@ KNOBS: list[dict[str, Any]] = [
              "endpoint and nowhere else. The two-vote gates need the two "
              "opinions served by different models; a mismatch between the "
              "model asked for and the model served is counted in the judge "
-             "result and logged."},
+             "result and logged. " "Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
     {"path": "memory.deep_dream.link_judge_mode", "group": "Deep dream",
      "label": "Link judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",

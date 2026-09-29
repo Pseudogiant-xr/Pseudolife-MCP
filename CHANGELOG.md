@@ -19,18 +19,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vote's served nor configured name equal to the first vote's stamp). A
   refused pair keeps its second vote, gains `auto-reject needs a distinct
   second model` on its note and counts as `auto_reject_refused_same_model`
-  in the judge result. With no `judge_second_model` set, two-vote rejects
-  therefore stop applying; the single-vote gate (`judge_reject_min_confidence`)
-  is unchanged.
+  in the judge result. With neither `judge_second_model` nor
+  `judge_second_url` set, two-vote rejects therefore stop applying; the
+  single-vote gate (`judge_reject_min_confidence`) is unchanged, so a single
+  confident reject still applies on one model's say-so.
 - New `memory.deep_dream.judge_second_url`: an OpenAI-compatible endpoint
   of its own for the merge judge's second opinion, serving
   `judge_second_model` (empty = its launch default), with a bearer key read
   only from `PSEUDOLIFE_JUDGE_SECOND_API_KEY` (forwarded by both compose
   files, documented in `ops/.env.example`) and sent nowhere else. Empty
   keeps today's behaviour: the second model on the first opinion's
-  endpoint. It is signed into the review fingerprints only while set, so
-  deploying it does not clear recorded verdicts or reopen automatic
-  decisions.
+  endpoint. A failing second endpoint is reported as
+  `second_opinion_error` and its share of the batch goes to first opinions,
+  instead of ending the tick before any first opinion runs. It is signed
+  into the review fingerprints only while set, so deploying it does not
+  clear recorded verdicts or reopen automatic decisions.
 - A judge endpoint that serves another model than it was asked for is now
   visible: the merge judge result counts it (`served_model_mismatch`, names
   in `served_model_mismatches`) and logs a warning, for first and second

@@ -927,10 +927,12 @@ that ever auto-applies an accept. "Different" is decided on what the
 endpoints *served*, not the names they were asked for: a CLI shim answers a
 name outside its own family (a `claude-*` name on the Codex shim) with its
 launch default, which on 2026-09-03 turned a configured `claude-fable-5`
-second opinion into the first opinion's model. Each judge result counts a
+second opinion into the first opinion's model. Each merge-judge result counts a
 served-vs-requested mismatch (`served_model_mismatch`, with the names in
 `served_model_mismatches`) and logs a warning, and counts same-model reject
-pairs it refused (`auto_reject_refused_same_model`). Since 2026-09-02 the other queues have judges too, each riding the
+pairs it refused (`auto_reject_refused_same_model`). A second endpoint
+that fails (down, or refusing its key) is reported as
+`second_opinion_error` and never stops that tick's first opinions. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only

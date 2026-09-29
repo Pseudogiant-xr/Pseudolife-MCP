@@ -3595,7 +3595,26 @@ class DreamOps:
                               "snippet_chars": cfg.judge_snippet_max_chars}
                              for i, e in enumerate(enriched)]
                 second_observed = observed_model(ex2)
-                verdicts = ex2.judge_merges(proposals)
+                try:
+                    verdicts = ex2.judge_merges(proposals)
+                except Exception as exc:  # noqa: BLE001 — see below
+                    # With judge_second_url the two opinions fail apart: a
+                    # second endpoint that is down or refuses its key must
+                    # not end the tick before any first opinion runs. The
+                    # rows stay waiting; their batch share goes to first
+                    # opinions this tick. On the first opinion's own
+                    # endpoint the first call would fail the same way after
+                    # a second timeout, so that failure ends the tick as
+                    # before.
+                    if ex2 is ex or (getattr(ex2, "base_url", None) is not None
+                                     and getattr(ex2, "base_url", None)
+                                     == getattr(ex, "base_url", None)):
+                        raise
+                    logger.warning("deep-dream judge: second opinion failed, "
+                                   "first opinions continue: %s", exc)
+                    out["second_opinion_error"] = str(exc)
+                    second = []
+            if second:
                 self._stamp_skipped(verdicts, proposals)
                 self._report_served_model(out, "second", ex2)
                 model2 = self._model_name(ex2)

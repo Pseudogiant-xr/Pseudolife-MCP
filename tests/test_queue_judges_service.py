@@ -577,6 +577,58 @@ def test_the_sweep_judge_takes_its_second_opinion_from_the_second_endpoint(svc, 
     assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
 
 
+class _DownJudge(_SecondJudge):
+    def judge_merges(self, proposals):
+        from pseudolife_memory.memory.dream import ExtractorError
+        raise ExtractorError("merge judge failed: HTTP Error 401: Unauthorized")
+
+
+def test_a_failing_second_endpoint_never_starves_first_opinions(svc):
+    """With judge_second_url the two opinions fail independently: a second
+    endpoint that is down or refuses its key must not stop first opinions
+    (review finding, 2026-09-30: the second batch runs first, and its
+    exception ended the whole tick while any row awaited a second vote).
+    Its share of the batch goes to first opinions for that tick."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    waiting = _propose(svc, "omicron svc", "omicron harness")
+    judge = _MergeJudge({("omicron svc", "omicron harness"): ("reject", 0.6),
+                         ("pi svc", "pi harness"): ("leave", 0.5)})
+    assert svc.deep_dream_judge(judge, limit=1)["judged"] == 1
+    fresh = _propose(svc, "pi svc", "pi harness")
+    out = svc.deep_dream_judge(judge, limit=1, second_extractor=_DownJudge({}))
+    assert "401" in out["second_opinion_error"]
+    assert out["second_opinions"] == 0 and out["judged"] == 1
+    assert _merge_row(svc, fresh)["judge_verdict"] == "leave"
+    assert _merge_row(svc, waiting)["judge2_verdict"] is None      # asked again later
+
+
+class _DiesAfterFirstCall(_MergeJudge):
+    def judge_merges(self, proposals):
+        if self.calls:
+            self.calls += 1
+            from pseudolife_memory.memory.dream import ExtractorError
+            raise ExtractorError("merge judge failed: timed out")
+        return super().judge_merges(proposals)
+
+
+def test_a_failing_shared_endpoint_still_ends_the_tick_after_one_call(svc):
+    """On the first opinion's own endpoint a second-opinion failure predicts
+    the first call's: the tick ends as before instead of waiting out a
+    second timeout on the sweep thread."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    _propose(svc, "rho svc", "rho harness")
+    judge = _DiesAfterFirstCall({("rho svc", "rho harness"): ("reject", 0.6)})
+    assert svc.deep_dream_judge(judge, limit=1)["judged"] == 1
+    _propose(svc, "sigma svc", "sigma harness")
+    out = svc.deep_dream_judge(judge, limit=2)    # ex2 is ex; one slot left for sigma
+    assert out["judged"] == 0 and "timed out" in out["error"]
+    assert judge.calls == 2                                    # one failing call
+
+
 def test_compose_forwards_the_second_judge_key_to_the_daemon():
     from pathlib import Path
 

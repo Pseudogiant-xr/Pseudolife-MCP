@@ -41,8 +41,8 @@ another model than it was asked for. **Day-one behaviour on an existing bank:** 
 2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
 without any config edit — measured 8/8 on the 2026-09-02 rows — but since
-2026-09-30 only when the two votes came from different models: with no
-`judge_second_model` set, same-model pairs are recorded and counted
+2026-09-30 only when the two votes came from different models: with
+neither `judge_second_model` nor `judge_second_url` set, same-model pairs are recorded and counted
 (`auto_reject_refused_same_model`) and applied by nobody. A
 wrong reject — auto or human; since 2026-09-03 every merge reject writes
 the canonical pair so the verdict outlives its proposal row — also writes
