@@ -4,7 +4,7 @@ baked command line.
     python ops/shim_autostart.py run claude|codex [overrides] [--dry-run] [--foreground]
     python ops/shim_autostart.py config claude|codex --model X --port N ...   # write ops/.env
     python ops/shim_autostart.py show claude|codex [--json]                   # the resolved settings
-    python ops/shim_autostart.py restart claude|codex [--dry-run]             # stop the shim, start it again
+    python ops/shim_autostart.py restart claude|codex [--dry-run] [--force]   # stop the shim, start it again
 
 The scheduled task (Windows) and the systemd --user unit (Linux) that the
 autostart installers register run ``run <kind>`` and nothing else, so the
@@ -23,8 +23,10 @@ then the flags. Standard library only; run from the checkout it sits in
 
 A registration from before the runner (the task or unit still carries
 ``--model`` and the rest on its command line) keeps starting those values
-at logon: ``show`` and ``restart`` say so, and the fix is one more run of
-the installer, elevated on Windows.
+at logon: ``show`` says so, ``restart`` refuses rather than start the
+ops/.env values under a task that brings its own back at the next logon
+(``--force`` restarts from ops/.env anyway), and the fix is one more run
+of the installer, elevated on Windows.
 """
 from __future__ import annotations
 
@@ -387,6 +389,17 @@ def _registered_command(kind: str) -> str | None:
     return text
 
 
+def registration_carries_its_values(kind: str, text: str | None = None) -> bool:
+    """Whether the registered task or unit predates this runner: its
+    command line names the shim script and the values, not
+    ``shim_autostart.py run``. ``text`` is the registration as
+    :func:`_registered_command` reads it; read here when omitted. False
+    when nothing is registered."""
+    if text is None:
+        text = _registered_command(kind)
+    return text is not None and "shim_autostart.py" not in text
+
+
 def registration_note(kind: str) -> str:
     """One line when the registered task or unit does not run this runner
     (an install from before it, whose command line still carries the
@@ -401,7 +414,7 @@ def registration_note(kind: str) -> str:
             return ""
         return (f"{where} is not registered: the shim will not start at logon until "
                 f"{installer} has run once{elevated}")
-    if "shim_autostart.py" not in text:
+    if registration_carries_its_values(kind, text):
         return (f"{where} still carries the model and the rest on its command line: at logon it starts "
                 f"those, not ops/.env. Run {installer} once{elevated} to switch it to ops/.env")
     if os.name == "nt" and re.search(r"<Enabled>\s*false\s*</Enabled>", text, re.IGNORECASE):
@@ -589,6 +602,9 @@ def main(argv: list[str] | None = None) -> int:
     p_restart = sub.add_parser("restart", help="stop the running shim and start it again (no elevation)")
     p_restart.add_argument("kind", choices=sorted(KINDS))
     p_restart.add_argument("--dry-run", action="store_true")
+    p_restart.add_argument("--force", action="store_true",
+                           help="restart from ops/.env even when the registered task or unit still "
+                                "carries its own values (those come back at the next logon)")
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
     kind = args.kind
@@ -646,6 +662,13 @@ def main(argv: list[str] | None = None) -> int:
         if problems and not args.dry_run:
             for problem in problems:
                 print(f"cannot start the {kind} shim: {problem}", file=sys.stderr)
+            return 1
+        # An install registered before this runner would be stopped and
+        # started from ops/.env — the defaults, when it never wrote the
+        # block — with its own values coming back at the next logon.
+        if not args.dry_run and not args.force and registration_carries_its_values(kind):
+            print(f"restart refused: {registration_note(kind)}. "
+                  f"--force restarts from ops/.env anyway", file=sys.stderr)
             return 1
         return restart(kind, repo, settings, dry_run=args.dry_run)
     return 2

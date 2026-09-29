@@ -56,8 +56,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   registering; `config` changes only the keys it is given and moves a
   hand-written `PSEUDOLIFE_*_SHIM_*` line from elsewhere in the file into
   the block, which is read last. Changing a value later is an edit plus
-  `python ops/shim_autostart.py restart claude|codex`, with no elevation:
-  on Windows it stops the shim (on its configured port and on the port it
+  `python ops/shim_autostart.py restart claude|codex`, with no elevation
+  (a task or unit registered before the runner still carries its own
+  values, so `restart` refuses rather than start the `ops/.env` ones under
+  it — the defaults, for an install that never wrote the block — until the
+  autostart installer has run once more; `--force` restarts from
+  `ops/.env` anyway): on Windows it stops the shim (on its configured
+  port and on the port it
   was last started on) and starts it again itself, then waits for the
   port, since running a scheduled task is not a right its owner always
   holds unelevated and a disabled task would leave no shim; on Linux it

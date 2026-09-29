@@ -2845,8 +2845,10 @@ set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
 and unit read it at every start) and run `python ops/shim_autostart.py
 restart claude` — no re-registration, no elevation, once the task or unit
 runs the runner (an install registered before 2026-09-29 still carries
-the prompt file on its command line: `show claude` says so, and one more
-run of the autostart installer, elevated on Windows, switches it).
+the prompt file on its command line: `show claude` says so, `restart`
+refuses until then — `--force` restarts from `ops/.env` anyway, and the
+task's own values come back at the next logon — and one more run of the
+autostart installer, elevated on Windows, switches it).
 Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
