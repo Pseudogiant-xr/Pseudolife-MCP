@@ -70,6 +70,12 @@ _OLD_LAUNCHER_PREFIX = "pseudolife-mcp.exe.old-"
 # places or not at all.
 SHIM_REQUIREMENTS = (
     "mcp>=2.1,<2.2",
+    # The coordination adapter imports these two itself; mcp 2.1 requires
+    # httpx2, not httpx, and --no-deps installs nothing transitively. The
+    # first runtime on a Docker-tier host crashed on `import httpx`
+    # (2026-09-29); tests/test_shim_runtimes.py pins the whole closure.
+    "httpx>=0.27",
+    "anyio>=4",
     "pydantic>=2.12,<3",
     "pyyaml>=6.0",
     "psycopg[binary]>=3.1",
