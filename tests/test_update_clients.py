@@ -373,7 +373,32 @@ def test_a_pipx_registration_moves_to_the_launcher_and_names_the_environment(cli
     assert result["state"] == "installed:0.15.0", result
     assert _read(cli.home / ".claude.json")["mcpServers"]["pseudolife-memory"]["command"] == str(_layout(cli).launcher)
     assert "pipx uninstall pseudolife-mcp" in result["detail"]
+    # ops/shim_python.py may pick that venv for an extractor shim unit (POSIX).
+    assert "shim_autostart.py show claude|codex" in result["detail"]
     assert launcher.is_file()   # nothing of the old environment is touched
+
+
+def test_the_pipx_uninstall_advice_yields_to_an_extractor_shim_that_runs_from_it(cli, tmp_path):
+    """ops/shim_python.py can choose pipx's venv as an extractor shim unit's
+    interpreter and records it in ops/.env; uninstalling pipx's package then
+    breaks the unit (2026-09-29), so the advice names the setting instead."""
+    venv = tmp_path / "pipx-home" / "venvs" / "pseudolife-mcp"
+    launcher = venv / SCRIPTS / f"pseudolife-mcp{EXE}"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("", encoding="utf-8")
+    (venv / "pyvenv.cfg").write_text("", encoding="utf-8")
+    cli.pipx_list = (0, json.dumps({"venvs": {"pseudolife-mcp": {"metadata": {"main_package": {
+        "app_paths": [{"__Path__": str(launcher)}]}}}}}))
+    _register_claude(cli, str(launcher))
+    checkout = tmp_path / "checkout"
+    (checkout / "ops").mkdir(parents=True)
+    (checkout / "ops" / ".env").write_text(
+        f'PSEUDOLIFE_CLAUDE_SHIM_PORT=8766\nPSEUDOLIFE_CODEX_SHIM_PYTHON="{venv / SCRIPTS / "python"}"\n',
+        encoding="utf-8")
+    result = uc.update_shim(ROOT, repo=checkout)
+    assert result["state"] == "installed:0.15.0", result
+    assert "pipx uninstall" not in result["detail"]
+    assert "PSEUDOLIFE_CODEX_SHIM_PYTHON" in result["detail"] and "keep" in result["detail"]
 
 
 def test_a_virtualenv_launcher_elsewhere_moves_to_the_launcher(cli, tmp_path):

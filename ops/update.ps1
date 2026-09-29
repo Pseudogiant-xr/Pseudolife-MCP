@@ -15,6 +15,7 @@
 #   ops\update.ps1 -AllowDirty       # deploy a tree with uncommitted or
 #                                    # untracked files (stamped dirty=true),
 #                                    # or one git cannot describe (unknown)
+#   ops\update.ps1 -ClientsOnly      # not here: python ops/update_clients.py
 #
 # The deploy itself is pseudolife_memory/update_cli.py — the same code
 # `pseudolife-mcp update` runs from an installed package with no checkout.
@@ -34,11 +35,18 @@ param(
     [int]$HealthRetries = 30,
     [int]$HealthDelayMs = 1500,
     [switch]$All,
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+    [switch]$ClientsOnly
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# A release-mode option of `pseudolife-mcp update`; this script deploys the checkout.
+if ($ClientsOnly) {
+    [Console]::Error.WriteLine("-ClientsOnly is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)")
+    exit 2
+}
 
 # A python that answers (the Store's `python` stub on PATH exits 9009), 3.10 or newer.
 $python = $null

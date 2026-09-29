@@ -529,8 +529,9 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pse
 docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 ```
 
-The extractor sidecar is not published and still builds locally; updates on
-the pull path are `pull` + `up -d`, not `ops/update.ps1`.
+The extractor sidecar is not published and still builds locally; update the
+pull path with `pseudolife-mcp update` (backup, pinned image, rollback tag;
+see [Updating](#updating)), not a bare `pull` + `up -d`.
 
 > **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
 > `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
@@ -567,7 +568,8 @@ logon autostart task:
 **Upgrading from before the agent board (no bearer token yet):** this
 migration step applies to installer-managed Docker installations. Rerun
 `ops/install.ps1` (Windows) or `ops/install.sh` (Linux / macOS) with the
-same client selection (close sessions first on Windows, as below).
+same client selection (sessions can stay open: the shim installs as a new
+runtime beside the running one).
 The installer creates a bearer token for the default shim install and
 migrates the environment of the installer-managed `pseudolife-memory`
 stdio registration for Claude Code in place. Custom registrations are
@@ -1041,8 +1043,8 @@ handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's wake
 hook, on by default; in Codex it runs only the park gate). It does not approve other plugins or bypass
 future trust checks. Changed definitions need approval again, and so does a
 handler a plugin update adds; Codex skips an unapproved one silently in the
-desktop app, which `ops/update.ps1 -All` (or `ops/update_clients.py`) now
-reports as `needs-approval`. If automatic setup cannot
+desktop app, which `pseudolife-mcp update` (from a checkout, `ops/update.ps1
+-All` or `ops/update_clients.py`) reports as `needs-approval`. If automatic setup cannot
 use the installed runtime's trust interface, it reports the problem and
 asks you to open `/hooks` to review and trust the definitions. Approved standing
 instructions remain available as fallback. Installed files alone do not
@@ -1294,10 +1296,11 @@ pseudolife-mcp-daemon`).
   entry already carries `PSEUDOLIFE_MCP_TOKEN_FILE` and still 401s, the
   shim predates token-file support (PyPI releases through 0.15.0 read only
   the literal token): `pseudolife-mcp --help` from a capable shim lists
-  `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim and re-run the installer,
-  which now refuses to register an older one against a token file. On
-  Windows, upgrade with every session using the shim closed (Desktop
-  fully quit from the tray), or it can leave the shim half-removed.
+  `PSEUDOLIFE_MCP_TOKEN_FILE`; upgrade the shim (`python
+  ops/update_clients.py --only shim` from the checkout installs a new
+  runtime beside the running one, so no session has to close) and re-run
+  the installer, which now refuses to register an older one against a
+  token file.
 - **A harness "removed tools" notice is not an outage.** A resumed session
   can carry a larger tool roster in its transcript than the current
   [toolset tier](docs/guide/configuration.md#toolset-tiers) serves —

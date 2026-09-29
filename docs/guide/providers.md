@@ -374,15 +374,16 @@ needs to be resolved before the installer can confirm the upgrade.
 
 For an update, use the intended checkout and rerun its installer with the
 same client selection when migrating an installation from before the agent
-board. `ops/update.ps1` / `ops/update.sh` update the daemon only by default;
-`-All` / `--all` also refresh host shims and client plugin caches, followed
-by a client restart. Follow the [README update recipe](../../README.md#updating)
+board. `pseudolife-mcp update` moves the daemon, the shim and the plugin
+cache from a release; from a checkout, `ops/update.ps1` / `ops/update.sh`
+update the daemon only by default, and `-All` / `--all` also refresh host
+shims and client plugin caches, followed by a client restart. Follow the [README update recipe](../../README.md#updating)
 for the installer migration and Windows prerequisites. Existing custom MCP
 registrations are preserved. If one points at a separate virtual environment,
 upgrade that exact environment as described below. For a versioned plugin release,
 update the Pseudolife plugin through the client's plugin manager. For changed
 hooks within the same version, the manager reports "already latest"; use
-`-All` / `--all` to refresh the cache instead. Then rerun hook setup and
+`pseudolife-mcp update` or `-All` / `--all` to refresh the cache instead. Then rerun hook setup and
 approve the changed scripts. Editing a plugin cache directly does not
 survive plugin updates.
 

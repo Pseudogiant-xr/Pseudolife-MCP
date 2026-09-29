@@ -352,6 +352,35 @@ def _pipx_venv_roots(pipx_listing: dict) -> list[Path]:
     return roots
 
 
+def _extractor_pythons_in(repo: Path | None, venvs: list[Path]) -> list[tuple[str, str]]:
+    """The ``PSEUDOLIFE_<KIND>_SHIM_PYTHON`` entries of ``<repo>/ops/.env``
+    whose interpreter lives inside one of ``venvs``. ``ops/shim_python.py``
+    may pick pipx's venv for an extractor shim autostart unit (POSIX) and
+    records it there, so uninstalling that venv breaks the unit (2026-09-29).
+    Paths are compared unresolved: a venv's python is often a symlink out of
+    it."""
+    if repo is None or not venvs:
+        return []
+    try:
+        lines = (Path(repo) / "ops" / ".env").read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return []
+    roots = [os.path.normcase(os.path.abspath(v)) for v in venvs]
+    held = []
+    for line in lines:
+        key, sep, value = line.strip().partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        value = value.strip().strip("'\"")
+        if not (sep and value and key.startswith("PSEUDOLIFE_") and key.endswith("_SHIM_PYTHON")):
+            continue
+        path = os.path.normcase(os.path.abspath(value))
+        if any(path == root or path.startswith(root + os.sep) for root in roots):
+            held.append((key, value))
+    return held
+
+
 def _legacy_directories(rt, layout) -> list[Path]:
     """Directories under the runtimes root that are not numbered runtimes:
     hand-made virtualenvs from before the launcher, left for the operator."""
@@ -392,6 +421,7 @@ def update_shim(source, repo: Path | None = None) -> dict:
         if not isinstance(pipx_listing, dict):
             pipx_listing = {}
     pipx_roots = _pipx_venv_roots(pipx_listing)
+    pipx_venvs = list(pipx_roots)
     if pipx:
         # pipx exposes a COPY of the launcher in its bin dir on Windows
         # without Developer Mode (no symlink): that copy is pipx's too.
@@ -472,7 +502,16 @@ def update_shim(source, repo: Path | None = None) -> dict:
         failed = failed or moved["state"] == "failed"
         note = moved["detail"] + (f" (backup {moved['backup']})" if moved.get("backup") else "")
         if kind == "pipx":
-            note += "; its pipx environment is no longer registered: `pipx uninstall pseudolife-mcp` once no session runs it"
+            venvs = pipx_venvs + [r for r in [_venv_root(Path(registration.command))] if r]
+            held = _extractor_pythons_in(repo, venvs)
+            if held:
+                note += ("; its pipx environment is no longer registered, but keep it: "
+                         + ", ".join(f"ops/.env's {key} runs an extractor shim autostart from it ({value})"
+                                     for key, value in held))
+            else:
+                note += ("; its pipx environment is no longer registered: `pipx uninstall pseudolife-mcp` once no "
+                         "session runs it, unless an extractor shim autostart uses that venv (`python "
+                         "ops/shim_autostart.py show claude|codex` names its interpreter)")
         detail.append(note)
     pinned = rt.pinned_runtimes(layout, rt.find_registrations(env))
     pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes)
