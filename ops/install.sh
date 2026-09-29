@@ -821,8 +821,32 @@ if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
     step "Dreamer model: $MODEL"
 fi
 
+# ── 3c. ops/.env line endings ──────────────────────────────────────────────
+# >>> env line endings >>>
+# An ops/.env copied from a Windows host carries CRLF line endings, and a
+# value read from it here then ends in a CR: `docker volume create` refused
+# "pseudolife-mcp-bank-pg18\r" as an invalid name (Debian 13, 2026-09-29).
+# Compose tolerates CRLF; the shell reads do not. The file is rewritten in
+# place with LF endings, keeping its mode (owner-only once a token is
+# minted) and a copy of the original beside it; a file already on LF is not
+# touched. ops/install.sh and ops/update.sh carry this same block, and
+# tests/test_installer_env_file.py keeps the two identical.
+normalize_env_line_endings() {  # $1 = env file; says so when it rewrote it
+    [ -f "$1" ] || return 0
+    grep -q "$(printf '\r')" "$1" || return 0
+    env_backup="$1.crlf-$(date +%Y%m%d-%H%M%S)"
+    cp -p "$1" "$env_backup"
+    tr -d '\r' < "$env_backup" > "$1"
+    step "Rewrote $(basename "$1") with LF line endings (it had CRLF, which put a stray CR into every value read from it); the original is kept as $(basename "$env_backup")"
+}
+[ -n "$CLIENT_ONLY" ] || normalize_env_line_endings "$env_file"
+# <<< env line endings <<<
+
 # ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
-get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 || true; }
+# >>> volumes >>>
+# A trailing CR is dropped here too: a reader placed before stage 3c, or a
+# file rewritten by hand, still yields clean names.
+get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 | tr -d '\r' || true; }
 bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
 state_vol="$(get_env PSEUDOLIFE_STATE_VOLUME)"; state_vol="${state_vol:-pseudolife-mcp-state}"
 if [ -z "$CLIENT_ONLY" ]; then
@@ -830,6 +854,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     docker volume create "$state_vol" >/dev/null
     step "Volumes ready: $bank_vol, $state_vol"
 fi
+# <<< volumes <<<
 
 # ── 5. managed env block ───────────────────────────────────────────────────
 # >>> extractor env >>>
@@ -1008,40 +1033,6 @@ if [ -z "$CLIENT_ONLY" ]; then
     [ -f "$override_file" ] && compose+=(-f "$override_file")
     step "docker compose up -d --build (first build downloads images — grab a coffee)..."
     docker compose "${compose[@]}" up -d --build
-fi
-
-# ── 8. CLI shim autostart (Claude / Codex modes) ───────────────────────────
-# Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
-# must not abort the install between `compose up` and the hooks/mcp-add/health
-# steps — that strands a running stack that was never wired into Claude Code.
-# A mode switch must tear down the OTHER family's autostart: an abandoned
-# shim unit keeps making real CLI calls at every /health refresh, forever,
-# on a plan whose owner believes it is turned off.
-remove_shim_unit() {
-    command -v systemctl >/dev/null 2>&1 || return 0
-    if systemctl --user is-enabled "$1" >/dev/null 2>&1 \
-            || systemctl --user is-active "$1" >/dev/null 2>&1; then
-        systemctl --user disable --now "$1" >/dev/null 2>&1 || true
-        step "Removed autostart unit $1"
-    fi
-}
-# A client-only install leaves any local daemon's extractor shims alone.
-[ -n "$codex_shim_mode" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-codex-shim.service
-[ -n "$claude_shim_mode" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-sonnet-shim.service
-if [ -n "$claude_shim_mode" ]; then
-    step "Registering the Claude shim autostart (systemd --user)..."
-    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
-        echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
-        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
-        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v5.md" >&2
-    fi
-elif [ -n "$codex_shim_mode" ]; then
-    step "Registering the Codex shim autostart (systemd --user)..."
-    if ! "$repo/ops/install-codex-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
-        echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
-        echo "  Re-run later: ops/install-codex-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
-        echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
-    fi
 fi
 
 # ── 8b. Claude Code plugin (hooks + commands layer) ────────────────────────
@@ -2306,6 +2297,53 @@ describe_endpoint_container() {
     esac
 }
 # <<< endpoint container probe <<<
+# ── 12a. CLI shim autostart (Claude / Codex modes) ──────────────────────────
+# Placed here, at the top of stage 12, for three reasons: after stage 11's
+# shim install (below); before the health wait, so a daemon that is not yet
+# healthy still leaves the autostart registered, as when this was stage 8;
+# and outside every stage range the installer tests extract (they run
+# stages 9 through the '12. health' header), so no test ever reaches the
+# real systemctl / Task Scheduler calls below.
+# >>> shim autostart >>>
+# Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
+# must not abort the install after `compose up` — that strands a running
+# stack that was never wired into Claude Code. Runs after stage 11 on
+# purpose: the shim install there (pipx, or pip --user) is what puts the
+# package where an interpreter imports it on a host without a checkout
+# venv, and the autostart script's interpreter pick (ops/shim_python.py)
+# finds it there instead of building a venv of its own.
+# A mode switch must tear down the OTHER family's autostart: an abandoned
+# shim unit keeps making real CLI calls at every /health refresh, forever,
+# on a plan whose owner believes it is turned off.
+remove_shim_unit() {  # $1 = unit, $2 = the shim family it runs
+    command -v systemctl >/dev/null 2>&1 || return 0
+    if systemctl --user is-enabled "$1" >/dev/null 2>&1 \
+            || systemctl --user is-active "$1" >/dev/null 2>&1; then
+        systemctl --user disable --now "$1" >/dev/null 2>&1 || true
+        step "Removed autostart unit $1 (the $2 shim): extractor mode $EXTRACTOR does not use it, and an abandoned shim keeps making real CLI calls at every health refresh"
+    fi
+}
+# A client-only install leaves any local daemon's extractor shims alone.
+# (The mode flags are set at stage 3; `:-` keeps this stage runnable on its
+# own under `set -u`, the way tests extract stage ranges.)
+[ -n "${codex_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-codex-shim.service Codex
+[ -n "${claude_shim_mode:-}" ] || [ -n "$CLIENT_ONLY" ] || remove_shim_unit pseudolife-sonnet-shim.service Claude
+if [ -n "${claude_shim_mode:-}" ]; then
+    step "Registering the Claude shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
+        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
+        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
+        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v5.md" >&2
+    fi
+elif [ -n "${codex_shim_mode:-}" ]; then
+    step "Registering the Codex shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-codex-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
+        echo "WARNING: shim autostart registration failed (see above: no systemd --user on this host, or no interpreter that imports pseudolife_memory for the unit)" >&2
+        echo "  Re-run later: ops/install-codex-shim-autostart.sh --port $SHIM_PORT --model $MODEL (add --python <interpreter> to name one)" >&2
+        echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
+    fi
+fi
+# <<< shim autostart <<<
 # A client-only install checked the remote daemon at preflight, and nothing
 # starts locally, so there is nothing to wait for.
 if [ -z "$CLIENT_ONLY" ]; then

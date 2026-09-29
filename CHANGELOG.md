@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — a Docker-tier Linux install survives a Windows-made ops/.env, and its shim autostart units start)
+- `ops/install.sh` and `ops/update.sh` rewrite an `ops/.env` that has CRLF
+  line endings (one copied from a Windows host) with LF endings before
+  reading it — in place, keeping the file's mode, with the original kept
+  beside it as `ops/.env.crlf-<stamp>` — and say so; a file already on LF
+  is not touched. A value the installer read from such a file ended in a
+  CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
+  an invalid name (Debian 13, 2026-09-29). Compose itself tolerates CRLF;
+  the installer's own volume-name reads now drop a trailing CR as well.
+  [Environment variables](docs/guide/configuration.md#environment-variables)
+- The shim autostart scripts (`ops/install-shim-autostart.sh`,
+  `ops/install-codex-shim-autostart.sh` and their `.ps1` twins) no longer
+  fall back to a bare `python3` / `python`: `evals/claude_shim.py` and
+  `evals/codex_shim.py` import the dream system prompt from
+  `pseudolife_memory`, so on a host without a checkout `.venv` the unit's
+  `ExecStart` exited 1 in a restart loop until it was re-registered with
+  `--python` (same install). The new `ops/shim_python.py` picks an
+  interpreter that imports the package — the checkout's `.venv`, pipx's
+  `pseudolife-mcp` venv (not on Windows, where `ops/install.ps1` treats
+  anything running from that venv as a session holding the MCP shim and
+  would refuse every later shim upgrade), a venv it made earlier, a PATH
+  python that imports it, else a venv it creates from the checkout (torch
+  from the CPU wheel index) — verifies each candidate the way the unit
+  runs, prints the choice, and refuses with the fix when none qualifies;
+  `--python` / `-PythonExe` names one to verify instead, and a bare name
+  (`--python python3`) is looked up on PATH as the unit would have. The
+  `.ps1` twins read the choice as UTF-8, so a profile path with a
+  non-ASCII character reaches the task intact, and the `.sh` twins quote
+  the prompt-file and CLI paths in `ExecStart`. Both one-shot installers now
+  register the autostart after their own shim install, so that install's
+  venv is what the unit uses, and a mode switch says which family's
+  autostart it removed and why.
+  [Claude primary with local fallback](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
 ### Changed (2026-09-29 — delete filters narrow the match, and a bulk delete needs confirming)
 - `memory_forget(scope="memory")`, `POST /api/delete` and
   `MemoryService.delete` combine their `text` / `substring` / `source` /

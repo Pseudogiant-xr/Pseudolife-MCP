@@ -52,14 +52,6 @@ command -v systemctl >/dev/null 2>&1 || {
     exit 1
 }
 
-if [ -z "$PYTHON_EXE" ]; then
-    if [ -x "$repo/.venv/bin/python" ]; then
-        PYTHON_EXE="$repo/.venv/bin/python"
-    else
-        PYTHON_EXE="$(command -v python3)"
-    fi
-fi
-
 # The shim spawns `codex exec`; a systemd user unit gets a minimal PATH, so
 # resolve the CLI now and pin it via --cli (a login shell's PATH additions
 # like ~/.local/bin are not visible to the unit).
@@ -71,6 +63,23 @@ fi
     echo "  https://developers.openai.com/codex/cli/" >&2
     exit 1
 }
+
+# >>> shim python >>>
+# The unit's interpreter must import pseudolife_memory with its
+# dependencies (the shim imports the dream system prompt from it): a bare
+# python3 registered this very unit with an ExecStart that exited 1 in a
+# restart loop (Debian 13, 2026-09-29). ops/shim_python.py picks one (the
+# checkout's .venv, pipx's pseudolife-mcp venv, a venv it made earlier, a
+# PATH python that imports the package, else a venv it creates from the
+# checkout), verifies it the way the unit will use it, and says which and
+# why; --python names one to verify instead. Last among the checks: a
+# missing CLI fails faster than a venv build.
+helper_python="$(command -v python3 || command -v python || true)"
+[ -n "$helper_python" ] || { echo "no python3 on PATH to run ops/shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run." >&2; exit 1; }
+picker=("$helper_python" "$repo/ops/shim_python.py" --repo "$repo")
+[ -z "$PYTHON_EXE" ] || picker+=(--python "$PYTHON_EXE")
+PYTHON_EXE="$("${picker[@]}")" || { echo "shim autostart not registered: no interpreter for the unit (see above)." >&2; exit 1; }
+# <<< shim python <<<
 
 # host-gateway routes container->host traffic to the docker bridge IP, so a
 # 127.0.0.1 bind is invisible to the daemon container. Bind the bridge IP —
@@ -90,7 +99,7 @@ Description=Codex extractor CLI shim (dream pass primary; E4B sidecar is fallbac
 After=network-online.target
 
 [Service]
-ExecStart=$PYTHON_EXE $repo/evals/codex_shim.py --host $BIND_HOST --port $PORT --model $MODEL --health-ttl $HEALTH_TTL --cli $CODEX_CLI
+ExecStart="$PYTHON_EXE" "$repo/evals/codex_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --health-ttl $HEALTH_TTL --cli "$CODEX_CLI"
 WorkingDirectory=$repo
 Restart=on-failure
 RestartSec=60
@@ -104,7 +113,7 @@ EOF
 systemctl --user daemon-reload
 systemctl --user enable --now pseudolife-codex-shim.service
 
-echo "Registered + started pseudolife-codex-shim.service ($MODEL, $BIND_HOST:$PORT, health-ttl ${HEALTH_TTL}s, log $LOG_FILE)."
+echo "Registered + started pseudolife-codex-shim.service ($MODEL, $BIND_HOST:$PORT, health-ttl ${HEALTH_TTL}s, python $PYTHON_EXE, log $LOG_FILE)."
 echo "Host-side check: curl http://$BIND_HOST:$PORT/health"
 echo "User services start at login; to start at BOOT (before login) run:"
 echo "  loginctl enable-linger $USER"

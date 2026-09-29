@@ -3037,6 +3037,26 @@ steps:
      `--model` choice; binds the docker bridge IP so the daemon container
      can reach it — `host-gateway` routes container→host traffic to the
      bridge, where a loopback bind is invisible).
+   - The unit's (or task's) interpreter must import `pseudolife_memory`
+     with its dependencies: the shim imports the dream system prompt from
+     it, and a bare `python3` registered a unit that exited 1 in a restart
+     loop on a Docker-tier Debian 13 host with no checkout `.venv`
+     (2026-09-29). On every platform both autostart scripts ask
+     `ops/shim_python.py` for one — the checkout's `.venv`, then pipx's
+     `pseudolife-mcp` venv (the installer's shim install; not on Windows,
+     where `ops/install.ps1` treats anything running from that venv as a
+     session holding the MCP shim and would refuse every later shim
+     upgrade), then a venv the
+     helper made on an earlier run (`~/.pseudolife-mcp/shim-venv`), then a
+     `python3` or `python` on PATH that imports the package, else a venv it creates
+     there from the checkout (torch from PyTorch's CPU wheel index; the
+     shim never runs a model). Each candidate is verified the way the unit
+     runs it before anything is written, the choice is printed, and the
+     script refuses rather than register a unit that cannot start.
+     `--python <interpreter>` (Windows: `-PythonExe`) names one to verify
+     instead. The one-shot installers register the autostart after their
+     own shim install for this reason, and when a mode switch removes the
+     other family's autostart they say which unit and why.
 2. Set in `ops/.env` (both vars must flip together — pointing only one at
    the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
@@ -3082,8 +3102,10 @@ which prompts for the GPT dreamer (GPT-5.6 Terra / Sol / Luna, GPT-6 Sol /
 Luna), registers the
 shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
 Scheduler, elevated pwsh opened from the Start menu, same caveat as the
-Claude shim above; `.sh` — systemd `--user`, docker-bridge bind),
-and writes the env triple for you. The autostart raises the shim's
+Claude shim above; `.sh` — systemd `--user`, docker-bridge bind; both pick
+and verify the unit's interpreter exactly as the Claude shim's autostart
+does, `--python` / `-PythonExe` naming one), and writes the env triple for
+you. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
 stale-ok window only costs one failed primary attempt before the dream
@@ -3984,6 +4006,17 @@ For the Docker stack, set these in `ops/.env`
 every value is commented, a missing file runs entirely on defaults). The
 dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 [Dreaming](dreaming.md).
+
+An `ops/.env` copied from a Windows host carries CRLF line endings. Compose
+reads such a file fine, but a value the shell installer read from it ended
+in a CR, and `docker volume create` refused `pseudolife-mcp-bank-pg18\r` as
+an invalid name (Debian 13, 2026-09-29). `ops/install.sh` and
+`ops/update.sh` therefore rewrite a CRLF `ops/.env` with LF endings before
+reading it — in place, keeping the file's owner-only mode, with the
+original kept beside it as `ops/.env.crlf-<stamp>` (gitignored like every
+`ops/.env*`) — and print one line saying so; a file already on LF is not
+touched. `ops/install.ps1` reads the file line by line and needs no
+rewrite.
 
 When deploying with `ops/update.ps1` or `ops/update.sh`, an explicit assignment
 to either authentication variable in `ops/.env` makes that file authoritative

@@ -45,10 +45,6 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 
-if (-not $PythonExe) {
-    $venv = Join-Path $repo ".venv\Scripts\python.exe"
-    $PythonExe = (Test-Path $venv) ? $venv : (Get-Command python).Source
-}
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Fail fast if no codex CLI is findable — but do NOT bake a discovered path
@@ -65,6 +61,39 @@ if (-not $CodexCli) {
                "install Codex and run `codex login`: https://developers.openai.com/codex/cli/")
     }
 }
+
+# >>> shim python >>>
+# The task's interpreter must import pseudolife_memory with its
+# dependencies (the shim imports the dream system prompt from it): the
+# Linux twin registered this unit with a bare python3 that exited 1 in a
+# restart loop (Debian 13, 2026-09-29). ops\shim_python.py picks one (the
+# checkout's .venv, a venv it made earlier, a PATH python that imports the
+# package, else a venv it creates from the checkout; never pipx's
+# pseudolife-mcp venv here, which install.ps1 treats as held by a session
+# while anything runs from it), verifies it the way the task will use it,
+# and says which and why; -PythonExe names one to verify instead. After
+# the CLI check: a missing CLI fails faster than a venv build.
+$helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
+if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
+    throw "no python on PATH to run ops\shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run."
+}
+$pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
+if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }
+# The helper prints the path as UTF-8; this shell must decode it the same
+# way, or a profile path with a non-ASCII character names an interpreter
+# that does not exist (review, 2026-09-29).
+$savedOutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    $picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+} finally {
+    [Console]::OutputEncoding = $savedOutputEncoding
+}
+if ($LASTEXITCODE -ne 0 -or -not $picked) {
+    throw "shim autostart not registered: no interpreter imports pseudolife_memory for the task (see the message above; -PythonExe <interpreter> names one)."
+}
+$PythonExe = "$picked".Trim()
+# <<< shim python <<<
 
 $taskName = "Pseudolife Codex Shim"
 # Same detached CreateNoWindow spawner as the Claude shim task — see the
@@ -109,7 +138,7 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
            "anthropics/claude-code#61635).")
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, log $LogFile)."
+Write-Host "Registered + started '$taskName' ($Model, port $Port, health-ttl ${HealthTtl}s, python $PythonExe, log $LogFile)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"
