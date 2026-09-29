@@ -1159,13 +1159,23 @@ def migrate_registrations(layout: Layout, registrations: Iterable[Registration] 
     """Move every registration that names a runtime path (or a path under
     ``roots``, or with ``bare`` the shim by name alone) to the launcher;
     others are reported and left. Idempotent: a registration already on the
-    launcher reads ``current``."""
+    launcher reads ``current``. A registration reached through ``roots`` or
+    ``bare`` names a full install; one that would spawn its own daemon
+    (``spawns_a_daemon``) stays there, since a runtime cannot serve — the
+    same rule ``update_clients`` applies (review, 2026-09-29)."""
     registrations = find_registrations(env) if registrations is None else list(registrations)
     results = []
     for registration in registrations:
-        if (registers_launcher(registration, layout) or registers_runtime_path(registration, layout, roots)
-                or (bare and registers_bare_shim(registration))):
+        if registers_launcher(registration, layout) or registers_runtime_path(registration, layout):
             result = migrate_registration(registration, layout)
+        elif registers_runtime_path(registration, layout, roots) or (bare and registers_bare_shim(registration)):
+            if registration.spawns_a_daemon:
+                result = {"state": "spawning", "backup": None,
+                          "detail": f"{registration.client}: {registration.command} spawns its own daemon "
+                                    "(no PSEUDOLIFE_MCP_NO_SPAWN=1 and a loopback daemon URL), which a shim "
+                                    "runtime cannot serve; left as it is"}
+            else:
+                result = migrate_registration(registration, layout)
         else:
             result = {"state": "left", "detail": f"{registration.client}: {registration.command} is not a "
                                                  f"managed runtime path; left as it is", "backup": None}

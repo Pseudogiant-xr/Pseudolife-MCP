@@ -608,9 +608,12 @@ def test_a_registration_that_is_not_a_runtime_path_is_left_alone(tmp_path):
     assert [r["state"] for r in results] == ["left"] * 4
     assert (home / ".codex" / "config.toml").read_text(encoding="utf-8") == text_before
     assert not list(home.rglob("*.bak-*"))
-    # unless the caller names that root as one of the shim's
+    # unless the caller names that root as one of the shim's — and then only
+    # the registrations that would not spawn their own daemon (Claude Code's
+    # and Codex's carry PSEUDOLIFE_MCP_NO_SPAWN here; Desktop's and Gemini's
+    # do not, see the spawning test below).
     results = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True), roots=[elsewhere])
-    assert [r["state"] for r in results] == ["migrated"] * 4
+    assert [r["state"] for r in results] == ["migrated", "migrated", "spawning", "spawning"]
 
 
 def test_a_codex_table_the_editor_cannot_isolate_is_reported_for_hand_editing(tmp_path):
@@ -644,9 +647,10 @@ def test_codex_registration_migrates_from_the_checkout_script(tmp_path):
     proc = subprocess.run([sys.executable, str(ROOT / "ops" / "shim_runtime.py"), "migrate", "--client", "codex"],
                           capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode == 0 and "current" in proc.stderr and proc.stdout == ""
-    # a bare registration moves only when asked (--bare), to the absolute launcher
+    # a bare registration moves only when asked (--bare), to the absolute
+    # launcher — and only with the no-spawn guard, as the installers set it
     (home / ".gemini" / "settings.json").write_text(json.dumps({"mcpServers": {"pseudolife-memory": {
-        "command": "pseudolife-mcp"}}}), encoding="utf-8")
+        "command": "pseudolife-mcp", "env": {"PSEUDOLIFE_MCP_NO_SPAWN": "1"}}}}), encoding="utf-8")
     proc = subprocess.run([sys.executable, str(ROOT / "ops" / "shim_runtime.py"), "migrate", "--client", "gemini"],
                           capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode == 3
@@ -775,3 +779,29 @@ def test_a_given_venv_interpreter_is_reduced_to_its_base(tmp_path):
     subprocess.run([str(python), "-m", "venv", "--without-pip", str(inner)], check=True, capture_output=True, timeout=180)
     inner_python = inner / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
     assert Path(rt.base_interpreter(str(inner_python))).resolve() == Path(base).resolve()
+
+
+def test_a_registration_that_spawns_its_own_daemon_is_never_moved_onto_a_runtime(tmp_path):
+    """A shim runtime holds no daemon (no torch). A registration of a full
+    install with no ``PSEUDOLIFE_MCP_NO_SPAWN`` and a loopback daemon URL
+    (the pip and lite tiers) starts its own daemon when none answers, so it
+    stays where its install is — the guide promised as much, but only
+    ``update_clients.py`` kept the promise; the installers migrate through
+    ``shim_runtime.py migrate`` (review, 2026-09-29)."""
+    layout = _layout(tmp_path, "windows")
+    elsewhere = tmp_path / "checkout" / ".venv"
+    home, env = _fixture_home(tmp_path, layout, elsewhere)
+    before = {p: p.read_text(encoding="utf-8") for p in home.rglob("*.json")}
+    results = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True), roots=[elsewhere])
+    by_client = {r["client"]: r for r in results}
+    assert by_client["claude-code"]["state"] == "migrated"           # PSEUDOLIFE_MCP_NO_SPAWN=1
+    for client in ("claude-desktop", "gemini"):                        # no guard: would spawn
+        assert by_client[client]["state"] == "spawning", by_client[client]
+        assert "spawns its own daemon" in by_client[client]["detail"]
+        assert by_client[client]["backup"] is None
+    for p, text in before.items():
+        if p.name != ".claude.json":
+            assert p.read_text(encoding="utf-8") == text, p
+    # A registration already on the launcher is not re-examined.
+    again = rt.migrate_registrations(layout, rt.find_registrations(env, windows=True), roots=[elsewhere])
+    assert {r["client"]: r["state"] for r in again}["claude-code"] == "current"
