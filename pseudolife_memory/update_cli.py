@@ -732,6 +732,7 @@ class Update:
             print("    Rolled-back deploy if ever needed:")
             for line in self.rollback_lines:
                 print(line)
+            sys.stdout.flush()   # ahead of a warning on stderr, or a streamed child
         return health
 
     def prune_cache(self, checkout: Path | None) -> None:

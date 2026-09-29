@@ -8,10 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (2026-09-29 — an update's log reads in the order the steps ran)
 - `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`, behind
-  `ops/update.sh` and `ops/update.ps1`) flushes each `==> ...` step line and
-  each warning as it prints it, and flushes both streams before a streamed
-  child (the docker build, the checkout's backup and retention scripts)
-  starts. With stdout a file (`ops/update.sh > log 2>&1` on a headless
+  `ops/update.sh` and `ops/update.ps1`) flushes each `==> ...` step line,
+  each warning and the rollback text as it prints them, and flushes both
+  streams before a streamed child (the docker pull or build, the checkout's
+  backup and retention scripts) starts. With stdout a file (`ops/update.sh > log 2>&1` on a headless
   host, 2026-09-29) Python block-buffered the step lines while the build
   wrote to the file directly, so every step — "backing up the bank",
   "tagged rollback image", "rebuilding the daemon only", "healthy" —
