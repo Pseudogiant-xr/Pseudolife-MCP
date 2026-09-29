@@ -690,3 +690,72 @@ def test_relate_link_follows_the_orientation_the_judge_saw(svc):
     assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
     assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
     assert ("nu module", "implements", "nu concept", "merge-judge-relate") in _pending_links(svc)
+
+
+def test_a_failing_link_filing_never_undoes_the_reject(svc, monkeypatch):
+    """The link is a side effect of the reject: a filing that raises rolls
+    back only itself, and the rest of the batch is still judged."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    related = _propose(svc, "xi module", "xi concept")
+    plain = _propose(svc, "xi svc", "xi harness")
+
+    def boom(*a, **k):
+        raise RuntimeError("link filing failed")
+    monkeypatch.setattr(svc, "_graph_propose_links_locked", boom)
+    judge = _StubJudge({("xi module", "xi concept"): ("relate", 0.9, "implements"),
+                        ("xi svc", "xi harness"): ("reject", 0.9)})
+    out = svc.deep_dream_judge(judge)
+    assert "error" not in out, out
+    assert out["auto_rejected"] == 2 and out["relate_links_filed"] == 0
+    for pid in (related, plain):
+        assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+
+
+def test_relate_files_at_most_one_link_per_pair(svc):
+    """An accepted relate link changes both sides' degree, so reconsideration
+    reopens the merge reject and the judge sees the pair again. A pair that
+    an edge or any link proposal already joins gets no second link: the
+    loop would otherwise stack one edge per vocabulary relation."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    svc.config.memory.deep_dream.judge_second_opinion = False
+    _propose(svc, "rho2 module", "rho2 concept")
+    first = _StubJudge({("rho2 module", "rho2 concept"): ("relate", 0.9, "implements")})
+    assert svc.deep_dream_judge(first)["relate_links_filed"] == 1
+    (link,) = svc._storage.pending_proposals()
+    assert svc.graph_accept_proposal(link["id"])["accepted"]
+    again = _StubJudge({("rho2 module", "rho2 concept"): ("relate", 0.9, "uses"),
+                        ("rho2 concept", "rho2 module"): ("relate", 0.9, "uses")})
+    out = svc.deep_dream_judge(again)
+    assert out["reconsideration"]["reopened"] == 1, out
+    assert again.seen, "the reopened pair is judged again"
+    assert out["relate_links_filed"] == 0
+    assert svc._storage.pending_proposals() == []
+    assert len(svc._storage.load_graph()["edges"]) == 1
+
+
+def test_an_unregistered_vocabulary_relation_files_no_link(svc):
+    """``tests`` is in the judges' vocabulary but not a registered relation;
+    the filing gate would silently turn it into related-to. The merge is
+    still rejected; no link is filed."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pid = _propose(svc, "tau test", "tau module")
+    judge = _StubJudge({("tau test", "tau module"): ("relate", 0.9, "tests")})
+    out = svc.deep_dream_judge(judge)
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 0
+    assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+    assert _pending_links(svc) == []
+
+
+def test_public_link_proposals_resolve_by_name_not_id(svc):
+    """The by-id filing is internal to the merge judge: a public proposal
+    carrying stale ids (a spread candidate row) still files by its names."""
+    st = svc._storage
+    for name in ("upsilon a", "upsilon b", "upsilon c"):
+        st.ensure_entity(name, display=name)
+    a, b = st.find_entity("upsilon a")["id"], st.find_entity("upsilon b")["id"]
+    out = svc.graph_propose_links([{"src": "upsilon c", "dst": "upsilon b",
+                                    "src_id": a, "dst_id": b,
+                                    "relation": "uses", "rationale": "t"}])
+    assert out["proposed"] == 1
+    (link,) = st.pending_proposals()
+    assert link["src"] == "upsilon c"

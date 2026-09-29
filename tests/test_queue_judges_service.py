@@ -1176,3 +1176,17 @@ def test_same_model_reject_class_pair_files_nothing(svc):
     assert out["relate_links_filed"] == 0
     assert _merge_row(svc, pid)["status"] == "pending"
     assert _merge_links(svc) == []
+
+
+def test_first_opinion_relation_is_recovered_for_the_link(svc):
+    """A relate FIRST vote below the single gate, then a reject from another
+    model: the relation comes back out of the first opinion's note."""
+    _two_vote_auto_reject(svc)
+    _propose(svc, "phi module", "phi concept")
+    pair = ("phi module", "phi concept")
+    judge = _MergeJudge({pair: ("relate", 0.75, "part-of")})
+    second = _SecondJudge({pair: ("reject", 0.8)})
+    svc.deep_dream_judge(judge)
+    out = svc.deep_dream_judge(judge, second_extractor=second)
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
+    assert _merge_links(svc) == [("phi module", "part-of", "phi concept", "merge-judge-relate")]

@@ -8615,10 +8615,17 @@ class MemoryService(DreamOps):
             return self._graph_propose_links_locked(proposals, source=source, _review_guard=_review_guard)
 
     def _graph_propose_links_locked(self, proposals: list[dict], *,
-                            source: str = "deep-dream", _review_guard=None) -> dict[str, Any]:
+                            source: str = "deep-dream", _review_guard=None,
+                            _by_id: bool = False) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
         production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
-        type-violations) and inserted into edge_proposals — never into edges."""
+        type-violations) and inserted into edge_proposals — never into edges.
+
+        ``_by_id`` (internal; the merge judge's relate, 2026-09-30): each
+        proposal also names its endpoints by ``src_id`` / ``dst_id``, which
+        are linked exactly, while ``src`` / ``dst`` (their displays) feed
+        the gate — a display name need not resolve back to its own entity,
+        and a miss would mint a new one. Public callers always file by name."""
         from pseudolife_memory import graph as G
         from pseudolife_memory.memory.relation_quality import (
             edge_confidence, is_hard_type_violation)
@@ -8631,31 +8638,17 @@ class MemoryService(DreamOps):
             return dict(self._GRAPH_UNAVAILABLE)
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
-        by_id = None
         for p in proposals:
-            # A proposal naming its endpoints by entity id (the merge
-            # judge's relate, 2026-09-30) links exactly those entities: a
-            # display name need not resolve back to its own entity, and a
-            # miss would mint a new one. The gate reads their displays.
-            ids = (p.get("src_id"), p.get("dst_id"))
-            if None not in ids:
-                if by_id is None:
-                    by_id = {e["id"]: e for e in self._storage.load_graph()["entities"]}
-                se, de = by_id.get(ids[0]), by_id.get(ids[1])
-                if se is None or de is None or se["id"] == de["id"]:
-                    skipped += 1
-                    continue
-                src = se["display"] or se["canonical"]
-                dst = de["display"] or de["canonical"]
-            else:
-                src, dst = str(p.get("src", "")), str(p.get("dst", ""))
+            src, dst = str(p.get("src", "")), str(p.get("dst", ""))
             resolved, _ = G.resolve_relation(known, str(p.get("relation", "")))
             relation = resolved or "related-to"
             if not src or not dst or G.norm_name(src) == G.norm_name(dst) \
                     or is_hard_type_violation(src, relation, dst):
                 skipped += 1
                 continue
-            if None in ids:
+            if _by_id:
+                se, de = {"id": p["src_id"]}, {"id": p["dst_id"]}
+            else:
                 se = self._resolve_or_create_entity(src)
                 de = self._resolve_or_create_entity(dst)
             conf = edge_confidence(src, relation, dst)

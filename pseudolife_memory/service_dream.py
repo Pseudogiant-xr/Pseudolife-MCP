@@ -3512,15 +3512,23 @@ class DreamOps:
         confident wins (the first on a tie). The relation reads FROM ->
         INTO as the judge was shown them (``e``, the signed pack, whose
         sides are oriented by current evidence), so the link is filed with
-        that orientation, by entity id. Caller holds the lock, inside the
-        reject's transaction."""
+        that orientation, by entity id. Caller holds the lock.
+
+        Files nothing when the relation is not a registered one (the filing
+        gate would silently file it as related-to), or when an edge or any
+        link proposal already joins the pair: an accepted link changes both
+        sides' evidence, so reconsideration reopens the reject and the
+        judge sees the pair again — without this the loop would stack one
+        edge per relation it names."""
         relates = [(conf, rel) for verdict, rel, conf in votes
                    if verdict == "relate" and rel]
         if not relates:
             return
         conf, relation = max(relates, key=lambda item: item[0])
-        disp = {ent["id"]: ent["display"]
-                for ent in self._storage.load_graph()["entities"]}
+        if relation not in {r["name"] for r in self._graph.load_relations()}:
+            return
+        g = self._storage.load_graph()
+        disp = {ent["id"]: ent["display"] for ent in g["entities"]}
         stored = (row["entity_id"], row["into_id"])
         shown = (e["from"]["display"], e["into"]["display"])
         if shown[0] == shown[1]:
@@ -3531,12 +3539,35 @@ class DreamOps:
             dst_id, src_id = stored
         else:
             return
+        pair = {src_id, dst_id}
+        if any({edge["src_id"], edge["dst_id"]} == pair for edge in g["edges"]):
+            return
+        if self._storage.conn.execute(
+                "SELECT 1 FROM edge_proposals WHERE (src_id=%s AND dst_id=%s) "
+                "OR (src_id=%s AND dst_id=%s) LIMIT 1",
+                (src_id, dst_id, dst_id, src_id)).fetchone():
+            return
         res = self._graph_propose_links_locked([{
-            "src_id": src_id, "dst_id": dst_id, "relation": relation,
-            "rationale": (f"merge judge: relate {conf:.2f} on merge "
-                          f"proposal #{row['id']} (rejected as distinct)")}],
-            source="merge-judge-relate")
+            "src_id": src_id, "dst_id": dst_id,
+            "src": disp[src_id], "dst": disp[dst_id], "relation": relation,
+            "rationale": (f"merge judge: relate ({relation}) {conf:.2f} on "
+                          f"merge proposal #{row['id']}, rejected as distinct")}],
+            source="merge-judge-relate", _by_id=True)
         out["relate_links_filed"] += int(res.get("proposed") or 0)
+
+    def _file_relate_link_isolated(self, out: dict, row: dict, e: dict,
+                                   votes: list[tuple]) -> None:
+        """:meth:`_file_relate_link` in a savepoint of its own: the link is a
+        side effect of an applied reject, so a filing that fails rolls back
+        only itself, never the reject or the rest of the batch. Caller
+        holds the lock, inside the reject's transaction."""
+        try:
+            with self._storage.transaction():
+                self._file_relate_link(out, row, e, votes)
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning("deep-dream judge: relate link for merge proposal "
+                           "#%s not filed: %s", row.get("id"), exc)
+            out["relate_link_errors"] = out.get("relate_link_errors", 0) + 1
 
     def review_rejudge(self, queue="all", *, limit=32):
         """Queue a bounded set of pending opinions for the next judge sweep."""
@@ -3729,7 +3760,7 @@ class DreamOps:
                                 if res.get("rejected"):
                                     out["auto_rejected"] += 1
                                     rel1 = relate_relations(row.get("judge_note"))[0]
-                                    self._file_relate_link(out, row, e, [
+                                    self._file_relate_link_isolated(out, row, e, [
                                         (v1, rel1, c1),
                                         (v2, v.get("relation"), c2)])
                             elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
@@ -3828,7 +3859,7 @@ class DreamOps:
                                     e["id"], decided_by="dream-judge")
                                 if res.get("rejected"):
                                     out["auto_rejected"] += 1
-                                    self._file_relate_link(out, row, e, [
+                                    self._file_relate_link_isolated(out, row, e, [
                                         (v["verdict"], v.get("relation"),
                                          v["confidence"])])
             out["pending_unjudged"] = max(0, len(first) - out["judged"])

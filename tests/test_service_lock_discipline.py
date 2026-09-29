@@ -89,6 +89,7 @@ CALLER_HOLDS_LOCK = {
     # The merge judge's relate filing (2026-09-30), called inside the
     # locked reject loop of deep_dream_judge.
     "_file_relate_link",
+    "_file_relate_link_isolated",
     "_link_evidence_locked",
     "_junk_evidence_locked",
     "_graph_accept_proposal_locked",

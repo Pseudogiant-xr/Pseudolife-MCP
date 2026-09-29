@@ -16,7 +16,8 @@ reject-class, exactly as ``deep_dream_judge`` gates it (2026-09-30):
   * two_vote_accept_not_lowdiff — both accept at mean >= ``--accept-gate``
     on a row the panel stamped not low-differential;
   * splits — accept vs reject-class disagreements (the sweep leaves these
-    for a human; reject vs relate is agreement);
+    for a human; reject vs relate is agreement; the sweep also splits on
+    a leave, which this count leaves out);
   * single_vote — per arm and replicate, reject-class votes at/above
     ``--reject-gate`` (the first opinion's single-vote gate).
 
@@ -41,7 +42,10 @@ REJECT_CLASS = ("reject", "relate")
 
 
 def load_arm(path: Path) -> dict:
+    """The one arm of a tagged ladder artifact."""
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    if len(doc["arms"]) != 1:
+        raise SystemExit(f"{path}: expected one arm, found {sorted(doc['arms'])}")
     (arm,) = doc["arms"].values()
     return arm
 
