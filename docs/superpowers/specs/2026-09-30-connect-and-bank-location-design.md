@@ -106,7 +106,7 @@ pseudolife-mcp connect <daemon-url>
 | `~/.codex/pseudolife/connection.json`, and the token copy `~/.codex/pseudolife/token` where the writer keeps one | URL and token-file path | the Codex credential writer |
 | Claude Desktop `claude_desktop_config.json` `pseudolife-desktop` | as for Claude Code | JSON edit of those keys only |
 | `~/.gemini/settings.json` `mcpServers.pseudolife-memory.env` | as for Claude Code | JSON edit of those keys only |
-| unattended-update task or unit, if scheduled | `--daemon-url`, `PSEUDOLIFE_MCP_DAEMON_URL` | reported only, with the command that re-schedules it |
+| unattended-update task or unit, if scheduled | `--daemon-url`, `PSEUDOLIFE_MCP_DAEMON_URL`, and on Linux the unit's `PSEUDOLIFE_MCP_TOKEN_FILE` | reported only, with the command that re-schedules it |
 | ambient `PSEUDOLIFE_MCP_DAEMON_URL` (the process environment; on Windows also the User-scope variable) | the URL | reported only, when it differs from the target |
 
 Each row is reported as `current` (already names the target), `change`
@@ -130,7 +130,8 @@ Rules the plan applies:
   entry in Desktop, or a legacy one this project's registrar wrote (the
   installer's registrar migrates it); a Claude Code entry under
   `projects[*].mcpServers` or in a `.mcp.json` of the current directory
-  (project-scoped files are not rewritten in part 1); a registration with a
+  (project-scoped files, including a project's `.claude/settings*.json`,
+  are not read or rewritten in part 1); a registration with a
   fixed `PSEUDOLIFE_AGENT_STATE` file, which is not keyed by URL and which
   the adapter refuses for a different bank; for Codex, a missing `codex`
   executable (the config writer needs its app-server) or credentials that
@@ -138,8 +139,10 @@ Rules the plan applies:
 - **The command is not changed.** A registration still on an old command is
   a job for `ops/shim_runtime.py migrate`; `connect` names it.
 
-`--dry-run` stops after the plan. It sends no credential and says so. It
-exits 4 if the health probe failed, 3 if nothing was found, and 0 otherwise.
+A failed health probe, or `auth: false` on a remote URL, exits 4 before
+anything is shown or written, with or without `--dry-run`. `--dry-run`
+stops after the plan. It sends no credential and says so, and exits 3 if
+nothing was found and 0 otherwise.
 
 ### Phase 2: confirm, then verify
 
@@ -213,8 +216,9 @@ Today the Codex credential writer (`ops/setup-codex-hooks.py`
 `configure_credential_file` and the app-server config writer) and the token
 file helpers (`ops/client_credentials.py`) exist only in a checkout. Part 1
 moves the pieces `connect` needs into the package, and the `ops/` scripts
-load them from the checkout, as `ops/client_credentials.py` already loads
-package modules by path, so the installer can keep running them with an
+import them from the checkout, the way `ops/client_credentials.py` already
+imports `pseudolife_memory.credentials` (it puts the repository root on
+`sys.path` first), so the installer can keep running them with an
 interpreter that has no package installed:
 
 - `pseudolife_memory/connect_cli.py`: argument parsing, the phases, the
@@ -271,9 +275,13 @@ port and `--no-token` flags stay exactly as they are and run on the answer.
 
 On a machine with existing registrations, the client-only path shows
 `connect`'s plan in the installer's own summary and then runs it with
-`--yes`, so the installer asks nothing twice. With no existing
-registration it does not run `connect` at all, so `connect`'s exit 3 never
-fails an install.
+`--yes`, so the installer asks nothing twice. It runs `connect` before any
+registrar or the Codex credential setup: once the existing registrations
+name the new daemon, the Codex setup no longer refuses its URL
+(`setup-codex-hooks.py` 666-670), and the registrars only create what is
+still missing. If `connect` exits non-zero the installer stops there. With
+no existing registration it does not run `connect` at all, so `connect`'s
+exit 3 never fails an install.
 
 ## Updating users
 
