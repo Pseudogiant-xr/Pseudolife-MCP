@@ -972,7 +972,8 @@ scopes and snippets at the judge's snippet cap, `low_differential`, the
 `judge`/`judge2` opinions, and a `group` computed over the whole queue, so
 rows sharing an entity stay one decision across pages. The response carries
 `total` and `next_offset` (`null` on the last page). Offsets shift as rows
-are settled, so read the queue first and settle it afterwards.
+are settled or new proposals are filed, so read the queue first and settle
+it afterwards.
 
 New automatic rejections and pair dismissals also retain the evidence and policy
 behind the decision. A bounded sweep can reopen them when those inputs change;

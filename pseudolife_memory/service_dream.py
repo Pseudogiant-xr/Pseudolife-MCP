@@ -3395,7 +3395,8 @@ class DreamOps:
         Rows are in queue order (``pending_entity_proposals``). ``group`` is
         computed over the WHOLE queue — the pack alone would compute it per
         page and split an accept-at-most-one decision across pages. Offsets
-        shift as rows are settled; read the queue before settling it."""
+        shift as rows are settled or new proposals are filed; read the queue
+        before settling it."""
         offset = max(0, int(offset))
         limit = min(max(1, int(limit)), self._EVIDENCE_PAGE_MAX)
         with self._lock:
