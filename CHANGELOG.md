@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
+- A Codex native child thread (`collaboration.spawn_agent`) or fork already
+  had its own board address: the shim keys identity by the MCP
+  `_meta.threadId` and writes the child's `<key>.agent` record and digest
+  under the child's thread id (`pseudolife_memory/codex_coordination.py`).
+  But the plugin's hooks read the root `session_id`, which Codex carries
+  unchanged into a child, and no hook ran at a child's stop, so the child's
+  own park record never reached the park gate. The 2026-09-29 probe (Codex
+  CLI 0.158.0, desktop 0.158.0-alpha.2.1) measured `SubagentStop` stdin
+  carrying `agent_id` equal to the child's MCP `threadId`, and a block
+  continuing the child once (`stop_hook_active` on its next stop).
+  `hooks.json` gains its own `SubagentStop` group: `lifecycle.ps1 -Event
+  SubagentStop` on Windows, `stop-wake.sh subagent-stop` elsewhere (behind
+  the same `bash -n` guard as `Stop`), synchronous, 10 s. In Codex context
+  it runs the root's park gate keyed by the validated `agent_id` (the
+  canonical lower-case UUID the shim accepts, exactly one top-level field;
+  no fallback to `session_id`): one `GET /api/hook/park-gate` for the
+  child's address, a block answered as `{"decision":"block","reason":...}`
+  on stdout, the `gate` ledger line under the child's key. A child gets no
+  prompt hook, so no turn stamp: the daemon judges its standing record. The
+  served text asks the child to park and never suggests sending. In Claude
+  Code, which fires `SubagentStop` too, the entry does nothing (before
+  this, the bash script run there would have gated the parent session).
+  `ops/setup-codex-hooks.py` lists `SubagentStop` in `PLUGIN_EVENTS`,
+  approves it with the other plugin hooks, treats it as optional (a Codex
+  that does not list it still reaches ready) and keeps a user's choice to
+  disable it. Manual installs stay without it, as they are without `Stop`.
+  Not done here: SubagentStart context, any parent relay or wake of a
+  finished child, and any change to the root session's hooks.
+- Upgrading: the plugin's hooks changed, so run `ops/update.ps1 -All`
+  (or `ops/update.sh --all`) and restart clients. The new `SubagentStop`
+  handler is a new position Codex has not approved: an existing Codex
+  plugin install lists it in Codex's startup hook review until it is
+  approved there (`/hooks`) or setup reruns
+  (`python ops/setup-codex-hooks.py --source plugin --trust ask`).
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the

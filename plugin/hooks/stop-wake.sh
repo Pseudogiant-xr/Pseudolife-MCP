@@ -57,6 +57,18 @@
 # script exits without arming the wait: the same behaviour lifecycle.ps1
 # gives Codex on Windows.
 #
+# With the argument subagent-stop (the plugin's SubagentStop entry) the
+# script runs that park gate for a Codex child thread, and only in Codex
+# context: a native child (collaboration.spawn_agent) or fork has its own
+# board address, which the shim records under the child's MCP threadId,
+# and Codex names the child in the payload's agent_id (equal to that
+# threadId in the 2026-09-29 probe on Codex 0.158.0) while session_id
+# stays the root thread's. The lookup is keyed by agent_id, which must be
+# the canonical lower-case UUID the shim accepts; there is no fallback to
+# session_id. A child gets no prompt hook, so no turn stamp: the daemon
+# judges its standing record. Claude Code fires SubagentStop too, and there
+# the entry does nothing.
+#
 # After a wake fires, the hook posts one woke marker (POST
 # /api/hook/woke?agent=<id>, in the background, 2 s): the daemon logs that
 # this session's turn is starting, so wake precision can be measured from
@@ -103,6 +115,9 @@ if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
           [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
     CODEX_HOOK_CONTEXT=1
 fi
+MODE="${1:-}"
+case "$MODE" in ''|subagent-stop) ;; *) OFF=1 ;; esac
+[ "$MODE" = subagent-stop ] && [ -z "$CODEX_HOOK_CONTEXT" ] && OFF=1
 if [ -n "$OFF" ] || { [ -z "$CODEX_HOOK_CONTEXT" ] && [ "${CLAUDECODE:-}" != "1" ]; }; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done
@@ -130,9 +145,24 @@ if [ "${CLAUDECODE:-}" = "1" ] && [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ]; th
     CODEX_HOOK_CONTEXT=""
 fi
 [ -n "$CODEX_HOOK_CONTEXT" ] || [ "${CLAUDE_CODE_SESSION_ID:-}" = "$SID" ] || exit 0
+# The thread whose records the hook reads: the payload's session, or for a
+# Codex child's stop the child named by the one top-level agent_id.
+SUBJECT=$SID
+if [ "$MODE" = subagent-stop ]; then
+    [ -n "$CODEX_HOOK_CONTEXT" ] || exit 0
+    SUBJECT=$(printf '%s' "$INPUT" | grep -o '[{,][[:space:]]*"agent_id"[[:space:]]*:[[:space:]]*"[^"\\]*"' |
+              sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
+    case "$SUBJECT" in *$'\n'*) exit 0 ;; esac
+    # The canonical thread id: 36 characters, lower-case hex in 8-4-4-4-12.
+    case "$SUBJECT" in ''|*[!0123456789abcdef-]*) exit 0 ;; esac
+    [ "${#SUBJECT}" -eq 36 ] || exit 0
+    [ "${SUBJECT:8:1}${SUBJECT:13:1}${SUBJECT:18:1}${SUBJECT:23:1}" = "----" ] || exit 0
+    HEX=${SUBJECT//-/}
+    [ "${#HEX}" -eq 32 ] || exit 0
+fi
 
 DIGEST_DIR="${PSEUDOLIFE_DIGEST_DIR:-${HOME:-${USERPROFILE:-~}}/.pseudolife-mcp/digests}"
-KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+KEY=$(printf '%s' "$SUBJECT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
 # After /clear, hooks get a new session id while the shim keeps writing the
 # digest under its spawn-time one; the /clear digest-keying change has
 # SessionStart record that key per Claude Code process (line 1) with the
