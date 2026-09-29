@@ -646,6 +646,8 @@ class ContinuumMemorySystem:
             for e in band.entries:
                 if e.text in seen:
                     continue
+                if e.source == "digest" and e.superseded_at is not None:
+                    continue
                 if hide_superseded and e.superseded_at is not None:
                     continue
                 if entry.episode_id:
@@ -895,6 +897,8 @@ class ContinuumMemorySystem:
             hide_superseded = bool(getattr(self.config, "hide_superseded", False))
 
         def _keep(entry: MemoryEntry) -> bool:
+            if entry.source == "digest" and entry.superseded_at is not None:
+                return False
             if not hide_superseded:
                 return True
             return entry.superseded_at is None
@@ -1906,6 +1910,8 @@ class ContinuumMemorySystem:
                 candidate_map.values(), key=lambda t: t[0]):
             if entry.text in seen_texts:
                 continue
+            if entry.source == "digest" and entry.superseded_at is not None:
+                continue
             # Filter on the band that CONTAINS the entry (recorded at
             # index time), not entry.bank — the stamp can go stale when a
             # preset change makes hydration re-route rows into band[0].
@@ -2618,6 +2624,7 @@ class ContinuumMemorySystem:
         episode: str | None = None,
         tag: str | None = None,
         max_removed: int | None = None,
+        before_delete=None,
     ) -> list[str]:
         """Remove entries from every band matching every provided filter.
 
@@ -2674,6 +2681,10 @@ class ContinuumMemorySystem:
                 [entry.text for _, hits in doomed for entry in hits],
             )
 
+        matches = [entry for _, hits in doomed for entry in hits]
+        if matches and before_delete is not None:
+            before_delete(matches)
+
         removed: list[str] = []
         removed_ids: list[int] = []
         for band, hits in doomed:
@@ -2686,7 +2697,7 @@ class ContinuumMemorySystem:
             band._dirty = True
         if removed:
             self._slot_index_dirty = True
-        if self.storage is not None and removed_ids:
+        if self.storage is not None and removed_ids and before_delete is None:
             self.storage.delete_entry_ids(removed_ids)
         return removed
 

@@ -279,7 +279,8 @@ class DreamOps:
         return value if math.isfinite(value) else 0.0
 
     def _link_dream_relations(self, relations: list[dict], *,
-                              batch_sources: set[str] | None = None) -> int:
+                              batch_sources: set[str] | None = None,
+                              batch_entries: list[dict] | None = None) -> int:
         """Upsert dream-extracted (src,relation,dst) edges. Closed-vocab
         (resolve_relation; unknown -> related-to), entities resolved alias-aware
         and pinned to the Postgres hub, self-loops dropped, origin='agent'.
@@ -366,14 +367,20 @@ class DreamOps:
                 continue
             # revive=False: a dream re-assertion must not resurrect an edge
             # a human (or deep-dream) superseded — removals stay sticky.
+            evidence_ids = [int(e["db_id"]) for e in (batch_entries or [])
+                            if e.get("db_id") is not None
+                            and raw_src.casefold() in e["text"].casefold()
+                            and raw_dst.casefold() in e["text"].casefold()]
             self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
                                     confidence=conf, origin="agent",
-                                    revive=False)
+                                    revive=False,
+                                    source_entry_ids=evidence_ids)
             n += 1
         return n
 
     def _dream_extract_relations(self, extractor, texts: list[str],
-                                 batch_sources: set[str] | None = None) -> int:
+                                 batch_sources: set[str] | None = None,
+                                 batch_entries: list[dict] | None = None) -> int:
         """Gated, best-effort graph-from-text for one dream batch: run the LLM
         relations call UNLOCKED (slow network), then write edges LOCKED. A
         failure logs and returns 0 — it must never break fact consolidation or
@@ -393,7 +400,8 @@ class DreamOps:
             rels = rel_fn(texts, registry)
             with self._lock:
                 return self._link_dream_relations(
-                    rels, batch_sources=batch_sources)
+                    rels, batch_sources=batch_sources,
+                    batch_entries=batch_entries)
         except Exception as exc:  # noqa: BLE001 — best-effort; never break the dream
             logger.warning("dream relation extraction failed (%s); claims kept",
                            exc)
@@ -527,8 +535,10 @@ class DreamOps:
                 # infer_outcomes_stage).
                 existing = any(
                     e.source == "digest" and e.episode_id == rid
+                    and e.superseded_at is None
                     for band in self._cms.bands for e in band.entries)
-                if cur["ts"] > cand["ended_at"] or existing:
+                queued = rid in cur.get("regenerate", [])
+                if (cur["ts"] > cand["ended_at"] and not queued) or existing:
                     continue
                 if digest is None:             # malformed: bounded retry
                     attempts = int(cur["retry"].get(rid, 0)) + 1
@@ -581,7 +591,9 @@ class DreamOps:
                     break                      # keep episode order
                 written += 1
                 cur["retry"].pop(rid, None)
-                cur["ts"] = cand["ended_at"]
+                cur["regenerate"] = [e for e in cur.get("regenerate", [])
+                                      if e != rid]
+                cur["ts"] = max(cur["ts"], cand["ended_at"])
                 self._save_digest_cursor(cur)
         return {"scanned": scanned, "written": written}
 
@@ -2079,7 +2091,8 @@ class DreamOps:
         _finish_run("committed", newest)
         relations_n = self._dream_extract_relations(
             extractor, texts,
-            batch_sources={e["source"] for e in entries if e.get("source")})
+            batch_sources={e["source"] for e in entries if e.get("source")},
+            batch_entries=entries)
         # After relations linking, so paraphrase entities the relations pass
         # just created resolve to their graph nodes instead of re-creating.
         alias_candidates = self._propose_dream_alias_candidates(
@@ -2754,7 +2767,7 @@ class DreamOps:
             if e.id in subtree and e.id != root.id and e.title:
                 lines.append(f"Sub-task: {e.title}")
         entries = [en for band in self._cms.bands for en in band.entries
-                   if en.episode_id in subtree]
+                   if en.episode_id in subtree and en.source != "digest"]
         entries.sort(key=lambda en: en.timestamp)
         for en in entries:
             mark = " [superseded]" if en.superseded_at else ""
@@ -2799,8 +2812,11 @@ class DreamOps:
         raw = self._storage.get_meta(self._DIGEST_CURSOR_KEY) \
             if self._storage else None
         if isinstance(raw, dict):
-            return {"ts": float(raw.get("ts", 0.0)),
-                    "retry": dict(raw.get("retry", {}))}
+            cur = {"ts": float(raw.get("ts", 0.0)),
+                   "retry": dict(raw.get("retry", {}))}
+            if "regenerate" in raw:
+                cur["regenerate"] = list(raw["regenerate"])
+            return cur
         return {"ts": 0.0, "retry": {}}
 
     def _save_digest_cursor(self, cur: dict) -> None:
@@ -2822,11 +2838,14 @@ class DreamOps:
         counts = self._episode_entry_counts()
         digested = {e.episode_id for band in self._cms.bands
                     for e in band.entries
-                    if e.source == "digest" and e.episode_id}
+                    if e.source == "digest" and e.episode_id
+                    and e.superseded_at is None}
+        regenerate = set(cur.get("regenerate", []))
         roots = sorted(
             (e for e in em.episodes.values()
              if e.parent_id is None and e.session_key
-             and e.ended_at is not None and e.ended_at > cur["ts"]),
+             and e.ended_at is not None
+             and (e.ended_at > cur["ts"] or e.id in regenerate)),
             key=lambda e: e.ended_at)
         out: list[dict] = []
         for root in roots:
