@@ -42,7 +42,11 @@ another model than it was asked for. **Day-one behaviour on an existing bank:** 
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
 without any config edit — measured 8/8 on the 2026-09-02 rows — but since
 2026-09-30 only when the two votes came from different models: with
-neither `judge_second_model` nor `judge_second_url` set, same-model pairs are recorded and counted
+neither `judge_second_model` nor `judge_second_url` set (or a second model
+equal to the first's), the second-opinion pass is skipped outright, no
+model call and no vote, and the waiting rows are counted
+(`second_opinion_skipped_same_model`); a pair whose sameness only the
+served names reveal is recorded, counted
 (`auto_reject_refused_same_model`) and applied by nobody. A
 wrong reject — auto or human; since 2026-09-03 every merge reject writes
 the canonical pair so the verdict outlives its proposal row — also writes

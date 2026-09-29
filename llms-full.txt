@@ -3587,7 +3587,8 @@ review surfaces show, plus a caution line on pairs stamped
 `low_differential` (whose snippets cannot tell the sides apart) — to the
 configured model (`memory.deep_dream.judge_mode`,
 default `shadow`; the dream extractor, or a dedicated `judge_url` serving
-`judge_model` — both Console knobs), and
+`judge_model` — both Console knobs, with an env-only bearer key
+`PSEUDOLIFE_JUDGE_API_KEY` sent to that endpoint alone), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
@@ -3614,7 +3615,18 @@ served-vs-requested mismatch (`served_model_mismatch`, with the names in
 `served_model_mismatches`) and logs a warning, and counts same-model reject
 pairs it refused (`auto_reject_refused_same_model`). A second endpoint
 that fails (down, or refusing its key) is reported as
-`second_opinion_error` and never stops that tick's first opinions. Since 2026-09-02 the other queues have judges too, each riding the
+`second_opinion_error` and never stops that tick's first opinions. When
+the configuration itself makes the second opinion the first model again
+(no `judge_second_url`, and `judge_second_model` empty or equal to the
+first endpoint's model name) the pass is skipped in every mode, shadow
+included: that vote could authorize nothing, so no model call is spent on
+it, the rows keep waiting, and the result counts them
+(`second_opinion_skipped_same_model`). Reviewers then see no same-model
+`judge2` block or `split` tag on those rows; a same-model re-ask flipped
+2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
+result whenever a tick judged, reconsidered, took second opinions,
+refused a same-model reject, saw a served-model mismatch or lost its
+second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
@@ -3697,7 +3709,40 @@ for review unless an existing, separately guarded maintenance path applies.
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is
-worth scheduling. A
+worth scheduling.
+
+Beside it rides a `review_queue` block, the health of the queues that
+Step C drains: `pending` counts for the merge, junk and link queues, the
+age of the oldest pending merge proposal (`oldest_merge_age_days`) and of
+the oldest one no judge has recorded a verdict on
+(`oldest_unjudged_merge_age_days`), the
+configured mode of every judge (`judges_enabled`, `judge_mode`,
+`link_judge_mode`, `junk_judge_mode`, `curation_judge_mode`,
+`candidate_judge_mode`) and `attention: {needed, reasons}`. It costs two
+aggregate queries and never fails the status call (a failure is an
+`error` field). The store-curation listing is not counted: it is
+recomputed on demand and capped at `curation_top_k` per store, so it
+cannot pile up. Attention covers the merge queue, the one that piled
+up; the junk and link counts are reported only. It is needed when the
+pending merge queue reaches
+`memory.deep_dream.review_queue_alert_pending` (default 500) in any
+mode, or when at least `review_queue_alert_min_pending` (default 100)
+merges wait and one of them has waited longer than
+`review_queue_alert_age_days` (default 14): the oldest pending merge
+while no judge applies merge verdicts (`judge_mode` `off` or `shadow`,
+or `judges_enabled: false`), or the oldest merge no judge has recorded
+a verdict on in `auto-reject` / `auto`, which catches a judge that is
+configured but not running. 0 disables either rule. While it is needed,
+the session briefing (`GET /api/briefing`, `pseudolife-mcp briefing`)
+and the SessionStart hook output carry one line naming the count, the
+oldest age, the merge judge's mode and the remedy (`/dream`, and the
+judge modes or the judge endpoint); the plugin's hook, which reports
+the session's start source, leaves it out on a resume or compaction.
+The defaults come from the live bank: a triage settled the merge queue on
+2026-09-02, and by 2026-09-29 it held 1,016 pending proposals (the merge
+judge in `shadow` from 09-11) without anything saying so.
+
+A
 dry-run (default) returns a preview of what it would change: re-scored
 edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across

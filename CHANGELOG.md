@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-30 — status and the session briefing say when the merge-proposal queue is piling up)
+- After a triage settled it on 2026-09-02, the pending merge-proposal
+  queue reached 1,016 by 2026-09-29 (the merge judge in `shadow` as a
+  containment from 09-11) with nothing reporting it: `memory_dream(action="status")`
+  carried only the deep-dream need signal and the briefing said nothing.
+  `dream_status` now carries a `review_queue` block beside `deep_dream`:
+  pending merge, junk and link counts, the ages of the oldest pending and
+  oldest unjudged merge, every judge's configured mode, and
+  `attention: {needed, reasons}` for the merge queue. Two aggregate
+  queries; a failure is an `error` field, never a failed status.
+  Attention is needed at `memory.deep_dream.review_queue_alert_pending`
+  (default 500) pending merges in any mode, or when at least
+  `review_queue_alert_min_pending` (default 100) wait and one has waited
+  past `review_queue_alert_age_days` (default 14): the oldest pending
+  merge while no judge applies merge verdicts, or the oldest unjudged one
+  while `auto-reject` / `auto` should be judging. While it is needed, the
+  briefing (`GET /api/briefing`, `pseudolife-mcp briefing`) and the
+  SessionStart hook output carry one line with the count, the age, the
+  merge judge's mode and the remedy; the plugin's hook leaves it out on a
+  resume or compaction.
+  The `/dream` command's status step reads the block and tells the user
+  why attention is needed before triaging.
+  [Deep dream](docs/guide/dreaming.md#deep-dream--full-corpus-graph-consolidation)
+
 ### Added (2026-09-30 — a Claude Code subagent can no longer write to the board as its parent session)
 - A subagent runs inside its parent's shim, so its board calls carried the
   parent's identity: its status update overwrote the parent's, its ack
@@ -179,7 +203,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused pair keeps its second vote, gains `auto-reject needs a distinct
   second model` on its note and counts as `auto_reject_refused_same_model`
   in the judge result. With neither `judge_second_model` nor
-  `judge_second_url` set, two-vote rejects therefore stop applying; the
+  `judge_second_url` set, two-vote rejects therefore stop applying (and the
+  second opinion is not asked at all, below); the
   single-vote gate (`judge_reject_min_confidence`) is unchanged, so a single
   confident reject still applies on one model's say-so.
 - New `memory.deep_dream.judge_second_url`: an OpenAI-compatible endpoint
@@ -202,6 +227,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `judge_url`, `judge_model` and `judge_second_url` are live Console knobs
   (Deep dream group); pointing the judges at another endpoint no longer
   needs a `config.yaml` edit and a restart.
+- `judge_url` takes its own bearer key, env-only like the second
+  endpoint's: `PSEUDOLIFE_JUDGE_API_KEY` (forwarded by both compose files,
+  documented in `ops/.env.example`), sent to `judge_url` alone, including a
+  second model swapped onto it, and never to the dream extractor or the
+  second endpoint.
+- The merge judge skips its second-opinion pass, with no model call, when
+  the configuration makes that opinion the first model again: no
+  `judge_second_url`, and `judge_second_model` empty or equal to the first
+  endpoint's model name. Such a vote can authorize nothing, and in shadow
+  it is one model's opinion twice. The rows keep waiting, their batch share
+  goes to first opinions, and the result counts them
+  (`second_opinion_skipped_same_model`). No config field changes, so no
+  review fingerprint moves.
+- The sweep logs the merge judge's result whenever a tick took second
+  opinions, refused a same-model reject, saw a served-model mismatch or
+  lost its second endpoint, not only when it judged or reopened something.
 
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
