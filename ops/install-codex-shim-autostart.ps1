@@ -67,18 +67,28 @@ if (-not $CodexCli) {
 # dependencies (the shim imports the dream system prompt from it): the
 # Linux twin registered this unit with a bare python3 that exited 1 in a
 # restart loop (Debian 13, 2026-09-29). ops\shim_python.py picks one (the
-# checkout's .venv, pipx's pseudolife-mcp venv, a venv it made earlier, a
-# PATH python that imports the package, else a venv it creates from the
-# checkout), verifies it the way the task will use it, and says which and
-# why; -PythonExe names one to verify instead. After the CLI check: a
-# missing CLI fails faster than a venv build.
+# checkout's .venv, a venv it made earlier, a PATH python that imports the
+# package, else a venv it creates from the checkout; never pipx's
+# pseudolife-mcp venv here, which install.ps1 treats as held by a session
+# while anything runs from it), verifies it the way the task will use it,
+# and says which and why; -PythonExe names one to verify instead. After
+# the CLI check: a missing CLI fails faster than a venv build.
 $helperPython = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $helperPython -and -not (Get-Command py -ErrorAction SilentlyContinue)) {
     throw "no python on PATH to run ops\shim_python.py, which picks the shim's interpreter; install Python 3.10+ and re-run."
 }
 $pickerArgs = @((Join-Path $PSScriptRoot "shim_python.py"), "--repo", $repo)
 if ($PythonExe) { $pickerArgs += @("--python", $PythonExe) }
-$picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+# The helper prints the path as UTF-8; this shell must decode it the same
+# way, or a profile path with a non-ASCII character names an interpreter
+# that does not exist (review, 2026-09-29).
+$savedOutputEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+try {
+    $picked = if ($helperPython) { & $helperPython @pickerArgs } else { & py -3 @pickerArgs }
+} finally {
+    [Console]::OutputEncoding = $savedOutputEncoding
+}
 if ($LASTEXITCODE -ne 0 -or -not $picked) {
     throw "shim autostart not registered: no interpreter imports pseudolife_memory for the task (see the message above; -PythonExe <interpreter> names one)."
 }

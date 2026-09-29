@@ -24,11 +24,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ExecStart` exited 1 in a restart loop until it was re-registered with
   `--python` (same install). The new `ops/shim_python.py` picks an
   interpreter that imports the package — the checkout's `.venv`, pipx's
-  `pseudolife-mcp` venv, a venv it made earlier, a PATH python that
-  imports it, else a venv it creates from the checkout (torch from the CPU
-  wheel index) — verifies each candidate the way the unit runs, prints the
-  choice, and refuses with the fix when none qualifies; `--python` /
-  `-PythonExe` names one to verify instead. Both one-shot installers now
+  `pseudolife-mcp` venv (not on Windows, where `ops/install.ps1` treats
+  anything running from that venv as a session holding the MCP shim and
+  would refuse every later shim upgrade), a venv it made earlier, a PATH
+  python that imports it, else a venv it creates from the checkout (torch
+  from the CPU wheel index) — verifies each candidate the way the unit
+  runs, prints the choice, and refuses with the fix when none qualifies;
+  `--python` / `-PythonExe` names one to verify instead, and a bare name
+  (`--python python3`) is looked up on PATH as the unit would have. The
+  `.ps1` twins read the choice as UTF-8, so a profile path with a
+  non-ASCII character reaches the task intact, and the `.sh` twins quote
+  the prompt-file and CLI paths in `ExecStart`. Both one-shot installers now
   register the autostart after their own shim install, so that install's
   venv is what the unit uses, and a mode switch says which family's
   autostart it removed and why.

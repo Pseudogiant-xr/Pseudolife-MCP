@@ -16,9 +16,11 @@ Candidates, in order, each verified by importing what the shims import with
 the checkout on the path (the unit's own shape):
 
 1. ``--python``, alone: the operator named it, so it is verified and
-   refused, never replaced;
+   refused, never replaced (a bare name is looked up on PATH);
 2. the checkout's ``.venv``;
-3. pipx's ``pseudolife-mcp`` venv (the installer's shim install);
+3. pipx's ``pseudolife-mcp`` venv (the installer's shim install), except on
+   Windows, where ``ops/install.ps1`` treats anything running from that
+   venv as a session holding the MCP shim;
 4. a venv this helper made on an earlier run (``--venv-dir``, default
    ``~/.pseudolife-mcp/shim-venv``);
 5. ``python3`` / ``python`` on PATH (``pip install --user <checkout>``, the
@@ -96,7 +98,17 @@ def pipx_home() -> Path | None:
     return Path(value) if value else None
 
 
-def candidates(repo: Path, venv_dir: Path) -> list[tuple[Path, str]]:
+def pipx_venv_is_held_by_the_installer() -> bool:
+    """Whether ``ops/install.ps1`` treats a process running from pipx's
+    ``pseudolife-mcp`` venv as a session holding the MCP shim: on Windows
+    its in-use check covers the whole venv, and refuses the shim upgrade
+    with "close every session" while anything runs from it. A logon task
+    pinned there would hold it for ever (review, 2026-09-29), so the picker
+    does not offer that venv on Windows."""
+    return os.name == "nt"
+
+
+def candidates(repo: Path, venv_dir: Path, log: Log | None = None) -> list[tuple[Path, str]]:
     """Existing interpreters worth verifying, in order, with what each is."""
     found: list[tuple[Path, str]] = []
     seen: set[Path] = set()
@@ -119,7 +131,14 @@ def candidates(repo: Path, venv_dir: Path) -> list[tuple[Path, str]]:
     add(venv_python(repo / ".venv"), "the checkout's .venv")
     home = pipx_home()
     if home is not None:
-        add(venv_python(home / "venvs" / "pseudolife-mcp"), "pipx's pseudolife-mcp venv")
+        pipx_venv = venv_python(home / "venvs" / "pseudolife-mcp")
+        if pipx_venv_is_held_by_the_installer():
+            if log is not None and pipx_venv.is_file():
+                log(f"skipped {pipx_venv}: the installer treats anything running from "
+                    f"pipx's venv as a session that holds the MCP shim, and a logon "
+                    f"task would keep it held for ever (pipx's pseudolife-mcp venv)")
+        else:
+            add(pipx_venv, "pipx's pseudolife-mcp venv")
     add(venv_python(venv_dir), f"the shim venv made earlier at {venv_dir}")
     for name in ("python3", "python"):
         exe = shutil.which(name)
@@ -193,7 +212,7 @@ def choose(repo: Path, explicit: Path | None, venv_dir: Path, allow_create: bool
         log(f"{explicit}, named with --python, cannot import {PROBE_IMPORT}: {why}")
         log(_fix(repo, venv_dir))
         return None
-    for path, label in candidates(repo, venv_dir):
+    for path, label in candidates(repo, venv_dir, log):
         ok, why = probe(path, repo)
         if ok:
             log(f"shim interpreter: {path} ({label}; imports {PROBE_IMPORT})")
@@ -234,8 +253,14 @@ def main(argv: list[str] | None = None) -> int:
     # Absolute against the caller's directory, never resolved (a venv's
     # interpreter is a symlink): the probe runs from the checkout and the
     # unit from its own directory, so a relative path would name a
-    # different file in each.
-    explicit = Path(os.path.abspath(args.python)) if args.python is not None else None
+    # different file in each. A bare name (``--python python3``) is looked
+    # up on PATH, as systemd and Task Scheduler would have resolved it.
+    explicit = None
+    if args.python is not None:
+        named = str(args.python)
+        if not any(sep in named for sep in (os.sep, os.altsep or os.sep)):
+            named = shutil.which(named) or named
+        explicit = Path(os.path.abspath(named))
 
     def log(message: str) -> None:
         print(message, file=sys.stderr)
@@ -243,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
     chosen = choose(repo, explicit, venv_dir, not args.no_create, log)
     if chosen is None:
         return 1
+    # The .ps1 twins decode the captured path as UTF-8; a piped stdout on
+    # Windows would otherwise write the ANSI code page and garble a profile
+    # path with a non-ASCII character (or fail on one outside that page).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(chosen)
     return 0
 

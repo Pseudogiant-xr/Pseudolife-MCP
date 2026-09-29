@@ -177,6 +177,9 @@ def test_the_checkouts_venv_comes_first(monkeypatch: pytest.MonkeyPatch, isolate
 def test_pipxs_venv_when_the_checkout_has_none(monkeypatch: pytest.MonkeyPatch,
                                               isolated: dict[str, Path],
                                               capsys: pytest.CaptureFixture[str]) -> None:
+    # The POSIX picker: on Windows pipx's venv is not offered (see the
+    # installer-held test below).
+    monkeypatch.setattr(shim_python, "pipx_venv_is_held_by_the_installer", lambda: False)
     monkeypatch.setenv("PIPX_HOME", str(isolated["repo"].parent / "pipx"))
     pipx_venv = _touch_python(Path(os.environ["PIPX_HOME"]) / "venvs" / "pseudolife-mcp")
     path_python = _touch_path_python(isolated["bin"])
@@ -394,3 +397,59 @@ def test_a_relative_explicit_interpreter_is_made_absolute(
     assert code == 0, err
     assert Path(out.strip()).is_absolute()
     assert Path(out.strip()) == Path(sys.executable)
+
+
+# -- review findings, 2026-09-29 ------------------------------------------------
+
+def test_pipxs_venv_is_not_a_candidate_where_the_installer_treats_it_as_held(
+        monkeypatch: pytest.MonkeyPatch, isolated: dict[str, Path],
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """On Windows ``ops/install.ps1`` treats any process running from pipx's
+    ``pseudolife-mcp`` venv as a session holding the MCP shim, and refuses
+    the shim upgrade with "close every session" while one runs. A logon
+    task pinned to that venv would hold it for ever, so the picker skips it
+    there and takes its own venv instead."""
+    monkeypatch.setattr(shim_python, "pipx_venv_is_held_by_the_installer", lambda: True)
+    monkeypatch.setenv("PIPX_HOME", str(isolated["repo"].parent / "pipx"))
+    pipx_venv = _touch_python(Path(os.environ["PIPX_HOME"]) / "venvs" / "pseudolife-mcp")
+    shim_venv = _touch_python(isolated["venv_dir"])
+    asked = _stub_probe(monkeypatch, {pipx_venv, shim_venv})
+    code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"])
+    assert code == 0, err
+    assert Path(out.strip()) == shim_venv
+    assert _abs(pipx_venv) not in asked
+    assert "pipx" in err and "held" in err
+
+
+def test_a_bare_name_for_python_is_looked_up_on_path(
+        monkeypatch: pytest.MonkeyPatch, isolated: dict[str, Path],
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """``--python python3`` used to become ``$PWD/python3`` and be refused
+    as not found; systemd and Task Scheduler both resolve a bare name on
+    PATH, and so does the picker now."""
+    path_python = _touch_path_python(isolated["bin"])
+    asked = _stub_probe(monkeypatch, {path_python})
+    monkeypatch.chdir(isolated["repo"])
+    code, out, err = _run(capsys, "--repo", isolated["repo"], "--venv-dir", isolated["venv_dir"],
+                          "--python", "python3")
+    assert code == 0, err
+    assert Path(out.strip()) == _abs(path_python)
+    assert asked == [_abs(path_python)]
+
+
+def test_the_chosen_path_is_printed_as_utf8_whatever_the_console_code_page(
+        monkeypatch: pytest.MonkeyPatch, isolated: dict[str, Path]) -> None:
+    """The ``.ps1`` twins capture stdout and decode it as UTF-8. Python
+    writes a piped stdout in the ANSI code page on Windows, so a profile
+    path with a non-ASCII character came back garbled and the task named
+    an interpreter that does not exist."""
+    import io
+    explicit = _touch_python(isolated["repo"].parent / "Jörg" / "venv")
+    _stub_probe(monkeypatch, {explicit})
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252", newline="\n"))
+    code = shim_python.main(["--repo", str(isolated["repo"]), "--venv-dir",
+                             str(isolated["venv_dir"]), "--python", str(explicit)])
+    sys.stdout.flush()
+    assert code == 0
+    assert raw.getvalue().decode("utf-8").strip() == str(_abs(explicit))

@@ -99,7 +99,7 @@ Description=Codex extractor CLI shim (dream pass primary; E4B sidecar is fallbac
 After=network-online.target
 
 [Service]
-ExecStart="$PYTHON_EXE" "$repo/evals/codex_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --health-ttl $HEALTH_TTL --cli $CODEX_CLI
+ExecStart="$PYTHON_EXE" "$repo/evals/codex_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --health-ttl $HEALTH_TTL --cli "$CODEX_CLI"
 WorkingDirectory=$repo
 Restart=on-failure
 RestartSec=60

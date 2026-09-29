@@ -439,7 +439,10 @@ steps:
      loop on a Docker-tier Debian 13 host with no checkout `.venv`
      (2026-09-29). On every platform both autostart scripts ask
      `ops/shim_python.py` for one — the checkout's `.venv`, then pipx's
-     `pseudolife-mcp` venv (the installer's shim install), then a venv the
+     `pseudolife-mcp` venv (the installer's shim install; not on Windows,
+     where `ops/install.ps1` treats anything running from that venv as a
+     session holding the MCP shim and would refuse every later shim
+     upgrade), then a venv the
      helper made on an earlier run (`~/.pseudolife-mcp/shim-venv`), then a
      `python3` or `python` on PATH that imports the package, else a venv it creates
      there from the checkout (torch from PyTorch's CPU wheel index; the

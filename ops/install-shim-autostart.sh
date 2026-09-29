@@ -105,7 +105,7 @@ Description=Claude extractor CLI shim (dream pass primary; E4B sidecar is fallba
 After=network-online.target
 
 [Service]
-ExecStart="$PYTHON_EXE" "$repo/evals/claude_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --system-prompt-file $prompt_path --cli $claude_cli
+ExecStart="$PYTHON_EXE" "$repo/evals/claude_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --system-prompt-file "$prompt_path" --cli "$claude_cli"
 WorkingDirectory=$repo
 Restart=on-failure
 RestartSec=60
