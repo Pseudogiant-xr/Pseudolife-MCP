@@ -313,8 +313,9 @@ KNOBS: list[dict[str, Any]] = [
              "proposals: \"shadow\" records verdicts without applying them; "
              "\"auto-reject\" additionally applies reject verdicts at/above "
              "the confidence gate (judge_reject_min_confidence, 0.8) and, "
-             "with the second opinion on, two agreeing rejects at mean >= "
-             "judge_reject_min_confidence_2 (0.7); \"auto\" additionally "
+             "with the second opinion on, two agreeing rejects from different "
+             "models at mean >= judge_reject_min_confidence_2 (0.7); "
+             "\"auto\" additionally "
              "folds a pair when two independent accepts agree on "
              "non-low-differential evidence at mean >= "
              "judge_accept_min_confidence (0.6) and only when the two "
@@ -360,15 +361,58 @@ KNOBS: list[dict[str, Any]] = [
      "restart": False,
      "suggestions": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5",
                      "gpt-5.6-terra", "gpt-5.6-luna"],
-     "help": "Model for the merge judge's SECOND opinion, served by the same "
-             "endpoint as the first (judge_url, else the dream extractor; the "
-             "CLI shims honour claude-* / gpt-* names per request). Empty = "
-             "the same model in a fresh batch, which is enough to double-check "
-             "a reject but never authorizes a fold: \"auto\" accepts require "
-             "the two opinions to come from DIFFERENT models (2026-09-02 "
+     "help": "Model for the merge judge's SECOND opinion, served by the "
+             "second endpoint URL when set, else by the same endpoint as the "
+             "first (judge_url, else the dream extractor; the CLI shims "
+             "honour claude-* / gpt-* names per request). Empty = "
+             "the same model in a fresh batch (or the second endpoint's "
+             "launch default), which records a second vote but authorizes "
+             "nothing: both two-vote gates (reject since 2026-09-30, "
+             "\"auto\" accepts) require the two opinions to come from "
+             "DIFFERENT models (2026-09-02 "
              "panel: claude-fable-5 as the second voter went 6/6 accepts, 8/8 "
              "rejects on the 63-row ladder). Read on every sweep batch; each "
              "second opinion is one call to this model."},
+    # Every judge builds its endpoint from service.config per call
+    # (_judge_extractor / _judge_second_extractor), so these are live too.
+    {"path": "memory.deep_dream.judge_url", "group": "Deep dream",
+     "label": "Judge endpoint URL", "type": "string", "format": "url",
+     "default": None, "restart": False,
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1"],
+     "help": "OpenAI-compatible /v1 endpoint every review-queue judge "
+             "(merge, link, junk, store-curation, candidates) calls instead "
+             "of the dream extractor. Empty = the dream extractor. From "
+             "inside the container the host is host.docker.internal "
+             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Sends no "
+             "API key. Read on every judge call. " "Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
+    {"path": "memory.deep_dream.judge_model", "group": "Deep dream",
+     "label": "Judge model", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["claude-opus-5-5", "claude-opus-5", "gpt-5.6-terra"],
+     "help": "Model name sent to the judge endpoint URL (ignored while that "
+             "is empty). Empty = \"judge\", the endpoint's launch default. "
+             "The CLI shims serve only names of their own family (claude-* "
+             "on the Claude shim, gpt-* / codex-* on the Codex shim) and "
+             "answer any other name with their launch default."},
+    {"path": "memory.deep_dream.judge_second_url", "group": "Deep dream",
+     "label": "Merge judge second endpoint URL", "type": "string",
+     "format": "url", "default": None, "restart": False,
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1"],
+     "help": "OpenAI-compatible /v1 endpoint for the merge judge's SECOND "
+             "opinion, serving the second model above (empty = its launch "
+             "default), so the two opinions can come from different "
+             "providers. Empty = the first opinion's endpoint. Its bearer key "
+             "is env-only: PSEUDOLIFE_JUDGE_SECOND_API_KEY, sent to this "
+             "endpoint and nowhere else. The two-vote gates need the two "
+             "opinions served by different models; a mismatch between the "
+             "model asked for and the model served is counted in the judge "
+             "result and logged. " "Changing it changes the judging policy: recorded "
+             "verdicts in every review queue are re-judged and automatic "
+             "decisions reconsidered."},
     {"path": "memory.deep_dream.link_judge_mode", "group": "Deep dream",
      "label": "Link judge", "type": "enum",
      "options": ["off", "shadow", "auto"], "default": "shadow",

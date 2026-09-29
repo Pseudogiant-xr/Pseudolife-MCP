@@ -214,6 +214,10 @@ services:
       # (the sidecar needs none).
       PSEUDOLIFE_DREAM_FALLBACK_API_KEY: ${PSEUDOLIFE_DREAM_FALLBACK_API_KEY:-}
       PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
+      # The merge judge's second-opinion endpoint key (memory.deep_dream.
+      # judge_second_url, set in config.yaml or the Console). Sent to that
+      # endpoint only; empty = no key (a host-side CLI shim needs none).
+      PSEUDOLIFE_JUDGE_SECOND_API_KEY: ${PSEUDOLIFE_JUDGE_SECOND_API_KEY:-}
       # How often the daemon returns heap memory glibc keeps after encode
       # bursts (malloc_trim). Empty = the 60 s default; 0 disables. See
       # docs/guide/configuration.md.
