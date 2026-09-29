@@ -280,6 +280,25 @@ def test_a_codex_listing_one_of_the_two_subagent_stop_handlers_reaches_ready(
     assert len(writes[0]["edits"]) == len(hooks)
 
 
+def test_one_optional_handler_listed_twice_is_refused(tmp_path):
+    """SubagentStop may list two handlers, so the count alone would admit
+    the park gate twice (its Windows and its bash spelling) in place of the
+    gate and the liveness entry. Each listed handler must be a distinct
+    manifest handler (vet_plugin's ``matches[0] in seen[event]``)."""
+    hooks = plugin_hooks(tmp_path)
+    [gate] = [h for h in hooks if h["eventName"] == "subagentStop"
+              and h["command"].endswith("-Event SubagentStop")]
+    manifest = json.loads((tmp_path / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    bash = next(h["command"] for g in manifest["SubagentStop"] for h in g["hooks"]
+                if "stop-wake.sh" in h["command"])
+    twin = {**gate, "key": gate["key"] + "-bash", "command": bash}
+    hooks = [h for h in hooks if not (h["eventName"] == "subagentStop" and h is not gate)]
+    hooks.append(twin)
+    assert setup.complete_set(hooks, "plugin")  # the count alone admits it
+    with pytest.raises(setup.SetupError, match="differ"):
+        setup.vet_plugin(hooks)
+
+
 def test_more_listed_handlers_than_the_plugin_ships_are_refused(tmp_path):
     hooks = plugin_hooks(tmp_path)
     extra = dict(next(h for h in hooks if h["eventName"] == "subagentStop"))

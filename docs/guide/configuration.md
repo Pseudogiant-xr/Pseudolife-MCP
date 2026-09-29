@@ -1709,16 +1709,17 @@ also capped (below, and by the daemon's `wake` caps under
   decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
-- The plugin's SubagentStart hook and its second SubagentStop group (schema
-  v50, `subagent-board.sh`, separate from the child park gate's group below, which keeps a Claude Code session's `children`
-  current; see [Delivery and recovery](#delivery-and-recovery)) are no-ops
-  in Codex: `lifecycle.ps1 -Event SubagentBoardStart|SubagentBoardStop`
-  exits at once, and the bash script exits in Codex context. Codex's native
-  subagents are linked to their parent by the shim instead.
-  `ops/setup-codex-hooks.py` approves them when Codex lists them and treats
-  them as optional, like Stop, accepting either or both of SubagentStop's
-  two handlers when Codex lists them; one disabled in `/hooks` stays
-  disabled.
+- The plugin's subagent liveness hook (schema v50, `subagent-board.sh`),
+  which keeps a Claude Code session's `children` current (see [Delivery and
+  recovery](#delivery-and-recovery)), runs on SubagentStart and from a
+  second SubagentStop group, separate from the child park gate's group
+  below. Both entries are no-ops in Codex: `lifecycle.ps1 -Event
+  SubagentBoardStart|SubagentBoardStop` exits at once, and the bash script
+  exits in Codex context. Codex's native subagents are linked to their
+  parent by the shim instead. `ops/setup-codex-hooks.py` approves the
+  entries Codex lists and treats them as optional, like Stop, accepting
+  either or both of SubagentStop's two handlers; one disabled in `/hooks`
+  stays disabled.
 - **A Codex child thread's stop (SubagentStop).** A native Codex child
   (`collaboration.spawn_agent`) or fork has a board address of its own: the
   shim keys it by the child's MCP `threadId` and writes the child's

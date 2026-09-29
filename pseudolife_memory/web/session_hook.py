@@ -539,9 +539,11 @@ def session_start_context(service: Any, authorized: bool, *,
             # slots into transcripts, while the Console Insight view keeps
             # it (2026-09-23 review; maintainer decision 2026-09-25). The
             # REST and CLI briefings still carry it.
-            # The dream-stall line rides hook_session_start's prefix.
+            # The dream-stall and review-queue lines ride
+            # hook_session_start's prefix.
             md = (service.session_briefing(include_coordination=False, max_unsure=0,
-                                           include_dream_stall=False)
+                                           include_dream_stall=False,
+                                           include_review_queue=False)
                   or {}).get("markdown", "") or ""
         except Exception:  # noqa: BLE001 — never break a session start
             md = ""
@@ -626,6 +628,21 @@ def _dream_stall_line(service: Any) -> str:
         return ""
 
 
+def _review_queue_line(service: Any) -> str:
+    """The review-queue line (2026-09-30) while ``review_queue_health``
+    says the queue needs attention, else ''. From 2026-09-11 to 09-29 the
+    merge judge sat in shadow and 1,016 merge proposals piled up with
+    nothing saying so. Never raises."""
+    try:
+        health = getattr(service, "review_queue_health", None)
+        if health is None:
+            return ""
+        from pseudolife_memory.memory.briefing import review_queue_line
+        return review_queue_line(health())
+    except Exception:  # noqa: BLE001 — never break a session start
+        return ""
+
+
 def hook_session_start(
     service: Any, session_id: str | None = None, source: str | None = None,
     authorized: bool = True, plugin_version: str | None = None,
@@ -656,6 +673,12 @@ def hook_session_start(
         stall = _dream_stall_line(service)
         if stall:
             prefix_parts.append(stall)
+        # Fresh starts only: a resumed or compacted session keeps drift
+        # notices, the handle and a pointer, and a backlog is not drift.
+        if source not in CONTINUED_SOURCES:
+            queue = _review_queue_line(service)
+            if queue:
+                prefix_parts.append(queue)
     ad = ""
     if session_id:
         ad = _episode_advertisement(session_id, source, service)

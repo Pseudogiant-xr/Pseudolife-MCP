@@ -2700,6 +2700,9 @@ class DreamOps:
                 # user. Computed outside the lock above — deep_dream_need
                 # takes the (non-reentrant) service lock itself.
                 "deep_dream": self.deep_dream_need(),
+                # Review-queue health: pending counts, judge modes and an
+                # attention flag. Also outside the lock; never raises.
+                "review_queue": self.review_queue_health(),
                 # Dream-stall signal: null while dreams are served; see
                 # DreamStallTracker. ``last_stall`` is the latest closed one.
                 "stall": stall_state["stall"],
@@ -3293,6 +3296,77 @@ class DreamOps:
                        reason=f"{days:.1f} days since the last deep apply")
         return out
 
+    # The judge-mode knobs the review_queue block reports, by config name.
+    _REVIEW_QUEUE_JUDGE_FIELDS = (
+        "judges_enabled", "judge_mode", "link_judge_mode", "junk_judge_mode",
+        "curation_judge_mode", "candidate_judge_mode")
+
+    def review_queue_health(self) -> dict[str, Any]:
+        """Cheap health signal for the review queues, beside
+        ``deep_dream_need`` in ``dream_status``: pending rows per queue
+        (merge, junk, link), the ages of the oldest pending merge and of the
+        oldest one no judge has recorded a verdict on, each judge's
+        configured mode, and ``attention: {needed, reasons}`` for the merge
+        queue. The curation
+        duplicate listing is not counted: it is recomputed from slot
+        embeddings on demand and capped at ``curation_top_k`` per store, so
+        it cannot pile up. Never raises: a failure is an ``error`` field.
+
+        From 2026-09-11 to 09-29 the merge judge sat in "shadow" and the
+        pending merge queue grew from ~100 rows to 1,016 while nothing
+        reported it; see the ``review_queue_alert_*`` thresholds."""
+        import time as _t
+        quiet = {"needed": False, "reasons": []}
+        try:
+            cfg = self.config.memory.deep_dream
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"available": False, "reason": "no_storage",
+                            "attention": quiet}
+                counts = self._storage.review_queue_counts()
+            judges = {k: getattr(cfg, k) for k in self._REVIEW_QUEUE_JUDGE_FIELDS}
+            merge = counts["merge"]
+            now = _t.time()
+
+            def _age(ts):
+                return None if ts is None else round(max(0.0, now - ts) / 86400.0, 2)
+            age = _age(counts["oldest_merge_at"])
+            unjudged_age = _age(counts["oldest_unjudged_merge_at"])
+            reasons: list[str] = []
+            if cfg.review_queue_alert_pending and merge >= cfg.review_queue_alert_pending:
+                reasons.append(f"{merge} merge proposals pending "
+                               f"(alert at {cfg.review_queue_alert_pending})")
+            # Only "auto-reject" and "auto" apply merge verdicts; every
+            # other mode (off, shadow) leaves the queue for a human. A
+            # judge configured to drain is only draining if it runs, so in
+            # those modes the age rule reads the oldest row no judge has
+            # recorded a verdict on: a missing or failing judge endpoint
+            # leaves rows unjudged and trips it, while rows the judge has
+            # seen and left for a human fall to the count rule.
+            draining = (cfg.judges_enabled
+                        and cfg.judge_mode in ("auto-reject", "auto"))
+            judge = (cfg.judge_mode if cfg.judges_enabled
+                     else "disabled (judges_enabled false)")
+            waited = unjudged_age if draining else age
+            if (cfg.review_queue_alert_age_days and waited is not None
+                    and waited >= cfg.review_queue_alert_age_days
+                    and merge >= cfg.review_queue_alert_min_pending):
+                what = ("unjudged merge proposal" if draining
+                        else "pending merge proposal")
+                reasons.append(
+                    f"oldest {what} {waited:.0f} days old "
+                    f"({merge} pending) while the merge judge is {judge}")
+            return {"pending": {"merge": merge, "junk": counts["junk"],
+                                "link": counts["link"]},
+                    "oldest_merge_age_days": age,
+                    "oldest_unjudged_merge_age_days": unjudged_age,
+                    "judges": judges,
+                    "attention": {"needed": bool(reasons), "reasons": reasons}}
+        except Exception as exc:  # noqa: BLE001 — a status block never raises
+            logger.warning("review-queue health failed: %s", exc)
+            return {"error": f"{type(exc).__name__}: {exc}", "attention": quiet}
+
     def deep_dream_tick(self) -> dict[str, Any]:
         """Sweep-tick automation of the deep dream's MECHANICAL half: when
         the need signal fires, run ``deep_dream(apply=True)`` — rescore,
@@ -3331,8 +3405,12 @@ class DreamOps:
             return extractor if hasattr(extractor, method) else None
         from pseudolife_memory.memory.dream import OpenAICompatExtractor
         if cfg.judge_url:
+            import os
             ex = OpenAICompatExtractor(
                 cfg.judge_url, model or cfg.judge_model or "judge",
+                # judge_url's own key, env-only like the second endpoint's
+                # (PSEUDOLIFE_JUDGE_SECOND_API_KEY); never the dream key.
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_API_KEY") or None,
                 # Explicit, not the constructor default: the judge endpoint
                 # follows the same config knob as the dream extractor, so a
                 # default change can never silently alter this shipped payload.
@@ -3572,8 +3650,13 @@ class DreamOps:
         second vote is not independent enough to authorize a fold). Name
         vetoes (``merge_veto``, ``variant_conflict``) hold at apply time
         too. Disagreement stamps ``split`` on the note and leaves the row
-        for a human. ``second_extractor`` is the test hook for the second
-        opinion's endpoint. Never raises into the sweep timer."""
+        for a human. When the configuration makes the second opinion the
+        first model again (no ``judge_second_url``; ``judge_second_model``
+        empty or the first's configured name) the pass is skipped with no
+        model call (``second_opinion_skipped_same_model``), in every mode.
+        ``second_extractor`` is the test hook for the second opinion's
+        endpoint; passing either extractor keeps the pass. Never raises
+        into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -3607,13 +3690,34 @@ class DreamOps:
             with self._lock:
                 pending = review.refresh()
             first = [p for p in pending if not p.get("judge_verdict")]
-            second = ([p for p in pending
-                       if p.get("judge_verdict") and not p.get("judge2_verdict")]
-                      if cfg.judge_second_opinion else [])
+            awaiting = ([p for p in pending
+                         if p.get("judge_verdict") and not p.get("judge2_verdict")]
+                        if cfg.judge_second_opinion else [])
+            # A second opinion the CONFIGURATION already makes the first
+            # model again (no judge_second_url, and judge_second_model empty
+            # or the first endpoint's configured name) can authorize nothing
+            # in any mode, and in shadow it is the same model's opinion
+            # twice, so no call is spent on it: the rows keep waiting and
+            # the batch goes to first opinions (maintainer decision
+            # 2026-09-30). A distinct model or endpoint by configuration
+            # still gets its call; a substitution only the served name
+            # reveals is caught per row by _second_opinion_distinct. No
+            # config field changes, so no review fingerprint moves.
+            same_model_second = (
+                extractor is None and second_extractor is None
+                and not cfg.judge_second_url
+                and (not cfg.judge_second_model
+                     or cfg.judge_second_model == getattr(ex, "model", None)))
+            second = [] if same_model_second else awaiting
+            skipped = len(awaiting) if same_model_second else 0
             if not first and not second:
-                return {"judged": 0, "reconsideration": reconsidered}
+                idle = {"judged": 0, "reconsideration": reconsidered}
+                if skipped:
+                    idle["second_opinion_skipped_same_model"] = skipped
+                return idle
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
+                   "second_opinion_skipped_same_model": skipped,
                    "auto_reject_refused_same_model": 0,
                    "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
@@ -3652,12 +3756,16 @@ class DreamOps:
                     # not end the tick before any first opinion runs. The
                     # rows stay waiting; their batch share goes to first
                     # opinions this tick. On the first opinion's own
-                    # endpoint the first call would fail the same way after
-                    # a second timeout, so that failure ends the tick as
-                    # before.
+                    # endpoint (same URL AND same key: judge_url has its own
+                    # key, so a keyless second call to its URL can 401 where
+                    # the first would not) the first call would fail the
+                    # same way after a second timeout, so that failure ends
+                    # the tick as before.
                     if ex2 is ex or (getattr(ex2, "base_url", None) is not None
                                      and getattr(ex2, "base_url", None)
-                                     == getattr(ex, "base_url", None)):
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex2, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
                         raise
                     logger.warning("deep-dream judge: second opinion failed, "
                                    "first opinions continue: %s", exc)

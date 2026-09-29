@@ -3600,6 +3600,26 @@ class PostgresStorage:
             (int(entity_id),)).fetchone()
         return int(row[0])
 
+    def review_queue_counts(self) -> dict:
+        """Pending rows per review queue plus the ``created_at`` of the
+        oldest pending merge and of the oldest one no judge has recorded a
+        verdict on (None when there is none): two aggregate queries, cheap
+        enough for every ``dream_status`` and session start."""
+        merge, junk, oldest, unjudged = self.conn.execute(
+            "SELECT count(*) FILTER (WHERE kind = 'merge'), "
+            "       count(*) FILTER (WHERE kind = 'junk'), "
+            "       min(created_at) FILTER (WHERE kind = 'merge'), "
+            "       min(created_at) FILTER (WHERE kind = 'merge' "
+            "                               AND judge_verdict IS NULL) "
+            "FROM entity_proposals WHERE status = 'pending'").fetchone()
+        link = self.conn.execute(
+            "SELECT count(*) FROM edge_proposals WHERE status = 'pending'"
+        ).fetchone()[0]
+        return {"merge": int(merge), "junk": int(junk), "link": int(link),
+                "oldest_merge_at": float(oldest) if oldest is not None else None,
+                "oldest_unjudged_merge_at":
+                    float(unjudged) if unjudged is not None else None}
+
     def merge_decision_stats(self) -> dict:
         """Accept/reject tallies over merge_decisions — the direct measure of
         the dedup detector's precision (the 2026-08-11 triage ran 38/153 and
