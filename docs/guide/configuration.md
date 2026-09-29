@@ -1339,7 +1339,20 @@ status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="receive")` without `ack`, `memory_search`), and the
-orchestrating session owns the address. The served check-in says so. The
+orchestrating session owns the address. The served check-in says so, and
+since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
+(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
+puts in a subagent's hook input, and never in the parent's, and denies that
+subagent's `memory_agents` update, claim and release and `memory_message`
+send and ack, whatever the server's name. Its list and receive pass, and so
+does every call the parent makes. The subagent reads the refusal as
+`PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
+it to ask the parent instead (probed on Claude Code 2.1.283: the child's
+update never reached the server, its list and the parent's update did). A
+payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
+anything but a yes, let the call through. Installs without the plugin keep
+the instruction only. In Codex the same entry allows everything: a Codex
+child has a board address of its own. Claude Code
 subagents get no addresses of their own: the parent names them on its own row
 with `memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of

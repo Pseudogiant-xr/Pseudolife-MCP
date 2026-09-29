@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + Stop hook that wakes an idle session on board mail that clears its declared need (on by default) and asks it to park",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory-change note + end-of-session episode close + Stop hook that wakes an idle session on board mail that clears its declared need (on by default) and asks it to park + PreToolUse guard that lets a Claude Code subagent only read the board its parent session owns",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -77,6 +77,19 @@
             "async": true,
             "asyncRewake": true,
             "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__.+__memory_(agents|message)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\"",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardGuard",
+            "timeout": 5
           }
         ]
       }
