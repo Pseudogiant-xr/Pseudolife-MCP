@@ -1450,6 +1450,8 @@ $script:shimUpgradeHeld = $null
 $script:shimPython = $null
 $script:shimManagerKind = $null
 $script:shimPipxVenv = $null
+$script:shimPathNotes = @()
+$script:shimPathState = $null
 function Resolve-InstalledShimPath($Manager = $null) {
     $shimBinDir = $null
     if ((-not $Manager) -or ($Manager.Cmd -eq "runtime")) {
@@ -1605,6 +1607,20 @@ function Install-ShimOnce {
         if (($LASTEXITCODE -eq 0) -and $launcher) {
             $script:shimInstallPath = "$launcher".Trim()
             $script:shimManagerKind = "runtime"
+            # `pseudolife-mcp` typed in a new terminal reaches the launcher too:
+            # its directory goes first on the user PATH (HKCU\Environment only;
+            # an older pipx or pip copy further down is left in place, never
+            # renamed while it may be running). Shown now and in the summary.
+            try {
+                $exposed = (& $script:shimPython (Join-Path $repo "ops\shim_runtime.py") --json expose) -join "`n" | ConvertFrom-Json
+                $script:shimPathState = "$($exposed.state)"
+                $script:shimPathNotes = @(@($exposed.detail, $exposed.hint) | Where-Object { $_ })
+                if ($script:shimPathState -eq "skipped") { $script:shimPathNotes = @() }
+            } catch {
+                $script:shimPathState = "failed"
+                $script:shimPathNotes = @("the user PATH step could not run ($($_.Exception.Message)); run the launcher by its full path")
+            }
+            foreach ($note in $script:shimPathNotes) { Write-Host "  shim: $note" }
             # A pipx environment from an earlier install: registrations that
             # still name it move to the launcher (Test-ShimRegistrationMigrates).
             if (Get-Command pipx -ErrorAction SilentlyContinue) {
@@ -2532,6 +2548,14 @@ foreach ($selectedClient in $clients) {
     }
 }
 Write-Host ""
+# Whether `pseudolife-mcp` in a new terminal reaches the launcher (the user
+# PATH step in Install-ShimOnce).
+if ($script:shimPathNotes.Count -gt 0) {
+    $pathMarker = if ($script:shimPathState -eq "failed") { "[!]" } else { "[x]" }
+    Write-Host "  $pathMarker Launcher on PATH     $($script:shimPathNotes[0])"
+    foreach ($note in @($script:shimPathNotes | Select-Object -Skip 1)) { Write-Host "      $note" }
+    Write-Host ""
+}
 # One line for the agent board, as the daemon answers it for the first client
 # token file (else the daemon's singular token): on, or off and why.
 # >>> board line >>>

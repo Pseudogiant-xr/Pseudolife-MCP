@@ -151,3 +151,51 @@ def test_doctor_reports_specific_safe_recovery(monkeypatch, capsys, failure, hin
     assert "fixture-secret-must-not-leak" not in output
     if failure == "unreachable":
         handshake.assert_not_called()
+
+
+# --- which `pseudolife-mcp` a terminal runs ------------------------------------
+#
+# 2026-09-29: after every registration moved to the launcher, `pseudolife-mcp`
+# on PATH was still pipx's copy of the old package. doctor names both and
+# warns when they differ.
+
+def _launcher_layout(tmp_path, monkeypatch):
+    name = "pseudolife-mcp.exe" if doctor_cli._windows() else "pseudolife-mcp"
+    launcher = tmp_path / "bin" / name
+    launcher.parent.mkdir()
+    launcher.write_text("launcher", encoding="utf-8")
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "runtimes"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(launcher))
+    return launcher
+
+
+def test_path_resolution_warns_when_the_name_runs_something_else(tmp_path, monkeypatch):
+    launcher = _launcher_layout(tmp_path, monkeypatch)
+    old = str(tmp_path / "pipx" / "bin" / "pseudolife-mcp")
+    report = doctor_cli.path_resolution(which=lambda name: old)
+    assert report["on_path"] == old and report["launcher"] == str(launcher)
+    assert old in report["warning"] and str(launcher) in report["warning"]
+    same = doctor_cli.path_resolution(which=lambda name: str(launcher))
+    assert same["on_path"] == str(launcher) and "warning" not in same
+    missing = doctor_cli.path_resolution(which=lambda name: None)
+    assert missing["on_path"] is None and str(launcher) in missing["warning"]
+
+
+def test_path_resolution_is_quiet_without_a_launcher(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(tmp_path / "runtimes"))
+    monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(tmp_path / "bin" / (
+        "pseudolife-mcp.exe" if doctor_cli._windows() else "pseudolife-mcp")))
+    report = doctor_cli.path_resolution(which=lambda name: "/usr/bin/pseudolife-mcp")
+    assert report["launcher"] is None and "warning" not in report
+
+
+def test_doctor_reports_path_resolution(tmp_path, monkeypatch, capsys):
+    _launcher_layout(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "probe_health", lambda *a, **kw: None)
+    monkeypatch.setattr(doctor_cli, "_windows", lambda: False)
+    with pytest.raises(SystemExit):
+        doctor_cli.run_doctor()
+    report = json.loads(capsys.readouterr().out)
+    assert set(report["path_resolution"]) >= {"on_path", "launcher"}

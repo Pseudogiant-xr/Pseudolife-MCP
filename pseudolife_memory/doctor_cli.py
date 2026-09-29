@@ -354,5 +354,32 @@ def run_doctor() -> None:
         if "error" not in report:
             report["error"] = "GitBashMissing"
             report["recovery"] = report["git_bash_recovery"]
+    # Which `pseudolife-mcp` a terminal runs, beside the launcher (informational).
+    report["path_resolution"] = path_resolution()
     print(json.dumps(report, indent=2))
     raise SystemExit(0 if report["ok"] else 1)
+
+
+# --- which `pseudolife-mcp` a terminal runs -----------------------------------
+# 2026-09-29: every registration named the launcher, while `pseudolife-mcp` on
+# PATH was still pipx's copy of the old package, so `pseudolife-mcp update`
+# ran old code.
+
+def path_resolution(which=shutil.which) -> dict:
+    """What ``pseudolife-mcp`` resolves to on this process's PATH, the
+    launcher path (``None`` when no launcher is installed), and a warning
+    when a launcher exists and the name does not reach it."""
+    from pseudolife_memory import runtimes
+    found = which("pseudolife-mcp")
+    try:
+        launcher = runtimes.default_layout().launcher
+    except ValueError:
+        launcher = None
+    report = {"on_path": found, "launcher": str(launcher) if launcher and launcher.is_file() else None}
+    if report["launcher"] and not (found and os.path.normcase(os.path.realpath(found))
+                                   == os.path.normcase(os.path.realpath(report["launcher"]))):
+        report["warning"] = (f"`pseudolife-mcp` on PATH is {found or 'not found'}, not the launcher "
+                             f"{report['launcher']}, so a terminal runs another install. Run "
+                             f"\"{report['launcher']}\" update --clients-only to point the name at the "
+                             "launcher, then open a new terminal")
+    return report

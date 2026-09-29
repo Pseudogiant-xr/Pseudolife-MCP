@@ -2224,7 +2224,7 @@ The installers put the shim into its own **runtime** and register one
 | | Windows | Linux / macOS |
 |---|---|---|
 | runtimes | `%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN\` | `$XDG_DATA_HOME/pseudolife-mcp/runtimes/NNNNNN/` (`~/.local/share/...`) |
-| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp` (not `~/.local/bin`, which pip --user and pipx own) |
+| launcher | `%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` (its directory goes on the user `PATH`) | `$XDG_DATA_HOME/pseudolife-mcp/bin/pseudolife-mcp`, linked from `~/.local/bin/pseudolife-mcp` |
 
 A runtime is a plain virtualenv holding the package (`pip install
 --no-deps`) and the shim's own dependencies — not torch, chromadb or the
@@ -2246,11 +2246,30 @@ backed up first and its permission bits kept (`shim_runtime.py migrate`); a
 mode argument such as `channel` stays. A registration that would spawn its
 own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1` and a loopback daemon URL — the
 pip and lite tiers) is never moved onto a shim runtime, which cannot serve.
-The launcher directory is not on `PATH`; run `pseudolife-mcp doctor` and
-friends through its full path. Set `PSEUDOLIFE_SHIM_PYTHON`
-to choose the interpreter the runtimes are created from;
-`PSEUDOLIFE_SHIM_RUNTIMES` and `PSEUDOLIFE_SHIM_LAUNCHER` (together) move
-both paths. A host whose Python cannot make a virtualenv falls back to the
+The same steps make `pseudolife-mcp` typed in a terminal reach the
+launcher (`shim_runtime.py expose` runs that step alone). On POSIX
+`~/.local/bin/pseudolife-mcp` becomes a symlink to the launcher: a free
+name is linked; an older pipx link into `venvs/pseudolife-mcp`, or a
+pip --user console script of this package, is moved aside as
+`pseudolife-mcp.<kind>-<stamp>` (never deleted; `pipx uninstall` removes a
+moved pipx link with its venv and leaves the new link, which resolves
+outside every pipx venv); anything else is left as it is and named. When
+`~/.local/bin` is not on `PATH` the step prints the one-line fix
+(`export PATH="$HOME/.local/bin:$PATH"` in your shell profile) and edits no
+profile; when an earlier `PATH` entry still wins, it names that entry. On
+Windows the launcher directory is prepended to the user `PATH`
+(`HKCU\Environment`, never the machine `PATH`) and a settings-change
+broadcast reaches consoles opened afterwards. A terminal that was already
+open keeps its old `PATH`, so the step says to open a new one when this
+one still runs another copy. An older pipx `pseudolife-mcp.exe` further
+down `PATH` is left in place; `pipx uninstall pseudolife-mcp` removes it
+once no session runs it. `pseudolife-mcp doctor` reports
+`path_resolution`: what the name resolves to, the launcher, and a warning
+when they differ. Set `PSEUDOLIFE_SHIM_PYTHON` to choose the interpreter
+the runtimes are created from; `PSEUDOLIFE_SHIM_RUNTIMES` and
+`PSEUDOLIFE_SHIM_LAUNCHER` (together) move both paths, and then no `PATH`
+is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
+from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
 

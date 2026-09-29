@@ -678,9 +678,19 @@ on Windows, `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere) and
 every client registers one **launcher** path
 (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe` /
 `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) that starts the newest
-complete runtime. Neither directory is on `PATH`: run `doctor`, `lease` or
-`wait-mail` through the launcher's full path, or add its directory to
-`PATH` yourself.
+complete runtime. The installer and the update step also make
+`pseudolife-mcp` typed in a terminal reach the launcher. On Linux and macOS
+`~/.local/bin/pseudolife-mcp` becomes a link to it; an older pipx or
+pip --user entry there is moved aside as `pseudolife-mcp.<kind>-<stamp>`
+(never deleted), and anything else there is left alone and named. When
+`~/.local/bin` is not on `PATH`, the step prints the line to add to your
+shell profile: `export PATH="$HOME/.local/bin:$PATH"`. On Windows the
+launcher directory goes first on your user `PATH`, ahead of pipx's and
+pip's copies; open a new terminal for the name to reach the launcher,
+because a terminal that was already open keeps its old `PATH`.
+`pseudolife-mcp doctor` reports what the name resolves to
+(`path_resolution`) and warns when that is not the launcher; the
+launcher's full path always works.
 The step installs the checkout as a new runtime beside the old one, moves
 any registration that still names a runtime, pipx or virtualenv path to
 the launcher in place (Claude Code, Codex, Claude Desktop and Gemini CLI;
