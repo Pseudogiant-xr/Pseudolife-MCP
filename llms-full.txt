@@ -5485,7 +5485,8 @@ reason and a bad expiry; credential-shaped text is `secret_like_body`. Every pee
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the
 [Stop hook park gate](#waking-an-idle-claude-code-session-the-stop-hook) asks
-once when a turn ends without one. (The served check-in does not say it yet:
+once when a turn ends without one (in Codex, a child thread's stop is asked
+under the child's own address). (The served check-in does not say it yet:
 it is the text the check-in bench measured, and changes only with a new run.)
 
 **The daemon decides, the shim rings.** `memory_message(action="send")` takes
@@ -5742,6 +5743,28 @@ also capped (below, and by the daemon's `wake` caps under
   decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
+- **A Codex child thread's stop (SubagentStop).** A native Codex child
+  (`collaboration.spawn_agent`) or fork has a board address of its own: the
+  shim keys it by the child's MCP `threadId` and writes the child's
+  `<key>.agent` record under that id. The root's `Stop` never sees it, since
+  Codex's hook payloads carry the root thread's `session_id` into a child.
+  The plugin's `SubagentStop` entry runs the same park gate at the child's
+  stop, keyed by the payload's `agent_id`, which names the child (it equalled
+  the child's MCP `threadId` in the 2026-09-29 probe on Codex CLI 0.158.0
+  and desktop 0.158.0-alpha.2.1): `lifecycle.ps1 -Event SubagentStop` on
+  Windows, `stop-wake.sh subagent-stop` in Codex context elsewhere. The id
+  must be the canonical lower-case UUID the shim accepts from `_meta.threadId`;
+  anything else, or no `<key>.agent` for the child, asks nothing, and the
+  root's `session_id` is never used in its place. A child gets no prompt
+  hook, so there is no turn stamp and the daemon judges the child's standing
+  record (a block when it has no live park and its status is not
+  done-shaped). A block continues the child once, with the same
+  `{"decision": "block", "reason": ...}` on stdout; its next stop carries
+  `stop_hook_active` and is not asked. The same opt-outs turn it off.
+  Claude Code fires `SubagentStop` too and runs the bash command there,
+  which does nothing. The entry is synchronous (10 s), plugin installs only,
+  like `Stop`; setup approves it with the others and treats it as optional.
+  The served message asks the child to park; it never suggests sending mail.
 
 ## Startup memory policy (`memory_policy`)
 
@@ -7007,7 +7030,9 @@ and does not pull one), the approval (`/hooks` in a Codex session, or
 `python ops/setup-codex-hooks.py --source plugin --trust yes` /
 `--codex-hook-trust yes` for an unattended install), what is off until
 then (the memory briefing, the per-turn memory and mail notes, the board
-check-in, the SessionEnd close and the Stop-hook park gate), and the
+check-in, the SessionEnd close and the Stop-hook park gate, including a
+child thread's `SubagentStop` gate, a new handler position that an
+existing install asks to approve once), and the
 check: `pseudolife-mcp doctor` reports `codex_hooks = current`. A manual
 copy (`setup-codex-hooks.py --source manual`) gets its own commands, and
 `doctor` reports `bundle-present` for it. An update whose hooks did not
@@ -7530,6 +7555,17 @@ stalls on a prompt. Setup approves it with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.
+
+The plugin also carries a `SubagentStop` entry that runs the same park gate
+when a Codex child thread (`collaboration.spawn_agent`, or a fork) stops,
+under the child's own board address: the lookup is keyed by the payload's
+`agent_id`, the child's thread id, never by the root's `session_id` (see
+[the Stop hook](configuration.md#waking-an-idle-claude-code-session-the-stop-hook)).
+In Claude Code the entry does nothing. Setup approves it with the others
+and treats it as optional, like `Stop`; an existing install lists it once in
+Codex's startup hook review, so approve it there or rerun
+`python ops/setup-codex-hooks.py --source plugin --trust ask` after the
+update.
 
 For authenticated stdio connections, setup prepares a private bearer file and
 records the same daemon URL and file path for the shim and lifecycle hooks.
