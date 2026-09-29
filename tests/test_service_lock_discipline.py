@@ -108,6 +108,8 @@ CALLER_HOLDS_LOCK = {
     "_derived_from_entries_locked",
     "_resolve_correction_targets_locked",
     "_retire_entries_locked",
+    # CMS invokes the delete callback inline, within delete's lock hold.
+    "_forget_entries_locked",
     "_correction_trace_state",
     "_hydrate_correction_rows",
     "_recover_correction_locked",

@@ -67,7 +67,7 @@ FORMAT_VERSION = 1
 EXPORTED_TABLES = (
     "meta", "episodes", "entries", "entry_reinstatement_decisions",
     "entities", "entity_aliases",
-    "relations", "edges", "edge_proposals", "entity_proposals",
+    "relations", "edges", "edge_evidence", "edge_proposals", "entity_proposals",
     "entity_kinds", "dismissed_pairs", "facts", "world_facts", "lessons",
     "outcome_signals", "communities", "entity_communities",
     "memory_traces", "memory_trace_invalidations", "entity_sources",
