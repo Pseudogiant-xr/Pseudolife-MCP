@@ -234,7 +234,10 @@ class CodexCli:
                 # every call with HTTP 500 on 2026-09-29. Skip it; auth still
                 # comes from CODEX_HOME. hooks.json is read regardless (codex
                 # 0.158), so hooks are switched off outright as well.
+                # Directory trust lived in that config too, so a shim run
+                # outside a git checkout needs the repo check skipped.
                 "--ignore-user-config",
+                "--skip-git-repo-check",
                 "-c", "features.hooks=false",
                 "-c", "web_search=disabled",
                 "-c", "features.shell_tool=false"]

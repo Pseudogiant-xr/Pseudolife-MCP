@@ -11,17 +11,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interactive `~/.codex/config.toml`. Where that config marks the
   pseudolife-memory MCP server `required`, an unreachable daemon made
   Codex refuse to start a session, and every dream or judge call returned
-  HTTP 500 (a queue-judge ladder run, 2026-09-29). Where the server is
-  optional, each call still started it, loaded the plugins and ran the
-  SessionStart hooks. On codex 0.158, a one-word prompt took 80k input
-  tokens and made board and bank calls. Each call now passes
+  HTTP 500 (a queue-judge ladder run, 2026-09-29). Each call now passes
   `--ignore-user-config` (no MCP servers, plugins or hook trust from
-  `config.toml`; auth still comes from `CODEX_HOME`) and
-  `-c features.hooks=false`, because `hooks.json` is read either way.
-  `-c mcp_servers={}` was measured and is not enough: the enabled plugin
-  starts its own copy of the server. A side effect: a
-  `model_reasoning_effort` in the host's `config.toml` no longer reaches
-  the shim. Pin it with `--reasoning-effort` or
+  `config.toml`; auth still comes from `CODEX_HOME`),
+  `-c features.hooks=false` (because `hooks.json` is read either way) and
+  `--skip-git-repo-check` (directory trust lived in the ignored config).
+  `-c mcp_servers={}` was measured on codex-cli 0.158.0 and is not
+  enough: the enabled pseudolife plugin started its own copy of the
+  server, and the model called the board and bank for a one-word reply
+  (80k input tokens; 16k with `--ignore-user-config`, no MCP calls). The
+  flag is present in codex-cli 0.157.1 and 0.158.0; an older CLI that
+  lacks it fails `/health` with an unexpected-argument error. A side
+  effect: a `model_reasoning_effort` in the host's `config.toml` no
+  longer reaches the shim. Pin it with `--reasoning-effort` or
   `memory.dream.extractor_reasoning_effort`.
   [Reasoning effort](docs/guide/dreaming.md#reasoning-effort--the-dreamers-thinking-budget)
 

@@ -77,9 +77,13 @@ def test_argv_isolates_the_call_from_the_hosts_codex_config():
     # the enabled plugin still started its own pseudolife-memory server and
     # the model called it). --ignore-user-config drops MCP servers, plugins
     # and hook trust while auth still comes from CODEX_HOME; hooks.json is
-    # still read, so features.hooks=false keeps hooks off outright.
+    # still read, so features.hooks=false keeps hooks off outright. Directory
+    # trust lived in the ignored config too: without --skip-git-repo-check a
+    # shim started outside a git checkout fails every call ("Not inside a
+    # trusted directory", measured the same day).
     argv = shim.CodexCli(Path("codex"), "m", 30.0)._argv(None)
     assert "--ignore-user-config" in argv
+    assert "--skip-git-repo-check" in argv
     assert argv[argv.index("features.hooks=false") - 1] == "-c"
 
 
