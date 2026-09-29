@@ -22,6 +22,9 @@ Three contracts differ from the Claude CLI and drive the design here:
   * **It is an agent, not a completion endpoint.** Tools are disabled
     explicitly (``web_search=disabled``, ``features.shell_tool=false``), the
     sandbox stays read-only, and ``--ephemeral`` keeps session files off disk.
+    ``--ignore-user-config`` keeps the host's interactive ``config.toml``
+    (MCP servers, plugins, hook trust) out of the call, and
+    ``features.hooks=false`` keeps ``hooks.json`` hooks off.
 
 Registered as the ``terra`` rung/extractor. Like ``sonnet-5`` it stays OUT of
 LADDER_ORDER — the default sweep remains sovereign-only; invoke explicitly
@@ -201,8 +204,8 @@ class CodexCli:
         self.call_timeout = call_timeout
         self.system_override = system_override
         # Launch-default reasoning effort; a per-request value wins (mirrors
-        # resolve_model). None = never pass the -c key, so the CLI inherits
-        # the host's ~/.codex/config.toml — the pre-knob behavior.
+        # resolve_model). None = never pass the -c key, so the CLI runs at
+        # its own per-model default (the host config.toml is not loaded).
         self.reasoning_effort = reasoning_effort
         # Refresh cadence for /health — every refresh is a REAL CLI call, so
         # on a metered/free ChatGPT tier the default (300s ≈ 288 calls/day)
@@ -226,6 +229,13 @@ class CodexCli:
                 "--json",
                 "--sandbox", "read-only",
                 "--ephemeral",
+                # The host's ~/.codex/config.toml is for interactive use: a
+                # required MCP server there (the memory daemon, down) failed
+                # every call with HTTP 500 on 2026-09-29. Skip it; auth still
+                # comes from CODEX_HOME. hooks.json is read regardless (codex
+                # 0.158), so hooks are switched off outright as well.
+                "--ignore-user-config",
+                "-c", "features.hooks=false",
                 "-c", "web_search=disabled",
                 "-c", "features.shell_tool=false"]
         if effort or self.reasoning_effort:
@@ -431,8 +441,9 @@ def _parse_args(argv=None):
     ap.add_argument("--reasoning-effort", default=None,
                     help="launch-default model_reasoning_effort "
                          "(minimal/low/medium/high/xhigh); a request's "
-                         "reasoning_effort wins per call. Unset = the CLI "
-                         "inherits the host's ~/.codex/config.toml")
+                         "reasoning_effort wins per call. Unset = the CLI's "
+                         "per-model default (~/.codex/config.toml is not "
+                         "loaded)")
     return ap.parse_args(argv)
 
 

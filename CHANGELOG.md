@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-29 — the Codex shim no longer fails when the memory daemon is down)
+- `evals/codex_shim.py` ran every `codex exec` against the host's
+  interactive `~/.codex/config.toml`. Where that config marks the
+  pseudolife-memory MCP server `required`, an unreachable daemon made
+  Codex refuse to start a session, and every dream or judge call returned
+  HTTP 500 (a queue-judge ladder run, 2026-09-29). Where the server is
+  optional, each call still started it, loaded the plugins and ran the
+  SessionStart hooks. On codex 0.158, a one-word prompt took 80k input
+  tokens and made board and bank calls. Each call now passes
+  `--ignore-user-config` (no MCP servers, plugins or hook trust from
+  `config.toml`; auth still comes from `CODEX_HOME`) and
+  `-c features.hooks=false`, because `hooks.json` is read either way.
+  `-c mcp_servers={}` was measured and is not enough: the enabled plugin
+  starts its own copy of the server. A side effect: a
+  `model_reasoning_effort` in the host's `config.toml` no longer reaches
+  the shim. Pin it with `--reasoning-effort` or
+  `memory.dream.extractor_reasoning_effort`.
+  [Reasoning effort](docs/guide/dreaming.md#reasoning-effort--the-dreamers-thinking-budget)
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the
