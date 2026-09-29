@@ -103,6 +103,28 @@ def single_vote(votes: dict, rep: int, gate: float) -> dict:
     return out
 
 
+def vote_confidence(votes: dict, gate: float, gate_2: float) -> dict:
+    """Per verdict, over every replicate's votes: how many, their mean
+    confidence, and how many reach the single-vote and two-vote gates —
+    the calibration the reject-class gates read."""
+    out = {}
+    for row in votes.values():
+        for v in row["votes"]:
+            if not v:
+                continue
+            s = out.setdefault(v["verdict"], {"n": 0, "sum": 0.0,
+                                              "ge_reject_gate": 0,
+                                              "ge_reject_gate_2": 0})
+            s["n"] += 1
+            s["sum"] += v["confidence"]
+            s["ge_reject_gate"] += v["confidence"] >= gate
+            s["ge_reject_gate_2"] += v["confidence"] >= gate_2
+    return {k: {"n": s["n"], "mean": round(s["sum"] / s["n"], 4),
+                "ge_reject_gate": s["ge_reject_gate"],
+                "ge_reject_gate_2": s["ge_reject_gate_2"]}
+            for k, s in sorted(out.items())}
+
+
 def build(first_arm: dict, second_arm: dict, panel_doc: dict, *,
           reject_gate: float = 0.8, reject_gate_2: float = 0.7,
           accept_gate: float = 0.6) -> dict:
@@ -120,6 +142,9 @@ def build(first_arm: dict, second_arm: dict, panel_doc: dict, *,
         "single_vote": {
             arm["arm"]: [single_vote(votes, k, reject_gate)
                          for k in range(arm["replicates"])]
+            for arm, votes in ((first_arm, first), (second_arm, second))},
+        "vote_confidence": {
+            arm["arm"]: vote_confidence(votes, reject_gate, reject_gate_2)
             for arm, votes in ((first_arm, first), (second_arm, second))},
         "relate_by_arm": {
             arm["arm"]: arm["queues"]["merges"].get("relate")

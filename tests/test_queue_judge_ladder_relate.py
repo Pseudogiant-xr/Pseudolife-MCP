@@ -85,3 +85,6 @@ def test_cross_gates_count_relate_as_reject_class_and_file_links():
     # accept vs relate is the only split; reject vs relate agrees.
     assert rep["splits"] == {"n": 1, "rows": [3]}
     assert doc["single_vote"]["b"] == [{"n": 3, "bad": 1, "relate": 2}]
+    assert doc["vote_confidence"]["b"]["relate"] == {
+        "n": 2, "mean": 0.9, "ge_reject_gate": 2, "ge_reject_gate_2": 2}
+    assert doc["vote_confidence"]["a"]["reject"]["ge_reject_gate"] == 1

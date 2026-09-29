@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-30 — the merge judge can say "distinct but related", and the relationship becomes a link proposal instead of being lost)
+- Most merge proposals the judge rejects are related pairs, not unrelated
+  ones: a file and the concept it implements, a component and its parent
+  (most rejects in the 2026-09-29 merge-queue triage were this shape). A
+  reject dismisses the pair, and the relationship
+  was lost with it. The merge judge may now answer `relate` with a relation
+  from the link judge's vocabulary, read from FROM to INTO as it was shown
+  the pair. For the merge, relate is a reject in every gate: the
+  single-vote gate, the two-vote gate (still only from two different
+  models), and `split`, which a reject beside a relate no longer stamps.
+  A relate naming no vocabulary relation is recorded as a reject.
+- No schema change: `relate` is stored in `judge_verdict` /
+  `judge2_verdict`, and the relation rides on the note
+  (`relate:<relation> | …`, and `2nd (<model>): relate:<relation> …` for a
+  second opinion). The review payloads' `judge` / `judge2` blocks carry it
+  as `relation`, and the Console chip shows `relate <relation>` as a
+  reject.
+- When an automatic reject applies and one of its votes was a relate, the
+  sweep files that relation (the more confident vote's) as a link proposal
+  with source `merge-judge-relate`, by entity id, through the ordinary
+  filing gate; the link judge settles it at its own gates, and the merge
+  judge never writes an edge. It files nothing for a relation that is not
+  registered (`tests`, `superseded-by`), nor when an edge or link proposal
+  already joins the pair: an accepted link changes the pair's evidence, so
+  reconsideration reopens the merge reject, and without the check each
+  reopening could file another relation. A filing that fails is logged
+  (`relate_link_errors`) and never undoes the reject. The judge result
+  counts `relate_links_filed`.
+- Measured before shipping (the private 2026-09-02 panel, merges only, two
+  replicates each; Opus 5.5 first opinion, Sonnet 5.5 second): cross-model
+  two-vote rejects 5/5 and 9/9, two-vote non-low-differential accepts 5/6
+  in both replicates; accept precision per arm 21/25 (Opus 5.5) and 17/23
+  (Sonnet 5.5). Relate votes: 46 (Opus 5.5) and 39 (Sonnet 5.5), of which
+  42 and 36 landed on rows the panel labelled distinct. The cost is
+  coverage: none of the 85 relate votes reached the 0.8 single-vote gate,
+  so relate rows are rejected, and their links filed, only through the
+  two-vote gate (links filed on 1 and 6 two-vote rejects, every one on a
+  pair the panel itself called related). Artifacts:
+  `evals/results/queue-judge-ladder-20260930-relate-opus55.json`,
+  `…-relate-sonnet55.json` and `queue-judge-cross-20260930-relate.json`
+  (`evals/merge_relate_gates.py`). `evals/queue_judge_ladder.py` and
+  `evals/judge_ladder.py` count relate as reject-class.
+- **Upgrade note:** the judge prompt is part of the signed judging policy,
+  so the first sweep after deploying this clears every pending merge
+  opinion (first and second, `split` rows included) for re-judging, one
+  `judge_batch` a tick, and reconsideration reopens the active automatic
+  merge rejects, deleting their dismissed pairs, one `judge_batch` a tick.
+  In `shadow` mode the reopened rows then wait for a human; in
+  `auto-reject` they are judged again under the new prompt.
+
 ### Changed (2026-09-30 — the merge judge's second opinion can come from another provider, and two votes from one model never auto-reject)
 - Two agreeing merge-judge rejects auto-apply only when the two votes came
   from different models, the rule two-vote accepts already had. The same

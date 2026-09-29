@@ -3274,6 +3274,68 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# The merge judge's relate verdict (2026-09-30): the prompt change measured
+# on the same panel, Opus 5.5 first opinion and Sonnet 5.5 second.
+RELATE_OPUS = "evals/results/queue-judge-ladder-20260930-relate-opus55.json"
+RELATE_SONNET = "evals/results/queue-judge-ladder-20260930-relate-sonnet55.json"
+RELATE_CROSS = "evals/results/queue-judge-cross-20260930-relate.json"
+
+
+def _relate_arm(arm, *path):
+    def get(d):
+        v = d["arms"][arm]["queues"]["merges"]
+        for key in path:
+            v = v[key]
+        return v
+    return get
+
+
+def _relate_cross(rep, gate, field):
+    return lambda d: d["replicates"][rep][gate][field]
+
+
+_RC = "two_vote_reject_class"
+_AC = "two_vote_accept_not_lowdiff"
+for _cid, _needle, _art, _val, _stated in [
+    ("relate-cross-reject-r1-n", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "n"), 5),
+    ("relate-cross-reject-r1-bad", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "bad"), 0),
+    ("relate-cross-reject-r2-n", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "n"), 9),
+    ("relate-cross-reject-r2-bad", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "bad"), 0),
+    ("relate-cross-accept-r1-n", "non-low-differential accepts 5/6", RELATE_CROSS, _relate_cross(0, _AC, "n"), 6),
+    ("relate-cross-accept-r1-bad", "non-low-differential accepts 5/6", RELATE_CROSS, _relate_cross(0, _AC, "bad"), 1),
+    ("relate-cross-accept-r2-n", "in both replicates", RELATE_CROSS, _relate_cross(1, _AC, "n"), 6),
+    ("relate-cross-accept-r2-bad", "in both replicates", RELATE_CROSS, _relate_cross(1, _AC, "bad"), 1),
+    ("relate-opus-accept-n", "21/25 (Opus 5.5)", RELATE_OPUS,
+     _relate_arm("opus-5-5-relate", "accept_precision", "n"), 25),
+    ("relate-opus-accept-bad", "21/25 (Opus 5.5)", RELATE_OPUS,
+     _relate_arm("opus-5-5-relate", "accept_precision", "bad"), 4),
+    ("relate-sonnet-accept-n", "and 17/23", RELATE_SONNET,
+     _relate_arm("sonnet-5-5-relate", "accept_precision", "n"), 23),
+    ("relate-sonnet-accept-bad", "and 17/23", RELATE_SONNET,
+     _relate_arm("sonnet-5-5-relate", "accept_precision", "bad"), 6),
+    ("relate-opus-votes", "46 (Opus 5.5) and 39 (Sonnet 5.5)", RELATE_OPUS,
+     _relate_arm("opus-5-5-relate", "relate", "votes"), 46),
+    ("relate-sonnet-votes", "46 (Opus 5.5) and 39 (Sonnet 5.5)", RELATE_SONNET,
+     _relate_arm("sonnet-5-5-relate", "relate", "votes"), 39),
+    ("relate-opus-on-reject", "42 and 36 landed", RELATE_OPUS,
+     _relate_arm("opus-5-5-relate", "relate", "on_label", "reject"), 42),
+    ("relate-sonnet-on-reject", "42 and 36 landed", RELATE_SONNET,
+     _relate_arm("sonnet-5-5-relate", "relate", "on_label", "reject"), 36),
+    ("relate-votes-total", "none of the 85 relate votes", RELATE_CROSS,
+     lambda d: sum(a["relate"]["n"] for a in d["vote_confidence"].values()), 85),
+    ("relate-votes-at-gate", "none of the 85 relate votes", RELATE_CROSS,
+     lambda d: sum(a["relate"]["ge_reject_gate"] for a in d["vote_confidence"].values()), 0),
+    ("relate-links-r1", "links filed on 1 and 6", RELATE_CROSS, _relate_cross(0, _RC, "links_filed"), 1),
+    ("relate-links-r2", "links filed on 1 and 6", RELATE_CROSS, _relate_cross(1, _RC, "links_filed"), 6),
+    ("relate-links-r1-panel", "links filed on 1 and 6", RELATE_CROSS,
+     _relate_cross(0, _RC, "links_on_panel_relate"), 1),
+    ("relate-links-r2-panel", "links filed on 1 and 6", RELATE_CROSS,
+     _relate_cross(1, _RC, "links_on_panel_relate"), 6),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=0))
+
 CLAIMS.append(Claim(
     id="queue-ladder-curation-keep-precision", doc=CHANGELOG,
     needle="precision was 0.5625", artifacts=(LADDER_0902,),
