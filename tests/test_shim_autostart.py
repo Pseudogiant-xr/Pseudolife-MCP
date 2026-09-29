@@ -320,3 +320,31 @@ def test_the_task_and_the_unit_run_the_runner_with_no_baked_values():
     # and every installer says how to change a value later
     for text in (ps, sh, cps, csh):
         assert "shim_autostart.py restart" in text
+
+
+def test_restart_refuses_a_registration_that_still_carries_its_values_unless_forced(repo, monkeypatch, capsys):
+    """An install registered before this runner keeps its model, interpreter
+    and log on the task's or unit's command line. ``restart`` used to stop
+    that shim and start one from ops/.env — the defaults, for an install
+    that never wrote the block — and only then print the note (review,
+    2026-09-29). It refuses now, naming the installer to run once; --force
+    restarts from ops/.env anyway."""
+    monkeypatch.setattr(sa, "_registered_command",
+                        lambda kind: "python.exe evals/claude_shim.py --model claude-sonnet-5 --port 8082")
+    monkeypatch.setattr(sa, "check", lambda kind, repo, settings: [])
+    restarts = []
+    monkeypatch.setattr(sa, "restart", lambda kind, repo, settings, *, dry_run: restarts.append(kind) or 0)
+    assert sa.main(["--repo", str(repo), "restart", "claude"]) == 1
+    err = capsys.readouterr().err
+    assert restarts == []
+    assert "still carries the model" in err and "--force" in err
+    assert sa.main(["--repo", str(repo), "restart", "claude", "--force"]) == 0
+    assert restarts == ["claude"]
+    # a registration that runs this runner needs no flag
+    monkeypatch.setattr(sa, "_registered_command", lambda kind: "... ops/shim_autostart.py run claude ...")
+    assert sa.main(["--repo", str(repo), "restart", "claude"]) == 0
+    assert restarts == ["claude", "claude"]
+    # --dry-run only prints the plan; it never refuses
+    monkeypatch.setattr(sa, "_registered_command",
+                        lambda kind: "python.exe evals/claude_shim.py --model claude-sonnet-5 --port 8082")
+    assert sa.main(["--repo", str(repo), "restart", "claude", "--dry-run"]) == 0

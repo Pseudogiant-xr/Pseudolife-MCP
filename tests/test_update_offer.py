@@ -403,3 +403,30 @@ def test_the_update_check_names_the_command(tmp_path):
     up.current_version = lambda tier: "0.15.0"
     up.check_for_release("docker")
     assert lines == ["update available: 0.15.0 -> 99.0.0 (run: pseudolife-mcp update)"]
+
+
+def test_a_failed_client_step_is_a_failed_run(tmp_path, monkeypatch):
+    """`update --clients-only` printed a warning when the runtime install or
+    the plugin refresh failed and still exited 0, so the result file said
+    the unattended update finished and the next session was told to start
+    on a runtime that was never installed (review, 2026-09-29). A failed
+    client step now fails the run: exit 5, and the result file says so."""
+    from pseudolife_memory import client_updates, update_cli
+    report = {"shim": {"state": "failed", "detail": "pip could not build the runtime"},
+              "plugin": {"state": "current:0.15.0", "detail": ""},
+              "codex": {"state": "not-configured", "detail": ""}, "ok": False}
+    monkeypatch.setattr(client_updates, "run_steps", lambda steps, **kw: report)
+    monkeypatch.setattr(client_updates, "print_ladder", lambda r: None)
+    result = tmp_path / "state" / "r.result"
+    update = update_cli.Update(update_cli.Options(result_file=result))
+    monkeypatch.setattr(update, "_run", lambda: update.clients(None, "pseudolife-mcp==99.0.0", {}))
+    assert update.run() == 5
+    assert update.report.ok is False and update.report.exit_code == 5
+    assert result.read_text(encoding="utf-8").strip() == "5"
+    assert any("client-side step failed" in s for s in update.report.steps)
+    # a run whose steps all succeed still exits 0
+    report_ok = {**report, "shim": {"state": "installed:99.0.0", "detail": ""}, "ok": True}
+    monkeypatch.setattr(client_updates, "run_steps", lambda steps, **kw: report_ok)
+    update = update_cli.Update(update_cli.Options(result_file=result))
+    monkeypatch.setattr(update, "_run", lambda: update.clients(None, "pseudolife-mcp==99.0.0", {}))
+    assert update.run() == 0 and result.read_text(encoding="utf-8").strip() == "0"

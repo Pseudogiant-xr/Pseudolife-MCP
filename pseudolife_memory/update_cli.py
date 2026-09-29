@@ -63,6 +63,10 @@ DAEMON_SERVICE = "pseudolife-daemon"
 GHCR_IMAGE = "ghcr.io/pseudogiant-xr/pseudolife-daemon"
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 PYPI_JSON = "https://pypi.org/pypi/pseudolife-mcp/json"
+# Exit code when a client-side step (the shim runtime, the plugin cache)
+# failed after the daemon side succeeded; distinct from 1 (the daemon
+# update failed), 2 (could not run) and 3 (nothing to do).
+CLIENT_STEP_FAILED = 5
 BUNDLED_COMPOSE = Path(__file__).resolve().parent / "compose"
 _DUMP_MARKER = "PostgreSQL database dump complete"
 
@@ -679,7 +683,12 @@ class Update:
         if not self.o.as_json:
             client_updates.print_ladder(report)
         if not report["ok"]:
-            self.warn("a client-side step needs attention (see the ladder above); the daemon update itself succeeded")
+            # A failed step fails the run: the result file an unattended
+            # caller reads must not say the update finished when the
+            # runtime was never installed (review, 2026-09-29).
+            self.warn("a client-side step failed (see the ladder above); the daemon update itself succeeded")
+            self.report.ok = False
+            self.report.exit_code = CLIENT_STEP_FAILED
         self.codex_step(report.get("codex"))
 
     def codex_step(self, codex: dict | None) -> None:
