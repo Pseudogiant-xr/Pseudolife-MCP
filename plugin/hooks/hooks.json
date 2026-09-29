@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\"",
+            "command": "bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh\"",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardGuard",
             "timeout": 5
           }

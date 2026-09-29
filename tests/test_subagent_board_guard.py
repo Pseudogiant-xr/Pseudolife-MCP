@@ -218,9 +218,41 @@ def test_the_matcher_selects_only_the_board_tools(name, matches):
 def test_the_entry_runs_the_guard_and_its_codex_windows_no_op():
     _, handler = _entry()
     assert handler["type"] == "command" and handler["timeout"] == 5
-    assert handler["command"] == 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh"'
+    assert handler["command"] == (
+        'bash -n "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh" 2>/dev/null || exit 0; '
+        'exec bash "${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board-guard.sh"')
     assert handler["commandWindows"].endswith("lifecycle.ps1\" -Event SubagentBoardGuard")
     assert "async" not in handler   # a deny has to arrive before the call runs
+
+
+def _command(env, stdin):
+    _, handler = _entry()
+    return subprocess.run([bash_exe(), "-c", handler["command"]], input=stdin, env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.parametrize("child", [True, False], ids=["child", "parent"])
+@pytest.mark.parametrize("copy", ["syntax-error", "missing"])
+def test_a_broken_copy_of_the_script_blocks_nothing(tmp_path, copy, child):
+    """Exit 2 blocks the tool call, and bash also exits 2 on a syntax error:
+    a corrupted plugin-cache copy would refuse every board call, the
+    parent's included. The command syntax-checks the script first, as the
+    Stop entry does, and allows when it does not parse or is not there."""
+    plugin = tmp_path / "plugin"
+    (plugin / "hooks").mkdir(parents=True)
+    if copy == "syntax-error":
+        (plugin / "hooks/subagent-board-guard.sh").write_bytes(b"if then fi\n")
+    env = _env(tmp_path, CLAUDE_PLUGIN_ROOT=plugin.as_posix())
+    result = _command(env, _payload("memory_agents", {"action": "update"}, child=child))
+    assert (result.returncode, result.stdout) == (0, "")
+
+
+def test_the_command_runs_the_shipped_guard(tmp_path):
+    env = _env(tmp_path, CLAUDE_PLUGIN_ROOT=(ROOT / "plugin").as_posix())
+    result = _command(env, _payload("memory_message", {"action": "ack", "message_id": "m1"}))
+    assert result.returncode == 0 and _denied(result.stdout)
+    result = _command(env, _payload("memory_message", {"action": "ack", "message_id": "m1"}, child=False))
+    assert (result.returncode, result.stdout) == (0, "")
 
 
 # ── the native command: Codex's only, a no-op ───────────────────────────────
@@ -234,3 +266,30 @@ def test_the_native_command_allows_everything(tmp_path, tool, tool_input):
     result = pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "SubagentBoardGuard",
                       input=_payload(tool, tool_input), env=env)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
+@pytest.mark.parametrize("copy", ["parse-error", "before-the-event", "missing"])
+def test_a_broken_native_copy_never_answers_with_a_block(tmp_path, copy):
+    """Codex blocks a PreToolUse call on exit 2 (or a deny on stdout). A
+    lifecycle.ps1 that does not parse, a cached copy from before this event
+    (the ValidateSet refuses it) or no script at all exits 1 or 64 and
+    prints no decision (a missing script prints pwsh's usage text; measured
+    on PowerShell 7, 2026-09-30)."""
+    import shutil
+    hooks = tmp_path / "plugin" / "hooks"
+    hooks.mkdir(parents=True)
+    if copy == "parse-error":
+        (hooks / "lifecycle.ps1").write_text("param([string]$Event) if ( {\n", encoding="utf-8")
+    elif copy == "before-the-event":
+        text = (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
+        (hooks / "lifecycle.ps1").write_text(text.replace(", 'SubagentBoardGuard'", ""), encoding="utf-8")
+    _, handler = _entry()
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is not installed")
+    env = _env(tmp_path, CLAUDE_PLUGIN_ROOT=str(tmp_path / "plugin"))
+    result = subprocess.run([pwsh, "-NoProfile", "-Command", handler["commandWindows"]],
+                            input=_payload("memory_agents", {"action": "update"}), env=env,
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode not in (0, 2), result
+    assert "permissionDecision" not in result.stdout and '"decision"' not in result.stdout

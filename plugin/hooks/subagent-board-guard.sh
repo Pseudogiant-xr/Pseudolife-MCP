@@ -23,7 +23,10 @@
 # It fails open: a payload it cannot read, or a coordination opt-out
 # (PSEUDOLIFE_AGENT_COORDINATION set to anything but a yes), allows the call,
 # because before this hook the rule was an instruction only and a broken
-# guard must never block the parent. Codex loads the same hooks.json and
+# guard must never block the parent. For the same reason hooks.json runs
+# `bash -n` on this file first and allows when it does not parse or is
+# missing: bash exits 2 on a syntax error, and exit 2 blocks the call, the
+# parent's included (the Stop entry has the same check). Codex loads the same hooks.json and
 # lists this entry, but a Codex child has a board address of its own, so in
 # Codex context (the markers stop-wake.sh reads) it allows everything, as
 # lifecycle.ps1 -Event SubagentBoardGuard does on Windows.
