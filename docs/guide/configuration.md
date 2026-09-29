@@ -1354,7 +1354,20 @@ status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="receive")` without `ack`, `memory_search`), and the
-orchestrating session owns the address. The served check-in says so. The
+orchestrating session owns the address. The served check-in says so, and
+since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
+(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
+puts in a subagent's hook input, and never in the parent's, and denies that
+subagent's `memory_agents` update, claim and release and `memory_message`
+send and ack, whatever the server's name. Its list and receive pass, and so
+does every call the parent makes. The subagent reads the refusal as
+`PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
+it to ask the parent instead (probed on Claude Code 2.1.283: the child's
+update never reached the server, its list and the parent's update did). A
+payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
+anything but a yes, let the call through. Installs without the plugin keep
+the instruction only. In Codex the same entry allows everything: a Codex
+child has a board address of its own. Claude Code
 subagents get no addresses of their own: the parent names them on its own row
 with `memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
@@ -1438,7 +1451,8 @@ reason and a bad expiry; credential-shaped text is `secret_like_body`. Every pee
 carries the six `park_*` fields, `park_set_at` being the daemon's stamp.
 `memory_agents`' description asks sessions to park when they stop, and the
 [Stop hook park gate](#waking-an-idle-claude-code-session-the-stop-hook) asks
-once when a turn ends without one. (The served check-in does not say it yet:
+once when a turn ends without one (in Codex, a child thread's stop is asked
+under the child's own address). (The served check-in does not say it yet:
 it is the text the check-in bench measured, and changes only with a new run.)
 
 **The daemon decides, the shim rings.** `memory_message(action="send")` takes
@@ -1695,14 +1709,38 @@ also capped (below, and by the daemon's `wake` caps under
   decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
-- The plugin's SubagentStart and SubagentStop hooks (schema v50,
-  `subagent-board.sh`, which keeps a Claude Code session's `children`
+- The plugin's SubagentStart hook and its second SubagentStop group (schema
+  v50, `subagent-board.sh`, separate from the child park gate's group below, which keeps a Claude Code session's `children`
   current; see [Delivery and recovery](#delivery-and-recovery)) are no-ops
   in Codex: `lifecycle.ps1 -Event SubagentBoardStart|SubagentBoardStop`
   exits at once, and the bash script exits in Codex context. Codex's native
   subagents are linked to their parent by the shim instead.
   `ops/setup-codex-hooks.py` approves them when Codex lists them and treats
-  them as optional, like Stop; one disabled in `/hooks` stays disabled.
+  them as optional, like Stop, accepting either or both of SubagentStop's
+  two handlers when Codex lists them; one disabled in `/hooks` stays
+  disabled.
+- **A Codex child thread's stop (SubagentStop).** A native Codex child
+  (`collaboration.spawn_agent`) or fork has a board address of its own: the
+  shim keys it by the child's MCP `threadId` and writes the child's
+  `<key>.agent` record under that id. The root's `Stop` never sees it, since
+  Codex's hook payloads carry the root thread's `session_id` into a child.
+  The plugin's `SubagentStop` entry runs the same park gate at the child's
+  stop, keyed by the payload's `agent_id`, which names the child (it equalled
+  the child's MCP `threadId` in the 2026-09-29 probe on Codex CLI 0.158.0
+  and desktop 0.158.0-alpha.2.1): `lifecycle.ps1 -Event SubagentStop` on
+  Windows, `stop-wake.sh subagent-stop` in Codex context elsewhere. The id
+  must be the canonical lower-case UUID the shim accepts from `_meta.threadId`;
+  anything else, or no `<key>.agent` for the child, asks nothing, and the
+  root's `session_id` is never used in its place. A child gets no prompt
+  hook, so there is no turn stamp and the daemon judges the child's standing
+  record (a block when it has no live park and its status is not
+  done-shaped). A block continues the child once, with the same
+  `{"decision": "block", "reason": ...}` on stdout; its next stop carries
+  `stop_hook_active` and is not asked. The same opt-outs turn it off.
+  Claude Code fires `SubagentStop` too and runs the bash command there,
+  which does nothing. The entry is synchronous (10 s), plugin installs only,
+  like `Stop`; setup approves it with the others and treats it as optional.
+  The served message asks the child to park; it never suggests sending mail.
 
 ## Startup memory policy (`memory_policy`)
 
@@ -2968,7 +3006,9 @@ and does not pull one), the approval (`/hooks` in a Codex session, or
 `python ops/setup-codex-hooks.py --source plugin --trust yes` /
 `--codex-hook-trust yes` for an unattended install), what is off until
 then (the memory briefing, the per-turn memory and mail notes, the board
-check-in, the SessionEnd close and the Stop-hook park gate), and the
+check-in, the SessionEnd close and the Stop-hook park gate, including a
+child thread's `SubagentStop` gate, a new handler position that an
+existing install asks to approve once), and the
 check: `pseudolife-mcp doctor` reports `codex_hooks = current`. A manual
 copy (`setup-codex-hooks.py --source manual`) gets its own commands, and
 `doctor` reports `bundle-present` for it. An update whose hooks did not

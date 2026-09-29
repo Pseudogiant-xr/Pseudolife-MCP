@@ -152,7 +152,10 @@ shim inherited the host's `~/.codex/config.toml`
 the `claude` CLI's per-model default. Cross-machine reruns may measure a
 different effort setting; a rerun wanting comparability should pin it
 with the flag (or the request-level `reasoning_effort` field both shims
-now honour).
+now honour). Since 2026-09-29 the Codex shim no longer reads
+`~/.codex/config.toml` at all, so an unpinned rerun gets the CLI's
+per-model default, not the host's setting: `--reasoning-effort high`
+reproduces these runs.
 
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served
 GGUF between runs (see below). Run one, then the next.

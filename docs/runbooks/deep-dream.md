@@ -12,7 +12,7 @@ queue per tick (`memory.deep_dream.judge_batch`), each mode-gated:
 
 | queue | knob | what `auto` applies |
 |---|---|---|
-| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean; `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, and only when the second opinion came from a different model (`judge_second_model`; Console: Deep dream → Merge judge second model, live) |
+| merge proposals | `judge_mode` (`off` / `shadow` / `auto-reject` / `auto`) | single reject >= 0.8; two-vote reject (second opinion) >= 0.7 mean, only when the second opinion came from a different model (since 2026-09-30); `auto` only: two-vote accept on a non-`low_differential` row >= 0.6 mean, under the same different-model rule (`judge_second_model`, optionally on its own endpoint `judge_second_url`; Console: Deep dream → Merge judge second model / second endpoint URL, live) |
 | link proposals | `link_judge_mode` | accept >= `link_accept_min_confidence` becomes a live edge, `decided_by='dream-judge'`; reject >= `link_reject_min_confidence`; a retype is recorded (`judge_relation`) for a reviewer to apply |
 | junk proposals | `junk_judge_mode` | keep >= `junk_keep_min_confidence`; delete >= `junk_delete_min_confidence` only under the evidence bar (degree <= `junk_max_auto_degree`, at most one fact slot) |
 | lesson / world duplicates | `curation_judge_mode` | `auto-distinct`: the reversible dismissal; `auto`: also retire the losing slot (reversible — `restore_slot` / `POST /api/lessons/restore`) after folding the carry-over into the surviving lesson |
@@ -31,11 +31,19 @@ also the rate limit. Merge rows judged before this build
 carry the judge's CONFIGURED model name; second opinions stamp the SERVED
 name, so the distinct-model check also refuses a second opinion from the
 same extractor object or the same configured name — a dated served id for
-one physical model cannot pass as a second model. **Day-one behaviour on an existing bank:** with
+one physical model cannot pass as a second model. The check reads the
+SERVED names, so a second endpoint that answers `claude-fable-5` with the
+first opinion's model (the Codex shim's launch default, 2026-09-03 to
+2026-09-11) is refused too; the judge result's `served_model_mismatch` /
+`served_model_mismatches` and a warning line name any endpoint that served
+another model than it was asked for. **Day-one behaviour on an existing bank:** with
 `judge_mode: auto-reject` already in `config.yaml` (the live default since
 2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
-without any config edit — measured 8/8 on the 2026-09-02 rows — and a
+without any config edit — measured 8/8 on the 2026-09-02 rows — but since
+2026-09-30 only when the two votes came from different models: with
+neither `judge_second_model` nor `judge_second_url` set, same-model pairs are recorded and counted
+(`auto_reject_refused_same_model`) and applied by nobody. A
 wrong reject — auto or human; since 2026-09-03 every merge reject writes
 the canonical pair so the verdict outlives its proposal row — also writes
 `dismissed_pairs`, which has no expiry and no un-dismiss route (a SQL
@@ -78,7 +86,11 @@ response is bounded: when the JSON text would exceed ~250 KB, each list is
 cut to its leading 40 items (fewer if still over) and `truncated` maps each
 cut key to its full length, with a `hint`. Cut candidates and duplicate
 listings resurface on the next pass; the pending merge proposals are always
-listed in full by `memory_graph_review(action="list")`. A 316-proposal queue
+listed in full by `memory_graph_review(action="list")`, and
+`GET /api/graph/proposal-evidence?offset=&limit=` pages through them WITH the
+merge judge's evidence pack (up to 100 rows a page; `group` spans the whole
+queue; read every page before settling, since settling or a newly filed
+proposal shifts offsets). A 316-proposal queue
 with snippets was 1.12 MB on the wire on 2026-09-20, past the 1 MiB event
 limit in the SDK client, and failed as a phantom disconnect. The Console
 and the sweep tick read the unbounded service result. Review:

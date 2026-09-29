@@ -116,8 +116,12 @@ def test_hooks_json_binds_both_subagent_events_to_the_script():
     hooks = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     for event, argument, native in (("SubagentStart", "start", "SubagentBoardStart"),
                                     ("SubagentStop", "stop", "SubagentBoardStop")):
-        [group] = hooks[event]
-        [hook] = group["hooks"]
+        # A group of its own: SubagentStop also carries Codex's child park
+        # gate (stop-wake.sh subagent-stop), a separate group that stays.
+        groups = [g for g in hooks[event]
+                  if any("subagent-board.sh" in h["command"] for h in g["hooks"])]
+        assert len(groups) == 1
+        [hook] = groups[0]["hooks"]
         assert hook["command"] == f'bash "${{CLAUDE_PLUGIN_ROOT}}/hooks/subagent-board.sh" {argument}'
         assert hook["commandWindows"].endswith(f"lifecycle.ps1\" -Event {native}")
         # Async: the answer is ignored, so a subagent never waits on the
@@ -127,6 +131,9 @@ def test_hooks_json_binds_both_subagent_events_to_the_script():
         assert hook["async"] is True and "asyncRewake" not in hook
         assert hook["timeout"] == 5
         assert native in (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
+    # Both SubagentStop groups stay: the liveness entry beside the park gate.
+    commands = [h["command"] for g in hooks["SubagentStop"] for h in g["hooks"]]
+    assert len(commands) == 2 and any("stop-wake.sh" in c for c in commands)
 
 
 @pytest.mark.parametrize("event,argument", [("SubagentStart", "start"), ("SubagentStop", "stop")])

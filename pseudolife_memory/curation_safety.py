@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-import dataclasses
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -264,13 +263,13 @@ def curation_policy_fingerprint(
         service, extractor, *, observed_model: str | None = None,
 ) -> str:
     """Fingerprint every input that can change a curation judge's policy."""
-    from pseudolife_memory.memory import dream
+    from pseudolife_memory.memory import dream, review_judgments
 
     cfg = service.config.memory
     return evidence_fingerprint({
         "version": 1,
         "prompt": dream._SLOT_JUDGE_SYSTEM_PROMPT,
-        "deep_dream": dataclasses.asdict(cfg.deep_dream),
+        "deep_dream": review_judgments.signed_deep_dream(cfg.deep_dream),
         "extractor_model": getattr(extractor, "model", None),
         "extractor_url": getattr(extractor, "base_url", None),
         "max_tokens": getattr(extractor, "max_tokens", None),

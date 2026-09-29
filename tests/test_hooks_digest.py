@@ -32,7 +32,7 @@ from tests.test_codex_hooks import (
 
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
            "coordination-start.sh", "coordination-prompt.sh", "session-end.sh", "stop-wake.sh",
-           "subagent-board.sh")
+           "subagent-board-guard.sh", "subagent-board.sh")
 REPO_DIGEST = plugin_hooks.hooks_digest(ROOT / "plugin/hooks")
 
 
