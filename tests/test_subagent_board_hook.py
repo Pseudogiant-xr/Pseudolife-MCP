@@ -120,9 +120,12 @@ def test_hooks_json_binds_both_subagent_events_to_the_script():
         [hook] = group["hooks"]
         assert hook["command"] == f'bash "${{CLAUDE_PLUGIN_ROOT}}/hooks/subagent-board.sh" {argument}'
         assert hook["commandWindows"].endswith(f"lifecycle.ps1\" -Event {native}")
-        # Synchronous, so a stop can never overtake its own start, and short:
-        # the script's one request takes at most two seconds.
-        assert hook["timeout"] == 5 and "async" not in hook
+        # Async: the answer is ignored, so a subagent never waits on the
+        # daemon (PR #481 review). A stop that overtakes its own start leaves
+        # an entry the detach or HOOK_CHILD_TTL clears. No asyncRewake: this
+        # hook never wakes anything.
+        assert hook["async"] is True and "asyncRewake" not in hook
+        assert hook["timeout"] == 5
         assert native in (ROOT / "plugin/hooks/lifecycle.ps1").read_text(encoding="utf-8")
 
 
@@ -137,6 +140,15 @@ def test_one_request_names_the_session_address_and_the_subagent(tmp_path, daemon
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert daemon.requests == [("POST", "/api/hook/subagent", _query(event=argument),
                                 "Bearer fixture-token")]
+
+
+def test_an_inherited_off_variable_decides_nothing(tmp_path, daemon):
+    """The script sets its own OFF; one in the hook's environment is not a
+    switch (PR #481 review)."""
+    _agent_file(tmp_path)
+    result = _run(_env(tmp_path, daemon.url, OFF="1"), _payload(), "start")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+    assert [r[2] for r in daemon.requests] == [_query()]
 
 
 def test_the_session_record_names_the_shims_key(tmp_path, daemon):

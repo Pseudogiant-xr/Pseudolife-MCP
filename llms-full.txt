@@ -5445,17 +5445,25 @@ shim writes beside its digest (as the Stop hook does), and make one bounded
 `POST /api/hook/subagent?agent=<id>&event=start|stop&child=<agent_id>&type=<agent_type>`
 each: a start adds `{label: "<agent_type>#<first 8 of the id>", since,
 agent_id}`, a stop removes it. SubagentStart carries no task description,
-hence the label. The hooks fail open: a down daemon, a refused bearer or a
-session without an address adds nothing and never holds a subagent back. A
-parent's `children=[...]` update replaces only its own labels and keeps the
-live hook entries (`[]` clears the parent's labels); a hook never removes a
-parent label; a parent label spelled like a live hook entry names that same
-child. The cap stays eight entries in all. A hook start past it always gets
-listed, replacing the oldest parent label, else the oldest hook entry (whose
-stop was most likely missed, say by a killed session); a parent update that
-would not fit beside the live hook entries is refused with `invalid_children`
-and a detail saying how many are subagents. In Codex these hooks do nothing:
-a Codex native subagent has an address of its own (next paragraph).
+hence the label. The hooks are `async` (their answer is ignored) and fail
+open: a down daemon, a refused bearer or a session without an address adds
+nothing and never holds a subagent back. A parent's `children=[...]` update
+replaces only its own labels and keeps the live hook entries (`[]` clears
+the parent's labels); a hook never removes a parent label; a parent label
+spelled like a live hook entry names that same child. Hook entries have a
+cap of their own, eight, and never count against the parent's eight labels,
+so a parent's update is never refused because of them; past it a new start
+replaces the oldest hook entry. A hook entry whose stop never came (a killed
+session, a hook that failed open, or an async stop that overtook its own
+start) does not stay: past three hours (`HOOK_CHILD_TTL`, the attached-idle
+window) it is no longer listed and goes at the next write to the list, and a
+detach (the shim ending with its session) clears every hook entry, logged as
+an `update` by the daemon; the parent's own labels stay. An update is one
+transaction: a refused `children` (more than eight labels, a duplicate, one
+over 40 characters) applies nothing else sent with it, status and park
+included, and the `invalid_children` detail says nothing was updated. In
+Codex these hooks do nothing: a Codex native subagent has an address of its
+own (next paragraph).
 
 A Codex native subagent (spawned with `collaboration.spawn_agent`) runs on its
 own thread, so it gets its own board address like any Codex thread (see

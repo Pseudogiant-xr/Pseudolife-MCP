@@ -124,6 +124,11 @@ MAX_CHILD_LABEL = 40
 # host's ``agent_id`` (Claude Code's are 17 hex characters, measured
 # 2026-09-30) and the label ``<agent_type>#<first 8 of the id>``, the type
 # cut to fit MAX_CHILD_LABEL. SubagentStart carries no task description.
+# Hook entries have a bound of their own, the same glance-sized eight, and
+# never count against the parent's MAX_CHILDREN labels, so a parent's update
+# is never refused because of them (PR #481 review). Past it a new start
+# replaces the oldest hook entry, the one whose stop was most likely missed.
+MAX_HOOK_CHILDREN = 8
 _HOOK_CHILD_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _HOOK_CHILD_KIND = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 HOOK_CHILD_KIND_CUT = MAX_CHILD_LABEL - 9
@@ -201,6 +206,12 @@ STATUS_STALE_AFTER = 2 * 3600
 # shows a quiet session with its (by then stale) status for one more
 # ACTIVE_WINDOW, still under the 5.4 h shortest idle stretch.
 ATTACHED_IDLE_WINDOW = STATUS_STALE_AFTER + ACTIVE_WINDOW
+# v50: a hook-listed subagent older than this is no longer shown and is
+# dropped at the next write to the list: its SubagentStop was missed (a
+# killed session, a hook that failed open). The same window a quiet attached
+# peer stays listed; a subagent running longer than three hours is rarer
+# than a missed stop, and its entry comes back only with a new start.
+HOOK_CHILD_TTL = ATTACHED_IDLE_WINDOW
 # An address whose adapter registered ``resumable: false`` has no state file
 # behind it, so nothing can attach to it again once its lease lapses; it is
 # removed after this much idleness instead of AGENT_RETENTION. Same
@@ -1090,7 +1101,7 @@ class CoordinationStore:
         result = {k: row[k] for k in keys}
         # Offline rebind runs on a restored bank before any schema pass, so
         # a pre-v47 row has no children column, and a pre-v49 row no park.
-        result["children"] = row.get("children", [])
+        result["children"] = self._live_children(row.get("children", []), self.clock())
         for key, default in _PARK_CLEARED.items():
             result[key] = row.get(key, default)
         # v50: a subagent's parent, and whether the row is a subagent at all
@@ -1218,15 +1229,25 @@ class CoordinationStore:
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
             elif key == "children":
-                # Labels only: update() stamps each one's ``since``.
+                # Labels only: update() stamps each one's ``since``. Refused
+                # before the update's transaction opens, so none of the
+                # call's other fields (status, park) is applied either, and
+                # the detail says so (PR #481 review).
+                refused = CoordinationError(
+                    "invalid_children",
+                    f"at most {MAX_CHILDREN} distinct labels of at most {MAX_CHILD_LABEL} "
+                    "characters; nothing was updated")
                 if not isinstance(value, list) or len(value) > MAX_CHILDREN:
-                    raise CoordinationError("invalid_children")
+                    raise refused
                 for label in value:
-                    _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    try:
+                        _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    except CoordinationError:
+                        raise refused from None
                     # Hashed into the update event, like the status.
                     _refuse_secret(label)
                 if len(set(value)) != len(value):
-                    raise CoordinationError("invalid_children")
+                    raise refused
             elif key == "park_reason":
                 # None (REST null) and "" (the tool's spelling of it) both
                 # clear the park.
@@ -1321,24 +1342,27 @@ class CoordinationStore:
             return self.authenticate(principal, agent_id, credential)
 
     @staticmethod
-    def _parent_children(current, labels, now):
-        """The children list after the parent names ``labels`` (v47), with
-        the entries the subagent hooks keep (v50, those carrying an
-        ``agent_id``) left as they are: the parent's replace-all rewrites
-        only its own labels, and a label spelled like a live hook entry
-        names that same child. Parent labels first, then the hook entries.
-        Eight in all: a list that would not fit beside the live hook
-        entries is refused, saying so."""
-        hooked = [child for child in current if child.get("agent_id")]
+    def _live_children(children, now):
+        """``children`` without the hook entries (v50, those carrying an
+        ``agent_id``) older than HOOK_CHILD_TTL: their stop was missed."""
+        return [child for child in children
+                if not child.get("agent_id") or now - child["since"] < HOOK_CHILD_TTL]
+
+    @classmethod
+    def _parent_children(cls, current, labels, now):
+        """The children list after the parent names ``labels`` (v47, at
+        most MAX_CHILDREN, checked in ``_fields``), with the live entries
+        the subagent hooks keep (v50) left as they are: the parent's
+        replace-all rewrites only its own labels, and a label spelled like a
+        live hook entry names that same child. Parent labels first, then
+        the hook entries, which have their own bound (MAX_HOOK_CHILDREN),
+        so nothing here can refuse the update."""
+        hooked = [child for child in cls._live_children(current, now) if child.get("agent_id")]
         taken = {child["label"] for child in hooked}
         # A label carried over keeps the time it first appeared.
         since = {child["label"]: child["since"] for child in current if not child.get("agent_id")}
         named = [{"label": label, "since": since.get(label, now)}
                  for label in labels if label not in taken]
-        if len(named) + len(hooked) > MAX_CHILDREN:
-            raise CoordinationError(
-                "invalid_children",
-                f"at most {MAX_CHILDREN} children; {len(hooked)} are subagents the hooks list")
         return named + hooked
 
     def _hook_children_row(self, agent_id, principal):
@@ -1359,9 +1383,11 @@ class CoordinationStore:
         ``child`` (its host ``agent_id``) of ``kind`` (its ``agent_type``)
         among the children of ``agent_id``, the session address the hook
         read beside its digest. Idempotent per child. Always listed: past
-        MAX_CHILDREN the entry replaces the oldest parent label, else the
-        oldest hook entry, whose stop was most likely missed. An address the
-        caller's principal does not own, or none at all, is not touched."""
+        MAX_HOOK_CHILDREN hook entries it replaces the oldest of them, whose
+        stop was most likely missed; parent labels are never touched, except
+        one spelled like the new entry, which names the same child. Entries
+        past HOOK_CHILD_TTL go at this write. An address the caller's
+        principal does not own, or none at all, is not touched."""
         if not isinstance(child, str) or not _HOOK_CHILD_ID.fullmatch(child):
             raise CoordinationError("invalid_children")
         if not isinstance(kind, str) or (kind and not _HOOK_CHILD_KIND.fullmatch(kind)):
@@ -1373,15 +1399,14 @@ class CoordinationStore:
             row = self._hook_children_row(agent_id, principal)
             if row is None:
                 return {"recorded": False, "reason": "unknown_agent"}
-            current = row["children"]
+            now = self.clock()
+            current = self._live_children(row["children"], now)
             if any(entry.get("agent_id") == child for entry in current):
                 return {"recorded": True, "changed": False}
-            now = self.clock()
             children = [entry for entry in current if entry["label"] != label]
-            if len(children) >= MAX_CHILDREN:
-                named = [entry for entry in children if not entry.get("agent_id")]
-                oldest = min(named or children, key=lambda entry: entry["since"])
-                children.remove(oldest)
+            hooked = [entry for entry in children if entry.get("agent_id")]
+            if len(hooked) >= MAX_HOOK_CHILDREN:
+                children.remove(min(hooked, key=lambda entry: entry["since"]))
             children.append({"label": label, "since": now, "agent_id": child})
             self._set_hook_children(row, children, principal, now)
         return {"recorded": True, "changed": True}
@@ -1395,10 +1420,12 @@ class CoordinationStore:
             row = self._hook_children_row(agent_id, principal)
             if row is None:
                 return {"recorded": False, "reason": "unknown_agent"}
-            children = [entry for entry in row["children"] if entry.get("agent_id") != child]
-            if len(children) == len(row["children"]):
+            now = self.clock()
+            live = self._live_children(row["children"], now)
+            children = [entry for entry in live if entry.get("agent_id") != child]
+            if len(children) == len(live):
                 return {"recorded": False, "reason": "not_listed"}
-            self._set_hook_children(row, children, principal, self.clock())
+            self._set_hook_children(row, children, principal, now)
         return {"recorded": True, "changed": True}
 
     def list_agents(self, principal, agent_id, credential, *, project=None, task=None, limit=50):
@@ -2085,9 +2112,21 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET attachment_id=NULL,lease_until=NULL,"
                 "generation=generation+1,lifecycle='detached' WHERE agent_id=%s", (agent_id,))
-            self._append([self._event("detach", {"generation": generation}, principal=principal,
-                                      agent_id=agent_id, project=row["project"],
-                                      task=row["task"])], self.clock())
+            events = [self._event("detach", {"generation": generation}, principal=principal,
+                                  agent_id=agent_id, project=row["project"], task=row["task"])]
+            # v50: a detach is the shim ending with its session, and with it
+            # every subagent the hooks listed under it; the parent's own
+            # labels stay, as they always have.
+            named = [child for child in row.get("children", []) if not child.get("agent_id")]
+            if len(named) != len(row.get("children", [])):
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET children=%s WHERE agent_id=%s",
+                    (Jsonb(named), agent_id))
+                events.append(self._event(
+                    "update", {"fields": {"children": named}, "before": {"children": row["children"]}},
+                    actor="daemon", principal=principal, agent_id=agent_id,
+                    project=row["project"], task=row["task"]))
+            self._append(events, self.clock())
         return {"detached": True}
 
     def _resolve_agent(self, value, *, missing, ambiguous):

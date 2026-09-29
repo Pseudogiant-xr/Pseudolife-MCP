@@ -29,12 +29,15 @@ setting() {
     [ -n "$1" ] || return 0
     printf %s "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'
 }
+# Set here, never inherited: an OFF in the hook's environment must not
+# decide anything (as in stop-wake.sh).
+OFF=""
 case "$(setting "${PSEUDOLIFE_AGENT_COORDINATION:-}")" in ''|1|true|yes|on) ;; *) OFF=1 ;; esac
 if [ "${PSEUDOLIFE_CODEX_HOOK:-}" = 1 ] ||
         { [ -n "${PLUGIN_ROOT:-}" ] && [ "${PLUGIN_ROOT}" = "${CLAUDE_PLUGIN_ROOT:-}" ]; }; then
     OFF=1
 fi
-if [ -n "${OFF:-}" ] || [ "${CLAUDECODE:-}" != "1" ]; then
+if [ -n "$OFF" ] || [ "${CLAUDECODE:-}" != "1" ]; then
     # Drain the payload with a builtin: a cheap exit.
     while IFS= read -r _; do :; done
     exit 0

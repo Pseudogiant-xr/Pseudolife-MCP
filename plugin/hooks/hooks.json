@@ -88,6 +88,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" start",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStart",
+            "async": true,
             "timeout": 5
           }
         ]
@@ -100,6 +101,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-board.sh\" stop",
             "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentBoardStop",
+            "async": true,
             "timeout": 5
           }
         ]
