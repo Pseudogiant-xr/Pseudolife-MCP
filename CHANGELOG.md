@@ -113,6 +113,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `memory.dream.extractor_reasoning_effort`.
   [Reasoning effort](docs/guide/dreaming.md#reasoning-effort--the-dreamers-thinking-budget)
 
+### Fixed (2026-09-29 — the dream-alias screen stops filing numbered siblings and unrelated names)
+- The embedding alias screen that files merge proposals for names a dream
+  just minted (`_propose_dream_alias_candidates`) was the review queue's
+  noisiest source. In the 2026-09-29 triage of 1,016 pending merge
+  proposals it had filed 574 proposals
+  (16 accepted, 524 rejected, 34 left). Two causes:
+  - It never applied `merge_veto`, the name-shape vetoes the write-dedup and
+    analyzer filings already use, so numbered siblings like two PR numbers
+    (which embed near-identically) were proposed as duplicates. The screen
+    now applies them. Replayed over the triage verdicts, the veto
+    vetoes 36 of its rejected proposals and none of its accepted ones.
+  - `memory.dream.alias_candidate_min_cosine` (0.5) was calibrated on
+    all-MiniLM-L6-v2 and went stale with the Qwen3-Embedding-0.6B swap,
+    which scores unrelated short names above it. The default is now 0.7:
+    past the veto the screen keeps 420 of the remaining 538 and
+    loses one accepted paraphrase (cosine 0.655);
+    0.8 would keep 194 but lose 6 of its 16 true duplicates, so 0.7 is the
+    conservative step. A real-model test pins that the screen still files
+    the paraphrase it was built for and drops an unrelated pair.
+- `evals/merge_detector_replay.py` replays labelled merge verdicts through
+  the vetoes and the threshold; its input carries bank names and stays in
+  the gitignored `evals/data/`, its artifact
+  (`evals/results/merge-detector-replay-20260929.json`) carries ids,
+  detectors, scores and verdicts only. Labels: the 2026-09-29 triage (eight
+  read-only Opus slice judges, a 0.8 accept floor applied in the main
+  thread); `leave` rows are unlabelled.
+
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install
   --no-deps` plus `SHIM_REQUIREMENTS`) lacked `httpx` and `numpy`, so the

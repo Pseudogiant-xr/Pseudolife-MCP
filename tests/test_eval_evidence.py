@@ -3274,6 +3274,54 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# The 2026-09-29 merge-detector replay: the dream-alias screen's filing
+# numbers under the merge veto and the recalibrated cosine threshold.
+REPLAY_0929 = "evals/results/merge-detector-replay-20260929.json"
+
+
+def _alias(block, field):
+    return lambda d: d["by_detector"]["dream-alias"][block][field]
+
+
+def _alias_at(t, field):
+    def pick(d):
+        (row,) = [c for c in d["dream_alias_threshold_curve_after_veto"]
+                  if c["min_cosine"] == t]
+        return row["filed"]["n"] if field == "filed" else row[field]
+    return pick
+
+
+for _cid, _needle, _val, _stated, _places in [
+    ("replay-alias-filed", "had filed 574 proposals", _alias("all", "n"), 574, 0),
+    ("replay-alias-accepted", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "accept"), 16, 0),
+    ("replay-alias-rejected", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "reject"), 524, 0),
+    ("replay-alias-left", "(16 accepted, 524 rejected, 34 left)",
+     _alias("all", "leave"), 34, 0),
+    ("replay-alias-vetoed", "vetoes 36 of its rejected proposals and none",
+     _alias("vetoed", "reject"), 36, 0),
+    ("replay-alias-vetoed-accepts", "vetoes 36 of its rejected proposals and none",
+     _alias("vetoed", "accept"), 0, 0),
+    ("replay-alias-after-veto", "keeps 420 of the remaining 538",
+     _alias("passes_veto", "n"), 538, 0),
+    ("replay-alias-at-07", "keeps 420 of the remaining 538",
+     _alias_at(0.7, "filed"), 420, 0),
+    ("replay-alias-lost-at-07", "loses one accepted paraphrase (cosine 0.655)",
+     _alias_at(0.7, "accepts_lost"), 1, 0),
+    ("replay-alias-lost-score", "loses one accepted paraphrase (cosine 0.655)",
+     lambda d: min(r["similarity"] for r in d["rows"]
+                   if r["detector"] == "dream-alias" and not r["veto"]
+                   and r["verdict"] == "accept"), 0.655, 3),
+    ("replay-alias-at-08", "0.8 would keep 194 but lose 6",
+     _alias_at(0.8, "filed"), 194, 0),
+    ("replay-alias-lost-at-08", "0.8 would keep 194 but lose 6",
+     _alias_at(0.8, "accepts_lost"), 6, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(REPLAY_0929,),
+        value=_val, stated=_stated, places=_places))
+
 CLAIMS.append(Claim(
     id="queue-ladder-curation-keep-precision", doc=CHANGELOG,
     needle="precision was 0.5625", artifacts=(LADDER_0902,),
