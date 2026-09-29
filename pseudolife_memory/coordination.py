@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 _PARAMETERS = {
     "context": {"agent_id", "nonce"},
-    "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled"},
+    "register": {"label", "project", "task", "status", "episode", "capabilities", "wake_enabled",
+                 "parent_thread"},
     "update": {"project", "task", "status", "expect", "children", "park_reason", "park_needs",
                "park_clear_by", "park_resume", "park_expires"},
     "agents": {"project", "task", "limit"},
@@ -87,6 +88,9 @@ PUBLIC_ERROR_CODES = frozenset({
     "fanout_too_large", "no_recipients",
     # v49: the park record and the send's wake fields.
     "invalid_park", "invalid_clears", "invalid_urgent",
+    # v50: a malformed parent thread at register, and a send from a
+    # subagent's own address (its parent sends for it).
+    "invalid_parent", "child_send_refused",
 })
 
 
@@ -266,6 +270,37 @@ def woke(service, headers: Mapping[str, str], *, agent, token_map=None, token=No
         with service._coordination_lock:
             result = _store(service).woke(agent, principal)
     except Exception:  # noqa: BLE001 - telemetry never surfaces an error to the hook
+        return ""
+    return "ok\n" if result.get("recorded") else ""
+
+
+def subagent(service, headers: Mapping[str, str], *, agent, event, child, kind=None,
+             token_map=None, token=None) -> str:
+    """Body for ``POST /api/hook/subagent?agent=<id>&event=start|stop&
+    child=<agent_id>&type=<agent_type>`` (v50): the plugin's SubagentStart
+    and SubagentStop hooks keeping a Claude Code session's children list
+    current. ``agent`` is the session's board address, read beside its
+    digest; ``child`` and ``type`` are the hook payload's ``agent_id`` and
+    ``agent_type``. ``ok`` when the list changed or already held the child;
+    empty wherever the board is not served to this bearer, for an address
+    that is not a 32-hex id or that the bearer's principal does not own, for
+    a malformed child, and on any failure. The hook ignores the answer: a
+    liveness entry never holds a subagent back."""
+    if unavailable_reason(service, headers, token_map=token_map, token=token) is not None:
+        return ""
+    if not (isinstance(agent, str) and len(agent) == 32
+            and all(c in "0123456789abcdef" for c in agent)) or event not in {"start", "stop"}:
+        return ""
+    try:
+        principal = authenticated_principal(headers, token_map=token_map, token=token)
+        _ensure_tier(service, full=False)
+        with service._coordination_lock:
+            store = _store(service)
+            if event == "start":
+                result = store.subagent_started(agent, principal, child=child, kind=kind or "")
+            else:
+                result = store.subagent_stopped(agent, principal, child=child)
+    except Exception:  # noqa: BLE001 - liveness never surfaces an error to the hook
         return ""
     return "ok\n" if result.get("recorded") else ""
 

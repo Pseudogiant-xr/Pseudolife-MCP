@@ -6,6 +6,66 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-09-30 — subagents show on the board as their parent's children, not as peers; schema v50)
+- **Behaviour change for Codex users: a Codex subagent can no longer send
+  board mail.** A Codex native subagent (`collaboration.spawn_agent`) has
+  its own thread and so its own board address, and until now looked like
+  an independent session that could mail anyone (2026-09-23..30: 58 board
+  rows were such children, 2 of them with a task). Maintainer decision
+  2026-09-30: subagents are liveness information on their parent, not
+  peers. `memory_message(action="send")` from a subagent's address is now
+  refused with `child_send_refused` ("a subagent does not send board mail;
+  ask your parent session"; HTTP 403 on REST). It still receives and
+  acknowledges its own mail and sets its own status and park record; a
+  peer that sees a subagent working on something it is touching messages
+  the parent.
+- Schema v50: `coordination_agents.parent_thread` (the parent Codex thread
+  a native child registered with, set once) and `parent_agent_id` (the
+  parent's row). The shim reads the parent from Codex's
+  `x-codex-turn-metadata` (`thread_source: "subagent"`, `thread_id` equal
+  to the call's `threadId`, a canonical `parent_thread_id`; measured on
+  Codex 0.158.0 CLI and desktop) and passes it at register; malformed
+  metadata is ignored. A user's fork of a conversation carries no subagent
+  source and stays a peer. The daemon links the child to the most recently
+  active live Codex row for that thread under the same principal (a thread
+  that registered twice), or, when the parent
+  registers later, links it then (a logged `update` by the daemon); prune
+  unlinks the children of a parent it removes, and the parent's next
+  registration relinks them. No extra row or mailbox is allocated.
+  `memory_agents` list, register and update results carry
+  `parent_agent_id` and `subagent`. A shim newer than its daemon registers
+  the child without the link. The columns are added only when missing,
+  like v47's and v49's. Additive/idempotent; existing rows read NULL.
+- Claude Code: the plugin's new SubagentStart and SubagentStop hooks
+  (`plugin/hooks/subagent-board.sh`) keep a session's `children` current
+  on their own: one bounded `POST /api/hook/subagent` per event adds or
+  removes an entry `{label: "<agent_type>#<id8>", since, agent_id}` on the
+  session's row (found through the `<key>.agent` file the shim writes, as
+  the Stop hook finds it). SubagentStart carries no task description, so
+  the label is the type and a short id. Both are `async` (the answer is
+  ignored) and fail open (exit 0, no output). A parent's
+  `memory_agents(action="update", children=[...])` now replaces only its
+  own labels and keeps the live hook entries; a hook never removes a
+  parent label. Hook entries have their own cap of eight and never count
+  against the parent's eight labels, so a parent update is never refused
+  because of them; past it a new start replaces the oldest hook entry. A
+  hook entry older than three hours (`HOOK_CHILD_TTL`, the attached-idle
+  window) is no longer listed and goes at the next write, and a detach
+  (the shim ending with its session) clears them all, logged by the
+  daemon: a killed session cannot list dead subagents for long. A refused
+  `children` update applies nothing else sent in the same call (status,
+  park), and its `invalid_children` detail now says so. In Codex both
+  hooks are no-ops (lifecycle.ps1
+  exits at once; the bash script exits in Codex context), and
+  `ops/setup-codex-hooks.py` treats them as optional, like Stop. SubagentStop
+  now carries two plugin handlers, this one and Codex's child park gate (a
+  separate group, a no-op in Claude Code); setup accepts either or both
+  listed, and each stays a no-op in the other host.
+- `board-audit stats` counts only the model's own board actions as a
+  woken session acting: the hooks' children updates (actor `hook`) and the
+  daemon's parent links (actor `daemon`) are left out.
+  [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
+
 ### Added (2026-09-30 — status and the session briefing say when the merge-proposal queue is piling up)
 - After a triage settled it on 2026-09-02, the pending merge-proposal
   queue reached 1,016 by 2026-09-29 (the merge judge in `shadow` as a

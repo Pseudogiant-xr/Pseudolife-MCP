@@ -241,15 +241,25 @@ def test_the_text_a_child_is_shown_never_suggests_sending():
 
 # --- setup ------------------------------------------------------------------
 
+def _park_gate(hook):
+    """The listed SubagentStop handler that is this park gate (Codex lists
+    the commandWindows spelling)."""
+    return hook["eventName"] == "subagentStop" and hook["command"].endswith("-Event SubagentStop")
+
+
 @pytest.mark.parametrize("listed", ["all", "without-subagent-stop"])
 def test_setup_approves_the_child_gate_and_keeps_it_optional(tmp_path, monkeypatch, listed):
     """Codex 0.158 lists the plugin's SubagentStop entry and setup approves
     it with the rest; a Codex that does not list it still reaches ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    assert [h["eventName"] for h in hooks].count("subagentStop") == 1
+    # SubagentStop carries two plugin handlers since v50: this park gate and
+    # Claude Code's subagent liveness entry (a no-op in Codex). This test is
+    # about the gate.
+    assert [h["eventName"] for h in hooks].count("subagentStop") == 2
+    assert len([h for h in hooks if _park_gate(h)]) == 1
     if listed != "all":
-        hooks = [h for h in hooks if h["eventName"] != "subagentStop"]
+        hooks = [h for h in hooks if not _park_gate(h)]
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
@@ -261,7 +271,7 @@ def test_setup_approves_the_child_gate_and_keeps_it_optional(tmp_path, monkeypat
 def test_a_disabled_subagent_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    [child] = [h for h in hooks if h["eventName"] == "subagentStop"]
+    [child] = [h for h in hooks if _park_gate(h)]
     child["enabled"] = False
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())

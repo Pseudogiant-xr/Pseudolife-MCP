@@ -239,10 +239,10 @@ PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]
 # and lifecycle.ps1: SHA-256 over `name NUL bytes NUL`, CRLF read as LF.
 hooks_digest() {  # $1 = directory
     local name
-    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh; do
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh subagent-board.sh; do
         [ -f "$1/$name" ] || return 1
     done
-    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh; do
+    for name in lifecycle.ps1 session-start.sh user-prompt-submit.sh coordination-start.sh coordination-prompt.sh session-end.sh stop-wake.sh subagent-board-guard.sh subagent-board.sh; do
         printf '%s\0' "$name"; tr -d '\r' < "$1/$name"; printf '\0'
     done | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64
 }

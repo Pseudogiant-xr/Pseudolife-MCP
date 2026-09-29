@@ -831,7 +831,7 @@ def _plugin_handler_keys():
     manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))
     event_keys = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit",
                   "SessionEnd": "session_end", "Stop": "stop", "SubagentStop": "subagent_stop",
-                  "PreToolUse": "pre_tool_use"}
+                  "PreToolUse": "pre_tool_use", "SubagentStart": "subagent_start"}
     return [f"pseudolife-memory@pseudolife-mcp:hooks/hooks.json:{event_keys[event]}:{g}:{h}"
             for event, groups in manifest["hooks"].items()
             for g, group in enumerate(groups) for h, _ in enumerate(group["hooks"])]

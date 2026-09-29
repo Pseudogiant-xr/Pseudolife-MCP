@@ -208,15 +208,18 @@ def test_plugin_runtime_accepts_both_manifest_platform_commands_and_root_expansi
 
 @pytest.mark.parametrize("dropped", [
     (), ("stop",), ("subagentStop",), ("preToolUse",), ("subagentStop", "preToolUse"),
-    ("stop", "subagentStop", "preToolUse")],
+    ("subagentStart",), ("subagentStart", "subagentStop"),
+    ("stop", "subagentStart", "subagentStop", "preToolUse")],
     ids=["all", "without-stop", "without-subagent-stop", "without-pre-tool-use",
-         "without-both-child-hooks", "lifecycle-only"])
+         "without-both-child-hooks", "without-subagent-start", "without-subagent-events",
+         "lifecycle-only"])
 def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, dropped):
     """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
     async hooks outside SessionEnd and omit Stop. Codex 0.158 lists the
     SubagentStop child park gate and the PreToolUse subagent board guard (a
-    no-op in Codex) too. Every combination of the optional entries reaches
-    ready."""
+    no-op in Codex) too, and may list the v50 subagent liveness entries
+    (SubagentStart and a second SubagentStop, no-ops in Codex). Every
+    combination of the optional entries reaches ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     hooks = [h for h in hooks if h["eventName"] not in dropped]
@@ -228,19 +231,91 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, d
         setup.dotted("hooks", "state", h["key"], "trusted_hash") for h in hooks)
 
 
-def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
-    """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    every other hook (the six memory, memory-policy and coordination hooks,
-    the child park gate and the subagent board guard) is still approved."""
+@pytest.mark.parametrize("disabled", [("stop",), ("subagentStart", "subagentStop"),
+                                      ("preToolUse",)])
+def test_a_disabled_no_op_hook_does_not_block_setup(tmp_path, monkeypatch, disabled):
+    """A user who disabled an optional entry in /hooks (Stop, the subagent
+    hooks, or the PreToolUse guard) keeps that choice; the six memory,
+    memory-policy and coordination hooks, and every other optional entry,
+    are still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    [stop] = [h for h in hooks if h["eventName"] == "stop"]
-    stop["enabled"] = False
+    off = [h for h in hooks if h["eventName"] in disabled]
+    assert {h["eventName"] for h in off} == set(disabled)
+    for hook in off:
+        hook["enabled"] = False
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == len(hooks) - 1 == 8
-    assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
+    assert len(writes[0]["edits"]) == len(hooks) - len(off)
+    lifecycle = [h for h in hooks if h["eventName"] in setup.EVENTS]
+    assert len(lifecycle) == 6 and all(
+        any(h["key"] in edit["keyPath"] for edit in writes[0]["edits"]) for h in lifecycle)
+    assert all(h["key"] not in edit["keyPath"] for h in off for edit in writes[0]["edits"])
+
+
+def test_setup_knows_how_many_handlers_each_optional_event_ships():
+    """complete_set accepts 1..N listed handlers of an optional event; N
+    must be what hooks.json carries (SubagentStop has two since v50: the
+    Codex child park gate and the Claude Code liveness entry)."""
+    shipped = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    for event, most in setup.OPTIONAL_PLUGIN_EVENTS.items():
+        name = setup.PLUGIN_EVENTS[event]
+        assert most == sum(len(group["hooks"]) for group in shipped[name]), name
+
+
+@pytest.mark.parametrize("group", [0, 1], ids=["only-liveness", "only-park-gate"])
+def test_a_codex_listing_one_of_the_two_subagent_stop_handlers_reaches_ready(
+        tmp_path, monkeypatch, group):
+    """A Codex that skips async hooks lists only SubagentStop's park gate
+    (group 0), not the async liveness entry (group 1); the other way round
+    is accepted too. What is listed is approved; nothing else is."""
+    seed_user_files(tmp_path)
+    hooks = [h for h in plugin_hooks(tmp_path)
+             if not (h["eventName"] == "subagentStop" and h["key"].endswith(f"-{group}-0"))]
+    assert sum(h["eventName"] == "subagentStop" for h in hooks) == 1
+    writes = approving_runtime(monkeypatch, tmp_path, hooks)
+    result = setup.setup(options())
+    assert result["status"] == "ready", result
+    assert len(writes[0]["edits"]) == len(hooks)
+
+
+def test_one_optional_handler_listed_twice_is_refused(tmp_path):
+    """SubagentStop may list two handlers, so the count alone would admit
+    the park gate twice (its Windows and its bash spelling) in place of the
+    gate and the liveness entry. Each listed handler must be a distinct
+    manifest handler (vet_plugin's ``matches[0] in seen[event]``)."""
+    hooks = plugin_hooks(tmp_path)
+    [gate] = [h for h in hooks if h["eventName"] == "subagentStop"
+              and h["command"].endswith("-Event SubagentStop")]
+    manifest = json.loads((tmp_path / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    bash = next(h["command"] for g in manifest["SubagentStop"] for h in g["hooks"]
+                if "stop-wake.sh" in h["command"])
+    twin = {**gate, "key": gate["key"] + "-bash", "command": bash}
+    hooks = [h for h in hooks if not (h["eventName"] == "subagentStop" and h is not gate)]
+    hooks.append(twin)
+    assert setup.complete_set(hooks, "plugin")  # the count alone admits it
+    with pytest.raises(setup.SetupError, match="differ"):
+        setup.vet_plugin(hooks)
+
+
+def test_more_listed_handlers_than_the_plugin_ships_are_refused(tmp_path):
+    hooks = plugin_hooks(tmp_path)
+    extra = dict(next(h for h in hooks if h["eventName"] == "subagentStop"))
+    extra.update(key="plugin-SubagentStop-9-0", command="pwsh -File other.ps1")
+    assert not setup.complete_set(hooks + [extra], "plugin")
+
+
+def test_the_plugin_byte_check_covers_the_subagent_script(tmp_path, monkeypatch):
+    """subagent-board.sh is Codex's non-Windows subagent command, run under
+    the trust setup writes: a changed copy is skew."""
+    original = seed_user_files(tmp_path)
+    hooks = plugin_hooks(tmp_path)
+    (tmp_path / "plugin/hooks/subagent-board.sh").write_text("exit 2\n")
+    mock_runtime(monkeypatch, tmp_path, user_config(tmp_path), hooks)
+    result = setup.setup(options())
+    assert result["status"] == "unavailable" and "differ" in result["recovery"], result
+    assert all(path.read_bytes() == data for path, data in original.items())
 
 
 def test_a_disabled_subagent_board_guard_does_not_block_setup(tmp_path, monkeypatch):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import aclosing
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -32,6 +33,53 @@ def thread_id_from_meta(meta) -> str | None:
         return None
     canonical = str(parsed)
     return canonical if candidate == canonical else None
+
+
+# Codex's per-turn metadata is a few hundred bytes (0.158.0, 2026-09-29); a
+# JSON string past this is not read at all.
+MAX_TURN_METADATA = 8192
+
+
+def _canonical_uuid(candidate) -> str | None:
+    if not isinstance(candidate, str):
+        return None
+    try:
+        canonical = str(uuid.UUID(candidate))
+    except (ValueError, AttributeError):
+        return None
+    return canonical if candidate == canonical else None
+
+
+def parent_thread_from_meta(meta, thread_id) -> str | None:
+    """The parent thread of a Codex native subagent, or ``None``.
+
+    Codex 0.158.0 (CLI and desktop, measured 2026-09-29) puts
+    ``x-codex-turn-metadata`` beside ``threadId`` in every tools/call
+    ``_meta``; a child spawned with ``collaboration.spawn_agent`` carries
+    ``thread_source: "subagent"``, its own ``thread_id`` and the spawning
+    thread's ``parent_thread_id``. Only that shape counts: the metadata's
+    thread must be ``thread_id`` (the transport thread the caller already
+    validated), the parent a different canonical UUID. Any
+    ``subagent_kind`` is accepted, since every kind is a model-spawned child
+    of that parent; a user's fork of a conversation carries no subagent
+    source and stays a peer. Anything malformed is ignored: the call goes
+    on without a link, never with an error."""
+    if not isinstance(meta, dict) or thread_id is None:
+        return None
+    turn = meta.get("x-codex-turn-metadata")
+    if isinstance(turn, str):
+        if len(turn) > MAX_TURN_METADATA:
+            return None
+        try:
+            turn = json.loads(turn)
+        except ValueError:
+            return None
+    if not isinstance(turn, dict) or turn.get("thread_source") != "subagent":
+        return None
+    if _canonical_uuid(turn.get("thread_id")) != thread_id:
+        return None
+    parent = _canonical_uuid(turn.get("parent_thread_id"))
+    return parent if parent is not None and parent != thread_id else None
 
 
 def default_state_dir() -> Path:
@@ -229,10 +277,18 @@ class CodexCoordinationRegistry:
             except Exception:  # noqa: BLE001 - never fail or error the user's tool call
                 pass
 
-    async def get(self, thread_id: str, *, snapshot=None):
+    async def get(self, thread_id: str, *, snapshot=None, parent_thread=None):
+        """The adapter for ``thread_id``, attached on first use.
+        ``parent_thread`` (from ``parent_thread_from_meta``) is registered
+        with a native subagent's new address, linking it to its parent; an
+        attached thread keeps what it registered with."""
         canonical = thread_id_from_meta({"threadId": thread_id})
         if canonical is None:
             return None
+        if parent_thread is not None and (
+                thread_id_from_meta({"threadId": parent_thread}) is None
+                or parent_thread == canonical):
+            parent_thread = None
         if self.provider is not None and snapshot is None:
             try:
                 snapshot = self.provider.snapshot()
@@ -246,7 +302,7 @@ class CodexCoordinationRegistry:
                 return None
             self._startups.add(startup)
         try:
-            return await self._get_started(canonical, snapshot)
+            return await self._get_started(canonical, snapshot, parent_thread)
         finally:
             async with self._entry_lock:
                 self._startups.discard(startup)
@@ -271,7 +327,7 @@ class CodexCoordinationRegistry:
             hint = "Coordination: identity attachment unavailable; saved state was preserved. Check bank access or wait for the prior attachment lease to expire."
         self._failure_hints[thread_id] = hint
 
-    async def _get_started(self, thread_id: str, snapshot=None):
+    async def _get_started(self, thread_id: str, snapshot=None, parent_thread=None):
         if snapshot is not None and self._retry_generations.get(thread_id) != snapshot.generation:
             self._retry_after.pop(thread_id, None)
         existing = self._adapters.get(thread_id)
@@ -314,6 +370,8 @@ class CodexCoordinationRegistry:
                                    self.state_dir, self.url, token, thread_id)}
                 else:
                     path = state_path_for_thread(self.state_dir, self.url, token, thread_id)
+                if parent_thread is not None:
+                    options["parent_thread"] = parent_thread
                 _prepare_private_dir(self.state_dir, path.parent)
                 delivery = await self._verified_delivery(thread_id)
                 candidate_adapter = self._factory()(
