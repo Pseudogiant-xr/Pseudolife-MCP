@@ -80,6 +80,18 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -n \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" 2>/dev/null || exit 0; exec bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-wake.sh\" subagent-stop",
+            "commandWindows": "pwsh -NoProfile -File \"$env:CLAUDE_PLUGIN_ROOT/hooks/lifecycle.ps1\" -Event SubagentStop",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
