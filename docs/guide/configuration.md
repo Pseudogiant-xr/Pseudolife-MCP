@@ -1959,6 +1959,18 @@ every variant.
   compare; divergences land in `stats()` as
   `slot_index_shadow_divergences`. `0.0` disables, `1.0` checks every
   query (dev/debug).
+- **Bulk delete confirmation at 20** (`memory.delete_confirm_threshold =
+  20`, since 2026-09-29) — `memory_forget(scope="memory")` and
+  `POST /api/delete` refuse a match larger than this unless the call
+  carries `confirm_bulk: true`; the refusal removes nothing and reports
+  `would_delete`, the threshold and up to 20 of the matched texts. The
+  guard counts matches whatever filters produced them (a broad substring
+  is as dangerous as a bare source). 20 is also the `deleted_texts`
+  sample cap, so an unconfirmed delete always lists everything it removed.
+  `0` disables. Added after a `text` + `source` delete, under the
+  OR-combination of filters then in force, removed every entry in the
+  source (1,399; restored from backup); filters now narrow the match, AND
+  across kinds like `memory_search`.
 - **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
   per-dream cap on quarantined pairs re-offered to the extractor for
   typing, shown only the notes where both entities co-occur; a typed

@@ -602,6 +602,135 @@ class TestDelete:
         assert "To-be-deleted" not in texts
         assert "To-be-kept" in texts
 
+    # -- filters narrow (AND across kinds) -----------------------------------
+    # 2026-09-29: a caller sent ``{"text": "probe", "source": "status"}``
+    # meaning "the probe entry in source status" and the OR-combination then
+    # in force deleted every status-source entry (1399, restored from
+    # backup). Every other filter API in the service ANDs across kinds
+    # (memory_search's sources/bands/tags), and so does delete now.
+
+    def test_delete_text_and_source_removes_only_the_intersection(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store("probe", source="status")
+        pristine_service.store("probe", source="notes")
+        pristine_service.store("real status line", source="status")
+        result = pristine_service.delete(text="probe", source="status")
+        assert result["deleted_count"] == 1
+        recent = pristine_service.recent(n=10)
+        left = {(e["text"], e["source"]) for e in recent["entries"]}
+        assert left == {("probe", "notes"), ("real status line", "status")}
+
+    def test_delete_substring_and_tag_removes_only_the_intersection(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store("junk alpha", source="x", tags=["tmp"])
+        pristine_service.store("junk beta", source="x", tags=["keep"])
+        pristine_service.store("gold gamma", source="x", tags=["tmp"])
+        result = pristine_service.delete(substring="junk", tag="tmp")
+        assert result["deleted_count"] == 1
+        assert result["deleted_texts"] == ["junk alpha"]
+        texts = {e["text"] for e in pristine_service.recent(n=10)["entries"]}
+        assert texts == {"junk beta", "gold gamma"}
+
+    def test_delete_episode_and_source_removes_only_the_intersection(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep = pristine_service.episode_start("mixed-session")
+        pristine_service.store("scratch", source="scratch")
+        pristine_service.store("finding", source="notes")
+        pristine_service.episode_end()
+        pristine_service.store("other scratch", source="scratch")
+        result = pristine_service.delete(episode=ep["id"], source="scratch")
+        assert result["deleted_count"] == 1
+        texts = {e["text"] for e in pristine_service.recent(n=10)["entries"]}
+        assert texts == {"finding", "other scratch"}
+
+    # -- bulk guard -----------------------------------------------------------
+
+    def test_delete_over_threshold_is_refused_without_confirm_bulk(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        cfg = pristine_service.config.memory
+        saved = cfg.delete_confirm_threshold
+        cfg.delete_confirm_threshold = 2
+        try:
+            for i in range(3):
+                pristine_service.store(f"bulk {i}", source="bulk")
+            pristine_service.store("bystander", source="other")
+            result = pristine_service.delete(source="bulk")
+            assert result["deleted_count"] == 0
+            assert result["error"] == "bulk_confirm_required"
+            assert result["would_delete"] == 3
+            assert result["threshold"] == 2
+            assert len(result["sample_texts"]) == 3
+            # Nothing left the bank.
+            texts = {e["text"] for e in pristine_service.recent(n=10)["entries"]}
+            assert texts == {"bulk 0", "bulk 1", "bulk 2", "bystander"}
+            # The same call with the flag proceeds.
+            result = pristine_service.delete(source="bulk", confirm_bulk=True)
+            assert result["deleted_count"] == 3
+            texts = {e["text"] for e in pristine_service.recent(n=10)["entries"]}
+            assert texts == {"bystander"}
+        finally:
+            cfg.delete_confirm_threshold = saved
+
+    def test_delete_guard_is_count_based_not_filter_kind_based(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """A broad substring is as dangerous as a bare source: the guard
+        counts matches, whatever filters produced them."""
+        cfg = pristine_service.config.memory
+        saved = cfg.delete_confirm_threshold
+        cfg.delete_confirm_threshold = 1
+        try:
+            pristine_service.store("entry one", source="s")
+            pristine_service.store("entry two", source="s")
+            result = pristine_service.delete(substring="e")
+            assert result["error"] == "bulk_confirm_required"
+            assert result["would_delete"] == 2
+            assert result["deleted_count"] == 0
+        finally:
+            cfg.delete_confirm_threshold = saved
+
+    def test_delete_at_threshold_proceeds_without_confirm(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        cfg = pristine_service.config.memory
+        saved = cfg.delete_confirm_threshold
+        cfg.delete_confirm_threshold = 2
+        try:
+            pristine_service.store("bulk a", source="bulk")
+            pristine_service.store("bulk b", source="bulk")
+            result = pristine_service.delete(source="bulk")
+            assert result["deleted_count"] == 2
+            assert "error" not in result
+        finally:
+            cfg.delete_confirm_threshold = saved
+
+    def test_delete_threshold_zero_disables_the_guard(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        cfg = pristine_service.config.memory
+        saved = cfg.delete_confirm_threshold
+        cfg.delete_confirm_threshold = 0
+        try:
+            for i in range(3):
+                pristine_service.store(f"bulk {i}", source="bulk")
+            result = pristine_service.delete(source="bulk")
+            assert result["deleted_count"] == 3
+        finally:
+            cfg.delete_confirm_threshold = saved
+
+    def test_delete_default_threshold_matches_the_response_sample_cap(
+        self,
+    ) -> None:
+        """Every unguarded delete lists all of its removed texts: the
+        default threshold equals the ``deleted_texts`` cap of 20."""
+        from pseudolife_memory.utils.config import MemoryConfig
+
+        assert MemoryConfig().delete_confirm_threshold == 20
+
 
 # ---------------------------------------------------------------------------
 # Persistence round-trip

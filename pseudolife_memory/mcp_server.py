@@ -1598,19 +1598,18 @@ def memory_forget(
         description="fact/world scope: one slot's attribute; omit to purge "
                     "the whole entity. lesson scope: the aspect.")] = None,
     text: Annotated[str | None, Field(
-        description="memory scope: delete entries whose text matches this "
-                    "exactly.")] = None,
+        description="memory scope: entries with exactly this text.")] = None,
     substring: Annotated[str | None, Field(
-        description="memory scope: delete entries whose text contains "
-                    "this.")] = None,
+        description="memory scope: entries whose text contains this.")] = None,
     source: Annotated[str | None, Field(
-        description="memory scope: delete entries with this source "
-                    "tag.")] = None,
+        description="memory scope: entries with this source tag.")] = None,
     episode: Annotated[str | None, Field(
-        description="memory scope: delete entries stamped with this "
-                    "episode id.")] = None,
+        description="memory scope: entries stamped with this episode id.")] = None,
     tag: Annotated[str | None, Field(
-        description="memory scope: delete entries carrying this tag.")] = None,
+        description="memory scope: entries carrying this tag.")] = None,
+    confirm_bulk: Annotated[bool, Field(
+        description="memory scope: allow over memory.delete_confirm_threshold "
+                    "(20) matches; else refused, reporting would_delete.")] = False,
 ) -> dict[str, Any]:
     """Forget from one memory store. ``memory`` and ``fact`` hard-delete
     (cleanup for junk/test data — no audit trail); ``world`` and ``lesson``
@@ -1619,8 +1618,11 @@ def memory_forget(
     ``memory_fact_set`` (facts) or ``memory_supersede`` (memories) instead.
 
     ``scope="memory"`` needs at least one of ``text``/``substring``/
-    ``source``/``episode``/``tag``, and those OR-combine — ANY match
-    deletes, unlike memory_search's AND. The other scopes need ``entity``.
+    ``source``/``episode``/``tag``; several NARROW the match (AND, like
+    memory_search): text + source is one entry, not the whole source.
+    Over ``memory.delete_confirm_threshold`` (20) matches it refuses with
+    ``would_delete`` until ``confirm_bulk=True``. The other scopes need
+    ``entity``.
 
     Returns: ``{deleted_count | removed, ...}``; ``{error}`` on bad input.
     """
@@ -1630,7 +1632,7 @@ def memory_forget(
                     "filters": ["text", "substring", "source", "episode", "tag"]}
         return service.delete(
             text=text, substring=substring, source=source,
-            episode=episode, tag=tag,
+            episode=episode, tag=tag, confirm_bulk=bool(confirm_bulk),
         )
     if scope in ("fact", "world", "lesson"):
         if not entity:

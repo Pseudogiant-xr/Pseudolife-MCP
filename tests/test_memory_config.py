@@ -67,7 +67,7 @@ def test_yaml_memory_block_omitted_keys_keep_dataclass_defaults(tmp_path):
     for field in ("embedding_dim", "surprise_threshold", "top_k",
                   "ref_top_k", "save_dir", "hide_superseded",
                   "search_confidence_floor", "recency_base_half_life_s",
-                  "slot_index_shadow_rate"):
+                  "slot_index_shadow_rate", "delete_confirm_threshold"):
         assert getattr(loaded, field) == getattr(defaults, field), field
 
 
@@ -78,10 +78,12 @@ def test_yaml_memory_scalar_key_present_is_read(tmp_path):
     review 2026-08-13: slot_index_shadow_rate was documented as a yaml
     knob while the loader never read it."""
     p = tmp_path / "config.yaml"
-    p.write_text("memory:\n  slot_index_shadow_rate: 0.0\n  top_k: 11\n")
+    p.write_text("memory:\n  slot_index_shadow_rate: 0.0\n  top_k: 11\n"
+                 "  delete_confirm_threshold: 5\n")
     loaded = load_config(p).memory
     assert loaded.top_k == 11
     assert loaded.slot_index_shadow_rate == 0.0
+    assert loaded.delete_confirm_threshold == 5
 
 
 # ── the recency base half-life the knob above drives ─────────────────────

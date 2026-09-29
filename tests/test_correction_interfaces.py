@@ -151,3 +151,76 @@ const exports = {
     else:
         assert out["closed"] == 1
         assert out["notices"][-1][1] == "ok"
+
+
+_DELETE_SCRIPT = r'''
+const fs = require('node:fs');
+const vm = require('node:vm');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const calls = [], notices = [], dialogs = [];
+const answers = [...input.answers], responses = [...input.responses];
+const noop = () => ({});
+const context = vm.createContext({});
+const source = fs.readFileSync(input.path, 'utf8') + `\nexport { doDelete };`;
+const module = new vm.SourceTextModule(source, {context});
+const exports = {
+  el: noop, mount: noop, clear: noop, fmtAge: noop, fmtTime: noop,
+  truncate: (s) => s, loadingBlock: noop, emptyBlock: noop, errorBlock: noop,
+  debounce: noop, openDrawer: noop, setDrawerBody: noop, openModal: noop,
+  closeModal: noop, toast: (...args) => notices.push(args),
+  confirmDialog: async (opts) => { dialogs.push(opts); return answers.shift(); },
+  badge: noop, reVerifyBadge: noop, searchBox: noop, facetBar: noop,
+  api: {post: async (url, payload) => {
+    calls.push({url, payload});
+    return responses.shift();
+  }, get: async () => ({})},
+};
+(async () => {
+  await module.link(() => new vm.SyntheticModule(Object.keys(exports), function() {
+    for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
+  }, {context}));
+  await module.evaluate();
+  await module.namespace.doDelete({id: 7, text: "repeated status line"});
+  process.stdout.write(JSON.stringify({calls, notices, dialogs: dialogs.length}));
+})().catch(error => { process.stderr.write(String(error)); process.exitCode = 1; });
+'''
+
+_REFUSED = {"deleted_count": 0, "error": "bulk_confirm_required",
+            "would_delete": 21, "threshold": 20,
+            "sample_texts": ["repeated status line"] * 20}
+
+
+@pytest.mark.skipif(_NODE is None, reason="Node.js is needed for Console behavior checks")
+@pytest.mark.parametrize("mode", ["single", "confirmed", "declined"])
+def test_console_delete_handles_the_bulk_refusal(mode):
+    """The stream view deletes by exact text, and identical texts are not
+    deduplicated, so one click can match more than the bulk threshold. The
+    refusal is an HTTP 200 with ``error``; the view must ask again with the
+    count and resend with ``confirm_bulk``, never toast "Deleted 0"."""
+    answers, responses = {
+        "single": ([True], [{"deleted_count": 1, "deleted_texts": ["x"]}]),
+        "confirmed": ([True, True],
+                      [_REFUSED, {"deleted_count": 21, "deleted_texts": []}]),
+        "declined": ([True, False], [_REFUSED]),
+    }[mode]
+    result = subprocess.run(
+        [_NODE, "--experimental-vm-modules", "-e", _DELETE_SCRIPT],
+        input=json.dumps({"path": str(_JS / "views/stream.js"),
+                          "answers": answers, "responses": responses}),
+        text=True, capture_output=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    first = {"url": "/api/delete", "payload": {"text": "repeated status line"}}
+    if mode == "single":
+        assert out["calls"] == [first] and out["dialogs"] == 1
+        assert out["notices"][-1] == ["Deleted 1", "ok"]
+    elif mode == "confirmed":
+        assert out["dialogs"] == 2
+        assert out["calls"] == [first, {"url": "/api/delete", "payload": {
+            "text": "repeated status line", "confirm_bulk": True}}]
+        assert out["notices"][-1] == ["Deleted 21", "ok"]
+    else:
+        assert out["dialogs"] == 2 and out["calls"] == [first]
+        assert out["notices"][-1][1] == "warn"
+        assert "21" in out["notices"][-1][0]

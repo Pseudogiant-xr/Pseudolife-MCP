@@ -262,6 +262,33 @@ def test_post_verdict_route_dispatches_and_returns_the_service_result(
     assert {k: out[k] for k in expected} == expected
 
 
+def test_delete_route_passes_every_filter_and_confirm_bulk_through(svc, monkeypatch):
+    """The REST body reaches service.delete intact, including the bulk
+    confirmation the Console or a curl caller sends; the route only
+    enforces "at least one filter"."""
+    calls = []
+
+    def delete(**kw):
+        calls.append(kw)
+        return {"deleted_count": 0}
+
+    monkeypatch.setattr(svc, "delete", delete)
+    routes = ConsoleRoutes(svc)
+    routes.dispatch("POST", "/api/delete", {},
+                    {"text": "probe", "source": "status", "confirm_bulk": True})
+    assert calls == [{"text": "probe", "substring": None, "source": "status",
+                      "episode": None, "tag": None, "confirm_bulk": True}]
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp"})
+    assert calls[-1]["confirm_bulk"] is False
+    # A curl caller's string "false" is not a confirmation.
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp", "confirm_bulk": "false"})
+    assert calls[-1]["confirm_bulk"] is False
+    routes.dispatch("POST", "/api/delete", {}, {"tag": "tmp", "confirm_bulk": "true"})
+    assert calls[-1]["confirm_bulk"] is True
+    with pytest.raises(ValueError):
+        routes.dispatch("POST", "/api/delete", {}, {"confirm_bulk": True})
+
+
 def test_dream_status_carries_dreamer_card_fields(svc):
     st = ConsoleRoutes(svc).dispatch("GET", "/api/dream/status", {}, {})
     for key in ("primary_model", "primary_model_served", "fallback_model",

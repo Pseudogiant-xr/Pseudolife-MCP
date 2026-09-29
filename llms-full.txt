@@ -414,7 +414,7 @@ is agent context every session, so it stays lean.
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text?, new_text, entry_id?)` | Correct the selected entry by ID, or one unique exact-text match; ambiguous/missing targets fail closed. Keep the old entry as history; `derived_flagged` names canonical facts built on it (flagged, never rewritten) |
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
-| `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
+| `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`; unknown episode scope stays unknown, and activity is not a resource reservation |
 | `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `nudged`, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
@@ -1032,13 +1032,18 @@ unique among live entries; it is the legacy selector and the only one file
 mode has. Ambiguous or missing targets change nothing.
 
 **Hygiene** — `memory` and `fact` scopes hard-delete (at least one filter
-is required for scope `memory`, preventing accidental wholesale deletion);
-`lesson` and `world` scopes retire the slot with an audit row and are
-reversible with `memory_graph_review(action="restore_slot", store=...,
-src="entity|attribute")`; for "keep the history but mark it wrong" use
-`memory_supersede` instead:
+is required for scope `memory`, preventing accidental wholesale deletion;
+several filters narrow the match, so `text="probe", source="status"` is
+the probe entry in that source, not the whole source; a match over
+`memory.delete_confirm_threshold` entries — default 20, `0` disables — is
+refused with `would_delete` until the call repeats with
+`confirm_bulk=true`); `lesson` and `world` scopes retire the slot with an
+audit row and are reversible with `memory_graph_review(action="restore_slot",
+store=..., src="entity|attribute")`; for "keep the history but mark it
+wrong" use `memory_supersede` instead:
 ```
-memory_forget(scope="memory", source="test-noise")
+memory_forget(scope="memory", source="test-noise")              # refused past 20 matches
+memory_forget(scope="memory", source="test-noise", confirm_bulk=True)
 memory_forget(scope="fact", entity="test-entity")
 ```
 
@@ -5905,6 +5910,18 @@ every variant.
   compare; divergences land in `stats()` as
   `slot_index_shadow_divergences`. `0.0` disables, `1.0` checks every
   query (dev/debug).
+- **Bulk delete confirmation at 20** (`memory.delete_confirm_threshold =
+  20`, since 2026-09-29) — `memory_forget(scope="memory")` and
+  `POST /api/delete` refuse a match larger than this unless the call
+  carries `confirm_bulk: true`; the refusal removes nothing and reports
+  `would_delete`, the threshold and up to 20 of the matched texts. The
+  guard counts matches whatever filters produced them (a broad substring
+  is as dangerous as a bare source). 20 is also the `deleted_texts`
+  sample cap, so an unconfirmed delete always lists everything it removed.
+  `0` disables. Added after a `text` + `source` delete, under the
+  OR-combination of filters then in force, removed every entry in the
+  source (1,399; restored from backup); filters now narrow the match, AND
+  across kinds like `memory_search`.
 - **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
   per-dream cap on quarantined pairs re-offered to the extractor for
   typing, shown only the notes where both entities co-occur; a typed

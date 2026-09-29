@@ -316,11 +316,15 @@ class ConsoleRoutes:
             limit=int(limit) if limit not in (None, "") else None)
 
     def _delete(self, b: dict) -> dict:
+        """POST /api/delete — filters narrow (AND across kinds); a match
+        over ``memory.delete_confirm_threshold`` is refused with
+        ``would_delete`` unless the body carries ``confirm_bulk: true``."""
         if not any(b.get(k) for k in ("text", "substring", "source", "episode", "tag")):
             raise ValueError("delete requires at least one filter")
         return self.svc.delete(
             text=b.get("text"), substring=b.get("substring"),
-            source=b.get("source"), episode=b.get("episode"), tag=b.get("tag"))
+            source=b.get("source"), episode=b.get("episode"), tag=b.get("tag"),
+            confirm_bulk=_tribool(b, "confirm_bulk") is True)
 
     def _overview(self) -> dict:
         """One round-trip dashboard summary: counts per layer + dream backlog."""
