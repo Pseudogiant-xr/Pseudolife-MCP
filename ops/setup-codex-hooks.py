@@ -53,14 +53,19 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
 # context elsewhere), never the wake, approved with the three lifecycle
 # hooks. Optional: Codex before 0.148 skips async hooks outside SessionEnd
 # and lists three. Manual installs keep EVENTS.
+# SubagentStop runs the same park gate for a Codex child thread, keyed by the
+# child's agent_id (its MCP threadId, probed on Codex 0.158.0 2026-09-29); in
+# Claude Code the entry does nothing. Optional too: a Codex that does not
+# list it still reaches ready.
 # The PreToolUse entry is Claude Code's subagent board guard
 # (subagent-board-guard.sh). Codex 0.158.0 lists it (pre_tool_use:0:0 in
 # hooks/list, 2026-09-30), but a Codex child has a board address of its own,
 # so in Codex it allows every call (lifecycle.ps1 -Event SubagentBoardGuard
 # on Windows, the script's Codex check elsewhere). Approved with the rest,
 # like Stop, and optional the same way: one entry or none.
-OPTIONAL_PLUGIN_EVENTS = ("stop", "preToolUse")
-PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "preToolUse": "PreToolUse"}
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStop": "SubagentStop",
+                 "preToolUse": "PreToolUse"}
+OPTIONAL_PLUGIN_EVENTS = ("stop", "subagentStop", "preToolUse")
 # A manual bundle copies SCRIPTS; it has no Stop or PreToolUse hook, so no
 # stop-wake.sh and no subagent-board-guard.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
@@ -353,9 +358,10 @@ def complete_set(hooks, source):
     from collections import Counter
     counts = Counter(h["eventName"] for h in hooks)
     required = Counter({event: len(roles) for event, roles in MANUAL_ROLES.items()})
-    for event in OPTIONAL_PLUGIN_EVENTS:
-        if source == "plugin" and counts.get(event) == 1:
-            del counts[event]
+    if source == "plugin":
+        for event in OPTIONAL_PLUGIN_EVENTS:
+            if counts.get(event) == 1:
+                del counts[event]
     return (counts == required
             and len({h.get("command") for h in hooks}) == len(hooks)
             and len({h.get("key") for h in hooks}) == len(hooks))
@@ -432,8 +438,9 @@ def is_legacy(hook, home):
 
 
 def select_hooks(hooks, home, source):
-    # A Stop or PreToolUse entry the user disabled in /hooks is a no-op there
-    # anyway: keep that choice instead of refusing setup over it.
+    # A Stop or SubagentStop entry the user disabled in /hooks gives up only
+    # the park gate, and a PreToolUse one is a no-op in Codex: keep that
+    # choice instead of refusing setup over it.
     plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID
               and (h["enabled"] or h["eventName"] not in OPTIONAL_PLUGIN_EVENTS)]
     manual = [h for h in hooks if owned_manual(h, home)]

@@ -1,6 +1,6 @@
 #Requires -Version 7
 # Native Windows override for Codex. Claude keeps the existing Bash commands.
-param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop', 'SubagentBoardGuard')][string]$Event)
+param([ValidateSet('SessionStart', 'MemoryPolicy', 'UserPromptSubmit', 'CoordinationStart', 'CoordinationPrompt', 'SessionEnd', 'Stop', 'SubagentStop', 'SubagentBoardGuard')][string]$Event)
 $ErrorActionPreference = 'Stop'
 
 # The PreToolUse entry is Claude Code's subagent board guard
@@ -229,12 +229,14 @@ $rawInput = [Console]::In.ReadToEnd()
 $sessionId = ''
 $startReason = ''
 $stopHookActive = $false
+$childThread = ''
 try {
     $parsedInput = $rawInput | ConvertFrom-Json
     $sessionId = [string]$parsedInput.session_id
     $startReason = [string]$parsedInput.source
     if (-not $startReason) { $startReason = [string]$parsedInput.session_start_reason }
     $stopHookActive = ($parsedInput.stop_hook_active -eq $true)
+    if ($parsedInput.agent_id -is [string]) { $childThread = $parsedInput.agent_id }
 } catch {}
 
 # Stop carries Claude Code's wake hook (stop-wake.sh), which Claude runs
@@ -250,9 +252,25 @@ try {
 # carries stop_hook_active and is not asked. Allow, no address, or no
 # answer prints nothing. Nothing else happens on Stop: no episode close,
 # no .seen marker.
+#
+# SubagentStop runs the same gate for a Codex child thread (a native
+# collaboration.spawn_agent child or a fork), which has its own board
+# address: the shim records it under the child's MCP threadId, and Codex
+# names the child in the payload's agent_id (equal to that threadId in the
+# 2026-09-29 probe on Codex 0.158.0) while session_id stays the root
+# thread's. The lookup is keyed by agent_id, which must be the canonical
+# lower-case UUID the shim accepts; there is no fallback to session_id. A
+# child gets no prompt hook, so no turn stamp: the daemon judges its
+# standing record. Claude Code never runs this native command.
 $gateQuery = $null
-if ($Event -eq 'Stop') {
-    if ($stopHookActive -or $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,128}\z') { exit 0 }
+if ($Event -in 'Stop', 'SubagentStop') {
+    $gateSubject = $sessionId
+    $subjectShape = '^[A-Za-z0-9._-]{1,128}\z'
+    if ($Event -eq 'SubagentStop') {
+        $gateSubject = $childThread
+        $subjectShape = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z'
+    }
+    if ($stopHookActive -or $gateSubject -cnotmatch $subjectShape) { exit 0 }
     # An explicit no to the wake hook or to coordination turns the gate off,
     # the same switches Claude Code's Stop command reads.
     foreach ($setting in @($env:PSEUDOLIFE_AGENT_WAKE_HOOK, $env:PSEUDOLIFE_AGENT_COORDINATION)) {
@@ -260,7 +278,7 @@ if ($Event -eq 'Stop') {
     }
     try {
         $digestDir = Get-DigestDir
-        $key = Get-DigestKey $sessionId
+        $key = Get-DigestKey $gateSubject
         $agentPath = Join-Path $digestDir "$key.agent"
         if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf) -or
             ((Get-Item -LiteralPath $agentPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 0 }
@@ -354,7 +372,7 @@ try {
     } else { $null }
     $token = if ($managedTokenless) { '' } else { Get-PseudolifeToken $tokenFile }
     if ($token) { $headers.Authorization = "Bearer $token" }
-    if ($Event -eq 'Stop') {
+    if ($Event -in 'Stop', 'SubagentStop') {
         # The park gate's one request; no answer, or anything but "block"
         # on its first line, is allow. Two seconds, inside the hook budget.
         $response = Invoke-WebRequest -Uri "$daemonUrl/api/hook/park-gate?$gateQuery" -Headers $headers -TimeoutSec 2 -MaximumRedirection 0

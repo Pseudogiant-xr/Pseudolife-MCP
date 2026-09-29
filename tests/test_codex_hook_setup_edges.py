@@ -206,16 +206,19 @@ def test_plugin_runtime_accepts_both_manifest_platform_commands_and_root_expansi
     setup.vet_plugin(hooks)
 
 
-@pytest.mark.parametrize("listed", ["all", "without-stop", "without-pre-tool-use", "lifecycle-only"])
-def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, listed):
+@pytest.mark.parametrize("dropped", [
+    (), ("stop",), ("subagentStop",), ("preToolUse",), ("subagentStop", "preToolUse"),
+    ("stop", "subagentStop", "preToolUse")],
+    ids=["all", "without-stop", "without-subagent-stop", "without-pre-tool-use",
+         "without-both-child-hooks", "lifecycle-only"])
+def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, dropped):
     """Codex 0.148+ lists the plugin's async Stop hook; older Codex skips
     async hooks outside SessionEnd and omit Stop. Codex 0.158 lists the
-    PreToolUse subagent board guard too (a no-op in Codex). Each reaches
+    SubagentStop child park gate and the PreToolUse subagent board guard (a
+    no-op in Codex) too. Every combination of the optional entries reaches
     ready."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
-    dropped = {"all": (), "without-stop": ("stop",), "without-pre-tool-use": ("preToolUse",),
-               "lifecycle-only": ("stop", "preToolUse")}[listed]
     hooks = [h for h in hooks if h["eventName"] not in dropped]
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
@@ -227,7 +230,8 @@ def test_approved_plugin_setup_trusts_every_listed_hook(tmp_path, monkeypatch, l
 
 def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     """A user who disabled the no-op Stop entry in /hooks keeps that choice;
-    every other hook is still approved."""
+    every other hook (the six memory, memory-policy and coordination hooks,
+    the child park gate and the subagent board guard) is still approved."""
     seed_user_files(tmp_path)
     hooks = plugin_hooks(tmp_path)
     [stop] = [h for h in hooks if h["eventName"] == "stop"]
@@ -235,7 +239,7 @@ def test_a_disabled_stop_hook_does_not_block_setup(tmp_path, monkeypatch):
     writes = approving_runtime(monkeypatch, tmp_path, hooks)
     result = setup.setup(options())
     assert result["status"] == "ready", result
-    assert len(writes[0]["edits"]) == len(hooks) - 1
+    assert len(writes[0]["edits"]) == len(hooks) - 1 == 8
     assert all(stop["key"] not in edit["keyPath"] for edit in writes[0]["edits"])
 
 
