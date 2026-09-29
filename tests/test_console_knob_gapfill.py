@@ -275,3 +275,4 @@ def test_judge_endpoint_knobs():
     assert model["restart"] is False and model["group"] == "Deep dream"
     second = _knob("memory.deep_dream.judge_second_url")
     assert "PSEUDOLIFE_JUDGE_SECOND_API_KEY" in second["help"]
+    assert "PSEUDOLIFE_JUDGE_API_KEY" in _knob("memory.deep_dream.judge_url")["help"]

@@ -3405,8 +3405,12 @@ class DreamOps:
             return extractor if hasattr(extractor, method) else None
         from pseudolife_memory.memory.dream import OpenAICompatExtractor
         if cfg.judge_url:
+            import os
             ex = OpenAICompatExtractor(
                 cfg.judge_url, model or cfg.judge_model or "judge",
+                # judge_url's own key, env-only like the second endpoint's
+                # (PSEUDOLIFE_JUDGE_SECOND_API_KEY); never the dream key.
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_API_KEY") or None,
                 # Explicit, not the constructor default: the judge endpoint
                 # follows the same config knob as the dream extractor, so a
                 # default change can never silently alter this shipped payload.
@@ -3646,8 +3650,13 @@ class DreamOps:
         second vote is not independent enough to authorize a fold). Name
         vetoes (``merge_veto``, ``variant_conflict``) hold at apply time
         too. Disagreement stamps ``split`` on the note and leaves the row
-        for a human. ``second_extractor`` is the test hook for the second
-        opinion's endpoint. Never raises into the sweep timer."""
+        for a human. When the configuration makes the second opinion the
+        first model again (no ``judge_second_url``; ``judge_second_model``
+        empty or the first's configured name) the pass is skipped with no
+        model call (``second_opinion_skipped_same_model``), in every mode.
+        ``second_extractor`` is the test hook for the second opinion's
+        endpoint; passing either extractor keeps the pass. Never raises
+        into the sweep timer."""
         import time as _t
         cfg = self.config.memory.deep_dream
         if not cfg.judges_enabled:
@@ -3681,13 +3690,34 @@ class DreamOps:
             with self._lock:
                 pending = review.refresh()
             first = [p for p in pending if not p.get("judge_verdict")]
-            second = ([p for p in pending
-                       if p.get("judge_verdict") and not p.get("judge2_verdict")]
-                      if cfg.judge_second_opinion else [])
+            awaiting = ([p for p in pending
+                         if p.get("judge_verdict") and not p.get("judge2_verdict")]
+                        if cfg.judge_second_opinion else [])
+            # A second opinion the CONFIGURATION already makes the first
+            # model again (no judge_second_url, and judge_second_model empty
+            # or the first endpoint's configured name) can authorize nothing
+            # in any mode, and in shadow it is the same model's opinion
+            # twice, so no call is spent on it: the rows keep waiting and
+            # the batch goes to first opinions (maintainer decision
+            # 2026-09-30). A distinct model or endpoint by configuration
+            # still gets its call; a substitution only the served name
+            # reveals is caught per row by _second_opinion_distinct. No
+            # config field changes, so no review fingerprint moves.
+            same_model_second = (
+                extractor is None and second_extractor is None
+                and not cfg.judge_second_url
+                and (not cfg.judge_second_model
+                     or cfg.judge_second_model == getattr(ex, "model", None)))
+            second = [] if same_model_second else awaiting
+            skipped = len(awaiting) if same_model_second else 0
             if not first and not second:
-                return {"judged": 0, "reconsideration": reconsidered}
+                idle = {"judged": 0, "reconsideration": reconsidered}
+                if skipped:
+                    idle["second_opinion_skipped_same_model"] = skipped
+                return idle
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
+                   "second_opinion_skipped_same_model": skipped,
                    "auto_reject_refused_same_model": 0,
                    "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
@@ -3726,12 +3756,16 @@ class DreamOps:
                     # not end the tick before any first opinion runs. The
                     # rows stay waiting; their batch share goes to first
                     # opinions this tick. On the first opinion's own
-                    # endpoint the first call would fail the same way after
-                    # a second timeout, so that failure ends the tick as
-                    # before.
+                    # endpoint (same URL AND same key: judge_url has its own
+                    # key, so a keyless second call to its URL can 401 where
+                    # the first would not) the first call would fail the
+                    # same way after a second timeout, so that failure ends
+                    # the tick as before.
                     if ex2 is ex or (getattr(ex2, "base_url", None) is not None
                                      and getattr(ex2, "base_url", None)
-                                     == getattr(ex, "base_url", None)):
+                                     == getattr(ex, "base_url", None)
+                                     and getattr(ex2, "api_key", None)
+                                     == getattr(ex, "api_key", None)):
                         raise
                     logger.warning("deep-dream judge: second opinion failed, "
                                    "first opinions continue: %s", exc)

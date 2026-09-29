@@ -613,7 +613,10 @@ class DeepDreamConfig:
     # >= 0.6 — while single-vote accept precision on the same rows was 0.74
     # and 9 of 10 two-vote accepts on low-differential rows were right but
     # the tenth folded the wrong way. A wrong fold deletes an entity, so
-    # accepts additionally require judge_mode "auto".
+    # accepts additionally require judge_mode "auto". Since 2026-09-30 the
+    # pass is skipped (no call) when the configuration makes the second
+    # opinion the first model again: no judge_second_url, and
+    # judge_second_model empty or the first endpoint's configured name.
     judge_second_opinion: bool = True
     # A same-model second vote (temperature 0) is independent only through
     # batch composition — 2/129 flips on the 2026-08-16 ladder — which is
@@ -621,7 +624,9 @@ class DeepDreamConfig:
     # model's two votes authorized rejects from 2026-09-03 to 09-11) a
     # reject: both two-vote gates require a DIFFERENT model here (with
     # claude-fable-5 as the second model the same 63 rows gave 6/6
-    # accepts, 8/8 rejects). A same-model second vote is still recorded.
+    # accepts, 8/8 rejects). A same-model second opinion by configuration
+    # is not asked at all (judge_second_opinion above); one whose sameness
+    # only the served name reveals is recorded and authorizes nothing.
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch

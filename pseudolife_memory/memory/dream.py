@@ -2406,8 +2406,15 @@ def run_sweep_once(service) -> dict:
     judge = getattr(service, "deep_dream_judge", None)
     judged = _timed("judge",
                     lambda: judge() if judge is not None else None)
+    # Also log a tick that only took second opinions, refused a same-model
+    # reject, saw an endpoint serve another model or lost its second
+    # endpoint: judged == 0 on each, and they were otherwise invisible.
     if judged and (judged.get("judged")
-                   or (judged.get("reconsideration") or {}).get("reopened")):
+                   or (judged.get("reconsideration") or {}).get("reopened")
+                   or judged.get("second_opinions")
+                   or judged.get("auto_reject_refused_same_model")
+                   or judged.get("served_model_mismatch")
+                   or judged.get("second_opinion_error")):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged

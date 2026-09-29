@@ -178,7 +178,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refused pair keeps its second vote, gains `auto-reject needs a distinct
   second model` on its note and counts as `auto_reject_refused_same_model`
   in the judge result. With neither `judge_second_model` nor
-  `judge_second_url` set, two-vote rejects therefore stop applying; the
+  `judge_second_url` set, two-vote rejects therefore stop applying (and the
+  second opinion is not asked at all, below); the
   single-vote gate (`judge_reject_min_confidence`) is unchanged, so a single
   confident reject still applies on one model's say-so.
 - New `memory.deep_dream.judge_second_url`: an OpenAI-compatible endpoint
@@ -201,6 +202,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `judge_url`, `judge_model` and `judge_second_url` are live Console knobs
   (Deep dream group); pointing the judges at another endpoint no longer
   needs a `config.yaml` edit and a restart.
+- `judge_url` takes its own bearer key, env-only like the second
+  endpoint's: `PSEUDOLIFE_JUDGE_API_KEY` (forwarded by both compose files,
+  documented in `ops/.env.example`), sent to `judge_url` alone, including a
+  second model swapped onto it, and never to the dream extractor or the
+  second endpoint.
+- The merge judge skips its second-opinion pass, with no model call, when
+  the configuration makes that opinion the first model again: no
+  `judge_second_url`, and `judge_second_model` empty or equal to the first
+  endpoint's model name. Such a vote can authorize nothing, and in shadow
+  it is one model's opinion twice. The rows keep waiting, their batch share
+  goes to first opinions, and the result counts them
+  (`second_opinion_skipped_same_model`). No config field changes, so no
+  review fingerprint moves.
+- The sweep logs the merge judge's result whenever a tick took second
+  opinions, refused a same-model reject, saw a served-model mismatch or
+  lost its second endpoint, not only when it judged or reopened something.
+
 
 ### Fixed (2026-09-29 — a shim runtime holds every module the shim imports)
 - A shim runtime (`pseudolife_memory/runtimes.py`, built with `pip install

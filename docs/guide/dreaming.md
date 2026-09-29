@@ -907,7 +907,8 @@ review surfaces show, plus a caution line on pairs stamped
 `low_differential` (whose snippets cannot tell the sides apart) — to the
 configured model (`memory.deep_dream.judge_mode`,
 default `shadow`; the dream extractor, or a dedicated `judge_url` serving
-`judge_model` — both Console knobs), and
+`judge_model` — both Console knobs, with an env-only bearer key
+`PSEUDOLIFE_JUDGE_API_KEY` sent to that endpoint alone), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
@@ -934,7 +935,18 @@ served-vs-requested mismatch (`served_model_mismatch`, with the names in
 `served_model_mismatches`) and logs a warning, and counts same-model reject
 pairs it refused (`auto_reject_refused_same_model`). A second endpoint
 that fails (down, or refusing its key) is reported as
-`second_opinion_error` and never stops that tick's first opinions. Since 2026-09-02 the other queues have judges too, each riding the
+`second_opinion_error` and never stops that tick's first opinions. When
+the configuration itself makes the second opinion the first model again
+(no `judge_second_url`, and `judge_second_model` empty or equal to the
+first endpoint's model name) the pass is skipped in every mode, shadow
+included: that vote could authorize nothing, so no model call is spent on
+it, the rows keep waiting, and the result counts them
+(`second_opinion_skipped_same_model`). Reviewers then see no same-model
+`judge2` block or `split` tag on those rows; a same-model re-ask flipped
+2 of 129 verdicts on the 2026-08-16 ladder, so little is lost. The sweep logs the merge judge's
+result whenever a tick judged, reconsidered, took second opinions,
+refused a same-model reject, saw a served-model mismatch or lost its
+second endpoint. Since 2026-09-02 the other queues have judges too, each riding the
 same sweep as a bounded batch, all but one defaulting to `shadow`: the
 **link judge** (`link_judge_mode`; `auto` promotes accept verdicts to live
 edges and applies rejects, each at its own gate — a *retype* is only
