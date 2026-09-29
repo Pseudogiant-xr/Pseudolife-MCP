@@ -88,10 +88,13 @@ def _run_bash_helper(
 ) -> tuple[list[str], str, str]:
     """Run ``ensure_shim`` twice against fake managers.
 
-    ``process_table`` stands in for the Windows process table (``None``:
-    not Windows; ``"real"``: the real one). ``existing`` puts a shim
-    launcher and a pipx venv in place first, as on a rerun; ``pipx_home``
-    points the fake pipx at a real one instead."""
+    ``manager``: ``runtime`` (a python installs the side-by-side runtime),
+    ``pip`` (that install fails, so the pip --user fallback runs) or
+    ``pipx`` (no python; the pipx fallback). ``process_table`` stands in
+    for the Windows process table (``None``: not Windows; ``"real"``: the
+    real one). ``existing`` puts a shim launcher and a pipx venv in place
+    first, as on a rerun; ``pipx_home`` points the fake pipx at a real one
+    instead."""
     helper = _between(
         "ops/install.sh", "resolve_installed_shim() {", "\n}\n\n# Two env pairs"
     ) + "\n}"
@@ -124,6 +127,24 @@ else
     cat >"$fake_bin/python3" <<'FAKE'
 #!/bin/sh
 printf 'python3|%%s\n' "$*" >>"$CALL_LOG"
+case "$1" in *shim_runtime.py)
+    # ops/shim_runtime.py: install writes the launcher and prints it (unless
+    # told to fail, which sends the installer to the pipx / pip fallback);
+    # launcher --if-installed prints it once it exists.
+    if [ "$2" = install ] && [ "${FAKE_RUNTIME_FAIL:-}" = yes ]; then echo "fake: venv failed" >&2; exit 1; fi
+    if [ "$2" = install ] && [ "%s" = yes ]; then
+        printf '#!/bin/sh\n' >"$FAKE_INSTALLED_BIN/pseudolife-mcp"
+        chmod +x "$FAKE_INSTALLED_BIN/pseudolife-mcp"
+    fi
+    if [ "$2" = install ] || [ "$2" = launcher ]; then
+        if [ -f "$FAKE_INSTALLED_BIN/pseudolife-mcp" ]; then
+            if [ "$FAKE_WINDOWS_PATH" = yes ]; then cygpath -w "$FAKE_INSTALLED_BIN/pseudolife-mcp"; else printf '%%s\n' "$FAKE_INSTALLED_BIN/pseudolife-mcp"; fi
+            exit 0
+        fi
+        exit 3
+    fi
+    exit 91 ;;
+esac
 if [ "$1" = -m ] && [ "%s" = yes ]; then
     printf '#!/bin/sh\n' >"$FAKE_INSTALLED_BIN/pseudolife-mcp"
     chmod +x "$FAKE_INSTALLED_BIN/pseudolife-mcp"
@@ -137,6 +158,7 @@ printf '#!/bin/sh\nexit 99\n' >"$fake_bin/pseudolife-mcp"
 chmod +x "$fake_bin"/*
 PATH="$fake_bin:/usr/bin:/bin"
 ''' % (state, "yes" if windows_manager_path else "no", manager,
+       "yes" if create_executable else "no",
        "yes" if create_executable else "no",
        "yes" if create_executable else "no")
     home = pipx_home.replace("'", "'\\''")
@@ -159,14 +181,17 @@ SHIM_TRIED=""
 SHIM_OK=""
 SHIM_PATH=""
 SHIM_HELD=""
-if [ '{manager}' = pip ]; then
+if [ '{manager}' = pip ] || [ '{manager}' = runtime ]; then
     command() {{
         if [ "$1" = -v ] && [ "$2" = pipx ]; then return 1; fi
         builtin command "$@"
     }}
 fi
+if [ '{manager}' = pip ]; then export FAKE_RUNTIME_FAIL=yes; fi
+export PSEUDOLIFE_SHIM_RUNTIMES="$installed_bin/runtimes" PSEUDOLIFE_SHIM_LAUNCHER="$installed_bin/pseudolife-mcp"
 {helper}
 {_bash_process_table(process_table)}
+shim_runtime_python() {{ {"echo python3" if manager in ("pip", "runtime") else ":"}; }}
 ensure_shim
 if [ '{"yes" if failed_later_probe else "no"}' = yes ]; then
     export FAKE_RESOLVE_FAIL=yes
@@ -189,6 +214,27 @@ printf 'resolved|%s\n' "$SHIM_PATH"
 
 @pytest.mark.parametrize("state", ["fresh", "stale"])
 @pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_installs_a_side_by_side_runtime_behind_the_launcher(bash: str, state: str) -> None:
+    """With a usable python the shim goes into a new runtime beside any
+    older one (ops/shim_runtime.py) and the launcher it prints is what the
+    clients register; pipx and pip are never called, and a second
+    ensure_shim is memoised."""
+    calls, resolved, diagnostics = _run_bash_helper(bash, manager="runtime", state=state)
+    assert calls == [f"python3|{ROOT}/ops/shim_runtime.py install --source {ROOT} --python python3"]
+    assert Path(resolved).name == "pseudolife-mcp"
+    assert Path(resolved).parent.name == "installed dir"
+    assert "falling back" not in diagnostics
+
+
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
+def test_install_sh_runtime_without_a_launcher_is_not_success(bash: str) -> None:
+    _, resolved, stderr = _run_bash_helper(bash, manager="runtime", state="fresh", create_executable=False)
+    assert resolved == ""
+    assert "installed executable" in stderr
+
+
+@pytest.mark.parametrize("state", ["fresh", "stale"])
+@pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
 def test_install_sh_pipx_replaces_with_checkout_once(bash: str, state: str) -> None:
     calls, resolved, _ = _run_bash_helper(bash, manager="pipx", state=state)
     assert calls == [f"pipx|install --force {ROOT}",
@@ -200,8 +246,12 @@ def test_install_sh_pipx_replaces_with_checkout_once(bash: str, state: str) -> N
 @pytest.mark.parametrize("state", ["fresh", "stale"])
 @pytest.mark.parametrize("bash", _bash_variants(), ids=lambda p: Path(p).parent.name)
 def test_install_sh_pip_uses_upgrade_from_checkout_once(bash: str, state: str) -> None:
-    calls, resolved, _ = _run_bash_helper(bash, manager="pip", state=state)
-    assert calls == ["python3|-c import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
+    """The runtime install is tried first; when it fails (no venv module,
+    say) the pip --user fallback runs as before."""
+    calls, resolved, diagnostics = _run_bash_helper(bash, manager="pip", state=state)
+    assert "falling back to pipx / pip --user" in diagnostics
+    assert calls == [f"python3|{ROOT}/ops/shim_runtime.py install --source {ROOT} --python python3",
+                     "python3|-c import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
                      f"python3|-m pip install --user --upgrade {ROOT}",
                      ("python3|-c import sysconfig; "
                       "print(sysconfig.get_path('scripts', "
@@ -281,6 +331,8 @@ def _run_powershell_helper(
     tmp_path.mkdir(parents=True, exist_ok=True)
     log = tmp_path / "calls.txt"
     command = "pipx" if manager == "pipx" else "python"
+    runtime_python = "'python'" if manager in ("pip", "runtime") else "$null"
+    runtime_fails = "$true" if manager == "pip" else "$false"
     escaped_repo = str(ROOT).replace("'", "''")
     escaped_log = str(log).replace("'", "''")
     installed_bin = tmp_path / "installed"
@@ -301,9 +353,28 @@ $repo = '{escaped_repo}'
 $script:shimInstallResult = $null
 $script:shimInstallPath = $null
 $script:shimUpgradeHeld = $null
+$script:shimPython = $null
+$script:shimManagerKind = $null
+$script:shimPipxVenv = $null
 function global:{command} {{
     $callArgs = @($args)
     Add-Content -LiteralPath '{escaped_log}' -Value ('{command}|' + ($callArgs -join ' '))
+    if ($callArgs[0] -like '*shim_runtime.py') {{
+        # ops/shim_runtime.py: install writes the launcher and prints it (unless
+        # told to fail, which sends the installer to the pipx / pip fallback);
+        # launcher --if-installed prints it once it exists.
+        if (($callArgs[1] -eq 'install') -and {runtime_fails}) {{ [Console]::Error.WriteLine('fake: venv failed'); $global:LASTEXITCODE = 1; return }}
+        if (($callArgs[1] -eq 'install') -and ({'$true' if create_executable else '$false'})) {{
+            Set-Content -LiteralPath (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe') -Value 'fake'
+        }}
+        if (($callArgs[1] -eq 'install') -or ($callArgs[1] -eq 'launcher')) {{
+            if (Test-Path -LiteralPath (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe')) {{
+                Write-Output (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe'); $global:LASTEXITCODE = 0; return
+            }}
+            $global:LASTEXITCODE = 3; return
+        }}
+        $global:LASTEXITCODE = 91; return
+    }}
     if (($callArgs[0] -eq 'install') -and ({'$true' if create_executable else '$false'})) {{
         Set-Content -LiteralPath (Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe') -Value 'fake'
     }} elseif (($callArgs[0] -eq 'environment') -and ($callArgs[2] -eq 'PIPX_HOME')) {{
@@ -317,8 +388,11 @@ function global:{command} {{
     }}
     $global:LASTEXITCODE = 0
 }}
+$env:PSEUDOLIFE_SHIM_RUNTIMES = Join-Path '{escaped_installed_bin}' 'runtimes'
+$env:PSEUDOLIFE_SHIM_LAUNCHER = Join-Path '{escaped_installed_bin}' 'pseudolife-mcp.exe'
 {helper}
 {_powershell_process_table(process_table, places)}
+function Get-ShimRuntimePython {{ {runtime_python} }}
 Install-ShimOnce | Out-Null
 Install-ShimOnce | Out-Null
 Add-Content -LiteralPath '{escaped_log}' -Value ('resolved|' + $script:shimInstallPath)
@@ -343,6 +417,21 @@ Add-Content -LiteralPath '{escaped_log}' -Value ('resolved|' + $script:shimInsta
 
 
 @pytest.mark.parametrize("state", ["fresh", "stale"])
+def test_install_ps1_installs_a_side_by_side_runtime_behind_the_launcher(tmp_path: Path, state: str) -> None:
+    calls, resolved, diagnostics = _run_powershell_helper(tmp_path, manager="runtime", state=state)
+    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python"]
+    assert Path(resolved).name == "pseudolife-mcp.exe"
+    assert Path(resolved).parent.name == "installed"
+    assert "falling back" not in diagnostics
+
+
+def test_install_ps1_runtime_without_a_launcher_is_not_success(tmp_path: Path) -> None:
+    _, resolved, stderr = _run_powershell_helper(tmp_path, manager="runtime", state="fresh", create_executable=False)
+    assert resolved == ""
+    assert "installed executable" in stderr
+
+
+@pytest.mark.parametrize("state", ["fresh", "stale"])
 def test_install_ps1_pipx_replaces_with_checkout_once(tmp_path: Path, state: str) -> None:
     calls, resolved, _ = _run_powershell_helper(
         tmp_path, manager="pipx", state=state,
@@ -355,8 +444,12 @@ def test_install_ps1_pipx_replaces_with_checkout_once(tmp_path: Path, state: str
 
 @pytest.mark.parametrize("state", ["fresh", "stale"])
 def test_install_ps1_pip_uses_upgrade_from_checkout_once(tmp_path: Path, state: str) -> None:
-    calls, resolved, _ = _run_powershell_helper(tmp_path, manager="pip", state=state)
-    assert calls == ["python|-c import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
+    """The runtime install is tried first; when it fails the pip --user
+    fallback runs as before."""
+    calls, resolved, diagnostics = _run_powershell_helper(tmp_path, manager="pip", state=state)
+    assert "falling back to pipx / pip --user" in diagnostics
+    assert calls == [f"python|{os.path.join(ROOT, 'ops', 'shim_runtime.py')} install --source {ROOT} --python python",
+                     "python|-c import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
                      f"python|-m pip install --user --upgrade {ROOT}",
                      ("python|-c import sysconfig; "
                       "print(sysconfig.get_path('scripts', "

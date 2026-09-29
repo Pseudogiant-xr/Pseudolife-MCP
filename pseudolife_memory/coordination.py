@@ -524,7 +524,11 @@ def daemon_notice(service, text: str) -> dict | None:
 
     The first notice registers the daemon's board address, kept for the
     process (and registered again if the board pruned it). No bearer can
-    reach this path. Each recipient's wake decision is ``hinted``: the
+    reach this path through mail; the one operator route that calls it,
+    ``POST /api/daemon-notice`` (the unattended updater), admits only a
+    principal listed in ``daemon_notice_principals`` (empty by default)
+    and stamps the notice with that
+    principal. Each recipient's wake decision is ``hinted``: the
     notice is context for the next turn and rings no one, so no notifier
     is called. Returns ``{"recipients": n}`` (0 when nobody is attached),
     or ``None`` when the board cannot carry it (disabled, no Postgres, or

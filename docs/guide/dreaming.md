@@ -198,9 +198,16 @@ same way, v4 vs v5
 and v4 stay in the tree as the gates' pre arms; `sonnet_extractor_v3.md` is
 an unrelated, never-adopted 2026-08-02 lineage.
 
-Existing installs pick v5 up when the shim autostart is re-installed
-(`ops/install-shim-autostart.ps1`) or the shim is restarted with the new
-file. Rebuilding the daemon image alone does **not** reach the shim path.
+Existing installs pick v5 up when the shim is restarted on the new file:
+set `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` in `ops/.env` (the autostart task
+and unit read it at every start) and run `python ops/shim_autostart.py
+restart claude` — no re-registration, no elevation, once the task or unit
+runs the runner (an install registered before 2026-09-29 still carries
+the prompt file on its command line: `show claude` says so, `restart`
+refuses until then — `--force` restarts from `ops/.env` anyway, and the
+task's own values come back at the next logon — and one more run of the
+autostart installer, elevated on Windows, switches it).
+Rebuilding the daemon image alone does **not** reach the shim path.
 The Codex shim passes no prompt file at all, so it already runs the shipped
 prompt.
 
@@ -433,6 +440,27 @@ steps:
      `--model` choice; binds the docker bridge IP so the daemon container
      can reach it — `host-gateway` routes container→host traffic to the
      bridge, where a loopback bind is invisible).
+   - Both register `python ops/shim_autostart.py run claude` and nothing
+     else: the model, prompt file, port, host, CLI path, interpreter and
+     log file are read from `ops/.env` (`PSEUDOLIFE_CLAUDE_SHIM_MODEL`,
+     `…_PROMPT_FILE`, `…_PORT`, `…_HOST`, `…_CLI`, `…_PYTHON`, `…_LOG`, in
+     a block the installers write from their flags) at every start. To
+     change any of them later, edit that line and run
+     `python ops/shim_autostart.py restart claude` — the elevated shell is
+     needed only once, to register the task. On Windows `restart` stops
+     the shim and starts it itself (the task still starts it at logon);
+     on Linux it is `systemctl --user restart`. Run the Windows restart
+     from a plain terminal: the shim starts with that shell's environment
+     (a Claude Code session's own `CLAUDE_CODE_*` variables are dropped,
+     the rest is passed through). `python
+     ops/shim_autostart.py show claude` prints what the next start would
+     run, and warns when the registered task or unit predates the runner
+     and still carries the values on its command line (re-run the
+     installer once, elevated on Windows, to switch it). The Codex shim
+     is the same with `codex` and `PSEUDOLIFE_CODEX_SHIM_*`
+     (`…_HEALTH_TTL` instead of a prompt file). When no `…_CLI` is set the
+     shim's own lookup applies (`PSEUDOLIFE_SHIM_CLAUDE_CLI` /
+     `PSEUDOLIFE_SHIM_CODEX_CLI`, then `PATH`).
    - The unit's (or task's) interpreter must import `pseudolife_memory`
      with its dependencies: the shim imports the dream system prompt from
      it, and a bare `python3` registered a unit that exited 1 in a restart

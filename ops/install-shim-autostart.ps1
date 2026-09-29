@@ -19,6 +19,13 @@
 #
 #   ops\install-shim-autostart.ps1              # default port 8082, v5 prompt, opus
 #   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
+#
+# The task runs `ops\shim_autostart.py run claude`, which reads the model,
+# prompt file, port, host, CLI path, interpreter and log file from ops/.env
+# (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written
+# into that file. Changing a value later is an edit plus
+# `python ops\shim_autostart.py restart claude` — no elevation. Elevation
+# is needed only here, to register the task, once.
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
 #   claude-haiku-4-5, claude-fable-5 (the list ops\install.ps1 offers; any other
 #   claude-* id passes to the shim unchanged)
@@ -97,18 +104,18 @@ if ($LASTEXITCODE -ne 0 -or -not $picked) {
 }
 $PythonExe = "$picked".Trim()
 # <<< shim python <<<
-# Absolute up front: the task's cmd.exe would otherwise resolve a relative
-# -LogFile against its WorkingDirectory ($repo) while the verification below
-# resolves it against this shell's location.
+# Absolute up front: the runner would otherwise resolve a relative -LogFile
+# against its WorkingDirectory ($repo) while the verification below resolves
+# it against this shell's location.
 $LogFile = [IO.Path]::GetFullPath($LogFile, (Get-Location).ProviderPath)
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 # Every process whose command line names claude_shim.py AND this --port. The
-# task launches a three-layer tree (cmd.exe running the `>> log` redirect ->
-# the .venv python.exe launcher -> the base interpreter that owns the socket)
-# and no layer's death propagates to the others, so the whole set is what
-# "the running shim" means here. Keyed on the port too: an A/B shim serving
-# another port from the same script must survive an install.
+# shim is a two-layer tree (the .venv python.exe launcher -> the base
+# interpreter that owns the socket) and neither layer's death propagates to
+# the other, so the whole set is what "the running shim" means here. Keyed
+# on the port too: an A/B shim serving another port from the same script
+# must survive an install.
 function Get-ShimProcess {
     param([int]$ShimPort)
     $pattern = "claude_shim\.py.*--port\s+$ShimPort(\s|$)"
@@ -147,26 +154,25 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # console allocation entirely, so WT has nothing to attach a tab to —
 # validated standalone (detached long-running child survives its spawner
 # exiting; redirected output confirmed correct) before wiring in here.
-# The scheduled task launches this tiny spawner, which starts the real
-# python.exe chain fully detached (CreateNoWindow, own console-less
-# session) and returns immediately, so the Task-Scheduler-owned window is
-# at most a sub-second flash rather than persisting for the shim's whole
-# runtime.
+# The scheduled task launches this tiny spawner, which starts the runner
+# with CreateNoWindow (a hidden console the shim inherits) and returns
+# immediately, so the Task-Scheduler-owned window is at most a sub-second
+# flash rather than persisting for the shim's whole runtime.
 #
-# cmd.exe's `/c` argument parsing mishandles a command line containing
-# MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
-# arg) unless the whole thing is wrapped in one extra redundant pair of
-# quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-$innerCmd = "`"$PythonExe`" `"$repo\evals\claude_shim.py`" --port $Port " +
-            "--model $Model --system-prompt-file `"$promptPath`""
-$cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+# The task's only argument is the runner: the values live in ops/.env. The
+# runner opens the log itself and starts the shim with the same hidden
+# console (no `cmd >> log` layer: the process tree is the runner, gone in
+# a second, then the shim's python).
+& $PythonExe (Join-Path $repo "ops\shim_autostart.py") config claude --model $Model --port $Port `
+    --prompt-file $PromptFile --python $PythonExe --log $LogFile 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "could not write the shim settings into ops\.env (see above)" }
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
-`$psi.FileName = 'cmd.exe'
-`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.FileName = '$($PythonExe -replace "'", "''")'
+`$psi.Arguments = '$(("`"$repo\ops\shim_autostart.py`" run claude") -replace "'", "''")'
 `$psi.UseShellExecute = `$false
 `$psi.CreateNoWindow = `$true
-`$psi.WorkingDirectory = '$repo'
+`$psi.WorkingDirectory = '$($repo -replace "'", "''")'
 [System.Diagnostics.Process]::Start(`$psi) | Out-Null
 "@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -201,7 +207,7 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
 # http.server listener BINDS beside the first (allow_reuse_address is
 # SO_REUSEADDR, which shares a port in LISTEN), so the new interpreter never
 # hit an error to log, and its startup lines were then overwritten by the old
-# shim's next log write (two `cmd >> log` opens keep independent file
+# shim's next log write (two appending opens keep independent file
 # pointers). Both probed 2026-09-07. This runs only after registration
 # succeeded: stopping the live shim and then failing to register would leave
 # the box with no extractor at all.
@@ -272,6 +278,7 @@ if ($startup.Count -eq 0) {
     foreach ($line in $startup) { Write-Host "  log: $line" }
 }
 Write-Host "Registered + started '$taskName' ($Model, port $Port, pid $($listener.OwningProcess), python $PythonExe, log $LogFile)."
+Write-Host "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops\.env, then run: python ops\shim_autostart.py restart claude (no elevation)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"

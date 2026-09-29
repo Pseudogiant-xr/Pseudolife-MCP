@@ -63,6 +63,236 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   asks a second time with the count and resends with `confirm_bulk`,
   instead of reporting "Deleted 0". [Built-in defaults](docs/guide/configuration.md#built-in-defaults-tuned-for-claudes-use-case)
 
+### Added (2026-09-29 — opt-in unattended daemon updates for headless hosts; the Codex re-approval steps, complete and only when the hooks changed)
+- `pseudolife-mcp update --schedule HH:MM` installs a daily scheduled
+  task (Windows, `schtasks`) or systemd `--user` timer (Linux) that runs
+  `pseudolife-mcp update --unattended`; `--unschedule` removes it. The
+  run applies a new release only while `config.yaml`
+  `updates.unattended_daemon: true` (default false, read from `/health`,
+  so the timer alone changes nothing) and the agent board lists no active
+  session, with the same backup and rollback tag as an attended update,
+  reading the board once more right before the recreate, and posts a
+  board notice from the daemon's reserved principal, stamped with the
+  posting principal, to the sessions the board lists as active, saying it
+  updated (rollback tag, client states, the Codex steps when the hooks
+  changed) or held off and why (active sessions, the board unreadable;
+  with the knob off it only logs); a failed update posts the failure with
+  the rollback line when the daemon can still take it. Exit 0 updated,
+  3 current, 4 held off, 2 could not check, 1 failed; every line goes to
+  `~/.pseudolife-mcp/unattended-update.log`, the durable record.
+  `--unattended` refuses the flags that would skip the backup or half
+  the update. New route `POST /api/daemon-notice` carries the notice:
+  only a bearer whose principal is listed in the new
+  `coordination.daemon_notice_principals` (default empty) may post, since
+  the reserved sender is otherwise unforgeable and `allowed_principals`
+  admits `default`, the principal every ordinary session uses; the
+  refusal names the key and the setup (a dedicated `PSEUDOLIFE_MCP_TOKENS`
+  principal as the scheduled run's bearer), `--schedule` prints one line
+  saying so, and the run says in one line why a notice was not taken
+  (refused for the principal, the board off, the daemon silent). One
+  update runs at a time per host: a daemon-recreating
+  `pseudolife-mcp update` (release or checkout mode), a `--clients-only`
+  run and the unattended run hold an exclusive OS lock on
+  `~/.pseudolife-mcp/update.lock`; an attended run that finds it held
+  exits 2 naming the holder's pid, the unattended run holds off (exit 4),
+  and the unattended run reads the daemon's version again under the lock,
+  so a release an attended run applied meanwhile is "nothing to do"
+  rather than tagged as the rollback of the version it replaced. The
+  guide states what the idle check cannot see (clients off the board) and
+  the board's activity windows (1 h, 3 h while holding a lease). The
+  systemd unit carries `SuccessExitStatus=3 4` and the guide says to
+  enable lingering; a `--daemon-url` given with `--schedule` rides into
+  the task or unit.
+  [Configuration](docs/guide/configuration.md#unattended-daemon-updates-on-headless-hosts-updatesunattended_daemon)
+- Every update path (`pseudolife-mcp update`, `ops/update.*`,
+  `ops/update_clients.py`, the unattended notice) prints the complete
+  Codex re-approval steps when and only when Codex's hook copy differs
+  from the scripts just deployed: the changed files (from Codex's
+  marketplace clone against the checkout or the Claude plugin cache), the
+  refresh, the `/hooks` approval or `--trust yes` for unattended installs
+  (the manual-copy commands for a `setup-codex-hooks.py --source manual`
+  install), what is off until then, and the check `pseudolife-mcp doctor`
+  now reports as `codex_hooks`. An update whose hooks did not change says
+  nothing about Codex, and neither does one that finds no marketplace
+  clone at all; until now one generic line fired for any non-current
+  state. A daemon-only update (`ops/update.ps1` without `-All`,
+  `update --daemon-only`) whose hook scripts changed says in one line
+  that the client side and the Codex steps are still to do; the shim's
+  unattended client half leaves the steps beside its result file and its
+  next session's note points at them.
+
+### Added (2026-09-29 — sessions are told when a release is out, and the shim can take the client half of an update by itself)
+- The daemon reads the newest release from PyPI on a background thread
+  once per `updates.check_interval_seconds` (six hours; `config.yaml`
+  `updates.check_releases: false` turns it off), keeps the last good
+  answer and serves it on `/health` (`updates.latest_release`,
+  `checked_at`). When it is newer than the daemon, the session-start
+  briefing opens with one line naming the command (`release X is
+  available (daemon Y, plugin Z) — run pseudolife-mcp update`) in place
+  of the plugin-version notice. Every notice that names an update now
+  names `pseudolife-mcp update` or `--clients-only` first (the briefing's
+  plugin-behind, daemon-behind and hooks-differ lines, the shim's version
+  line, `doctor`), with the checkout scripts as the alternative, and the
+  client half pinned to the daemon's release (`--clients-only --tag
+  <version>`: without the tag the newest PyPI release would be installed
+  and the mismatch would only change direction). Until now only
+  `pseudolife-mcp update --check`, run by hand, compared the daemon with
+  the release page. `PSEUDOLIFE_RELEASE_CHECK=0` in the daemon's
+  environment makes no request whatever the file says (the test daemons
+  run with it); a failed check is retried after fifteen minutes until the
+  first answer. The comparison guide's egress note names the check and
+  the switch.
+- `updates.unattended_clients: true` (default off): when a session's shim
+  finds the daemon on a newer release than itself, it starts
+  `pseudolife-mcp update --clients-only --tag <daemon version>` in the
+  background (a new shim runtime beside the running one, the plugin cache
+  refreshed; log `~/.pseudolife-mcp/update-clients.log`), at most once per
+  release per hour, and its served instructions say so instead of asking
+  for the command; the run writes its exit code to a result file (a
+  failed client step — the runtime install, the plugin refresh — is exit
+  5, on every update path, not a warning beside exit 0), and the next
+  session says when the last attempt failed rather than trying again.
+  Only a Docker-tier registration on this host (loopback daemon
+  URL, `PSEUDOLIFE_MCP_NO_SPAWN` set) takes it: elsewhere the command
+  could not succeed. The running session keeps its runtime; the next
+  starts on the new one. The daemon recreate, with its backup and rollback
+  tag, is never taken unattended by this knob. [Configuration](docs/guide/configuration.md#being-told-and-the-unattended-client-half-updates)
+
+### Changed (2026-09-29 — the extractor shims start from ops/.env; changing a model is an edit plus a restart, not an elevated re-registration)
+- The Claude and Codex shim autostart task (Windows) and units (Linux)
+  now run `python ops/shim_autostart.py run claude|codex` and nothing
+  else; the runner reads the model, prompt file (Claude), health TTL
+  (Codex), port, host, CLI path, interpreter and log file from `ops/.env`
+  (`PSEUDOLIFE_CLAUDE_SHIM_*` / `PSEUDOLIFE_CODEX_SHIM_*`) at every start,
+  falling back to the defaults the installers name. The installers' flags
+  (`-Model` / `--model`, `-Port`, `-PromptFile`, `-HealthTtl`, `-CodexCli`,
+  ...) keep working: `ops/install-*-shim-autostart.*` write them into a
+  managed block of `ops/.env` (`shim_autostart.py config`) before
+  registering; `config` changes only the keys it is given and moves a
+  hand-written `PSEUDOLIFE_*_SHIM_*` line from elsewhere in the file into
+  the block, which is read last. Changing a value later is an edit plus
+  `python ops/shim_autostart.py restart claude|codex`, with no elevation
+  (a task or unit registered before the runner still carries its own
+  values, so `restart` refuses rather than start the `ops/.env` ones under
+  it — the defaults, for an install that never wrote the block — until the
+  autostart installer has run once more; `--force` restarts from
+  `ops/.env` anyway): on Windows it stops the shim (on its configured
+  port and on the port it
+  was last started on) and starts it again itself, then waits for the
+  port, since running a scheduled task is not a right its owner always
+  holds unelevated and a disabled task would leave no shim; on Linux it
+  is `systemctl --user restart`. The Windows restart starts the shim with
+  the calling shell's environment minus a Claude Code session's own
+  variables (`CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID`, `CLAUDE_EFFORT`,
+  `CLAUDE_AGENT_SDK_*`), so restart from a plain terminal; the scheduled
+  task keeps the logon environment. The elevated shell remains a one-time
+  step to register the task. On 2026-09-28 a model change needed a
+  Start-menu elevated PowerShell only because the model sat in the task's
+  command line. `show` prints the resolved settings and warns when the
+  registered task or unit predates the runner (its command line still
+  carries the values, which is what starts at logon until the installer
+  runs once more, elevated on Windows); `run --dry-run` prints the
+  command line. The runner opens the log itself, writes a failed start
+  (a bad port, a missing prompt file) into it, and starts the shim under
+  the hidden console it inherits from the task, so the Windows task no
+  longer goes through `cmd >> log`. When no `…_CLI` is set the shims'
+  own `PSEUDOLIFE_SHIM_CLAUDE_CLI` / `PSEUDOLIFE_SHIM_CODEX_CLI` lookup
+  applies, as before. [Dreaming](docs/guide/dreaming.md#claude-primary-with-local-fallback)
+
+### Added (2026-09-29 — `pseudolife-mcp update`: the whole install updates from a release, with no checkout)
+- `pseudolife-mcp update` (`pseudolife_memory/update_cli.py`) updates a
+  Docker-tier install from a published release: it pulls the pinned GHCR
+  daemon image for the newest release on PyPI (or `--tag`), backs the bank
+  up (the checkout's `ops/backup.*` when the compose project's working
+  directory is still a checkout, else a built-in `pg_dump -Z9` in the
+  Postgres container checked for the dump's closing marker plus a tar of
+  the daemon's `/data`, under `~/.pseudolife-mcp/backups`), tags the
+  running image by id as `…-pre-update-<stamp>`, recreates only the daemon
+  container from the compose files the running container was created with
+  (its compose labels; the package's bundled copies, pinned byte-equal to
+  `ops/`, when those are gone) plus the GHCR overlay, waits for `/health`
+  at the new version, then installs the release as a new shim runtime
+  beside the running one, refreshes the plugin cache and prints the Codex
+  hook step. `--check` reports only (exit 0 when a newer release exists, 3
+  when current); `--clients-only` / `--daemon-only` take one half;
+  `--reinstall` recreates at the same version; `--allow-downgrade` is
+  needed for a `--tag` older than the daemon; `--env-file` names the
+  compose env file when the labelled one is gone (the update stops rather
+  than recreate the daemon with default password, volumes and bearer).
+  The rollback tag lives in the GHCR repository and the printed rollback
+  sets `PSEUDOLIFE_IMAGE_TAG` to it; a daemon back at a version other than
+  the one pulled fails the update and moves no client. Docker installed
+  but not answering stops the update (never a pip upgrade of the shim's
+  own runtime), and a target that cannot be read from PyPI is not guessed.
+  On a pip / lite install it upgrades the package where it is installed
+  (pip; on Windows or under pipx the command is printed, since pip cannot
+  replace the running console script and pipx deletes the environment
+  the command runs from), never an editable checkout or a shim runtime,
+  and restarts nothing. [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update)
+- `ops/update.ps1` and `ops/update.sh` are now thin wrappers that map their
+  flags onto the same Python deploy (`ops/update.py` runs it from the
+  checkout, ahead of any installed package), so there is one
+  implementation of the clean-tree guard and build stamp, the rollback-tag
+  guard, the credential scoping around `docker compose`, the health wait,
+  the client step and the retention calls. Their flags and exit codes are
+  unchanged. `tests/test_update_cli.py` carries the contracts the three
+  shell test files held; `tests/test_ops_update_wrappers.py` pins the
+  flag mapping.
+- `ops/update_clients.py`'s logic moved into the package as
+  `pseudolife_memory/client_updates.py` (the script now runs it from the
+  checkout), so the installed command can move the shim runtime, the
+  plugin cache and the Codex check without a checkout; the Codex check
+  compares the marketplace clone against the daemon's `hooks_digest` when
+  there is no checkout to compare with.
+
+### Changed (2026-09-29 — the shim installs side by side, behind one launcher path; no session has to close for an upgrade)
+- Every shim version now installs into its own runtime directory
+  (`%LOCALAPPDATA%\pseudolife-mcp\runtimes\NNNNNN` on Windows,
+  `~/.local/share/pseudolife-mcp/runtimes/NNNNNN` elsewhere; a virtualenv
+  with the package and the shim's dependencies only, plus a `runtime.json`
+  marker written last), and every client registration points at ONE
+  launcher path (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp` — not `~/.local/bin`,
+  the file pip --user and pipx own) that starts the newest complete runtime.
+  Sessions already running keep the runtime they started with; the next
+  session start uses the new one; a runtime is removed only when no process
+  runs from it and no registration names it (the process-table check the
+  installers' in-use gate already used, now also on Linux via `/proc` and
+  macOS via `ps`). `pseudolife_memory/runtimes.py` holds the logic;
+  `python ops/shim_runtime.py install|list|current|launcher|prune|migrate`
+  drives it from a checkout with nothing installed. On 2026-09-28 thirteen
+  idle Desktop sessions had refused the shim step of a deploy; nothing has
+  to close now. [stdio shim](docs/guide/configuration.md#where-the-shim-lives-side-by-side-runtimes-behind-one-launcher)
+- `ops/update_clients.py` (and so `ops/update.ps1 -All` / `update.sh
+  --all`) reads every stdio registration from the client config files
+  (Claude Code, Codex, Claude Desktop, Gemini CLI), installs the checkout as
+  a new runtime whenever a registration runs the launcher, a runtime under
+  the runtimes root, a pipx-managed launcher or a virtualenv's launcher or
+  `python -m pseudolife_memory.cli`, moves those registrations to the
+  launcher in place (each file backed up as `<file>.bak-<stamp>`; Codex's
+  `config.toml` is edited textually inside the shim's table and verified by
+  re-parsing, with the other tables untouched), prunes idle old runtimes and
+  names the ones still held or hand-made. The `in-use` refusal, the pip
+  stash restore and the "close every session and rerun" instruction are
+  gone with the in-place upgrade they guarded. An editable checkout
+  `.venv` is still named, never reinstalled, and a registration that would
+  spawn its own daemon (no `PSEUDOLIFE_MCP_NO_SPAWN=1`, loopback URL: the
+  pip and lite tiers) is left where its full install is, since a shim
+  runtime cannot serve. Migration keeps a mode argument (`channel`), the
+  file's permission bits and a dotfile symlink; pipx's bin-dir copy of the
+  launcher and a pip --user script are moved by their exact path. The
+  shim's and `doctor`'s version-mismatch advice name the runtime install
+  instead of `pipx install --force`.
+- The installers (`ops/install.sh`, `ops/install.ps1`) install the shim
+  runtime first and register the launcher; pipx / `pip install --user`
+  remain the fallback for a host whose Python cannot make a virtualenv, with
+  the earlier in-use check. On a rerun, an existing registration that names
+  a runtime, pipx or virtualenv path — or bare `pseudolife-mcp` on PATH —
+  is moved to the launcher (ladder state `present-migrated`).
+  `PSEUDOLIFE_SHIM_PYTHON` names the interpreter the runtimes are created
+  from; `PSEUDOLIFE_SHIM_RUNTIMES` + `PSEUDOLIFE_SHIM_LAUNCHER` relocate
+  both paths.
+
 ### Changed (2026-09-28 — the installer's extractor modes are named for the extractor, and any OpenAI-compatible server is a mode)
 - The one-shot installers' extractor modes are renamed from the models that
   were current when they were written: `claude-only` / `claude-fallback`

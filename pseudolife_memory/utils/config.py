@@ -1388,6 +1388,13 @@ class CoordinationConfig:
     awareness_limit: int = 5
     allowed_principals: list[str] = field(
         default_factory=lambda: [DEFAULT_PRINCIPAL])
+    # Principals that may post a board notice as the daemon through
+    # ``POST /api/daemon-notice`` (the unattended updater). Empty by
+    # default: ``default`` is every ordinary session's principal, and a
+    # notice from the daemon must not be something any session can send.
+    # An operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal here
+    # for the scheduled run's bearer (review of #463, 2026-09-29).
+    daemon_notice_principals: list[str] = field(default_factory=list)
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1421,6 +1428,53 @@ class CoordinationConfig:
             raise ValueError("coordination.allowed_principals must be a list of names")
         self.allowed_principals = list(dict.fromkeys(
             p.strip().lower() for p in self.allowed_principals))
+        if not isinstance(self.daemon_notice_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.daemon_notice_principals
+        ):
+            raise ValueError("coordination.daemon_notice_principals must be a list of names")
+        self.daemon_notice_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.daemon_notice_principals))
+
+
+@dataclass
+class UpdatesConfig:
+    """How an install learns about, and takes, a new release.
+
+    ``check_releases``: the daemon asks PyPI for the newest release once per
+    ``check_interval_seconds`` on a background thread (never on a request),
+    ``/health`` carries the answer, and the session-start briefing opens
+    with ``pseudolife-mcp update`` when the daemon is behind. Off, nothing
+    leaves the daemon and no session is told.
+
+    ``unattended_clients`` (off by default): when the daemon runs a newer
+    release than the shim a session starts from, that shim installs the
+    daemon's release as a new runtime beside itself and refreshes the
+    plugin cache in the background (``pseudolife-mcp update
+    --clients-only``); running sessions keep their runtime, the next
+    session starts on the new one. The daemon recreate, with its backup
+    and rollback tag, is never taken unattended by this knob.
+
+    ``unattended_daemon`` (off by default): the scheduled
+    ``pseudolife-mcp update --unattended`` run (a Windows task or a
+    systemd timer, installed with ``update --schedule HH:MM``) may recreate
+    the daemon on a new release, with the same backup and rollback tag as
+    an attended update, when the agent board lists no active session; it
+    posts a board notice from the daemon's principal when it updated or
+    held off. The run reads this through ``/health``, so installing the
+    timer alone changes nothing.
+    """
+
+    check_releases: bool = True
+    check_interval_seconds: int = 6 * 3600
+    unattended_clients: bool = False
+    unattended_daemon: bool = False
+
+    def __post_init__(self) -> None:
+        for name in ("check_releases", "unattended_clients", "unattended_daemon"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"updates.{name} must be a boolean")
+        if type(self.check_interval_seconds) is not int or self.check_interval_seconds < 60:
+            raise ValueError("updates.check_interval_seconds must be a whole number of seconds, 60 or more")
 
 
 @dataclass
@@ -1432,6 +1486,7 @@ class AppConfig:
     time: TimeConfig = field(default_factory=TimeConfig)
     coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
     memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -1565,5 +1620,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.coordination = _dict_to_dataclass(CoordinationConfig, raw["coordination"])
     if "memory_policy" in raw:
         config.memory_policy = _dict_to_dataclass(MemoryPolicyConfig, raw["memory_policy"])
+    if "updates" in raw:
+        config.updates = _dict_to_dataclass(UpdatesConfig, raw["updates"])
 
     return config

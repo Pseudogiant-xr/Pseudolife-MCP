@@ -42,6 +42,11 @@ PS1_SCRIPT = REPO / "ops" / "prune-build-cache.ps1"
 SH_SCRIPT = REPO / "ops" / "prune-build-cache.sh"
 UPDATE_PS1 = REPO / "ops" / "update.ps1"
 UPDATE_SH = REPO / "ops" / "update.sh"
+# Since pseudolife-mcp update (2026-09-29) the wrappers map their flags to
+# ops/update.py, and the deploy in pseudolife_memory.update_cli calls the
+# retention scripts; tests/test_update_cli.py proves the placement (cache
+# retention after the build, never on the unhealthy path) by execution.
+UPDATE_CLI = REPO / "pseudolife_memory" / "update_cli.py"
 
 # Forbidden verbs. Any of these reaching the stub fails the run outright.
 #
@@ -504,21 +509,24 @@ def test_unparseable_build_cache_size_fails_loudly(prune):
 
 
 def test_update_ps1_wires_cache_retention_in():
-    """update.ps1 must expose -KeepCacheHours / -NoCachePrune and call the
-    primitive. Retention must not abort a deploy that otherwise succeeded."""
+    """update.ps1 must expose -KeepCacheHours (default 168) / -NoCachePrune
+    and hand them to the deploy, which calls the primitive. Retention must
+    not abort a deploy that otherwise succeeded."""
     text = UPDATE_PS1.read_text(encoding="utf-8")
-    assert "KeepCacheHours" in text
-    assert "NoCachePrune" in text
-    assert "prune-build-cache.ps1" in text
-    assert "$KeepCacheHours = 168" in text
+    assert "[int]$KeepCacheHours = 168" in text
+    assert "[switch]$NoCachePrune" in text
+    assert '"--keep-cache-hours", "$KeepCacheHours"' in text
+    assert 'if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }' in text
+    deploy = UPDATE_CLI.read_text(encoding="utf-8")
+    assert "keep_cache_hours: int = 168" in deploy
+    assert '_checkout_script(checkout, "prune-build-cache")' in deploy
 
 
 def test_update_sh_wires_cache_retention_in():
     text = UPDATE_SH.read_text(encoding="utf-8")
-    assert "--keep-cache-hours" in text
-    assert "--no-cache-prune" in text
-    assert "prune-build-cache.sh" in text
-    assert "KEEP_CACHE_HOURS=168" in text
+    assert '--keep-cache-hours) args+=(--keep-cache-hours "$2")' in text
+    assert "--no-cache-prune)   args+=(--no-cache-prune)" in text
+    assert "keep_cache_hours: int = 168" in UPDATE_CLI.read_text(encoding="utf-8")
 
 
 def test_rollback_retention_still_runs_before_the_build():
@@ -531,6 +539,12 @@ def test_rollback_retention_still_runs_before_the_build():
     watches for the primitive's own `docker system df` — see the comment
     block there for why a `.index()` assertion could not prove it.
     """
-    ps1 = UPDATE_PS1.read_text(encoding="utf-8")
-    assert ps1.index("prune-rollbacks.ps1") < ps1.index("--build pseudolife-daemon"), \
+    import inspect
+
+    from pseudolife_memory import update_cli
+
+    deploy = inspect.getsource(update_cli.Update.deploy_checkout)
+    assert deploy.index("self.prune_rollbacks(") < deploy.index('"--build"'), \
         "rollback retention still belongs before the build"
+    assert deploy.index("self.wait_health()") < deploy.index("self.prune_cache("), \
+        "cache retention belongs after the daemon is healthy"

@@ -111,6 +111,11 @@ include = ["pseudolife_memory*"]
 # carry its static assets (css/fonts/js/index.html) or a pip install gets
 # a 404 console.
 "pseudolife_memory.web" = ["static/**"]
+# `pseudolife-mcp update` recreates the daemon container from the compose
+# files the running container was created with; when those are gone (the
+# checkout was deleted) it falls back to these copies, pinned byte-equal to
+# ops/ by tests/test_update_cli.py.
+"pseudolife_memory" = ["compose/*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,6 +4,12 @@
 #
 #   ops/install-shim-autostart.sh                 # default port 8082, v5 prompt, opus
 #   ops/install-shim-autostart.sh --model claude-sonnet-5   # pick the served model
+#
+# The unit runs `ops/shim_autostart.py run claude --foreground`, which reads
+# the model, prompt file, port, host, CLI path and interpreter from ops/.env
+# (PSEUDOLIFE_CLAUDE_SHIM_*) at every start; the flags here are written into
+# that file. Changing a value later is an edit plus
+# `python ops/shim_autostart.py restart claude`.
 #   Claude models: claude-opus-5-5 (default), claude-opus-5, claude-sonnet-5,
 #   claude-haiku-4-5, claude-fable-5 (the list ops/install.sh offers; any other
 #   claude-* id passes to the shim unchanged)
@@ -99,13 +105,16 @@ unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$unit_dir"
 unit="$unit_dir/pseudolife-sonnet-shim.service"
 
+# The values live in ops/.env; the unit's command line names only the runner.
+"$PYTHON_EXE" "$repo/ops/shim_autostart.py" config claude --model "$MODEL" --port "$PORT" \
+    --prompt-file "$PROMPT_FILE" --host "$BIND_HOST" --cli "$claude_cli" --python "$PYTHON_EXE" --log "$LOG_FILE"
 cat > "$unit" <<EOF
 [Unit]
 Description=Claude extractor CLI shim (dream pass primary; E4B sidecar is fallback)
 After=network-online.target
 
 [Service]
-ExecStart="$PYTHON_EXE" "$repo/evals/claude_shim.py" --host $BIND_HOST --port $PORT --model $MODEL --system-prompt-file "$prompt_path" --cli "$claude_cli"
+ExecStart="$PYTHON_EXE" "$repo/ops/shim_autostart.py" run claude --foreground
 WorkingDirectory=$repo
 Restart=on-failure
 RestartSec=60
@@ -120,6 +129,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now pseudolife-sonnet-shim.service
 
 echo "Registered + started pseudolife-sonnet-shim.service ($MODEL, $BIND_HOST:$PORT, python $PYTHON_EXE, log $LOG_FILE)."
+echo "To change the model, prompt file, port or CLI later: edit the PSEUDOLIFE_CLAUDE_SHIM_* lines in ops/.env, then run: python ops/shim_autostart.py restart claude"
 echo "Host-side check: curl http://$BIND_HOST:$PORT/health"
 echo "User services start at login; to start at BOOT (before login) run:"
 echo "  loginctl enable-linger $USER"

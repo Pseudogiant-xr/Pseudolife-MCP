@@ -481,12 +481,14 @@ def _accept_health(url: str, health: dict) -> dict:
             + (f" (db: {health['db']})" if health.get("db") else ""),
             file=sys.stderr,
         )
-    if _version_note(url, health):
+    if _version_note(url, health) and not _unattended_clients(url, health):
         print(
             f"[shim] this shim is pseudolife-mcp {__version__} but the daemon "
-            f"at {url} is {health['version']} — reinstall the shim from the "
-            f"daemon's checkout (re-run the installer, or pipx install --force "
-            f"<checkout>), or redeploy the daemon (ops/update.ps1 / update.sh).",
+            f"at {url} is {health['version']} — run pseudolife-mcp update --clients-only "
+            f"--tag {health['version']} (installs the daemon's release as a new shim runtime "
+            f"beside this one and refreshes the plugin cache; from a checkout: python "
+            f"ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp "
+            f"update); then start a new session.",
             file=sys.stderr,
         )
     return _notice_if_cortex_is_inert(health)
@@ -497,16 +499,151 @@ def _version_note(url: str, health: dict) -> str:
     is not the daemon's (``/health`` ``version``); '' when equal or when the
     daemon predates the field. The shim is installed separately from the
     daemon and does not move with a deploy; the model reads its
-    instructions, the stderr log is only for whoever looks."""
+    instructions, the stderr log is only for whoever looks. When the
+    client half was started unattended (:func:`_unattended_clients`), the
+    line says that instead of asking for the command."""
     daemon_version = health.get("version")
     # /health is unauthenticated and this string reaches the model's
     # instructions: only a version-shaped value is ever repeated.
     if (not isinstance(daemon_version, str) or daemon_version == __version__
             or not re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", daemon_version)):
         return ""
+    started = _UNATTENDED_NOTES.get((url, daemon_version))
+    if started:
+        return started
     return (f"Pseudolife-MCP: this shim is pseudolife-mcp {__version__} but the "
-            f"daemon at {url} is {daemon_version}; reinstall the shim from the "
-            f"daemon's checkout (re-run the installer) or redeploy the daemon.")
+            f"daemon at {url} is {daemon_version}; run pseudolife-mcp update --clients-only "
+            f"--tag {daemon_version} (from a checkout: python ops/update_clients.py --only shim) "
+            f"or update the daemon with pseudolife-mcp update, then start a new session.")
+
+
+# The unattended client half: what this process started, keyed by daemon URL
+# and release, so the served instructions can say so instead of asking for
+# the command, and a second health check in the same process starts nothing.
+_UNATTENDED_NOTES: dict[tuple[str, str], str] = {}
+# A failed unattended run must not repeat on every session start: one
+# attempt per release per hour.
+_UNATTENDED_RETRY_SECONDS = 3600.0
+
+
+def _state_dir():
+    from pathlib import Path
+
+    return Path.home() / ".pseudolife-mcp"
+
+
+def _spawn_detached(argv: list[str], log) -> int:
+    """Start ``argv`` so it outlives this shim, appending its output to
+    ``log``; returns the pid. The seam the tests replace."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(log, "ab")
+    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": handle, "stderr": subprocess.STDOUT}
+    if os.name == "nt":
+        kwargs["creationflags"] = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        return subprocess.Popen(argv, **kwargs).pid
+    finally:
+        handle.close()
+
+
+def _unattended_clients(url: str, health: dict) -> str:
+    """When the daemon says ``updates.unattended_clients`` and runs a newer
+    release than this shim, start ``pseudolife-mcp update --clients-only
+    --tag <daemon version>`` in the background (a new shim runtime beside
+    this one, the plugin cache refreshed; this session keeps its runtime)
+    and return the one line the served instructions carry; '' otherwise.
+    The daemon recreate is never taken here: that stays the operator's
+    ``pseudolife-mcp update``.
+
+    Only where that command can work: a Docker-tier registration on this
+    host (``PSEUDOLIFE_MCP_NO_SPAWN``, which the Docker-tier installers set,
+    and a loopback daemon URL); a lite daemon or a remote one would only
+    fail every time. One attempt per release per hour (the marker is
+    created exclusively, so two sessions starting together spawn one run),
+    and a run's exit code is read back from its result file, so the next
+    session says when the last attempt failed instead of trying again."""
+    updates = health.get("updates")
+    daemon_version = health.get("version")
+    if not isinstance(updates, dict) or updates.get("unattended_clients") is not True:
+        return ""
+    if not isinstance(daemon_version, str) or not re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", daemon_version):
+        return ""
+    daemon_key, own_key = _version_key(daemon_version), _version_key(__version__)
+    if daemon_key is None or own_key is None or daemon_key <= own_key:
+        return ""
+    if (url, daemon_version) in _UNATTENDED_NOTES:
+        return _UNATTENDED_NOTES[(url, daemon_version)]
+    if not (_is_loopback_url(url) and _spawn_disabled()):
+        return ""
+    state = _state_dir()
+    marker = state / f"update-clients.{daemon_version}.attempt"
+    result = state / f"update-clients.{daemon_version}.result"
+    log = state / "update-clients.log"
+    try:
+        stamp = marker.stat().st_mtime if marker.is_file() else None
+    except OSError:
+        stamp = None
+    if stamp is not None and (time.time() - stamp) < _UNATTENDED_RETRY_SECONDS:
+        try:
+            outcome = result.read_text(encoding="utf-8").strip() if result.is_file() else ""
+        except OSError:
+            outcome = ""
+        when = time.strftime("%H:%M", time.localtime(stamp))
+        if outcome and outcome != "0":
+            note = (f"Pseudolife-MCP: the unattended client update to {daemon_version} started at {when} "
+                    f"failed (exit {outcome}; log {log}); this shim is still {__version__}. Run "
+                    f"pseudolife-mcp update --clients-only --tag {daemon_version} yourself.")
+        else:
+            codex_file = result.with_suffix(".codex")
+            codex = (f" Codex's hook copy needs re-approval: the steps are in {codex_file}."
+                     if outcome == "0" and codex_file.is_file() else "")
+            note = (f"Pseudolife-MCP: an unattended client update to {daemon_version} started at {when} "
+                    f"({'finished' if outcome == '0' else 'still running'}; log {log}); this shim is "
+                    f"{__version__}. Start a new session to run on the new runtime.{codex}")
+        _UNATTENDED_NOTES[(url, daemon_version)] = note
+        return note
+    argv = [sys.executable, "-m", "pseudolife_memory.cli", "update", "--clients-only", "--tag", daemon_version,
+            "--result-file", str(result)]
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        if stamp is not None:
+            marker.unlink()
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(f"{time.time():.0f}\n")
+        try:
+            result.unlink()
+        except FileNotFoundError:
+            pass
+        pid = _spawn_detached(argv, log)
+    except FileExistsError:
+        # Another session won the exclusive create a moment ago: say that a
+        # run is in flight, never the manual command beside it.
+        note = (f"Pseudolife-MCP: an unattended client update to {daemon_version} was just started by "
+                f"another session (log {log}); this shim is {__version__}. Start a new session when it "
+                f"finishes.")
+        _UNATTENDED_NOTES[(url, daemon_version)] = note
+        return note
+    except Exception as exc:  # noqa: BLE001 - the shim must start whatever the spawn does
+        print(f"[shim] could not start the unattended client update: {exc}", file=sys.stderr)
+        return ""
+    note = (f"Pseudolife-MCP: the daemon at {url} runs {daemon_version} and this shim "
+            f"{__version__}; the shim runtime for {daemon_version} and the plugin cache are being "
+            f"installed unattended (updates.unattended_clients; log {log}). This session keeps "
+            f"its runtime; start a new session when it finishes.")
+    _UNATTENDED_NOTES[(url, daemon_version)] = note
+    print(f"[shim] daemon {daemon_version} is newer than this shim ({__version__}): started the "
+          f"unattended client update (pid {pid}, log {log}); this session keeps its runtime.",
+          file=sys.stderr)
+    return note
+
+
+def _version_key(value: str) -> tuple[int, ...] | None:
+    match = re.match(r"^(\d+(?:\.\d+)*)", value or "")
+    return tuple(int(part) for part in match.group(1).split(".")) if match else None
 
 
 def _exit_unreachable(url: str) -> NoReturn:
