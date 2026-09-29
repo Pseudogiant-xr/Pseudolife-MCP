@@ -587,7 +587,10 @@ class DeepDreamConfig:
     # >= 0.6 — while single-vote accept precision on the same rows was 0.74
     # and 9 of 10 two-vote accepts on low-differential rows were right but
     # the tenth folded the wrong way. A wrong fold deletes an entity, so
-    # accepts additionally require judge_mode "auto".
+    # accepts additionally require judge_mode "auto". Since 2026-09-30 the
+    # pass is skipped (no call) when the configuration makes the second
+    # opinion the first model again: no judge_second_url, and
+    # judge_second_model empty or the first endpoint's configured name.
     judge_second_opinion: bool = True
     # A same-model second vote (temperature 0) is independent only through
     # batch composition — 2/129 flips on the 2026-08-16 ladder — which is

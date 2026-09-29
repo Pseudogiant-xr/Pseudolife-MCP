@@ -355,7 +355,10 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Re-judge a pending merge proposal once more in a fresh batch "
              "(optionally judge_second_model) after its first verdict sat "
              "below the single-vote gate; the two-vote gates above apply "
-             "only when this is on."},
+             "only when this is on. Skipped, with no model call, while the "
+             "configuration makes the second opinion the first model again "
+             "(no second endpoint URL, and the second model empty or the "
+             "first's): that vote could authorize nothing."},
     {"path": "memory.deep_dream.judge_second_model", "group": "Deep dream",
      "label": "Merge judge second model", "type": "string", "default": None,
      "restart": False,
@@ -384,8 +387,9 @@ KNOBS: list[dict[str, Any]] = [
              "(merge, link, junk, store-curation, candidates) calls instead "
              "of the dream extractor. Empty = the dream extractor. From "
              "inside the container the host is host.docker.internal "
-             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Sends no "
-             "API key. Read on every judge call. " "Changing it changes the judging policy: recorded "
+             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Its bearer "
+             "key is env-only: PSEUDOLIFE_JUDGE_API_KEY, sent to this endpoint "
+             "and nowhere else. Read on every judge call. Changing it changes the judging policy: recorded "
              "verdicts in every review queue are re-judged and automatic "
              "decisions reconsidered."},
     {"path": "memory.deep_dream.judge_model", "group": "Deep dream",

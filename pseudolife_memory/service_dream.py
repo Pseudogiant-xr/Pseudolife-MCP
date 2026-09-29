@@ -3324,8 +3324,12 @@ class DreamOps:
             return extractor if hasattr(extractor, method) else None
         from pseudolife_memory.memory.dream import OpenAICompatExtractor
         if cfg.judge_url:
+            import os
             ex = OpenAICompatExtractor(
                 cfg.judge_url, model or cfg.judge_model or "judge",
+                # judge_url's own key, env-only like the second endpoint's
+                # (PSEUDOLIFE_JUDGE_SECOND_API_KEY); never the dream key.
+                api_key=os.environ.get("PSEUDOLIFE_JUDGE_API_KEY") or None,
                 # Explicit, not the constructor default: the judge endpoint
                 # follows the same config knob as the dream extractor, so a
                 # default change can never silently alter this shipped payload.
@@ -3558,13 +3562,34 @@ class DreamOps:
             with self._lock:
                 pending = review.refresh()
             first = [p for p in pending if not p.get("judge_verdict")]
-            second = ([p for p in pending
-                       if p.get("judge_verdict") and not p.get("judge2_verdict")]
-                      if cfg.judge_second_opinion else [])
+            awaiting = ([p for p in pending
+                         if p.get("judge_verdict") and not p.get("judge2_verdict")]
+                        if cfg.judge_second_opinion else [])
+            # A second opinion the CONFIGURATION already makes the first
+            # model again (no judge_second_url, and judge_second_model empty
+            # or the first endpoint's configured name) can authorize nothing
+            # in any mode, and in shadow it is the same model's opinion
+            # twice, so no call is spent on it: the rows keep waiting and
+            # the batch goes to first opinions (maintainer decision
+            # 2026-09-30). A distinct model or endpoint by configuration
+            # still gets its call; a substitution only the served name
+            # reveals is caught per row by _second_opinion_distinct. No
+            # config field changes, so no review fingerprint moves.
+            same_model_second = (
+                extractor is None and second_extractor is None
+                and not cfg.judge_second_url
+                and (not cfg.judge_second_model
+                     or cfg.judge_second_model == getattr(ex, "model", None)))
+            second = [] if same_model_second else awaiting
+            skipped = len(awaiting) if same_model_second else 0
             if not first and not second:
-                return {"judged": 0, "reconsideration": reconsidered}
+                idle = {"judged": 0, "reconsideration": reconsidered}
+                if skipped:
+                    idle["second_opinion_skipped_same_model"] = skipped
+                return idle
             out = {"judged": 0, "auto_rejected": 0, "auto_accepted": 0,
                    "second_opinions": 0, "pending_unjudged": 0,
+                   "second_opinion_skipped_same_model": skipped,
                    "auto_reject_refused_same_model": 0,
                    "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
