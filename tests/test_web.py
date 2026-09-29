@@ -66,6 +66,26 @@ def test_write_config_judge_second_model_is_live(svc):
     assert not svc.config.memory.deep_dream.judge_second_model
 
 
+def test_write_config_judge_endpoints_are_live(svc):
+    # 2026-09-30: every judge builds its endpoint from service.config per
+    # call, so the endpoint knobs live-mutate (no restart) and persist like
+    # judge_second_model; a non-URL is refused, empty clears.
+    patch = {"memory.deep_dream.judge_url": "http://127.0.0.1:8082/v1",
+             "memory.deep_dream.judge_model": "claude-opus-5-5",
+             "memory.deep_dream.judge_second_url": "https://api.example.com/v1"}
+    res = config_io.write_config(svc, patch)
+    assert set(patch) <= set(res["applied"]) and res["restart_required"] == []
+    dd = svc.config.memory.deep_dream
+    assert (dd.judge_url, dd.judge_model, dd.judge_second_url) == tuple(patch.values())
+    with open(res["config_path"], encoding="utf-8") as f:
+        saved = yaml.safe_load(f)["memory"]["deep_dream"]
+    assert saved["judge_second_url"] == "https://api.example.com/v1"
+    with pytest.raises(ValueError):
+        config_io.write_config(svc, {"memory.deep_dream.judge_second_url": "api.example.com"})
+    config_io.write_config(svc, {"memory.deep_dream.judge_second_url": ""})
+    assert not svc.config.memory.deep_dream.judge_second_url
+
+
 def test_write_config_restart_classification(svc):
     res = config_io.write_config(svc, {"memory.dream.sweep_interval_seconds": 300})
     assert "memory.dream.sweep_interval_seconds" in res["restart_required"]
@@ -204,6 +224,21 @@ def test_graph_review_route(svc):
     out = r.dispatch("GET", "/api/graph/review", {"scope": "all"}, {})
     assert "findings" in out and out["counts"]["total"] == len(out["findings"])
     assert any(f["action"] == "merge" for f in out["findings"])
+
+
+def test_proposal_evidence_route_pages(svc, monkeypatch):
+    calls = []
+    def evidence(*, offset, limit):
+        calls.append((offset, limit))
+        return {"kind": "merge", "total": 0, "offset": offset, "limit": limit,
+                "next_offset": None, "items": []}
+    monkeypatch.setattr(svc, "merge_proposal_evidence", evidence, raising=False)
+    routes = ConsoleRoutes(svc)
+    out = routes.dispatch("GET", "/api/graph/proposal-evidence",
+                          {"offset": "40", "limit": "20"}, {})
+    assert calls == [(40, 20)] and out["offset"] == 40
+    routes.dispatch("GET", "/api/graph/proposal-evidence", {}, {})
+    assert calls[-1] == (0, 25)
 
 
 def test_review_rejudge_route_preserves_queue_and_bound(svc, monkeypatch):

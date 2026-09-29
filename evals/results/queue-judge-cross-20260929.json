@@ -1,0 +1,231 @@
+{
+ "built_by": "evals/cross_judge_gates.py",
+ "tag": "20260929",
+ "first": {
+  "arm": "opus55",
+  "model": "claude-opus-5-5"
+ },
+ "gates": {
+  "reject_gate": 0.8,
+  "reject_gate_2": 0.7,
+  "accept_gate": 0.6
+ },
+ "panel": "queue-judge-panel-20260902.json",
+ "pairs": {
+  "sonnet55": {
+   "model": "claude-sonnet-5-5",
+   "replicates": [
+    {
+     "two_vote_reject": {
+      "n": 18,
+      "bad": 0,
+      "bad_ids": []
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 7,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    },
+    {
+     "two_vote_reject": {
+      "n": 17,
+      "bad": 0,
+      "bad_ids": []
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 7,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    }
+   ]
+  },
+  "fable51": {
+   "model": "claude-fable-5-1",
+   "replicates": [
+    {
+     "two_vote_reject": {
+      "n": 15,
+      "bad": 0,
+      "bad_ids": []
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 6,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    }
+   ]
+  },
+  "astra": {
+   "model": "gpt-6-astra",
+   "replicates": [
+    {
+     "two_vote_reject": {
+      "n": 26,
+      "bad": 1,
+      "bad_ids": [
+       2059
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 3,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    },
+    {
+     "two_vote_reject": {
+      "n": 24,
+      "bad": 1,
+      "bad_ids": [
+       2059
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 3,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    }
+   ]
+  },
+  "sol": {
+   "model": "gpt-6-sol",
+   "replicates": [
+    {
+     "two_vote_reject": {
+      "n": 30,
+      "bad": 3,
+      "bad_ids": [
+       1955,
+       2059,
+       2157
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 4,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    },
+    {
+     "two_vote_reject": {
+      "n": 29,
+      "bad": 2,
+      "bad_ids": [
+       1955,
+       2059
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 4,
+      "bad": 1,
+      "bad_ids": [
+       2016
+      ]
+     }
+    }
+   ]
+  },
+  "luna": {
+   "model": "gpt-6-luna",
+   "replicates": [
+    {
+     "two_vote_reject": {
+      "n": 28,
+      "bad": 3,
+      "bad_ids": [
+       1955,
+       2059,
+       2157
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 5,
+      "bad": 0,
+      "bad_ids": []
+     }
+    },
+    {
+     "two_vote_reject": {
+      "n": 21,
+      "bad": 1,
+      "bad_ids": [
+       1955
+      ]
+     },
+     "two_vote_accept_not_lowdiff": {
+      "n": 3,
+      "bad": 0,
+      "bad_ids": []
+     }
+    }
+   ]
+  }
+ },
+ "splits": {
+  "pair": [
+   "opus55",
+   "sonnet55"
+  ],
+  "replicate": 1,
+  "rows": [
+   1952,
+   1966,
+   2024,
+   2036,
+   2050,
+   2123,
+   2275
+  ],
+  "n": 7,
+  "correct_by_arm": {
+   "opus55": 4,
+   "sonnet55": 3,
+   "fable51": 6,
+   "astra": 4,
+   "sol": 5,
+   "luna": 2
+  }
+ },
+ "calibration": {
+  "opus55": {
+   "reject_votes": 67,
+   "at_or_above_reject_gate": 17
+  },
+  "sonnet55": {
+   "reject_votes": 74,
+   "at_or_above_reject_gate": 30
+  },
+  "fable51": {
+   "reject_votes": 36,
+   "at_or_above_reject_gate": 5
+  },
+  "astra": {
+   "reject_votes": 55,
+   "at_or_above_reject_gate": 55
+  },
+  "sol": {
+   "reject_votes": 79,
+   "at_or_above_reject_gate": 76
+  },
+  "luna": {
+   "reject_votes": 72,
+   "at_or_above_reject_gate": 71
+  }
+ }
+}
