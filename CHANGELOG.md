@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — shared cloud conversations cannot act as one mailbox)
+- Shared stdio cloud hosts can declare `PSEUDOLIFE_MCP_SHARED_HOST=1`; the
+  known `tunnel` writer uses the guard automatically. Like Claude Desktop's
+  app-level server, they register no coordination address and refuse status,
+  lease and mail operations before dispatch, while memory and awareness
+  calls remain available under the configured bearer principal.
+- Client metadata, a fixed adapter state file, channel mode or an explicitly
+  enabled board cannot override the shared-host guard. Session-aware Codex
+  and Claude Code hosts keep their existing bindings. Custom cloud launchers
+  require the operator marker and a restart; per-conversation mailbox binding
+  through this shared shim remains unsupported.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived
