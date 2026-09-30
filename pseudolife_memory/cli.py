@@ -36,6 +36,9 @@ modes:
                  lessons or other sessions' status notes landed since this
                  session's last one (installs without the plugin)
   doctor         check this runtime, daemon health and MCP handshake (no writes)
+  tunnel         guided optional Secure MCP Tunnel setup, cloud verification,
+                 status/doctor, private key renewal and opted-in autostart
+                 (`tunnel setup` resumes saved steps; `tunnel --help`)
   connect        point this machine's client registrations at a daemon URL
                  (`connect <url>`): replaces the old URL and, with
                  --token-file, the token file; verifies the daemon accepts
@@ -131,6 +134,9 @@ def main() -> None:
     elif mode == "connect":
         from pseudolife_memory.connect_cli import main as connect_main
         sys.exit(connect_main(sys.argv[2:]))
+    elif mode == "tunnel":
+        from pseudolife_memory.tunnel_cli import main as tunnel_main
+        sys.exit(tunnel_main(sys.argv[2:]))
     elif mode == "update":
         from pseudolife_memory.update_cli import main as update_main
         sys.exit(update_main(sys.argv[2:]))

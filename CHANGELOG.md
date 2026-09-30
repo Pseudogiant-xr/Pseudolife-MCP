@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-01 — guided Secure MCP Tunnel access)
+- Optional `pseudolife-mcp tunnel setup` resumes private account, key and app
+  onboarding without replacing local client registrations. Installer entrypoints,
+  status/doctor, explicit autostart, private key renewal and saved-profile updates
+  use the same flow.
+- Cloud verification requires two successful read-only challenge calls through
+  the tunnel; private receipts retain no memory or agent-board contents. Local
+  readiness remains distinct from cloud access. Full tool discovery across daemon
+  restart or tier expiry requires an explicit catalog choice.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived

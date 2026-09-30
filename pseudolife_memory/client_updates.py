@@ -994,13 +994,20 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
         # Informational, after the client steps: never "failed", so never
         # fails the run.
         report["autostart"] = check_autostart(repo)
+    from pseudolife_memory.tunnel_profiles import ProfileStore
+    try:
+        if ProfileStore().list():
+            from pseudolife_memory.tunnel_cli import update_existing_profiles
+            report["tunnel"] = update_existing_profiles()
+    except Exception:
+        report["tunnel"] = {"state": "failed", "detail": "private tunnel profiles could not be checked; run tunnel doctor"}
     # A shim left un-upgraded because sessions run it still needs the rerun.
     report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
     return report
 
 
 def print_ladder(report: dict) -> None:
-    labels = {"shim": "Shim", "plugin": "Plugin", "codex": "Codex hooks", "autostart": "Extractor autostart"}
+    labels = {"shim": "Shim", "plugin": "Plugin", "codex": "Codex hooks", "autostart": "Extractor autostart", "tunnel": "Secure tunnel"}
     for key, label in labels.items():
         if key in report and not (key == "autostart" and report[key]["state"] == "none"):
             result = report[key]

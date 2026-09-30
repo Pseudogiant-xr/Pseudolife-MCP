@@ -39,6 +39,8 @@
 #   --agents-file <path>             standing-file target for generic agents
 #   --no-art                         plain output (no banner, no color)
 #   --no-token                       open-loopback install: mint no bearer
+#   --tunnel                         enter optional guided ChatGPT Secure MCP
+#                                    Tunnel setup after local installation
 #                                    token, so the agent board stays off
 #   --model <name>                   the dreamer model: one the CLI shim modes
 #                                    list (docs/guide/dreaming.md), or any
@@ -108,6 +110,7 @@ SHIM_PORT=0
 TRANSPORT=shim
 NO_ART=""
 NO_TOKEN=""
+TUNNEL=""
 DAEMON_URL=""
 TOKEN_FILE=""
 CLIENT_ONLY=""
@@ -136,6 +139,7 @@ while [ $# -gt 0 ]; do
         --transport) TRANSPORT="$2"; shift 2 ;;
         --no-art) NO_ART=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
+        --tunnel) TUNNEL=1; shift ;;
         --daemon-url) DAEMON_URL="$2"; shift 2 ;;
         --token-file) TOKEN_FILE="$2"; shift 2 ;;
         --client-only) CLIENT_ONLY=1; shift ;;
@@ -2985,4 +2989,17 @@ print_update_line() {
 }
 # <<< update line <<<
 print_update_line
+if [ -n "$TUNNEL" ]; then
+    if [ -z "${SHIM_PATH:-}" ]; then
+        echo "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup." >&2
+        exit 2
+    fi
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_DAEMON_URL="$CLIENT_DAEMON_URL" PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" tunnel setup
+    else
+        "$SHIM_PATH" tunnel setup
+    fi
+else
+    echo "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
+fi
 echo "Done. First session: tell your coding agent to remember something."

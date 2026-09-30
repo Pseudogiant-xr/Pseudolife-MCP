@@ -14,6 +14,7 @@ license = {text = "Apache-2.0"}
 # minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
 # top so MCP-compatible clients can attach over stdio or Streamable HTTP.
 dependencies = [
+    "psutil>=5.9",
     "torch>=2.1.0",
     "sentence-transformers>=2.2.0",
     "numpy>=1.24.0",
@@ -58,8 +59,6 @@ dev = [
     "pytest-asyncio>=0.21",
     "pytest-xdist>=3.5",
     "websockets>=16,<17",
-    # evals/suite_cost.py and evals/service_init_bench.py sample processes.
-    "psutil>=5.9",
 ]
 # NLI contradiction scorer — heavy (~278 MB DeBERTa-xsmall checkpoint).
 # Off by default; the four-path contradiction detector still runs without it.

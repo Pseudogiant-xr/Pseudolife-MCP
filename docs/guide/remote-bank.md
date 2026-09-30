@@ -6,6 +6,10 @@ covers exposing that daemon beyond loopback, giving each remote machine its
 own identity, and wiring clients that run no daemon of their own.
 Part of the [user guide](../../README.md#documentation).
 
+For ChatGPT developer apps and a dot, use the optional guided
+[Secure MCP Tunnel setup](tunnels.md). It connects to this same daemon and
+keeps existing local client registrations.
+
 ## How it fits together
 
 ```
