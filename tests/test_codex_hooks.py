@@ -1589,7 +1589,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
 
 
 def _plugin_version():
-    return json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    return json.loads((ROOT / "plugin/release.json").read_text(encoding="utf-8"))["version"]
 
 
 def _recording_daemon():
@@ -1621,7 +1621,7 @@ def _hook_env(tmp_path, port):
 
 def test_bash_session_start_sends_the_plugin_version(tmp_path):
     """The SessionStart hook tells the daemon which plugin release it runs
-    from (read beside the script, in .claude-plugin/plugin.json), with and
+    from (read beside the script, in release.json), with and
     without a session id, so the briefing can open with a mismatch notice.
     2026-09-21: a stale plugin cache ran an hour against a newer daemon
     with nothing to say so."""
@@ -1680,13 +1680,10 @@ def test_native_session_start_sends_the_plugin_version(tmp_path):
 
 
 def _plugin_with_version(tmp_path, version):
-    """A plugin tree whose manifest carries ``version``; hooks run from it."""
+    """A plugin tree whose release.json carries ``version``; hooks run from it."""
     root = tmp_path / "plugin"
     shutil.copytree(ROOT / "plugin", root)
-    manifest = root / ".claude-plugin/plugin.json"
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    data["version"] = version
-    manifest.write_text(json.dumps(data), encoding="utf-8")
+    (root / "release.json").write_text(json.dumps({"version": version}), encoding="utf-8")
     return root
 
 

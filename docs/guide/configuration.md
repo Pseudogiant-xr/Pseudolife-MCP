@@ -2477,6 +2477,58 @@ at startup, the daemon serves nothing rather than a partly loaded bank:
 configured, such as an embedding-dimension mismatch, and the shim exits on
 it.
 
+## Claude Code plugin
+
+### Where the plugin lives: one cache folder per commit
+
+The plugin (`plugin/`, served by the `pseudolife-mcp` marketplace straight
+from this repository's master) is an install of its own, like the shim.
+Claude Code copies it into its plugin cache,
+`~/.claude/plugins/cache/pseudolife-mcp/pseudolife-memory/<version>/`
+(`CLAUDE_CODE_PLUGIN_CACHE_DIR` moves the whole `plugins` directory), and
+each session runs its hooks from the folder it started with.
+
+Claude Code names that folder by the `version` in the plugin's manifest,
+and `plugin/.claude-plugin/plugin.json` deliberately carries none. The
+version is then the marketplace commit (12 hex characters, as for
+Anthropic's own plugins), so every change to the plugin gets a folder of
+its own and an update never replaces a folder a session is using:
+
+- `pseudolife-mcp update`, `ops/update.ps1 -All` / `ops/update.sh --all`
+  and `python ops/update_clients.py` refresh the marketplace clone and
+  compare its plugin tree with the installed cache, byte for byte (CRLF
+  read as LF; the top-level dot entries Claude Code keeps there, such as
+  `.in_use/` and `.orphaned_at`, are skipped). When the two differ they run
+  `claude plugin update pseudolife-memory@pseudolife-mcp`, which installs
+  the new copy in a new folder beside the old one and switches the record
+  in `installed_plugins.json`, and they compare again. Nothing is
+  uninstalled at any point: an update that fails leaves the installed copy
+  installed.
+- Sessions already running keep the copy they loaded. A session started
+  afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
+  then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
+  do the same.
+- Claude Code stamps the replaced folder `.orphaned_at` and deletes it
+  itself 14 days later, once no running session marks it `.in_use`
+  (Claude Code 2.1.283; the sweep runs at most once a day).
+- The plugin's release, which the SessionStart hook reports to the daemon
+  for the version handshake, is in `plugin/release.json`, pinned to
+  `pyproject.toml` by `tests/test_plugin_packaging.py`.
+
+Until 2026-09-30 the manifest carried the release version. Every plugin
+change on master then landed on the same folder name: `/plugin update`
+answered "already at the latest version", and the updater's uninstall and
+reinstall could not replace a folder running sessions held (EPERM on
+Windows), which left the plugin uninstalled until the apps were restarted.
+The first update past that change installs a commit-named copy beside the
+release-named one. A marketplace clone that still offers the installed
+version (an older clone, or a fork that pins one) cannot install beside
+it; the updater reports that as failed and leaves the plugin installed.
+
+Codex keeps a copy of its own (a plugin without a version sits under
+`local/` in `~/.codex/plugins/cache/`) and runs plugin hooks only once
+they are approved; see `ops/setup-codex-hooks.py`.
+
 ## Session identity
 
 Every request resolves "which session/episode does this write belong to"

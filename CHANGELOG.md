@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — updating the plugin with sessions open installs beside them and never uninstalls)
+- Running the update while any Claude Code or Claude Desktop session was
+  open left the plugin uninstalled (2026-09-30). The updater compared the
+  marketplace clone with the plugin cache, counted the `.in_use` marker
+  Claude Code writes there while a session runs, and so always saw a stale
+  cache. It then uninstalled the plugin and reinstalled it; the reinstall
+  could not replace the same-version folder running sessions held (EPERM),
+  and the plugin stayed uninstalled until the apps were restarted.
+- The plugin's manifest no longer carries a version. Claude Code names each
+  cache folder by that version, and without one it uses the marketplace
+  commit, as for Anthropic's own plugins. Each update therefore installs
+  into a new folder beside the one running sessions loaded: they keep it,
+  new sessions start on the new one, and Claude Code deletes the old folder
+  14 days after it was replaced, once no session runs from it. The updater
+  (`pseudolife-mcp update`, `ops/update.ps1 -All`, `ops/update.sh --all`,
+  `ops/update_clients.py`) runs `claude plugin update` instead of uninstall
+  and install. It skips Claude Code's top-level markers when it compares,
+  follows `CLAUDE_CODE_PLUGIN_CACHE_DIR`, and on a failure leaves the
+  installed plugin installed. `/plugin update` inside Claude Code now moves
+  the plugin too.
+- The release the SessionStart hooks report for the version handshake moves
+  to `plugin/release.json`. `hooks.json` is unchanged, so Codex keeps its
+  approvals: it trusts a handler by its definition, not by the script
+  behind it (measured on Codex 0.158.0).
+  [Where the plugin lives](docs/guide/configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)
+
 ### Fixed (2026-09-29 — forget cascade for derived state)
 - Bulk source forget retains matching digests as retired history and excludes them from deleted-entry counts. Explicit digest-only deletion still removes the selected digest entries, as does a forget whose matched digest cannot be retired (its session episode is gone, or no matched source was persisted).
 - Revalidate captured relation evidence in the pinned edge transaction: a forget or supersession during extraction cannot publish an edge whose captured evidence was removed.

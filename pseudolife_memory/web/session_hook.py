@@ -116,10 +116,10 @@ def hooks_notice(plugin_version: str | None, plugin_digest: str | None,
     """One line when the plugin is the daemon's version but its hook scripts
     are not the daemon's, else ''.
 
-    The version string cannot move without a release (it is pinned to the
-    package version), so a plugin-only change on master reaches a user's
-    cache only through a forced refresh; until they run it, the version
-    handshake sees two equal strings. The digests tell the difference. A
+    The release string (``plugin/release.json``) cannot move without a
+    release (it is pinned to the package version), so a plugin-only change
+    on master reaches a user's cache only through an update; until they run
+    it, the version handshake sees two equal strings. The digests tell the difference. A
     version difference is left to :func:`version_notice`, so a session
     never opens with two lines about the same thing. Both digests are
     shape-checked: the plugin's arrives on a query string and is echoed
