@@ -49,6 +49,22 @@ def test_disconnect_during_forget_is_atomic(svc, monkeypatch):
                      "digest_retired": False, "resident_source_exists": True}
 
 
+def test_regeneration_retry_exhaustion_does_not_starve_later_session(svc):
+    root, _ = _session(svc, "old", "Beacon Cyan is gone", "Beacon Green remains")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Cyan and Green."]))["written"] == 1
+    svc.delete(text="Beacon Cyan is gone")
+    later, _ = _session(svc, "new", "Beacon Yellow remains", "Beacon Orange remains")
+    svc.config.memory.dream.digest_max_per_cycle = 1
+
+    class MalformedOld:
+        def summarize_session(self, context_text, *, target_chars):
+            return None if "Green" in context_text else "Yellow and Orange."
+
+    for _ in range(5):
+        svc.generate_digests_stage(MalformedOld())
+    assert svc._episode_digest_body(later) == "Yellow and Orange."
+
+
 def test_ordinary_exception_rolls_back_all_derived_updates(svc, monkeypatch):
     root, source_id = _session(svc, "rollback", "Beacon Teal uses Pump Zeta", "Beacon Rose remains")
     svc.cortex_write("Beacon Teal", "pump", "Pump Zeta", support="agent")
@@ -65,6 +81,27 @@ def test_ordinary_exception_rolls_back_all_derived_updates(svc, monkeypatch):
     assert svc._storage.conn.execute("SELECT status FROM facts WHERE entity='Beacon Teal'").fetchone()[0] == "current"
     assert svc._episode_digest_body(root) == "Teal uses Zeta."
     assert not svc._storage.conn.execute("SELECT superseded_at IS NOT NULL FROM entries WHERE source='digest'").fetchone()[0]
+
+
+def test_permanent_context_change_does_not_starve_other_sessions(svc):
+    root, _ = _session(svc, "changing", "Beacon Slate stays", "Beacon Coral stays")
+    later, _ = _session(svc, "later-stable", "Beacon Olive stays", "Beacon Indigo stays")
+    svc.config.memory.dream.digest_max_per_cycle = 1
+    class ChangingContext:
+        def summarize_session(self, context_text, *, target_chars):
+            if "Slate" in context_text:
+                with svc._lock:
+                    svc._cms.episodes.episodes[root].title += " changed"
+                return "Slate and Coral."
+            return "Olive and Indigo."
+    for _ in range(5):
+        svc.generate_digests_stage(ChangingContext())
+    assert svc._episode_digest_body(later) == "Olive and Indigo."
+    assert svc._episode_digest_body(root) is None
+    # Deferral keeps the old root eligible once its context stabilizes.
+    assert svc.generate_digests_stage(_FakeDigestExtractor(
+        ["Slate and Coral remain."]))["written"] == 1
+    assert svc._episode_digest_body(root) == "Slate and Coral remain."
 
 
 def test_schema_49_50_51_upgrade(pg_conn):
@@ -109,3 +146,27 @@ def test_legacy_edges_survive_and_fact_history_survives_hydration(svc):
         assert reloaded._storage.conn.execute("SELECT superseded_at FROM edges WHERE id=%s", (edge_id,)).fetchone()[0] is None
     finally:
         reloaded._storage.close()
+
+
+@pytest.mark.parametrize("failure", ["malformed", "write"])
+def test_exhausted_regeneration_preserves_advanced_cursor(svc, monkeypatch, failure):
+    root, _ = _session(svc, "exhaustion", "Beacon Mint is gone", "Beacon Pearl remains")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Mint and Pearl."]))["written"] == 1
+    svc.delete(text="Beacon Mint is gone")
+    with svc._lock:
+        cur = svc._load_digest_cursor()
+        advanced = cur["ts"] + 100
+        cur["ts"] = advanced
+        svc._save_digest_cursor(cur)
+    if failure == "write":
+        def fail_write(*args, **kwargs):
+            raise RuntimeError("synthetic digest write failure")
+        monkeypatch.setattr(svc, "_store_digest", fail_write)
+    for _ in range(2):
+        svc.generate_digests_stage(_FakeDigestExtractor(
+            [None if failure == "malformed" else "Pearl remains."]))
+    with svc._lock:
+        cur = svc._load_digest_cursor()
+        assert cur["ts"] == advanced
+        assert root not in cur.get("regenerate", [])
+        assert root not in cur["retry"]

@@ -551,13 +551,20 @@ class DreamOps:
                     # candidate advances the cursor in this same pass.
                     cur["regenerate"] = sorted(
                         set(cur.get("regenerate", [])) | {rid})
+                    # Rotate invalidated contexts behind untouched roots and
+                    # earlier deferrals; even a cap of one makes progress.
+                    cur["context_deferred"] = [
+                        e for e in cur.get("context_deferred", []) if e != rid
+                    ] + [rid]
                     self._save_digest_cursor(cur)
                     continue
                 if digest is None:             # malformed: bounded retry
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:
                         cur["retry"].pop(rid, None)
-                        cur["ts"] = cand["ended_at"]
+                        for key in ("regenerate", "context_deferred"):
+                            cur[key] = [e for e in cur.get(key, []) if e != rid]
+                        cur["ts"] = max(cur["ts"], cand["ended_at"])
                         self._save_digest_cursor(cur)
                         logger.warning(
                             "session digest: advancing past episode %s "
@@ -589,7 +596,9 @@ class DreamOps:
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:
                         cur["retry"].pop(rid, None)
-                        cur["ts"] = cand["ended_at"]
+                        for key in ("regenerate", "context_deferred"):
+                            cur[key] = [e for e in cur.get(key, []) if e != rid]
+                        cur["ts"] = max(cur["ts"], cand["ended_at"])
                         self._save_digest_cursor(cur)
                         logger.warning(
                             "session digest: advancing past episode %s "
@@ -604,8 +613,8 @@ class DreamOps:
                     break                      # keep episode order
                 written += 1
                 cur["retry"].pop(rid, None)
-                cur["regenerate"] = [e for e in cur.get("regenerate", [])
-                                      if e != rid]
+                for key in ("regenerate", "context_deferred"):
+                    cur[key] = [e for e in cur.get(key, []) if e != rid]
                 cur["ts"] = max(cur["ts"], cand["ended_at"])
                 self._save_digest_cursor(cur)
         return {"scanned": scanned, "written": written}
@@ -2827,8 +2836,9 @@ class DreamOps:
         if isinstance(raw, dict):
             cur = {"ts": float(raw.get("ts", 0.0)),
                    "retry": dict(raw.get("retry", {}))}
-            if "regenerate" in raw:
-                cur["regenerate"] = list(raw["regenerate"])
+            for key in ("regenerate", "context_deferred"):
+                if key in raw:
+                    cur[key] = list(raw[key])
             return cur
         return {"ts": 0.0, "retry": {}}
 
@@ -2840,7 +2850,8 @@ class DreamOps:
             self, *, limit: int | None = None) -> list[dict]:
         """Caller MUST hold the lock. Closed session roots past the digest
         cursor with >=1 subtree entry and no existing digest entry, oldest
-        first, capped at ``digest_max_per_cycle`` (bounds the backfill)."""
+        first, with invalidated contexts rotated behind other eligible roots;
+        capped at ``digest_max_per_cycle`` (bounds the backfill)."""
         assert self._cms is not None
         if self._storage is None:
             return []
@@ -2854,12 +2865,13 @@ class DreamOps:
                     if e.source == "digest" and e.episode_id
                     and e.superseded_at is None}
         regenerate = set(cur.get("regenerate", []))
+        deferred = {rid: i for i, rid in enumerate(cur.get("context_deferred", []))}
         roots = sorted(
             (e for e in em.episodes.values()
              if e.parent_id is None and e.session_key
              and e.ended_at is not None
              and (e.ended_at > cur["ts"] or e.id in regenerate)),
-            key=lambda e: e.ended_at)
+            key=lambda e: (deferred.get(e.id, -1), e.ended_at))
         out: list[dict] = []
         for root in roots:
             if root.id in digested:
