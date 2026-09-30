@@ -36,6 +36,11 @@ modes:
                  lessons or other sessions' status notes landed since this
                  session's last one (installs without the plugin)
   doctor         check this runtime, daemon health and MCP handshake (no writes)
+  connect        point this machine's client registrations at a daemon URL
+                 (`connect <url>`): replaces the old URL and, with
+                 --token-file, the token file; verifies the daemon accepts
+                 them first; all-or-nothing with backups (--dry-run shows
+                 the plan; --help for options)
   update         update the daemon and the client side from a release, with
                  no checkout: pull the pinned GHCR image, back the bank up,
                  tag a rollback, recreate only the daemon, wait for health,
@@ -123,6 +128,9 @@ def main() -> None:
     elif mode == "doctor":
         from pseudolife_memory.doctor_cli import run_doctor
         run_doctor()
+    elif mode == "connect":
+        from pseudolife_memory.connect_cli import main as connect_main
+        sys.exit(connect_main(sys.argv[2:]))
     elif mode == "update":
         from pseudolife_memory.update_cli import main as update_main
         sys.exit(update_main(sys.argv[2:]))

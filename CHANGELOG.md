@@ -240,6 +240,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ops/update_clients.py`); Codex asks for approval again after it.
   [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
 
+### Added (2026-09-30 — one command moves a machine's clients to a new daemon)
+- When a bank's daemon changed address, every client on every machine had to
+  be re-pointed by hand: each registrar fills in what is missing and leaves an
+  existing daemon URL alone, so the 2026-09-29 move of a live bank to a Linux
+  container took hand edits of `~/.claude.json`, Codex's `config.toml` (after
+  deleting `connection.json`), the Claude Desktop entry and
+  `~/.claude/settings.json`. `pseudolife-mcp connect <daemon-url>
+  [--token-file PATH [--read-token]] [--client ...] [--dry-run] [--yes]
+  [--json]` now re-points every Claude Code, Codex, Claude Desktop and Gemini
+  CLI registration it finds, plus the plugin hooks' copies (the
+  `settings.json` env block and Codex's `connection.json`). It plans first
+  (each place `current`, `change`, `manual` with the reason, or `absent` with
+  the command that registers it; it never creates a registration), asks once,
+  verifies every credential it points at the target (the shim's token-file
+  check, an authenticated request that follows no redirects, and an MCP
+  handshake with the board check-in off) before writing anything, then writes
+  all or nothing: each file backed up and read back, and on a failure every
+  file it wrote restored unless something else changed it since. Only the
+  daemon URL, the token-file path and, for a daemon on another machine,
+  `PSEUDOLIFE_MCP_NO_SPAWN=1` change. Project-scoped Claude Code entries,
+  non-stdio registrations, Desktop's old `pseudolife-memory` name, Codex
+  settings from another config layer, an ambient `PSEUDOLIFE_MCP_DAEMON_URL`
+  and a scheduled unattended update are reported, never written. Exit codes:
+  0 done, 1 rolled back, 2 usage or not confirmed, 3 no registration it can
+  write, 4 verification refused, 5 applied but the post-apply check failed.
+  [Moving a client to a new daemon](docs/guide/remote-bank.md#moving-a-client-to-a-new-daemon)
+- The token-file helpers and JSON env edits of `ops/client_credentials.py`
+  moved to `pseudolife_memory/client_config.py`, and the Codex connection
+  writer of `ops/setup-codex-hooks.py` (the app-server client,
+  `connection.json`, the token copy and `configure_credential_file`) to
+  `pseudolife_memory/codex_connection.py`, which adds the replace mode
+  `connect` uses. Both are standard library only, so `connect` runs from a
+  release install; the `ops/` scripts import them from the checkout and keep
+  their command lines, output and exit codes.
+
 ### Fixed (2026-09-30 — a Codex child thread is asked to park at its own stop, under its own address)
 - A Codex native child thread (`collaboration.spawn_agent`) or fork already
   had its own board address: the shim keys identity by the MCP
