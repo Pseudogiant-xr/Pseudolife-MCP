@@ -853,9 +853,10 @@ class Update:
         self.codex_step(report.get("codex"))
 
     def codex_step(self, codex: dict | None) -> None:
-        """What only the user can do: Codex trusts hooks by hash and asks
-        again when a script changes. The complete steps, printed when and
-        only when Codex's copy differs from the scripts just deployed
+        """What only the user can do: approve hooks Codex would ask about
+        again (a changed hooks.json, a new handler, manual copies that still
+        name a script bundle; Codex approves definitions, not scripts). The
+        complete steps, printed when and only when one is due
         (``client_updates.codex_reapproval_text``)."""
         from pseudolife_memory import client_updates
         text = client_updates.codex_reapproval_text(codex)

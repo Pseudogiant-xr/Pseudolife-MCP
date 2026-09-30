@@ -36,10 +36,12 @@ markers skipped) against the installed cache, and only when they differ is
 running sessions loaded and switches the record, then the tree is compared
 again, because the read-back is the proof. Nothing is ever uninstalled.
 
-Codex: hooks are trusted by hash, so a refresh is a consent step
-(``ops/setup-codex-hooks.py``); this reports whether the copy for the
-current scripts exists (the checkout's, or the daemon's ``hooks_digest``
-when there is no checkout) and names the command when not.
+Codex: Codex approves a hook by its definition in hooks.json, not by the
+script it runs (measured on Codex 0.158.0, 2026-09-30). Manual copies run
+through a launcher whose commands never change, so this refreshes them to
+the checkout's scripts with no approval; a plugin copy is reported as
+behind, and only a changed hooks.json names the approval steps
+(``ops/setup-codex-hooks.py``).
 
 Every CLI call goes through :func:`run_cli`, every lookup through
 :func:`which` and :func:`home`, so the tests drive the real logic with
@@ -744,8 +746,10 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
 # What Codex loses while its hook copy is unapproved, and the steps back.
 # Printed by every update path (pseudolife-mcp update, ops/update.*,
 # ops/update_clients.py, the unattended updater's board notice) when and only
-# when Codex's copy differs from the current scripts: Codex trusts hooks by
-# hash and asks again when a script changes, so no update can finish this.
+# when Codex would ask again: a changed hooks.json (Codex approves hook
+# definitions, not scripts), new handler positions, or manual copies that
+# still name a script bundle. An approval is the user's, so no update can
+# finish this.
 CODEX_HOOK_NAMES = HOOK_SCRIPTS + ("hooks.json",)
 CODEX_REAPPROVAL_VERIFY = "pseudolife-mcp doctor reports codex_hooks = current"
 
@@ -790,13 +794,16 @@ def codex_reapproval_text(codex: dict | None) -> str:
     off = ("so until this is done Codex sessions start without the memory briefing, the per-turn "
            "memory and mail notes, the board check-in, the SessionEnd close and the Stop-hook park gate.")
     if (codex or {}).get("source") == "manual":
-        # Content-addressed manual copies (ops/setup-codex-hooks.py --source
-        # manual): the same script refreshes, approves and verifies them.
+        # Manual copies whose commands still name a script bundle
+        # (ops/setup-codex-hooks.py before 2026-09-30): one approval moves
+        # them to the launcher, whose commands never change, and later
+        # updates refresh them without asking.
         return "\n".join([
-            f"Codex: its manual hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
-            f"approved handlers, {off}",
-            "  1. Refresh and approve the copy from a checkout: python ops/setup-codex-hooks.py --source manual "
-            "--trust ask (unattended: --trust yes)",
+            "Codex: its manual hook copy still names an older script bundle, so it needs one last approval "
+            "to move to the launcher; after that, updates refresh it without asking. Until then Codex keeps "
+            "running the older scripts.",
+            "  1. From a checkout: python ops/setup-codex-hooks.py --source manual --trust ask "
+            "(unattended: --trust yes)",
             "  2. Verify: the same command reports status ready; pseudolife-mcp doctor reports "
             "codex_hooks = bundle-present for manual copies.",
         ])
@@ -825,29 +832,57 @@ def _daemon_scripts_dir(daemon_digest: str | None) -> Path | None:
     return hooks if hooks.is_dir() and hooks_digest(hooks) == daemon_digest else None
 
 
-def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None) -> dict:
-    """Codex hooks come either as content-addressed manual copies under
-    ``<codex home>/pseudolife/hooks/<digest>`` (``setup-codex-hooks.py``) or
-    from the Codex plugin, whose marketplace clone Codex keeps itself. Both
-    are refreshed with consent (hooks are trusted by hash), so this reports
-    and names the command rather than acting. The current scripts are the
-    checkout's when ``repo`` is given, else the daemon's (``daemon_digest``,
-    its ``/health`` ``hooks_digest``)."""
+def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None,
+                      refresh: bool = False) -> dict:
+    """Codex hooks come either as manual copies under ``<codex
+    home>/pseudolife/hooks`` (``setup-codex-hooks.py``) or from the Codex
+    plugin, whose marketplace clone Codex keeps itself. Codex approves a hook
+    by its definition, not by the script it runs (measured on Codex 0.158.0,
+    2026-09-30), so only a changed ``hooks.json`` asks for approval again.
+    Manual copies run through a launcher whose commands never change; with
+    ``refresh`` (the update step) they are moved to the checkout's scripts
+    here, with no consent needed. Everything else is reported. The current
+    scripts are the checkout's when ``repo`` is given, else the daemon's
+    (``daemon_digest``, its ``/health`` ``hooks_digest``)."""
     repo = Path(repo) if repo else None
-    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex")
+    # Resolved as setup-codex-hooks.py resolves it: the launcher commands in
+    # hooks.json name the resolved path.
+    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex").expanduser().resolve()
     hooks_root = codex_home / "pseudolife" / "hooks"
     if hooks_root.is_dir():
         if repo is None or not (repo / "ops" / "setup-codex-hooks.py").is_file():
             return {"state": "bundle-present",
                     "detail": "manual hook copies present; whether they are current needs a checkout: "
                               "python ops/setup-codex-hooks.py --source manual --trust ask"}
-        if (hooks_root / codex_bundle_digest(repo)).is_dir():
+        setup = _load_from_checkout(repo, "ops/setup-codex-hooks.py", "codex_hook_setup")
+        checkout = codex_bundle_digest(repo)
+        # An older checkout's setup script has no launcher: read as before.
+        launcher_installed = getattr(setup, "launcher_installed", None)
+        if launcher_installed is not None and launcher_installed(codex_home):
+            try:
+                if setup._pointer(codex_home) == checkout:
+                    setup._vet_launcher(codex_home)
+                    return {"state": "current", "source": "manual",
+                            "detail": "manual hook copies run the checkout's scripts through the launcher"}
+                if not refresh:
+                    return {"state": "behind", "source": "manual",
+                            "detail": "manual hook copies run older scripts; the update refreshes them, with no "
+                                      "approval needed (Codex approves the launcher's commands, not the scripts)"}
+                moved = setup.refresh_manual(codex_home, repo / "plugin" / "hooks")
+            except (setup.SetupError, OSError, UnicodeError) as exc:
+                return {"state": "failed", "source": "manual",
+                        "detail": f"manual hook copies were not refreshed or verified: {exc}"}
+            return {"state": "current", "source": "manual",
+                    "detail": f"manual hook copies refreshed to the checkout's scripts (bundle {moved['bundle']}); "
+                              "Codex keeps its approval, which covers the launcher's commands, not the scripts"}
+        if (hooks_root / checkout).is_dir():
             return {"state": "bundle-present",
                     "detail": "bundle present; trust and execution not checked; rerun setup to verify with "
                               "consent: python ops/setup-codex-hooks.py --source manual --trust ask"}
         return {"state": "stale", "source": "manual",
-                "detail": "the installed copy predates the checkout's hook scripts; hooks are trusted by "
-                          "hash, so refresh with consent: python ops/setup-codex-hooks.py --trust ask"}
+                "detail": "the manual hook copies name an older script bundle in their commands, so moving "
+                          "them needs one more approval; after it, updates refresh them without asking: "
+                          "python ops/setup-codex-hooks.py --source manual --trust ask"}
     config = codex_home / "config.toml"
     try:
         config_text = config.read_text(encoding="utf-8")
@@ -860,7 +895,12 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     if current is None:
         return {"state": "unknown", "detail": "Codex runs the plugin's hooks; nothing to compare its clone with "
                                               "(no checkout, and the daemon reported no hooks_digest)"}
-    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current:
+    # Name the files that differ when the current scripts can be read here:
+    # the checkout's, or the daemon's through the plugin cache. The scripts'
+    # digest leaves hooks.json out, so it is compared here too.
+    reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
+    changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
+    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current and not changed:
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing:
             return {"state": "needs-approval", "source": "plugin", "changed_files": [],
@@ -869,10 +909,13 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                               "(or /hooks in the Codex terminal app)"}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its marketplace clone matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
-    # Name the files that differ when the current scripts can be read here:
-    # the checkout's, or the daemon's through the plugin cache.
-    reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
-    changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
+    if changed and "hooks.json" not in changed:
+        # Codex approves hook definitions (hooks.json), not the scripts
+        # they run: only the plugin copy is behind, no approval is due.
+        return {"state": "behind", "source": "plugin", "changed_files": changed,
+                "detail": f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)}); "
+                          "update the plugin in Codex's plugin manager. Its approvals carry over: Codex "
+                          "approves hook definitions, which did not change, not the scripts"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
             "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "
@@ -946,7 +989,7 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
     if "plugin" in steps:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
-        report["codex"] = check_codex_hooks(repo, daemon_digest)
+        report["codex"] = check_codex_hooks(repo, daemon_digest, refresh=True)
     if repo is not None:
         # Informational, after the client steps: never "failed", so never
         # fails the run.

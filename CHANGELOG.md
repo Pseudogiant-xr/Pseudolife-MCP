@@ -32,6 +32,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   behind it (measured on Codex 0.158.0).
   [Where the plugin lives](docs/guide/configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)
 
+### Fixed (2026-09-30 — Codex stops asking to approve PseudoLife's hooks after every update)
+- Codex users were asked to approve PseudoLife's hooks again after almost
+  every update. Codex approves a hook by its definition (the command,
+  timeout, `async` and `statusMessage`), not by the script it runs:
+  measured on Codex 0.158.0, editing a script left the approval in place
+  and editing the command asked again. Two things produced the churn.
+  Manual hook copies, which every Codex user without the plugin gets, named
+  a content-addressed script bundle in their commands, so each script
+  change was a new command. And the update told plugin users to re-approve
+  whenever a script changed, which Codex never asked for.
+- Manual copies now run through a launcher (`~/.codex/pseudolife/hooks/
+  run.sh`, `run.ps1` on Windows) whose commands never change; it runs the
+  bundle `current` names. Bundles stay content-addressed, and setup and
+  the update verify them and the launchers byte for byte. The update
+  (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
+  `ops/update.sh --all`, `ops/update_clients.py`) writes the new bundle,
+  checks it, moves `current` and removes the launcher bundle it replaced,
+  with no approval. A manual copy set up before this change asks for one
+  last approval (`python ops/setup-codex-hooks.py`); its old bundle stays,
+  since a Codex session started earlier may still run it.
+- A plugin copy whose scripts are older but whose `hooks.json` is not is
+  now reported as `behind` (update it in Codex's plugin manager; its
+  approvals carry over) instead of listing re-approval steps. A changed
+  `hooks.json`, which the old check missed because the scripts' digest
+  leaves it out, now does list them.
+- `tests/test_codex_hook_launcher.py` pins the fields Codex approves in
+  `plugin/hooks/hooks.json`, so a change that would ask every Codex user
+  again has to be deliberate. File writes in `ops/setup-codex-hooks.py`
+  retry a replace Windows refuses for a moment (a live setup run met one).
+- One approval now also covers the scripts later updates install, and the
+  consent prompt says so. A launcher an earlier release shipped is replaced
+  by a refresh (`PREVIOUS_LAUNCHERS`), so editing a launcher never strands
+  an install; setup with approval repairs a missing or changed launcher or
+  pointer, while a modified script bundle is still refused. A launcher
+  whose pointer names no bundle prints why on stderr and exits 1 instead of
+  running nothing silently. A manual refresh that cannot write or verify is
+  a failed client step, so the update exits non-zero for it.
+
 ### Fixed (2026-09-29 — forget cascade for derived state)
 - Bulk source forget retains matching digests as retired history and excludes them from deleted-entry counts. Explicit digest-only deletion still removes the selected digest entries, as does a forget whose matched digest cannot be retired (its session episode is gone, or no matched source was persisted).
 - Revalidate captured relation evidence in the pinned edge transaction: a forget or supersession during extraction cannot publish an edge whose captured evidence was removed.
