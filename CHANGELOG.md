@@ -27,8 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   installed plugin installed. `/plugin update` inside Claude Code now moves
   the plugin too.
 - The release the SessionStart hooks report for the version handshake moves
-  to `plugin/release.json`. The hook scripts changed, so Codex asks to
-  approve them again once.
+  to `plugin/release.json`. `hooks.json` is unchanged, so Codex keeps its
+  approvals: it trusts a handler by its definition, not by the script
+  behind it (measured on Codex 0.158.0).
   [Where the plugin lives](docs/guide/configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)
 
 ### Fixed (2026-09-29 — forget cascade for derived state)
