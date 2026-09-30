@@ -797,7 +797,9 @@ def test_board_default_stays_quiet_where_the_daemon_refuses_it(monkeypatch, caps
 
 def test_board_default_probe_is_bounded(monkeypatch):
     """The probe runs before the startup handshake; a stalled daemon must not
-    stretch Codex's startup budget, and an unanswered question means no."""
+    stretch Codex's startup budget. An unanswered question is not a no: no
+    adapter and no check-in at startup, and the background stand-in asks
+    again (tests/test_shim_board_retry.py drives it)."""
     import time
     seen = _board_env(monkeypatch, None)
 
@@ -820,7 +822,8 @@ def test_board_default_probe_is_bounded(monkeypatch):
     asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
     assert handshake and handshake[0] - started < 0.9
     assert _BoardAdapter.built == []
-    assert "coordination_adapter" not in seen and "board_checkin" not in seen
+    assert isinstance(seen["coordination_adapter"], shim._LateBoardAdapter)
+    assert "board_checkin" not in seen
 
 
 def test_board_default_stays_quiet_without_a_bearer(monkeypatch, capsys):
@@ -893,7 +896,8 @@ def _codex_board_env(monkeypatch, value, available):
     return seen
 
 
-@pytest.mark.parametrize("available", [True, False])
+# None: the daemon gave no answer, which Codex still reads as no for the process.
+@pytest.mark.parametrize("available", [True, False, None])
 def test_codex_default_builds_its_registry_only_where_the_daemon_serves_the_board(
         monkeypatch, available):
     """A registry the daemon refuses would retry every tool call and append
@@ -923,7 +927,12 @@ def test_codex_explicit_opt_in_keeps_its_registry_and_probes_for_the_checkin(mon
     (200, b"Pseudolife coordination: check in.\n", True),
     (200, b"", False),
     (401, b"unauthorized", False),
-    (None, None, False),
+    (404, b"not found", False),  # a daemon older than the route: an answer
+    # No answer is not a no: the shim keeps asking in the background.
+    (None, None, None),
+    (502, b"bad gateway", None),
+    (503, b"unavailable", None),
+    (429, b"rate limited", None),  # waited out, as the registration retry does
 ])
 def test_board_probe_reads_the_startup_checkin_route(monkeypatch, status, body, expected):
     import io

@@ -96,7 +96,8 @@ _ADAPTER_RETRY_ATTEMPT_SECONDS = 30.0
 # which runs before the downstream handshake: a design bound, not a measured
 # tuning constant. A healthy daemon answers it without storage I/O in a
 # loopback round trip; a stalled one must not stretch the startup budget
-# above, and an unanswered probe counts as no board for this process.
+# above. An unanswered probe adds no adapter or check-in at startup; the
+# per-session shim asks again in the background (_LateBoardAdapter).
 _BOARD_PROBE_SECONDS = 1.5
 # The provider guide's 2026-08-31 cold-start check budgets 180 s for a first
 # model-loading tool call. This replaces the MCP SDK's 300 s SSE default while
@@ -825,10 +826,14 @@ def _post_episode(url: str, token: str | None, path: str, payload: dict, *,
         pass
 
 
-def _board_available(url: str, provider) -> bool:
+def _board_available(url: str, provider) -> bool | None:
     """Whether the daemon would give this bearer the board check-in now:
-    the same answer the plugin's startup hook reads. False on any failure,
-    so an unreachable daemon never adds a check-in that must fail."""
+    the same answer the plugin's startup hook reads. ``None`` when the daemon
+    gave no answer (no connection, a timeout, a 5xx from it or a proxy in
+    front of it, or 408/429, which the registration retry also waits out),
+    which is falsy, so an unreachable daemon never adds a check-in that must
+    fail; the per-session shim asks again later instead of reading it as a
+    no. Any other refusal (a 4xx, or a daemon older than the route) is a no."""
     try:
         token = provider.snapshot().token
         req = urllib.request.Request(url + "/api/hook/coordination-start")
@@ -837,8 +842,10 @@ def _board_available(url: str, provider) -> bool:
         opener = urllib.request.build_opener(_NoRedirectHandler)
         with opener.open(req, timeout=2) as r:
             return bool(r.read().strip())
-    except Exception:  # noqa: BLE001
-        return False
+    except urllib.error.HTTPError as error:
+        return None if error.code >= 500 or error.code in (408, 429) else False
+    except Exception:  # noqa: BLE001 - no answer from the daemon
+        return None
 
 
 _YES = {"1", "true", "yes", "on"}
@@ -1005,11 +1012,16 @@ class _LateBoardAdapter:
 
     ``build`` returns a fresh, unentered adapter: one cannot be re-entered,
     and a failed or cancelled entry has already released its state-file
-    reservation, so every attempt starts clean."""
+    reservation, so every attempt starts clean. ``ask_board``, given when the
+    default-mode board check went unanswered at startup, is asked before each
+    attempt until it answers: ``None`` waits, ``False`` (the daemon does not
+    serve this bearer the board) stops quietly, as the default does at
+    startup, and ``True`` goes on to register."""
 
-    def __init__(self, build, state_path=None):
+    def __init__(self, build, state_path=None, *, ask_board=None):
         import asyncio
         self._build = build
+        self._ask_board = ask_board
         self._state_path = state_path
         self._adapter = None
         self._stopped = False
@@ -1035,6 +1047,17 @@ class _LateBoardAdapter:
             await asyncio.sleep(
                 _ADAPTER_RETRY_DELAYS[min(attempt, len(_ADAPTER_RETRY_DELAYS) - 1)])
             attempt += 1
+            if self._ask_board is not None:
+                served = await self._ask_board()
+                if self._closing:  # the check's wait_for can lose the cancel too
+                    return
+                if served is None:
+                    continue
+                if not served:
+                    self._stopped = True
+                    self._settled.set()
+                    return
+                self._ask_board = None
             try:
                 adapter = self._build()
                 await asyncio.wait_for(
@@ -1538,19 +1561,23 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     # bearer (disabled, an unlisted principal, file mode) gets no adapter or
     # Codex registry, whose refusals would otherwise ride every tool result.
     # An explicit opt-in skips the question and keeps the adapter's own
-    # diagnostics.
+    # diagnostics. A question the daemon did not answer is not a no: the
+    # per-session shim keeps asking in the background (_LateBoardAdapter).
     setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
     explicit = setting in {"1", "true", "yes", "on"}
     enabled = explicit
+    unanswered = False
     # A process serving many conversations binds no board identity whatever
     # the daemon says, so it does not wait on the question.
     if not setting and _holds_bearer(provider) and not _serves_many_conversations():
         try:
-            enabled = await asyncio.wait_for(
+            answer = await asyncio.wait_for(
                 asyncio.to_thread(_board_available, url, provider),
                 timeout=_BOARD_PROBE_SECONDS)
         except (TimeoutError, asyncio.TimeoutError):  # 3.10 raises the latter
-            enabled = False
+            answer = None
+        enabled = answer is True
+        unanswered = answer is None
     codex_pull = (not channel
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
@@ -1648,7 +1675,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                 print("pseudolife-mcp: this process serves every conversation in the "
                       "Claude app, so it registers no coordination address; board "
                       "writes are refused here.", file=sys.stderr)
-        elif enabled:
+        elif enabled or unanswered:
             from pseudolife_memory.coordination_adapter import CoordinationAdapter, AdapterError
             from pseudolife_memory.credentials import CredentialError
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
@@ -1669,35 +1696,57 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     # gets hints only.
                     digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))
 
-            try:
-                adapter = await asyncio.wait_for(
-                    stack.enter_async_context(build_adapter()),
-                    timeout=_ADAPTER_STARTUP_SECONDS)
-            except (AdapterError, CredentialError, TimeoutError, asyncio.TimeoutError) as exc:
-                if _transient_board_failure(exc):
-                    # Not a verdict, only no answer in time: keep trying, or
-                    # this process stays off the board for its whole life.
-                    late = _LateBoardAdapter(build_adapter, state_path)
-                    stack.push_async_callback(late.aclose)
-                    late.start()
-                    print("pseudolife-mcp: coordination registration did not complete at "
-                          "startup (daemon unreachable or slow); memory proxy remains "
-                          "active and registration is retried in the background.",
-                          file=sys.stderr)
-                else:
-                    _report_coordination_unavailable(state_path)
+            async def ask_board():
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(_board_available, url, provider),
+                        timeout=_ADAPTER_RETRY_ATTEMPT_SECONDS)
+                except (TimeoutError, asyncio.TimeoutError):
+                    return None
+
+            if unanswered:
+                # Whether the daemon serves this bearer the board is still
+                # open: the stand-in asks again before each attempt, and a
+                # refusal then leaves today's quiet default.
+                late = _LateBoardAdapter(build_adapter, state_path, ask_board=ask_board)
+                stack.push_async_callback(late.aclose)
+                late.start()
+                print("pseudolife-mcp: the daemon did not answer the board check at "
+                      "startup; memory proxy remains active and the check and "
+                      "registration are retried in the background.", file=sys.stderr)
+            else:
+                try:
+                    adapter = await asyncio.wait_for(
+                        stack.enter_async_context(build_adapter()),
+                        timeout=_ADAPTER_STARTUP_SECONDS)
+                except (AdapterError, CredentialError, TimeoutError,
+                        asyncio.TimeoutError) as exc:
+                    if _transient_board_failure(exc):
+                        # Not a verdict, only no answer in time: keep trying,
+                        # or this process stays off the board for its whole life.
+                        late = _LateBoardAdapter(build_adapter, state_path)
+                        stack.push_async_callback(late.aclose)
+                        late.start()
+                        print("pseudolife-mcp: coordination registration did not "
+                              "complete at startup (daemon unreachable or slow); memory "
+                              "proxy remains active and registration is retried in the "
+                              "background.", file=sys.stderr)
+                    else:
+                        _report_coordination_unavailable(state_path)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
             kwargs["coordination_hint"] = adapter.deliver_hint
             kwargs["board_checkin"] = True
         elif late is not None:
-            # The check-in stays in the instructions: a board write before
-            # the registration lands is refused with the reason, and the
-            # first result after it lands says the board works.
+            # A board write before the registration lands is refused with
+            # the reason, and the first result after it lands says the board
+            # works. The check-in stays in the instructions when the daemon
+            # said it serves the board; an unanswered check adds none.
             kwargs["coordination_adapter"] = late
             kwargs["coordination_hint"] = late.deliver_hint
-            kwargs["board_checkin"] = True
+            if not unanswered:
+                kwargs["board_checkin"] = True
         if channel:
             kwargs["channel_inbox"] = (adapter.inbox if adapter is not None
                                        else late.inbox if late is not None else idle_inbox)
