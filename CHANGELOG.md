@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
+- An installed ring capability no longer makes an idle recipient's send receipt
+  claim `rung` after its listener has stopped. The adapter renews short-lived
+  listener evidence; absent or expired evidence returns `no_path` with
+  `listener_unknown` or `listener_expired`, while eligible mail stays queued
+  for a later listener. `rung` means a known armed path, not recipient action.
+- Waiting guidance covers the Stop hook's 59-minute limit: Claude Code arms one
+  main-session background four-hour `wait-mail` and re-arms after mail or
+  timeout; Codex uses its supported doorbell. Other hosts state
+  `next-turn-only`. Senders use available recipient host messaging as a
+  fallback and tell the maintainer when an urgent dependency cannot wait.
+
 ### Fixed (2026-09-30 - REST identity and concurrent Console writes)
 - REST routes bind the authenticated principal and request headers in their worker, restoring the previous context on success or failure so writes carry the same writer/session attribution as MCP calls.
 - SessionEnd checks ownership and clears the active-session pointer atomically, preserving a newer session that starts concurrently.

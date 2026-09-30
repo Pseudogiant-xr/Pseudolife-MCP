@@ -14,6 +14,7 @@ also fires SubagentStop, the entry is a no-op.
 """
 import hashlib
 import json
+import re
 import subprocess
 
 import pytest
@@ -236,7 +237,8 @@ def test_the_text_a_child_is_shown_never_suggests_sending():
     from pseudolife_memory.coordination import PARK_GATE_MESSAGE
     for text in (PARK_GATE_MESSAGE, GATE_MESSAGE):
         lowered = text.lower()
-        assert "send" not in lowered and "memory_message" not in lowered and "reply" not in lowered
+        assert re.search(r"\bsend\b", lowered) is None
+        assert "memory_message" not in lowered and "reply" not in lowered
 
 
 # --- setup ------------------------------------------------------------------

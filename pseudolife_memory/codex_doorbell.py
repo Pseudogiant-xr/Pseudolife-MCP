@@ -242,7 +242,10 @@ class CodexDoorbell:
             bell.arrival = adapter.digest_watermark
             bell.covered = bell.arrival - 1
         self._bells[thread_id] = bell
-        adapter.mailbox_observer = lambda current: self.observe(thread_id, current)
+        observer = lambda current: self.observe(thread_id, current)
+        adapter.mailbox_observer = observer
+        adapter.ring_listener = lambda: (not self._disabled and thread_id in self._bells
+                                        and adapter.mailbox_observer is observer)
 
     def note_call(self, thread_id: str, name: str, arguments, *,
                   succeeded: bool = False) -> None:

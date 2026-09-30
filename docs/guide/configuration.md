@@ -370,6 +370,13 @@ heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
 an unchanged digest every hour, without moving the watermark, so the day-old
 sweep another adapter runs at start never takes a long-idle session's file.
 
+Each waiter owns a separate `<key>.<uuid32hex>.wait-armed` marker containing
+its owner token and a listener epoch renewed on each poll. The adapter
+aggregates unexpired listener records and reports that evidence to the daemon
+at attach and heartbeat. Exit clears only the waiter's own marker, so one
+waiter's exit does not disarm another; adapter teardown leaves these records
+alone. An interrupted process's evidence expires within 60 seconds.
+
 In Claude Code, the agent arms it with the Bash or PowerShell tool and
 `run_in_background: true`. Claude Code reports the exit as a task notification,
 which starts a turn even in an idle session (observed on Claude Code 2.1.280,
@@ -382,6 +389,13 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
    names (in Codex, make one `memory_*` call first) and re-arm once; if it
    persists, continue pull-only.
 3. Before ending a turn that waits on a peer, make sure a waiter is armed.
+
+The Stop hook alone watches for at most 59 minutes. A park record can outlive
+that watcher, so for a longer wait arm one main-session background
+`pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail or the
+four-hour timeout. Where Codex supports its doorbell, that is its durable host
+path. Where the host provides neither path, record `next-turn-only` in the
+park or status: a durable park is not evidence of a durable listener.
 
 Arm it from the main conversation: a command started by a foreground subagent
 ends with that subagent's final response, and `-p` runs end background commands
@@ -1439,7 +1453,22 @@ The **park record** lives on the agent row and is set through
 Use `done` only when no follow-up is expected: nothing will ring you.
 Waiting on a merge click or a review that may still bring fixes? Park
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
-`maintainer`, or `waiting_peer`.
+`maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
+a live listener. Check the sender's wake receipt; `no_path` means mail is
+queued for receive on a later turn. For waits over 59 minutes, especially
+`needs_approval` waiting on maintainer, arm `wait-mail` in the background or
+keep the Codex doorbell active; otherwise record that you are reachable
+on your next turn.
+
+Before parking on a dependency that may take longer than 59 minutes, keep a
+host path armed as described under [wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail)
+or [Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
+limitation explicit. A sender checks the receipt instead of assuming that
+an installed hook wakes an idle recipient. On `no_path`, use the recipient
+host's messaging tool when available: Claude Desktop's session `send_message`
+starts a user turn. If no host path is available, expect delivery on the next
+turn and tell the maintainer when the dependency is urgent. Peer text still
+does not grant approval.
 
 An omitted field stays; a refinement or a new reason keeps the standing
 expiry. A park past its `park_expires` no longer stands: a new reason over
@@ -1467,26 +1496,37 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | --- | --- | --- |
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` | |
-| `no_path` | the recipient has no wake path: no live channel (`wake_enabled: false`) and no ring path declared at attach | the parked need, if any |
-| `rung` | parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `no_path` | the recipient has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
 
 `reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
+`listener_unknown`, `listener_expired`,
 `clearer`, `anyone`, `clears`, `urgent`, `need_not_cleared`, `no_park`, or a
-cap). Chatter never rings. A retry of the same `request_id` repeats the first
+cap). `rung` is evidence of a known armed path at send time; it does not mean
+that a turn started, that the recipient read the message, or that it acted.
+Chatter never rings. A retry of the same `request_id` repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
 burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
 is a `coordination_wakes` row; the recipient's attach and heartbeat answers
 carry the newest for one heartbeat interval after it is first served
 (`wake`, with the latest `ring_at`), so a retried heartbeat still gets it,
-and the adapter takes each ring once. A wake path is a live channel or a
-**ring path**: an adapter declares at register and at every attach whether
-a ring reaches it without a channel (`ring`, kept in `capabilities`; the
-Claude shim when it has a digest for the Stop hook, a Codex thread the
-doorbell watches). A daemon older than v49 refuses the attach parameter
-once, and the adapter stops sending it. The shim rings through its client's
+and the adapter takes each ring once. A wake path is a live channel or an
+armed **ring path**. `ring` in `capabilities` describes what an adapter can
+support; it does not prove a listener is still running. The adapter reports
+`ring_armed_until` at attach and heartbeat, a finite epoch capped by the
+daemon to 60 seconds and valid only while that attachment is live. It renews
+that evidence only while a recipient listener is armed. Missing evidence is
+`listener_unknown`; expired evidence is `listener_expired`. Eligible mail
+without a listener remains queued for a later armed listener; the send's
+`no_path` receipt remains the honest result at send time. A pending queued
+ring survives an outage or a new attachment until its mail is acknowledged
+or expires; the adapter suppresses repeat delivery within one attachment
+generation. A daemon older than
+v49 refuses the attach parameter once, and the adapter stops sending it.
+The shim rings through its client's
 path: the Claude adapter writes
 `<key>.ring` beside the digest (line 1 the digest watermark, line 2 the
 decision and reason) at `ring_at` for the Stop hook, and the Codex doorbell
@@ -1655,7 +1695,12 @@ also capped (below, and by the daemon's `wake` caps under
   park_resume=...). Use done only when no follow-up is expected: nothing will
   ring you. Waiting on a merge click or a review that may still bring fixes?
   Park needs_approval with park_clear_by set to the reviewer's agent id or
-  maintainer, or waiting_peer." as the wake text and a `gate` ledger line (its
+  maintainer, or waiting_peer. A park records intent; automatic wake requires
+  a live listener. Check the sender's wake receipt; no_path means mail is
+  queued for receive on a later turn. For waits over 59 minutes, especially
+  needs_approval waiting on maintainer, arm wait-mail in the background or
+  keep the Codex doorbell active; otherwise record that you are reachable
+  on your next turn." as the wake text and a `gate` ledger line (its
   fifth column is the message's length in UTF-8 bytes plus one, on every
   client). Once: the continuation's Stop carries `stop_hook_active: true` and
   is not asked (Claude Code also caps stop-hook continuations at eight in a
@@ -1691,10 +1736,20 @@ also capped (below, and by the daemon's `wake` caps under
   exited) ends the watch. After `/clear` it reads the
   digest named by the per-process `claude-<pid>.host` record, when
   SessionStart has written one.
+  The lease keeps a stable owner token; each watcher owns a separate
+  `<key>.<Stop-owner-token>.wake-armed` marker carrying that token and a
+  listener epoch renewed at each poll, capped at the watcher's deadline. The
+  adapter accepts the marker only while its owner matches the lease, so a
+  superseded watcher cannot reclaim it. Exit removes only that watcher's own
+  marker and leaves the shared `.wake` ownership stamp alone; the stamp
+  without a matching live marker proves no liveness. Stale evidence expires
+  within 60 seconds even after an interrupted process.
 - A watcher waits at most 3540 s after the turn that armed it; the hook's
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer is not woken; its mail still appears on its next prompt. The watcher
+  longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
+  re-armed after mail or its four-hour timeout; without that, its mail appears
+  on its next prompt and the ring listener expires. The watcher
   also stops when Claude Code exits: at once on Linux and macOS, and within
   a minute on Windows, where it lists the process through `ps -W` at arm
   time and then once a minute (a Windows PID is invisible to `kill -0`). In

@@ -41,6 +41,23 @@ DEADLINE = 60
 STARTED = []
 
 
+def test_stop_wait_has_a_short_listener_lease_and_disarms_at_exit(tmp_path):
+    _digest(tmp_path, 1, "")
+    lease = tmp_path / "digests" / f"{_key()}.wake"
+    process = _start(_env(tmp_path, wait=5))
+    assert _wait_until(lambda: lease.exists())
+    token = lease.read_text().strip()
+    armed = lease.with_name(f"{_key()}.{token}.wake-armed")
+    assert _wait_until(lambda: armed.exists() and len(armed.read_text().splitlines()) == 2)
+    token, expiry = armed.read_text().splitlines()
+    assert token == lease.read_text().strip()
+    assert token and 0 < float(expiry) - time.time() <= 61
+    code, out, err = _finish(process)
+    assert (code, out, err) == (0, "", "")
+    assert lease.read_text().strip() == token
+    assert not armed.exists()
+
+
 @pytest.fixture(autouse=True)
 def _no_leftover_watchers():
     """A failed assertion must not leave a watcher polling for an hour."""
@@ -546,8 +563,13 @@ def test_a_newer_firing_retires_the_older_watcher(tmp_path):
     first_owner = lease.read_text()
     newer = _start(_env(tmp_path))
     assert _wait_until(lambda: lease.read_text() != first_owner)
+    new_owner = lease.read_text().strip()
+    new_listener = lease.with_name(f"{_key()}.{new_owner}.wake-armed")
+    assert _wait_until(new_listener.exists)
     code, out, err = _finish(older, timeout=20)
     assert (code, out, err) == (0, "", "")
+    assert lease.read_text().strip() == new_owner
+    assert new_listener.exists()
     _digest(tmp_path, 4, LATER)
     code, out, err = _finish(newer)
     assert code == 2 and _woke(err, LATER)
@@ -720,7 +742,11 @@ GATE_MESSAGE = ("Before ending: update your board status with why you stopped an
                 "park_resume=...). Use done only when no follow-up is expected: nothing will ring "
                 "you. Waiting on a merge click or a review that may still bring fixes? Park "
                 "needs_approval with park_clear_by set to the reviewer's agent id or maintainer, "
-                "or waiting_peer.")
+                "or waiting_peer. A park records intent; automatic wake requires a live listener. "
+                "Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. "
+                "For waits over 59 minutes, especially needs_approval waiting on maintainer, arm wait-mail "
+                "in the background or keep the Codex doorbell active; otherwise record that you are "
+                "reachable on your next turn.")
 
 
 def test_the_served_park_gate_prompt_names_the_followup_distinction():
@@ -741,7 +767,7 @@ def test_the_park_guidance_keeps_done_distinct_from_followup(surface):
         else:
             text = text.split("### Waking an idle Claude Code session: the Stop hook", 1)[1]
             text = text.split("park_resume=...)", 1)[1].split('" as the wake text', 1)[0]
-    guidance = GATE_MESSAGE.split(")", 1)[1].strip(". ")
+    guidance = GATE_MESSAGE.split(")", 1)[1].split(" A park records intent;", 1)[0].strip(". ")
     assert guidance in " ".join(text.replace("`", "").split())
 
 

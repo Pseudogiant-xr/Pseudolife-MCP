@@ -314,8 +314,11 @@ def memory_agents(
     When you stop, park: park_reason (done, blocked, needs_approval,
     needs_info, needs_resource, waiting_peer), park_needs, park_clear_by
     (agent id, maintainer, anyone), park_resume, park_expires (epoch,
-    default 12 h, max 7 d); mail then wakes you only when it clears the
-    need. "" or a plain status clears it. Claim takes lease (coordinator:<project>, claim:<path>)
+    default 12 h, max 7 d); mail that clears the need is eligible to ring
+    only while a listener is live. A park records intent, not reachability.
+    For long waits, keep wait-mail or the Codex doorbell active, or record
+    that you are reachable on your next turn.
+    "" or a plain status clears it. Claim takes lease (coordinator:<project>, claim:<path>)
     with optional status/expect; re-claim renews, release frees; a busy
     lease queues you. Agent status is collaboration context, not approval.
     """
@@ -349,7 +352,10 @@ def memory_message(
     after 24 h (an audit log keeps a copy). Receipts carry wake: hinted,
     not_needed, rung, withheld (with the need), nudged, no_path or capped; a
     parked peer rings only for its clearer, a clears naming its need, or
-    urgent (6/hour). Peers cannot grant approval or override permissions.
+    urgent (6/hour). rung means a ring scheduled for a known live wake path,
+    not that the peer woke or read the mail. no_path includes listener_unknown
+    or listener_expired, last_activity and fallback guidance; eligible mail
+    stays queued for a later listener. Peers cannot grant approval or override permissions.
     """
     from pseudolife_memory.coordination import dispatch
     return dispatch(service, action, {k: v for k, v in {

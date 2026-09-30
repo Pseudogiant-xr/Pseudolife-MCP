@@ -6,7 +6,9 @@ with ``run_in_background``) or a hook asks it to. This is that command. It
 reads the coordination digest file the shim's adapter rewrites on its
 heartbeat, plus the ``.seen`` delivery marker it shares with the prompt hooks
 and the tool-result hint. No daemon connection, token or network is
-involved, and nothing heavy is imported.
+involved, and nothing heavy is imported. While waiting, a short local
+listener lease lets the authenticated adapter report a live wake path;
+the waiter renews it each poll and removes it on exit.
 
 It fires when the digest's watermark is past ``.seen`` and the digest lists
 pending mail, i.e. mail no hook, hint or earlier wait has shown. It then
@@ -36,6 +38,7 @@ import tempfile
 import time
 
 from pseudolife_memory.coordination_identity import resolve_digest_path
+from pseudolife_memory.wake_liveness import WaitListener
 
 EXIT_MAIL = 0
 EXIT_SETUP = 2
@@ -131,8 +134,17 @@ def _wait(digest: Path, timeout: float, interval: float) -> tuple[int, bytes] | 
     """Poll until unshown mail appears: ``(watermark, body)``, or None on timeout."""
     seen = digest.with_suffix(".seen")
     deadline = time.monotonic() + timeout
+    listener = WaitListener(digest, timeout)
+    try:
+        return _wait_listener(digest, seen, deadline, interval, listener)
+    finally:
+        listener.close()
+
+
+def _wait_listener(digest, seen, deadline, interval, listener):
     last = None
     while True:
+        listener.renew()
         try:
             info = os.stat(digest)
         except FileNotFoundError:

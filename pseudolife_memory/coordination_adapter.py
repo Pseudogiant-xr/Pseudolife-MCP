@@ -22,6 +22,7 @@ import httpx
 from .channel import ChannelEvent
 from .coordination import PUBLIC_ERROR_CODES, encode_bound_principal
 from .private_state import _private_fd as _private_fd_impl, open_private
+from .wake_liveness import LEASE_SECONDS, armed_until
 
 
 class AdapterError(RuntimeError):
@@ -197,6 +198,8 @@ class CoordinationAdapter:
         # the attach parameter once, and the adapter stops sending it.
         self.ring_path = (self.digest_path is not None) if ring_path is None else ring_path is True
         self._ring_attach_supported = True
+        self._ring_liveness_supported = True
+        self.ring_listener = None
         # Called with this adapter after every mailbox update (attach,
         # heartbeat, re-attach): the Codex doorbell reads the new state here.
         # It runs on the heartbeat task, so it must return at once.
@@ -462,14 +465,29 @@ class CoordinationAdapter:
         drops it for good and attaches again, as the heartbeat does for
         ``active``."""
         body = {"attachment_id": self._attachment_id, "wake_enabled": wake_enabled}
+        if self._ring_liveness_supported and self.ring_path:
+            body["ring_armed_until"] = self._ring_armed_until()
         if self._ring_attach_supported:
             try:
                 return await self._post("attach", {**body, "ring": self.ring_path}, retry=True)
             except AdapterError as error:
                 if error.code != "unexpected_parameter":
                     raise
+                if self._ring_liveness_supported:
+                    self._ring_liveness_supported = False
+                    return await self._post_attach(wake_enabled)
                 self._ring_attach_supported = False
         return await self._post("attach", body, retry=True)
+
+    def _ring_armed_until(self) -> float:
+        if not self.ring_path:
+            return 0.0
+        if callable(self.ring_listener):
+            try:
+                return time.time() + LEASE_SECONDS if self.ring_listener() else 0.0
+            except Exception:
+                return 0.0
+        return armed_until(self.digest_path)
 
     def _read_seen(self) -> int:
         seen = self._delivered_watermark
@@ -511,7 +529,8 @@ class CoordinationAdapter:
                 mine = (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path(),
                         self._turn_path())
                 for entry in entries:
-                    if (entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn"))
+                    if (entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn",
+                                             ".wait-armed", ".wake-armed"))
                             and entry.is_file(follow_symlinks=False)
                             and entry.stat(follow_symlinks=False).st_mtime < cutoff
                             and Path(entry.path) not in mine):
@@ -1093,20 +1112,28 @@ class CoordinationAdapter:
 
     async def _heartbeat(self):
         body = self._attachment()
+        if self._ring_liveness_supported and self.ring_path:
+            body["ring_armed_until"] = self._ring_armed_until()
         report_turn = self._turn_seen and self._turn_flag_supported
         if report_turn:
             body["active"] = True
             self._turn_seen = False
-        try:
-            result = await self._post("heartbeat", body, retry=True)
-        except AdapterError as error:
-            if not report_turn or error.code != "unexpected_parameter":
+        while True:
+            try:
+                result = await self._post("heartbeat", body, retry=True)
+                break
+            except AdapterError as error:
+                if error.code == "unexpected_parameter" and "ring_armed_until" in body:
+                    self._ring_liveness_supported = False
+                    body.pop("ring_armed_until")
+                    continue
+                if error.code == "unexpected_parameter" and report_turn:
+                    self._turn_flag_supported = False
+                    body.pop("active", None)
+                    report_turn = False
+                    continue
                 self._turn_seen = self._turn_seen or report_turn
                 raise
-            # A daemon older than the flag refuses the whole heartbeat;
-            # keeping the lease matters more than the ranking.
-            self._turn_flag_supported = False
-            result = await self._post("heartbeat", self._attachment(), retry=True)
         if result.get("generation") != self._generation:
             raise AdapterError("coordination attachment is no longer current")
         self._update_pending_count(result)

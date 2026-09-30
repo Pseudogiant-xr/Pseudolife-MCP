@@ -832,6 +832,11 @@ def _wake_capable(store, principal="alice"):
     return agent
 
 
+def _renew_wake_path(store, agent):
+    """Keep the fixture listener attached across an explicit clock jump."""
+    store.attach(*creds(agent), attachment_id=agent["agent_id"][:8], wake_enabled=True)
+
+
 def test_an_active_recipient_is_hinted_not_rung(store):
     """An unparked session that acted within ``active_seconds`` sees the
     mail in its next tool result; a parked one is decided on its park
@@ -855,8 +860,11 @@ def test_a_recipient_without_a_wake_path_reports_no_path_and_its_need(store):
     b = store.register("alice")   # pull-only
     store.update(*creds(b), park_reason="blocked", park_needs="a review", park_clear_by="anyone")
     _idle(store, b)
-    assert _wake(store, a, b) == {"decision": "no_path", "reason": "wake_disabled",
-                                  "park_needs": "a review", "park_clear_by": "anyone"}
+    wake = _wake(store, a, b)
+    assert {key: wake[key] for key in ("decision", "reason", "park_needs", "park_clear_by")} == {
+        "decision": "no_path", "reason": "wake_disabled",
+        "park_needs": "a review", "park_clear_by": "anyone"}
+    assert wake["queued"] is True
 
 
 def test_chatter_to_a_parked_session_is_withheld_with_the_need(store):
@@ -909,6 +917,7 @@ def test_an_expired_park_is_idle(store):
                  park_expires=1500.0)
     _idle(store, b)
     store.test_time[0] = 1600.0
+    _renew_wake_path(store, b)
     assert _wake(store, a, b)["decision"] == "nudged"
 
 
@@ -918,9 +927,11 @@ def test_an_idle_unparked_recipient_is_nudged_once_an_hour(store):
     _idle(store, b)
     assert _wake(store, a, b) == {"decision": "nudged", "reason": "no_park", "ring_at": 1000.0}
     store.test_time[0] = 1000.0 + 1800
+    _renew_wake_path(store, b)
     _idle(store, b)
     assert _wake(store, a, b) == {"decision": "capped", "reason": "nudge_hour"}
     store.test_time[0] = 1000.0 + 3601
+    _renew_wake_path(store, b)
     _idle(store, b)
     assert _wake(store, a, b)["decision"] == "nudged"
 
@@ -931,13 +942,16 @@ def test_rings_to_one_recipient_are_capped_per_hour(store):
     store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="anyone")
     for i in range(20):
         store.test_time[0] = 1000.0 + i * 60
+        _renew_wake_path(store, b)
         _idle(store, b)
         assert _wake(store, a, b)["decision"] == "rung"
     store.test_time[0] = 1000.0 + 20 * 60
+    _renew_wake_path(store, b)
     _idle(store, b)
     assert _wake(store, a, b) == {"decision": "capped", "reason": "recipient_hour",
                                   "park_needs": "x", "park_clear_by": "anyone"}
     store.test_time[0] = 1000.0 + 3601
+    _renew_wake_path(store, b)
     _idle(store, b)
     assert _wake(store, a, b)["decision"] == "rung"
 
@@ -948,9 +962,11 @@ def test_urgent_is_capped_per_sender(store):
     store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="maintainer")
     for i in range(6):
         store.test_time[0] = 1000.0 + i * 120
+        _renew_wake_path(store, b)
         _idle(store, b)
         assert _wake(store, a, b, urgent=True)["decision"] == "rung"
     store.test_time[0] = 1000.0 + 6 * 120
+    _renew_wake_path(store, b)
     _idle(store, b)
     assert _wake(store, a, b, urgent=True) == {"decision": "capped", "reason": "urgent_sender_hour",
                                                "park_needs": "x", "park_clear_by": "maintainer"}
@@ -975,6 +991,7 @@ def test_rings_have_a_nightly_total(store):
     assert _wake(store, a, d) == {"decision": "capped", "reason": "nightly",
                                   "park_needs": "x", "park_clear_by": "anyone"}
     store.test_time[0] = 1000.0 + 86401
+    _renew_wake_path(store, d)
     _idle(store, d)
     assert _wake(store, a, d)["decision"] == "rung"
 
@@ -988,6 +1005,7 @@ def test_a_fan_out_burst_staggers_its_rings(store):
     assert [_wake(store, a, agent)["ring_at"] for agent in peers] == [1000.0, 1030.0, 1060.0]
     # A ring a minute after the burst's last is not part of it.
     store.test_time[0] = 1000.0 + 120
+    _renew_wake_path(store, peers[0])
     for agent in peers:
         _idle(store, agent)
     assert _wake(store, a, peers[0])["ring_at"] == 1120.0
@@ -1084,11 +1102,14 @@ def test_park_gate_requires_a_park_strictly_after_a_rung_delivery(store, reset_a
                  park_clear_by="anyone")
     # An update earlier in the turn must not excuse a later cleared need.
     store.test_time[0] = 1510.0
+    _renew_wake_path(store, recipient)
     store.update(*creds(recipient), park_reason="blocked")
     store.test_time[0] = 1600.0
+    _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     if reset_at is not None:
         store.test_time[0] = reset_at
+        _renew_wake_path(store, recipient)
         store.update(*creds(recipient), park_reason="blocked")
     expected = ({"gate": "allow", "reason": "parked"} if reset_at == 1700.0
                 else {"gate": "block", "reason": "not_updated_this_turn"})
@@ -1102,8 +1123,10 @@ def test_park_gate_ignores_rung_deliveries_before_or_at_the_turn_start(store, de
     store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
                  park_clear_by="anyone")
     store.test_time[0] = delivery_at
+    _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     store.test_time[0] = 2000.0
+    _renew_wake_path(store, recipient)
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
         "gate": "allow", "reason": "parked"}
 
@@ -1130,6 +1153,7 @@ def test_park_gate_ignores_rung_deliveries_to_another_agent(store):
         store.update(*creds(agent), park_reason="blocked", park_needs="a review",
                      park_clear_by="anyone")
     store.test_time[0] = 1600.0
+    _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     assert store.park_gate(sender["agent_id"], "alice", since=1500.0) == {
         "gate": "allow", "reason": "parked"}
@@ -1139,6 +1163,7 @@ def test_park_gate_ignores_a_nudge_when_the_recipient_then_parks(store):
     sender = store.register("alice")
     recipient = _wake_capable(store)
     store.test_time[0] = 1600.0
+    _renew_wake_path(store, recipient)
     _idle(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "nudged"
     store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
@@ -1153,10 +1178,13 @@ def test_park_gate_compares_the_park_with_the_newest_rung_delivery(store):
     store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
                  park_clear_by="anyone")
     store.test_time[0] = 1550.0
+    _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     store.test_time[0] = 1600.0
+    _renew_wake_path(store, recipient)
     store.update(*creds(recipient), park_reason="blocked")
     store.test_time[0] = 1700.0
+    _renew_wake_path(store, recipient)
     assert _wake(store, sender, recipient)["decision"] == "rung"
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {
         "gate": "block", "reason": "not_updated_this_turn"}
@@ -1169,8 +1197,12 @@ def test_park_gate_uses_delivery_time_not_the_staggered_or_served_ring(store):
         store.update(*creds(agent), park_reason="blocked", park_needs="a review",
                      park_clear_by="anyone")
     store.test_time[0] = 1550.0
+    for agent in (other, recipient):
+        _renew_wake_path(store, agent)
     assert _wake(store, sender, other)["decision"] == "rung"
     store.test_time[0] = 1560.0
+    for agent in (other, recipient):
+        _renew_wake_path(store, agent)
     assert _wake(store, sender, recipient)["ring_at"] == 1580.0
     store.test_time[0] = 1570.0
     store.update(*creds(recipient), park_reason="blocked")
@@ -1222,13 +1254,14 @@ def test_a_woke_marker_is_logged_against_the_rings_it_answers(store):
     store.update(*creds(b), status="parked", park_reason="blocked", park_needs="the review",
                  park_clear_by="anyone")
     store.test_time[0] = 2000.0
+    store.attach(*creds(b), attachment_id="one", ring=True, ring_armed_until=2060.0)
     assert store.send(*creds(a), to=b["agent_id"], text="review is in",
                       request_id="r1")["wake"]["decision"] == "rung"
     # Nothing served yet: the marker still lands (a hook may fire on a ring
     # the heartbeat served before this daemon restarted), counting zero.
     assert store.woke(b["agent_id"], "alice") == {"recorded": True, "rings": 0}
     store.test_time[0] = 2005.0
-    store.attach(*creds(b), attachment_id="one", ring=True)
+    store.attach(*creds(b), attachment_id="one", ring=True, ring_armed_until=2060.0)
     store.test_time[0] = 2010.0
     assert store.woke(b["agent_id"], "alice") == {"recorded": True, "rings": 1}
     woke = events(store, "woke")
@@ -1254,6 +1287,187 @@ def _ring_capable(store, principal="alice"):
     return agent
 
 
+def test_static_ring_capability_does_not_claim_a_listener(store):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    wake = _wake(store, sender, recipient)
+    assert wake["decision"] == "no_path"
+    assert wake["reason"] == "listener_unknown"
+    assert wake["queued"] is True
+    assert wake["last_activity"] == store.test_time[0]
+    assert "receive" in wake["fallback"]
+    attached = store.heartbeat(*creds(recipient), attachment_id=recipient["agent_id"][:8],
+                               generation=1, ring_armed_until=10000.0)
+    assert attached["ring_armed_until"] == 1060.0
+    assert attached["wake"]["decision"] == "rung"
+    assert store.receive(*creds(recipient))["messages"]
+
+
+def test_listener_heartbeat_expiry_and_disarm(store):
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"ring": True})
+    first = store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                         ring_armed_until=1040.0)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    assert _wake(store, sender, recipient)["decision"] == "rung"
+    store.test_time[0] = 1041.0
+    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+    renewed = store.heartbeat(*creds(recipient), attachment_id="listener",
+                              generation=first["generation"], ring_armed_until=1080.0)
+    assert renewed["wake"]["decision"] == "rung"
+    store.heartbeat(*creds(recipient), attachment_id="listener", generation=first["generation"])
+    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+    assert store.authenticate(*creds(recipient))["last_activity"] == 1000.0
+
+
+def test_expired_attachment_cannot_claim_a_live_listener(store):
+    sender = store.register("alice")
+    recipient = store.register("alice")
+    first = store.attach(*creds(recipient), attachment_id="listener", ring=True, ring_armed_until=1060.0)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
+    store.test_time[0] = 1060.0
+    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+    with pytest.raises(CoordinationError, match="stale_attachment"):
+        store.heartbeat(*creds(recipient), attachment_id="listener", generation=first["generation"], ring_armed_until=1100.0)
+    second = store.attach(*creds(recipient), attachment_id="replacement", ring=True)
+    assert second["wake"] is None
+    store.heartbeat(*creds(recipient), attachment_id="replacement", generation=second["generation"], ring_armed_until=1100.0)
+    store.detach(*creds(recipient), attachment_id="replacement", generation=second["generation"])
+    assert _wake(store, sender, recipient)["reason"] == "listener_expired"
+
+
+def test_queued_no_path_mail_reaches_a_later_live_channel_and_counts_toward_caps(store):
+    from pseudolife_memory.storage.coordination import WakePolicy
+    store.wake = WakePolicy(per_recipient_per_hour=1)
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
+    first = store.send(*creds(sender), to=recipient["agent_id"], text="review ready", request_id="queued")
+    assert first["wake"]["decision"] == "no_path"
+    assert _wake(store, sender, recipient)["decision"] == "capped"
+    attached = store.attach(*creds(recipient), attachment_id=recipient["agent_id"][:8], wake_enabled=True)
+    assert attached["wake"]["decision"] == "rung"
+    delivered = store.receive(*creds(recipient), for_delivery=True)["messages"]
+    assert [m["message_id"] for m in delivered] == [first["message_id"]]
+
+
+def test_unauthenticated_listener_heartbeat_cannot_arm_another_address(store):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    with pytest.raises(CoordinationError, match="invalid_credential"):
+        store.heartbeat("alice", recipient["agent_id"], sender["credential"],
+                        attachment_id=recipient["agent_id"][:8], generation=1, ring_armed_until=1060.0)
+    assert "ring_armed_until" not in store.authenticate(*creds(recipient))["capabilities"]
+
+
+def test_queued_wake_does_not_invalidate_a_park_until_it_reaches_a_listener(store):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.test_time[0] = 1010.0
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
+    store.test_time[0] = 1020.0
+    assert _wake(store, sender, recipient)["decision"] == "no_path"
+    assert store.park_gate(recipient["agent_id"], "alice", since=1005.0)["gate"] == "allow"
+    store.test_time[0] = 1030.0
+    store.heartbeat(*creds(recipient), attachment_id=recipient["agent_id"][:8], generation=1,
+                    ring_armed_until=1060.0)
+    assert store.park_gate(recipient["agent_id"], "alice", since=1005.0)["gate"] == "block"
+
+
+@pytest.mark.parametrize("arm_at_attach", [True, False])
+def test_queued_wake_survives_a_lost_handoff_and_replacement_attachment(store, arm_at_attach):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    body = {"to": recipient["agent_id"], "text": "review ready", "request_id": "lost-handoff"}
+    sent = store.send(*creds(sender), **body)
+    assert sent["wake"]["decision"] == "no_path"
+    store.test_time[0] = 1001.0
+    lost = store.heartbeat(*creds(recipient), attachment_id=recipient["agent_id"][:8],
+                           generation=1, ring_armed_until=1061.0)
+    assert lost["wake"] == {"decision": "rung", "reason": "anyone", "ring_at": 1000.0}
+    # The answer never reaches the recipient; its process and lease lapse.
+    store.test_time[0] = 1062.0
+    replacement = store.attach(*creds(recipient), attachment_id="replacement", ring=True,
+                               ring_armed_until=1122.0 if arm_at_attach else None)
+    assert replacement["generation"] == 2
+    if arm_at_attach:
+        assert replacement["wake"] == lost["wake"]
+    else:
+        assert replacement["wake"] is None
+    beat = {"attachment_id": "replacement", "generation": replacement["generation"],
+            "ring_armed_until": 1122.0}
+    assert store.heartbeat(*creds(recipient), **beat)["wake"] == lost["wake"]
+    # Replaying an existing authorization creates neither a send nor a cap entry.
+    assert store.send(*creds(sender), **body)["message_id"] == sent["message_id"]
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (1,)
+    assert [m["message_id"] for m in store.receive(*creds(recipient))["messages"]] == [sent["message_id"]]
+    with pytest.raises(CoordinationError, match="stale_attachment"):
+        store.heartbeat(*creds(recipient), attachment_id=recipient["agent_id"][:8], generation=1,
+                        ring_armed_until=1122.0)
+
+
+@pytest.mark.parametrize("retired", ["acknowledged", "expired"])
+def test_replacement_attachment_does_not_replay_retired_queued_mail(store, retired):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review",
+                 park_clear_by="anyone")
+    sent = store.send(*creds(sender), to=recipient["agent_id"], text="review ready", request_id="retired")
+    store.test_time[0] = 1001.0
+    assert store.heartbeat(*creds(recipient), attachment_id=recipient["agent_id"][:8],
+                           generation=1, ring_armed_until=1061.0)["wake"] is not None
+    if retired == "acknowledged":
+        store.ack(*creds(recipient), message_id=sent["message_id"])
+        store.test_time[0] = 1062.0
+    else:
+        store.test_time[0] = 87401.0
+    replacement = store.attach(*creds(recipient), attachment_id="replacement", ring=True,
+                               ring_armed_until=store.test_time[0] + 60)
+    assert replacement["wake"] is None
+    assert store.receive(*creds(recipient))["messages"] == []
+
+
+def test_queued_wake_repeats_stably_after_a_same_generation_handoff_loss(store):
+    sender = store.register("alice")
+    recipient = _ring_capable(store)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
+    queued = store.send(*creds(sender), to=recipient["agent_id"], text="review ready", request_id="same-generation")
+    beat = {"attachment_id": recipient["agent_id"][:8], "generation": 1, "ring_armed_until": 1060.0}
+    store.test_time[0] = 1001.0
+    lost = store.heartbeat(*creds(recipient), **beat)["wake"]
+    store.test_time[0] = 1030.0
+    # A restarted daemon's store has no process-local handoff state.
+    restarted = CoordinationStore(store.storage, clock=store.clock, wake=store.wake)
+    assert restarted.heartbeat(*creds(recipient), **beat)["wake"] == lost
+    # A newer live-path wake must remain the stable offer while queued mail remains.
+    newer = store.send(*creds(sender), to=recipient["agent_id"], text="another review", request_id="newer-ring")
+    offered = store.heartbeat(*creds(recipient), **beat)["wake"]
+    assert offered == newer["wake"]
+    store.test_time[0] = 1058.0
+    assert store.heartbeat(*creds(recipient), **beat)["wake"] == offered
+    store.ack(*creds(recipient), message_id=queued["message_id"])
+    assert store.heartbeat(*creds(recipient), **beat)["wake"] is None
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (2,)
+
+
+def test_listener_deadline_caps_an_oversized_json_integer(store):
+    agent = store.register("alice")
+    attached = store.attach(*creds(agent), attachment_id="listener", ring=True, ring_armed_until=10**400)
+    assert attached["ring_armed_until"] == 1060.0
+
+
+@pytest.mark.parametrize("until", [True, "1001", float("inf"), float("nan"), -1])
+def test_listener_deadline_rejects_invalid_values(store, until):
+    agent = store.register("alice")
+    with pytest.raises(CoordinationError, match="invalid_ring_armed_until"):
+        store.attach(*creds(agent), attachment_id="listener", ring=True, ring_armed_until=until)
+
+
 def test_a_ring_path_declared_at_attach_is_a_wake_path(store):
     """The Stop hook and the Codex doorbell are wake paths although the
     adapter has no live channel: a parked plain-shim session is rung, and
@@ -1261,6 +1475,8 @@ def test_a_ring_path_declared_at_attach_is_a_wake_path(store):
     a = store.register("alice")
     b = _ring_capable(store)
     assert store.authenticate(*creds(b))["capabilities"]["ring"] is True
+    store.heartbeat(*creds(b), attachment_id=b["agent_id"][:8], generation=1,
+                    ring_armed_until=1060.0)
     store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="anyone")
     _idle(store, b)
     assert _wake(store, a, b)["decision"] == "rung"

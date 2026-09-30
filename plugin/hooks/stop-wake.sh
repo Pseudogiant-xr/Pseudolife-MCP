@@ -82,10 +82,14 @@
 # asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. An hour
 # covers twice the p90 acknowledgement latency (1,740 s) that sessions
 # without a watcher showed in the 2026-09-23 10-session messageboard trial;
-# a session idle for longer has usually finished, and its mail still
-# surfaces on the next prompt. PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT shortens the
+# The arm expires after 59 minutes; longer waits need a background wait-mail
+# arm (four hours by default), or their mail surfaces on the next prompt.
+# PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT shortens the
 # wait, never lengthens it.
 MAX_WAIT=3540
+# Matches the board's 60 s listener lease ceiling; renew every poll so a
+# killed watcher is no longer advertised as armed after one minute.
+LISTENER_LEASE=60
 # The shim rewrites the digest on its 20 s heartbeat, so a 5 s poll adds
 # little latency; each poll spawns one sleep.
 POLL=5
@@ -419,7 +423,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
                 MESSAGE=""
                 case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
                 while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
-                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected: nothing will ring you. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer."
+                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected: nothing will ring you. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires a live listener. Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. For waits over 59 minutes, especially needs_approval waiting on maintainer, arm wait-mail in the background or keep the Codex doorbell active; otherwise record that you are reachable on your next turn."
                 [ -n "$MESSAGE" ] || MESSAGE=$DEFAULT_MESSAGE
                 if [ -n "$CODEX_HOOK_CONTEXT" ]; then
                     # Codex reads the decision from stdout (exit 0).
@@ -451,6 +455,7 @@ WAIT=$((10#$WAIT))
 [ "$WAIT" -le "$MAX_WAIT" ] || WAIT=$MAX_WAIT
 
 TOKEN="$$-$RANDOM$RANDOM"
+ARMED="$DIGEST_DIR/$KEY.$TOKEN.wake-armed"
 # No digest directory (coordination has never run here) fails this write.
 printf '%s\n' "$TOKEN" > "$LEASE.$$" && mv -f "$LEASE.$$" "$LEASE" || exit 0
 still_owner() {
@@ -458,6 +463,22 @@ still_owner() {
     IFS= read -r current < "$LEASE"
     [ "$current" = "$TOKEN" ]
 }
+renew_listener() {
+    local now expiry remaining
+    still_owner || return 1
+    now=$(date +%s)
+    remaining=$((WAIT - SECONDS))
+    [ "$remaining" -gt 0 ] || return 1
+    [ "$remaining" -le "$LISTENER_LEASE" ] || remaining=$LISTENER_LEASE
+    expiry=$((now + remaining))
+    printf '%s\n%s\n' "$TOKEN" "$expiry" > "$ARMED.$$" && mv -f "$ARMED.$$" "$ARMED"
+}
+disarm_listener() {
+    # Only token-specific paths: a superseding watcher owns the shared lease.
+    rm -f "$ARMED" "$LEASE.$$" "$ARMED.$$"
+}
+trap disarm_listener EXIT
+trap 'exit 0' HUP INT TERM
 
 # Claude Code going away ends the wait. kill -0 sees a POSIX parent at every
 # poll. Under Git Bash CLAUDE_PID is a Windows PID that only `ps -W` (Git's
@@ -562,6 +583,7 @@ wait_for_mail() {
     while :; do
         still_owner || return 3
         if [ -n "$PARENT" ] && ! parent_alive; then return 3; fi
+        renew_listener || return 3
         [ -L "$FILE" ] && return 2
         if [ ! -f "$FILE" ] && [ "$present" = 1 ]; then return 2; fi
         if [ -f "$FILE" ]; then
