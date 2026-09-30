@@ -726,7 +726,16 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     installed = tmp_path / "installed-bin"
     installed.mkdir()
     shim = installed / ("pseudolife-mcp.exe" if os.name == "nt" else "pseudolife-mcp")
-    shim.write_text("placeholder\n", encoding="utf-8")
+    # Off Windows the installed shim answers connect's dry run as the real one
+    # does on a fresh machine (its report of no registration, exit 3). A
+    # Windows .exe cannot be a script here, so there the shim cannot start and
+    # the install carries on with the warning (that path is pinned too).
+    shim.write_text("placeholder\n" if os.name == "nt" else
+                    "#!/bin/sh\n"
+                    f"printf 'shim|%s\\n' \"$*\" >>'{ps.calls}'\n"
+                    "if [ \"$1\" = connect ]; then\n"
+                    "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+                    "exit 0\n", encoding="utf-8")
     shim.chmod(0o755)
     calls = ps.calls
     for name in ("docker", "codex"):
@@ -797,3 +806,9 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(tmp_path, daem
     assert re.search(r"\[x\] Agent board\s+on", proc.stdout)
     assert any(seen.endswith(f"Bearer {FIXTURE_TOKEN}") for seen in _Daemon.seen)
     assert "Waiting for the daemon" not in proc.stdout
+    connects = [call for call in ps.logged() if call.startswith("shim|connect")]
+    if os.name == "nt":
+        assert connects == [] and "not checked" in output
+    else:
+        assert len(connects) == 1 and "--dry-run" in connects[0]
+        assert "not checked" not in output

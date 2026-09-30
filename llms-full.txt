@@ -229,7 +229,12 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-The installer asks which agents to wire (multi-select, with a capability
+The installer first asks where the memory bank lives: on this machine
+(the default, and everything below), on another machine that already runs
+it (a client-only install that asks for the daemon's URL and token), or on
+this machine with other machines connecting to it (see
+[Sharing one bank across machines](docs/guide/remote-bank.md)). It then
+asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
 missing prerequisite), then asks which **dream extractor** should
@@ -9159,7 +9164,10 @@ token; a `--no-token` install must not be exposed.
 
 ## Exposing the daemon
 
-In order of preference.
+In order of preference. An installer run on the daemon host that answers
+**3** to its first question ("On this machine, and other machines will
+connect to it") is a local install that ends by printing a short version of
+these steps and the two sections after them.
 
 ### 1. Tailscale Serve, TCP mode
 
@@ -9298,10 +9306,43 @@ owner-only check. Or let `-ReadToken` write it.
 
 ### With the installer (client-only path)
 
-The installers take a client-only mode that skips the Docker stack, mints no
-token, and wires the selected clients against a remote daemon. A
-non-loopback `--daemon-url` implies it; pass it explicitly for a loopback URL
-that is really an SSH tunnel.
+Run the installer on the client machine (`ops/install.sh`, or
+`ops\install.ps1` on Windows). Its first question is where the bank lives:
+
+```
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+```
+
+Answer **2**. It asks for the daemon's URL, then, once you have chosen the
+agents, for the token: paste it, and it is written to a new owner-only file
+(`~/.pseudolife-mcp/<client>.token` by default; it never replaces an
+existing file), or name a token file that already holds it. The
+client-only install follows: it skips the Docker stack, mints no token,
+checks the daemon's `/health`, and sets up the shim, the plugin and hooks
+and each client's registration against the remote daemon.
+
+The same install without questions takes flags: a non-loopback
+`--daemon-url` implies client-only; pass `--client-only` explicitly for a
+loopback URL that is really an SSH tunnel. A run that names the daemon
+(the flag, or `PSEUDOLIFE_MCP_DAEMON_URL` in the environment), or has no
+terminal, is not asked; one given `--token-file` or `--read-token` without
+a URL is asked only for the URL.
+
+**Re-running it re-points what is already registered.** When this machine
+already has registrations (from an earlier local install, or a client-only
+install against a daemon that has since moved), the installer runs
+[`pseudolife-mcp connect`](#moving-a-client-to-a-new-daemon) for the
+clients it installs, with that run's token file, before the Codex
+credential setup and the registrars: it shows connect's plan, applies it,
+and stops if connect fails.
+The registrars then create only what is still missing. Entries connect does
+not rewrite (a project-scoped Claude Code entry, for example) are named, for
+you to change by hand. A shim too old to have `connect` (one a running
+session kept in place) only gets a warning: that run leaves existing
+registrations as they are, as before.
 
 The installer takes one token file per run, so run it once per client, each
 with that client's own token file:
@@ -9435,6 +9476,9 @@ first, and if one write fails the files already written are restored.
   board address on the new URL.
 - **Rolling back:** run `connect` with the old URL, or restore the backups
   the report names.
+- **With the installer:** a client-only installer run (answer 2, or
+  `--daemon-url`) runs `connect` for the clients it installs, so re-running
+  the installer against the new URL re-points them too.
 
 `--yes` applies without asking (a run that is not interactive needs it),
 and `--json` prints one machine-readable report. Exit codes: 0 done or

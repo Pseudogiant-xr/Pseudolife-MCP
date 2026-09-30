@@ -280,8 +280,9 @@ banner; the validation and the `CLIENT_ONLY` rejection of extractor, model,
 port and `--no-token` flags stay exactly as they are and run on the answer.
 
 On a machine with existing registrations, the client-only path shows
-`connect`'s plan in the installer's own summary and then runs it with
-`--yes`, so the installer asks nothing twice. It runs `connect` before any
+`connect`'s plan inline, at the start of the registrations section and
+before any registrar runs, and then runs it with `--yes`, so the installer
+asks nothing twice. It runs `connect` before any
 registrar or the Codex credential setup: once the existing registrations
 name the new daemon, the Codex setup no longer refuses its URL
 (`setup-codex-hooks.py` 666-670), and the registrars only create what is

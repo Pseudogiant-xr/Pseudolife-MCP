@@ -223,7 +223,12 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-The installer asks which agents to wire (multi-select, with a capability
+The installer first asks where the memory bank lives: on this machine
+(the default, and everything below), on another machine that already runs
+it (a client-only install that asks for the daemon's URL and token), or on
+this machine with other machines connecting to it (see
+[Sharing one bank across machines](docs/guide/remote-bank.md)). It then
+asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
 missing prerequisite), then asks which **dream extractor** should

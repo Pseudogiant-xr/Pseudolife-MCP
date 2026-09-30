@@ -240,6 +240,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ops/update_clients.py`); Codex asks for approval again after it.
   [Delivery and recovery](docs/guide/configuration.md#delivery-and-recovery)
 
+### Added (2026-09-30 — the installer asks where the memory bank lives, and re-points what is already registered)
+- Whether an installer run was a local install or a client of a bank on
+  another machine was decided by whether `--daemon-url` named a non-loopback
+  host, before the banner, so a user who did not know the flag got a local
+  bank; and a client-only run on a machine that already had registrations
+  only warned about the ones naming another daemon ("Edit it in place"),
+  while the Codex credential setup refused its URL outright. Both
+  installers now open an interactive run that does not name the daemon
+  (`--daemon-url` / `-DaemonUrl`, `--client-only`, or
+  `PSEUDOLIFE_MCP_DAEMON_URL`) with one question: "Where does the memory
+  bank live?" **1** (the default) is today's local install. **2** asks for
+  the daemon's URL, then, once the agents are chosen, for the token: paste
+  it into a new owner-only file (`~/.pseudolife-mcp/<client>.token` by
+  default, never an existing file) or name a token file already on the
+  machine; the client-only install follows. **3** is a local install that
+  ends with the steps to share it: exposing the daemon (Tailscale Serve TCP
+  first), a principal and tier per client in `ops/.env`, and
+  `coordination.allowed_principals` (refused with `--no-token`: an
+  unauthenticated bank must never be exposed). With `--token-file` or
+  `--read-token` and no URL, which already mean another machine, only the
+  URL is asked. Pasted URLs and paths lose one pair of surrounding quotes,
+  and end of input at the question exits 2. The answer goes through the
+  same mode resolution and client-only refusals as the flags, which now
+  run after the banner. Runs without a terminal, and runs that name the
+  daemon, ask nothing and behave as before.
+- A client-only install re-points existing registrations with the
+  installed shim's `pseudolife-mcp connect`, before the Codex credential
+  setup and every registrar: a `--dry-run --json` pass for the clients this
+  run installs (with this run's token file) shows the plan in the
+  installer's output; when it found any, `--yes` applies it, and a non-zero
+  exit stops the install with what it means (a failed dry run with the
+  reason from its report). With no registration (exit 3) `connect` is not
+  run again, and entries it does not rewrite are named. Only connect's own
+  JSON report is trusted: a shim that answers without one (a held shim from
+  before `connect`, one that cannot start) gets a warning, and the install
+  goes on as before. The registrars then create only what is still missing.
+  Where `connect` checked, the "Edit it in place" advice for a Claude Code
+  or Codex registration still naming another daemon says `connect` could
+  not re-point it and how to finish (without its report the earlier advice
+  stands), and the Gemini token-file advice is skipped for a registration
+  `connect` wrote or confirmed. The shim helpers (`ensure_shim` / `Install-ShimOnce`
+  and the registration checks) moved, unchanged, from section 11 to the
+  top of section 9 so the client-only path can use them there.
+  [With the installer](docs/guide/remote-bank.md#with-the-installer-client-only-path)
+
 ### Added (2026-09-30 — one command moves a machine's clients to a new daemon)
 - When a bank's daemon changed address, every client on every machine had to
   be re-pointed by hand: each registrar fills in what is missing and leaves an
