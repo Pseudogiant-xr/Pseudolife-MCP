@@ -1044,11 +1044,7 @@ function codex {{
 def test_fresh_tokenless_install_ignores_unforwarded_ambient_connection(
         tmp_path, shell, env_supported):
     if shell == "bash":
-        executable = shutil.which("bash")
-        if os.name == "nt":
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            executable = str(candidate) if candidate and candidate.is_file() else None
+        executable = bash_exe()
     else:
         executable = shutil.which("pwsh")
     if not executable:
@@ -1305,11 +1301,7 @@ def test_powershell_shim_lookup_tolerates_an_unrunnable_interpreter(tmp_path):
 def test_installer_preserves_existing_forwarded_user_credential(
         tmp_path, shell, installer_token):
     if shell == "bash":
-        executable = shutil.which("bash")
-        if os.name == "nt":
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            executable = str(candidate) if candidate and candidate.is_file() else None
+        executable = bash_exe()
     else:
         executable = shutil.which("pwsh")
     if not executable:
@@ -1575,14 +1567,8 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
             + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
             encoding="utf-8")
         return pwsh_run("-File", script, env=env).stdout
-    bash = shutil.which("bash")
-    if os.name == "nt":
-        # The system32 bash is a WSL launcher; use native Git Bash here.
-        git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
-    if not bash:
-        pytest.skip("Bash is not installed")
+    # bash_exe() skips the native-Windows System32 WSL launcher for Git Bash.
+    bash = bash_exe()
     text = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
     parts = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)^# [^\n]*11\. wire into selected MCP clients", text)
     assert parts, "installer stage boundaries changed"
