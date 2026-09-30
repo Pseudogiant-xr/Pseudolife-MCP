@@ -1611,8 +1611,10 @@ def memory_forget(
         description="memory scope: allow over memory.delete_confirm_threshold "
                     "(20) matches; else refused, reporting would_delete.")] = False,
 ) -> dict[str, Any]:
-    """Forget from one memory store. ``memory`` and ``fact`` hard-delete
-    (cleanup for junk/test data — no audit trail); ``world`` and ``lesson``
+    """Forget from one memory store. ``memory`` hard-deletes the matched
+    entries (cleanup for junk/test data) and retires what they supported:
+    facts they cited, their session digests (kept as history) and
+    source-backed edges. ``fact`` hard-deletes (no audit trail); ``world`` and ``lesson``
     RETIRE the slot with an audit row, undone by ``memory_graph_review(
     action="restore_slot")``. For "now wrong, keep history" use
     ``memory_fact_set`` (facts) or ``memory_supersede`` (memories) instead.

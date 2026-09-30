@@ -3250,19 +3250,6 @@ class MemoryService(DreamOps):
         if self._storage is None:
             return
         import time as _time
-        # A source/bulk forget retires matching digests as history too.
-        # A digest-only selection remains an explicit entry deletion.
-        retained = [e for e in matches if e.source == "digest"] if any(
-            e.source != "digest" for e in matches) else []
-        retained_objects = {id(e) for e in retained}
-        ids = [int(e.db_id) for e in matches
-               if e.db_id is not None and id(e) not in retained_objects]
-        if not ids:
-            return
-        slots = self._storage.slots_for_entries(ids)
-        source_for_slot = {
-            (row["entity_norm"], row["attribute_norm"]): row["entry_id"]
-            for row in slots}
         episodes = self._cms.episodes.episodes
         def _root_id(episode_id):
             ep = episodes.get(episode_id)
@@ -3274,6 +3261,26 @@ class MemoryService(DreamOps):
             root_id = _root_id(entry.episode_id)
             if root_id is not None:
                 roots.add(root_id)
+        # A source/bulk forget retires matching digests as history too.
+        # A digest-only selection remains an explicit entry deletion, and so
+        # does a digest this cascade would not retire (no persisted row, its
+        # session root is gone, or no persisted source matched): holding it
+        # back would leave it live and served.
+        has_source = any(e.source != "digest" and e.db_id is not None
+                         for e in matches)
+        retained = [
+            e for e in matches
+            if has_source and e.source == "digest" and e.db_id is not None
+            and (e.superseded_at is not None or e.episode_id in roots)]
+        retained_objects = {id(e) for e in retained}
+        ids = [int(e.db_id) for e in matches
+               if e.db_id is not None and id(e) not in retained_objects]
+        if not ids:
+            return
+        slots = self._storage.slots_for_entries(ids)
+        source_for_slot = {
+            (row["entity_norm"], row["attribute_norm"]): row["entry_id"]
+            for row in slots}
         match_objects = {id(e) for e in matches}
         surviving_roots = {
             _root_id(e.episode_id)

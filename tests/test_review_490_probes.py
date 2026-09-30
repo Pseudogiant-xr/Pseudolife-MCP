@@ -246,3 +246,34 @@ def test_explicit_digest_only_forget_still_removes_the_selected_digest(svc):
     assert svc.delete(source="digest")["deleted_count"] == 1
     assert svc._storage.get_entry(digest_id) is None
     assert svc._storage.conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 2
+
+
+def _live_digest_state(svc):
+    row = svc._storage.conn.execute(
+        "SELECT superseded_at IS NULL FROM entries WHERE source='digest'").fetchone()
+    resident = [e.superseded_at is None
+                for b in svc._cms.bands for e in b.entries if e.source == "digest"]
+    return (row[0] if row is not None else None), resident
+
+
+def test_matched_digest_of_pruned_root_is_not_left_live(svc):
+    root, _ = _session(svc, "orphan", "Beacon Azure stays", "Beacon Black stays")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Beacon Azure and Beacon Black."]))["written"] == 1
+    with svc._lock:
+        svc._cms.episodes.remove(root)
+    svc.delete(substring="Beacon")
+    stored_live, resident = _live_digest_state(svc)
+    assert stored_live is not True and True not in resident
+
+
+def test_matched_digest_with_unpersisted_sources_is_not_left_live(svc):
+    _session(svc, "unflushed", "Beacon Coral stays", "Beacon Olive stays")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Beacon Coral and Beacon Olive."]))["written"] == 1
+    with svc._lock:
+        for band in svc._cms.bands:
+            for entry in band.entries:
+                if entry.source != "digest":
+                    entry.db_id = None
+    svc.delete(substring="Beacon")
+    stored_live, resident = _live_digest_state(svc)
+    assert stored_live is not True and True not in resident
