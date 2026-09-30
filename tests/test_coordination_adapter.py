@@ -1382,6 +1382,61 @@ def test_a_malformed_wake_answer_rings_nothing(tmp_path):
     asyncio.run(drive())
 
 
+PARENT_THREAD = "01a0ec35-a19d-7043-9336-ac6b9863afd7"
+
+
+def test_a_codex_child_names_its_parent_thread_at_register():
+    """v50: a native Codex child registers with the parent thread the shim
+    read from Codex's turn metadata; a root thread sends none."""
+    daemon = FakeDaemon()
+
+    async def drive(**kwargs):
+        client, coordination = adapter(daemon, delivery_transport="codex", **kwargs)
+        async with client:
+            async with coordination:
+                pass
+
+    asyncio.run(drive(parent_thread=PARENT_THREAD))
+    asyncio.run(drive())
+    registers = [body for action, body, _ in daemon.calls if action == "register"]
+    assert registers[0]["parent_thread"] == PARENT_THREAD
+    assert "parent_thread" not in registers[1]
+
+
+def test_a_daemon_older_than_v50_still_registers_the_child():
+    """A shim updated before its daemon: the daemon refuses the unknown
+    parameter once, and the child registers without the link rather than
+    lose its board address."""
+    daemon = FakeDaemon()
+    refused = []
+
+    def hook(action, body):
+        if action == "register" and "parent_thread" in body:
+            refused.append(body)
+            return httpx.Response(400, json={"error": "unexpected_parameter"})
+        return None
+    daemon.hook = hook
+
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       parent_thread=PARENT_THREAD)
+        async with client:
+            async with coordination:
+                assert coordination.instance_headers["X-PL-Agent"] == "agent-a"
+
+    asyncio.run(drive())
+    registers = [body for action, body, _ in daemon.calls if action == "register"]
+    assert len(refused) == 1 and len(registers) == 2
+    assert "parent_thread" not in registers[1]
+
+
+def test_only_a_codex_adapter_takes_a_parent_thread():
+    from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
+    with pytest.raises(AdapterError, match="parent thread"):
+        CoordinationAdapter("http://127.0.0.1:8099", "fixture-bearer",
+                            parent_thread=PARENT_THREAD)
+
+
 def test_an_adapter_with_a_ring_path_says_so_at_attach(tmp_path):
     """A Claude shim with a digest (the Stop hook reads its .ring) or a
     Codex adapter the doorbell watches declares ``ring: true`` at attach;

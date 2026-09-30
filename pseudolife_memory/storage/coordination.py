@@ -120,6 +120,21 @@ MAX_SCOPE = 120
 # in a peer listing, like the 240-character status.
 MAX_CHILDREN = 8
 MAX_CHILD_LABEL = 40
+# v50: a child the plugin's SubagentStart hook lists is an entry with its
+# host's ``agent_id`` (Claude Code's are 17 hex characters, measured
+# 2026-09-30) and the label ``<agent_type>#<first 8 of the id>``, the type
+# cut to fit MAX_CHILD_LABEL. SubagentStart carries no task description.
+# Hook entries have a bound of their own, the same glance-sized eight, and
+# never count against the parent's MAX_CHILDREN labels, so a parent's update
+# is never refused because of them (PR #481 review). Past it a new start
+# replaces the oldest hook entry, the one whose stop was most likely missed.
+MAX_HOOK_CHILDREN = 8
+_HOOK_CHILD_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_HOOK_CHILD_KIND = re.compile(r"[A-Za-z0-9._:-]{1,64}")
+HOOK_CHILD_KIND_CUT = MAX_CHILD_LABEL - 9
+# v50: what a subagent's own address is told when it tries to send
+# (maintainer decision 2026-09-30).
+CHILD_SEND_REFUSED = "a subagent does not send board mail; ask your parent session"
 # v49: the park record, a session's standing statement of why it stopped
 # (maintainer decision 2026-09-28). ``park_needs`` is one line saying what
 # would clear it, ``park_resume`` what to do once cleared, sized like the
@@ -191,6 +206,12 @@ STATUS_STALE_AFTER = 2 * 3600
 # shows a quiet session with its (by then stale) status for one more
 # ACTIVE_WINDOW, still under the 5.4 h shortest idle stretch.
 ATTACHED_IDLE_WINDOW = STATUS_STALE_AFTER + ACTIVE_WINDOW
+# v50: a hook-listed subagent older than this is no longer shown and is
+# dropped at the next write to the list: its SubagentStop was missed (a
+# killed session, a hook that failed open). The same window a quiet attached
+# peer stays listed; a subagent running longer than three hours is rarer
+# than a missed stop, and its entry comes back only with a new start.
+HOOK_CHILD_TTL = ATTACHED_IDLE_WINDOW
 # An address whose adapter registered ``resumable: false`` has no state file
 # behind it, so nothing can attach to it again once its lease lapses; it is
 # removed after this much idleness instead of AGENT_RETENTION. Same
@@ -1080,9 +1101,13 @@ class CoordinationStore:
         result = {k: row[k] for k in keys}
         # Offline rebind runs on a restored bank before any schema pass, so
         # a pre-v47 row has no children column, and a pre-v49 row no park.
-        result["children"] = row.get("children", [])
+        result["children"] = self._live_children(row.get("children", []), self.clock())
         for key, default in _PARK_CLEARED.items():
             result[key] = row.get(key, default)
+        # v50: a subagent's parent, and whether the row is a subagent at all
+        # (true before its parent registers, while the link is still empty).
+        result["parent_agent_id"] = row.get("parent_agent_id")
+        result["subagent"] = row.get("parent_thread") is not None
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
         return result
@@ -1097,27 +1122,84 @@ class CoordinationStore:
                 and label.strip().casefold() == DAEMON_PRINCIPAL):
             raise CoordinationError("invalid_label")
 
+    @staticmethod
+    def _codex_thread(fields) -> str | None:
+        """The Codex thread a row speaks for: its episode, on a row whose
+        capabilities name the ``codex`` transport (the shim's Codex adapter
+        registers each thread that way). The Codex namespace for the v50
+        parent link."""
+        if "codex" not in fields["capabilities"] or not fields["episode"]:
+            return None
+        return fields["episode"]
+
     def register(self, principal, *, label="", project="", task="", episode="", status="",
-                 capabilities=None, wake_enabled=False):
+                 capabilities=None, wake_enabled=False, parent_thread=None):
+        """``parent_thread`` (v50) is the parent Codex thread a native child
+        read from Codex's turn metadata: a canonical UUID, on a Codex row
+        (``_codex_thread``) for another thread. It marks the row a subagent
+        for good, and links it to the parent's row under the same principal
+        now or when that parent registers."""
         _string(principal, 256, "principal", empty=False)
         self._check_label(principal, {"label": label})
         fields = self._fields(label=label, project=project, task=task, episode=episode, status=status,
                               capabilities={} if capabilities is None else capabilities,
                               wake_enabled=wake_enabled)
+        thread = self._codex_thread(fields)
+        if parent_thread is not None:
+            try:
+                canonical = str(uuid.UUID(parent_thread)) if isinstance(parent_thread, str) else None
+            except ValueError:
+                canonical = None
+            if canonical != parent_thread or thread is None or thread == parent_thread:
+                raise CoordinationError("invalid_parent")
         agent_id, credential = uuid.uuid4().hex, secrets.token_urlsafe(32)
         now = self.clock()
         with self.storage._txn():
+            parent = None
+            if parent_thread is not None:
+                parent = self._codex_parent(principal, parent_thread)
+                fields.update(parent_thread=parent_thread, parent_agent_id=parent)
             self.storage.conn.execute(
                 "INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
-                "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity,"
+                "parent_thread,parent_agent_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (agent_id, principal, _hash(credential), fields["label"], fields["project"],
                  fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
-                 fields["wake_enabled"], now, now))
-            self._append([self._event("register", fields, principal=principal, agent_id=agent_id,
-                                      project=fields["project"], task=fields["task"])], now)
+                 fields["wake_enabled"], now, now, parent_thread, parent))
+            events = [self._event("register", fields, principal=principal, agent_id=agent_id,
+                                  project=fields["project"], task=fields["task"])]
+            if thread is not None:
+                events += self._link_children(principal, thread, agent_id)
+            self._append(events, now)
             out = self.authenticate(principal, agent_id, credential)
         return {**out, "credential": credential}
+
+    def _codex_parent(self, principal, thread):
+        """The live row speaking for Codex ``thread`` under ``principal``:
+        the most recently active, if a thread ever held two."""
+        row = self._one(
+            "SELECT agent_id FROM coordination_agents WHERE principal=%s AND episode=%s "
+            "AND capabilities ? 'codex' AND credential_hash IS NOT NULL "
+            "ORDER BY last_activity DESC, agent_id LIMIT 1", (principal, thread))
+        return row["agent_id"] if row else None
+
+    def _link_children(self, principal, thread, agent_id):
+        """Point every subagent of Codex ``thread`` under ``principal`` at
+        ``agent_id``, the row that thread just registered (the parent that
+        registered after its children, or again after prune removed it).
+        One ``update`` event per child whose link changed, by the daemon."""
+        rows = self._all(
+            "UPDATE coordination_agents c SET parent_agent_id=%s FROM coordination_agents o "
+            "WHERE c.agent_id=o.agent_id AND c.principal=%s AND c.parent_thread=%s "
+            "AND c.agent_id<>%s AND c.parent_agent_id IS DISTINCT FROM %s "
+            "RETURNING c.agent_id, o.parent_agent_id AS before, c.project, c.task",
+            (agent_id, principal, thread, agent_id, agent_id))
+        return [self._event("update", {"fields": {"parent_agent_id": agent_id},
+                                       "before": {"parent_agent_id": row["before"]}},
+                            actor="daemon", principal=principal, agent_id=row["agent_id"],
+                            project=row["project"], task=row["task"])
+                for row in sorted(rows, key=lambda r: r["agent_id"])]
 
     def authenticate(self, principal, agent_id, credential):
         return self._public(self._auth(principal, agent_id, credential))
@@ -1147,15 +1229,25 @@ class CoordinationStore:
                     if not isinstance(enabled, bool):
                         raise CoordinationError("invalid_capabilities")
             elif key == "children":
-                # Labels only: update() stamps each one's ``since``.
+                # Labels only: update() stamps each one's ``since``. Refused
+                # before the update's transaction opens, so none of the
+                # call's other fields (status, park) is applied either, and
+                # the detail says so (PR #481 review).
+                refused = CoordinationError(
+                    "invalid_children",
+                    f"at most {MAX_CHILDREN} distinct labels of at most {MAX_CHILD_LABEL} "
+                    "characters; nothing was updated")
                 if not isinstance(value, list) or len(value) > MAX_CHILDREN:
-                    raise CoordinationError("invalid_children")
+                    raise refused
                 for label in value:
-                    _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    try:
+                        _string(label, MAX_CHILD_LABEL, "children", empty=False)
+                    except CoordinationError:
+                        raise refused from None
                     # Hashed into the update event, like the status.
                     _refuse_secret(label)
                 if len(set(value)) != len(value):
-                    raise CoordinationError("invalid_children")
+                    raise refused
             elif key == "park_reason":
                 # None (REST null) and "" (the tool's spelling of it) both
                 # clear the park.
@@ -1229,10 +1321,7 @@ class CoordinationStore:
             # Only a real change reaches the row and the log, so a status
             # update that never used an expectation logs what it always did.
             if "children" in fields:
-                # A label carried over keeps the time it first appeared.
-                since = {child["label"]: child["since"] for child in row["children"]}
-                fields["children"] = [{"label": label, "since": since.get(label, now)}
-                                      for label in fields["children"]]
+                fields["children"] = self._parent_children(row["children"], fields["children"], now)
             if expect is not None:
                 fields["status_expires_at"] = now + expect
             elif "status" in fields and row["status_expires_at"] is not None:
@@ -1251,6 +1340,93 @@ class CoordinationStore:
                 project=fields.get("project", row["project"]),
                 task=fields.get("task", row["task"]))], now)
             return self.authenticate(principal, agent_id, credential)
+
+    @staticmethod
+    def _live_children(children, now):
+        """``children`` without the hook entries (v50, those carrying an
+        ``agent_id``) older than HOOK_CHILD_TTL: their stop was missed."""
+        return [child for child in children
+                if not child.get("agent_id") or now - child["since"] < HOOK_CHILD_TTL]
+
+    @classmethod
+    def _parent_children(cls, current, labels, now):
+        """The children list after the parent names ``labels`` (v47, at
+        most MAX_CHILDREN, checked in ``_fields``), with the live entries
+        the subagent hooks keep (v50) left as they are: the parent's
+        replace-all rewrites only its own labels, and a label spelled like a
+        live hook entry names that same child. Parent labels first, then
+        the hook entries, which have their own bound (MAX_HOOK_CHILDREN),
+        so nothing here can refuse the update."""
+        hooked = [child for child in cls._live_children(current, now) if child.get("agent_id")]
+        taken = {child["label"] for child in hooked}
+        # A label carried over keeps the time it first appeared.
+        since = {child["label"]: child["since"] for child in current if not child.get("agent_id")}
+        named = [{"label": label, "since": since.get(label, now)}
+                 for label in labels if label not in taken]
+        return named + hooked
+
+    def _hook_children_row(self, agent_id, principal):
+        return self._one("SELECT * FROM coordination_agents WHERE agent_id=%s AND principal=%s "
+                         "AND credential_hash IS NOT NULL FOR UPDATE", (agent_id, principal))
+
+    def _set_hook_children(self, row, children, principal, now):
+        self.storage.conn.execute(
+            "UPDATE coordination_agents SET children=%s,last_activity=%s WHERE agent_id=%s",
+            (Jsonb(children), now, row["agent_id"]))
+        self._append([self._event(
+            "update", {"fields": {"children": children}, "before": {"children": row["children"]}},
+            actor="hook", principal=principal, agent_id=row["agent_id"],
+            project=row["project"], task=row["task"])], now)
+
+    def subagent_started(self, agent_id, principal, *, child, kind=""):
+        """The plugin's SubagentStart hook (v50): list Claude Code subagent
+        ``child`` (its host ``agent_id``) of ``kind`` (its ``agent_type``)
+        among the children of ``agent_id``, the session address the hook
+        read beside its digest. Idempotent per child. Always listed: past
+        MAX_HOOK_CHILDREN hook entries it replaces the oldest of them, whose
+        stop was most likely missed; parent labels are never touched, except
+        one spelled like the new entry, which names the same child. Entries
+        past HOOK_CHILD_TTL go at this write. An address the caller's
+        principal does not own, or none at all, is not touched."""
+        if not isinstance(child, str) or not _HOOK_CHILD_ID.fullmatch(child):
+            raise CoordinationError("invalid_children")
+        if not isinstance(kind, str) or (kind and not _HOOK_CHILD_KIND.fullmatch(kind)):
+            raise CoordinationError("invalid_children")
+        label = f"{kind[:HOOK_CHILD_KIND_CUT] or 'subagent'}#{child[:8]}"
+        # Hashed into the update event, like a parent's labels.
+        _refuse_secret(label)
+        with self.storage._txn():
+            row = self._hook_children_row(agent_id, principal)
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            current = self._live_children(row["children"], now)
+            if any(entry.get("agent_id") == child for entry in current):
+                return {"recorded": True, "changed": False}
+            children = [entry for entry in current if entry["label"] != label]
+            hooked = [entry for entry in children if entry.get("agent_id")]
+            if len(hooked) >= MAX_HOOK_CHILDREN:
+                children.remove(min(hooked, key=lambda entry: entry["since"]))
+            children.append({"label": label, "since": now, "agent_id": child})
+            self._set_hook_children(row, children, principal, now)
+        return {"recorded": True, "changed": True}
+
+    def subagent_stopped(self, agent_id, principal, *, child):
+        """The plugin's SubagentStop hook (v50): remove the entry
+        ``subagent_started`` listed for ``child``; parent labels stay."""
+        if not isinstance(child, str) or not _HOOK_CHILD_ID.fullmatch(child):
+            raise CoordinationError("invalid_children")
+        with self.storage._txn():
+            row = self._hook_children_row(agent_id, principal)
+            if row is None:
+                return {"recorded": False, "reason": "unknown_agent"}
+            now = self.clock()
+            live = self._live_children(row["children"], now)
+            children = [entry for entry in live if entry.get("agent_id") != child]
+            if len(children) == len(live):
+                return {"recorded": False, "reason": "not_listed"}
+            self._set_hook_children(row, children, principal, now)
+        return {"recorded": True, "changed": True}
 
     def list_agents(self, principal, agent_id, credential, *, project=None, task=None, limit=50):
         self._auth(principal, agent_id, credential)
@@ -1936,9 +2112,21 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET attachment_id=NULL,lease_until=NULL,"
                 "generation=generation+1,lifecycle='detached' WHERE agent_id=%s", (agent_id,))
-            self._append([self._event("detach", {"generation": generation}, principal=principal,
-                                      agent_id=agent_id, project=row["project"],
-                                      task=row["task"])], self.clock())
+            events = [self._event("detach", {"generation": generation}, principal=principal,
+                                  agent_id=agent_id, project=row["project"], task=row["task"])]
+            # v50: a detach is the shim ending with its session, and with it
+            # every subagent the hooks listed under it; the parent's own
+            # labels stay, as they always have.
+            named = [child for child in row.get("children", []) if not child.get("agent_id")]
+            if len(named) != len(row.get("children", [])):
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET children=%s WHERE agent_id=%s",
+                    (Jsonb(named), agent_id))
+                events.append(self._event(
+                    "update", {"fields": {"children": named}, "before": {"children": row["children"]}},
+                    actor="daemon", principal=principal, agent_id=agent_id,
+                    project=row["project"], task=row["task"]))
+            self._append(events, self.clock())
         return {"detached": True}
 
     def _resolve_agent(self, value, *, missing, ambiguous):
@@ -2111,7 +2299,12 @@ class CoordinationStore:
             # answers differently for mail that exists, so an unauthenticated
             # call must never reach one (review of 67d54ac7). Re-read under
             # the row locks below.
-            self._auth(principal, agent_id, credential)
+            sender = self._auth(principal, agent_id, credential)
+            # v50: a subagent's own address receives, acknowledges and sets
+            # its status, but its parent sends for it (maintainer decision
+            # 2026-09-30), whether or not the parent has registered yet.
+            if sender.get("parent_thread") is not None:
+                raise CoordinationError("child_send_refused", CHILD_SEND_REFUSED)
             # A retry is recognised from its stored rows before any prefix is
             # resolved, so it returns its receipts even after a new address
             # made its prefix ambiguous or its recipient was revoked.
@@ -2462,6 +2655,13 @@ class CoordinationStore:
                 "DELETE FROM coordination_agents a WHERE " + removable
                 + " AND NOT EXISTS (SELECT 1 FROM coordination_leases l "
                 "WHERE l.holder_agent_id=a.agent_id) RETURNING a.agent_id", retention))
+            # A removed parent leaves its subagents unlinked (v50, no foreign
+            # key either), until its thread registers again and relinks them.
+            # Not logged per child: the prune event names the removed row.
+            if agents:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET parent_agent_id=NULL "
+                    "WHERE parent_agent_id=ANY(%s)", (agents,))
             # A removed address leaves no place in any queue (the lease tables
             # carry no foreign keys; see the v45 DDL).
             self.storage.conn.execute(

@@ -538,6 +538,7 @@ def test_judge_second_url_builds_the_second_opinion_on_its_own_endpoint(svc, mon
     dream = svc.config.memory.dream
     monkeypatch.setenv("PSEUDOLIFE_JUDGE_SECOND_API_KEY", "sk-second")
     monkeypatch.delenv("PSEUDOLIFE_DREAM_API_KEY", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_JUDGE_API_KEY", raising=False)
     cfg.judge_url, cfg.judge_model = "http://127.0.0.1:8082/v1", "claude-opus-5-5"
     cfg.judge_second_url = "https://api.example.com/v1"
     cfg.judge_second_model = "gpt-5.6-terra"
@@ -566,6 +567,7 @@ def test_the_sweep_judge_takes_its_second_opinion_from_the_second_endpoint(svc, 
     cfg = svc.config.memory.deep_dream
     cfg.judge_mode = "auto-reject"
     cfg.judge_second_opinion = True
+    cfg.judge_second_url = "https://api.example.com/v1"   # a distinct endpoint by config
     pair = ("xi svc", "xi harness")
     pid = _propose(svc, *pair)
     first = _MergeJudge({pair: ("reject", 0.6)})
@@ -577,6 +579,86 @@ def test_the_sweep_judge_takes_its_second_opinion_from_the_second_endpoint(svc, 
     assert second.calls == 1 and first.calls == 1
     assert out["auto_rejected"] == 1
     assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+
+
+def test_judge_url_takes_its_own_env_key_and_no_other_endpoint_sees_it(svc, monkeypatch):
+    """judge_url gets the same env-only key option as judge_second_url
+    (maintainer decision 2026-09-30): PSEUDOLIFE_JUDGE_API_KEY goes to
+    judge_url's endpoint, including the second model swapped onto it, and
+    never to the second endpoint or the dream extractor."""
+    cfg = svc.config.memory.deep_dream
+    monkeypatch.setenv("PSEUDOLIFE_JUDGE_API_KEY", "sk-first")
+    monkeypatch.setenv("PSEUDOLIFE_JUDGE_SECOND_API_KEY", "sk-second")
+    monkeypatch.delenv("PSEUDOLIFE_DREAM_API_KEY", raising=False)
+    cfg.judge_url, cfg.judge_model = "https://judge.example.com/v1", "claude-opus-5-5"
+    assert svc._judge_extractor().api_key == "sk-first"
+    cfg.judge_second_model = "claude-fable-5"               # swapped onto judge_url
+    swapped = svc._judge_second_extractor()
+    assert (swapped.base_url, swapped.api_key) == ("https://judge.example.com/v1", "sk-first")
+    cfg.judge_second_url = "https://api.example.com/v1"
+    assert svc._judge_second_extractor().api_key == "sk-second"
+    cfg.judge_url = ""                                        # the dream extractor
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_BASE_URL", "https://dream.example.com/v1")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "extractor")
+    dream = svc._judge_extractor()
+    assert dream.base_url == "https://dream.example.com/v1"
+    assert dream.api_key is None
+
+
+def _config_path_judges(svc, monkeypatch, first, second=None):
+    """Drive deep_dream_judge down its CONFIG path (no extractor passed):
+    the first opinion's endpoint is ``first``; the second is whatever
+    _judge_second_extractor builds, or ``second`` when given."""
+    monkeypatch.setattr(svc, "_judge_extractor", lambda *a, **k: first)
+    if second is not None:
+        monkeypatch.setattr(svc, "_judge_second_extractor", lambda: second)
+
+
+@pytest.mark.parametrize("mode", ["shadow", "auto-reject"])
+@pytest.mark.parametrize("second_model", ["", None, "stub-merge-judge"])
+def test_same_model_by_config_skips_the_second_opinion_call(svc, monkeypatch, mode, second_model):
+    """No judge_second_url and a second model that is empty or equal to the
+    first's configured model: the second vote would be the first model again,
+    which authorizes nothing in any mode (and informs no decision in
+    shadow), so no model call is spent on it. The batch goes to first
+    opinions instead (maintainer decision 2026-09-30)."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = mode
+    cfg.judge_second_opinion = True
+    cfg.judge_second_url = ""
+    cfg.judge_second_model = second_model
+    waiting = _propose(svc, "tau svc", "tau harness")
+    judge = _MergeJudge({("tau svc", "tau harness"): ("reject", 0.6),
+                         ("upsilon svc", "upsilon harness"): ("leave", 0.5)})
+    _config_path_judges(svc, monkeypatch, judge)
+    assert svc.deep_dream_judge(limit=1)["judged"] == 1
+    fresh = _propose(svc, "upsilon svc", "upsilon harness")
+    out = svc.deep_dream_judge(limit=1)
+    assert out["second_opinions"] == 0 and out["second_opinion_skipped_same_model"] == 1
+    assert out["judged"] == 1 and judge.calls == 2           # the fresh row, no second call
+    assert _merge_row(svc, waiting)["judge2_verdict"] is None
+    assert _merge_row(svc, fresh)["judge_verdict"] == "leave"
+    # Nothing left to judge: the tick says why both waiting rows are idle.
+    again = svc.deep_dream_judge(limit=1)
+    assert again["judged"] == 0 and again["second_opinion_skipped_same_model"] == 2
+    assert judge.calls == 2
+
+
+def test_a_distinct_second_model_by_config_still_gets_its_call(svc, monkeypatch):
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    cfg.judge_second_url = ""
+    cfg.judge_second_model = "stub-merge-judge-2"
+    pair = ("phi svc", "phi harness")
+    pid = _propose(svc, *pair)
+    first, second = _MergeJudge({pair: ("reject", 0.6)}), _SecondJudge({pair: ("reject", 0.9)})
+    _config_path_judges(svc, monkeypatch, first, second)
+    svc.deep_dream_judge()
+    out = svc.deep_dream_judge()
+    assert second.calls == 1 and out["second_opinions"] == 1
+    assert out.get("second_opinion_skipped_same_model", 0) == 0
+    assert _merge_row(svc, pid)["judge2_verdict"] == "reject"
 
 
 class _DownJudge(_SecondJudge):
@@ -631,6 +713,67 @@ def test_a_failing_shared_endpoint_still_ends_the_tick_after_one_call(svc):
     assert judge.calls == 2                                    # one failing call
 
 
+def test_the_skip_holds_on_the_real_judge_url_builder(svc, monkeypatch):
+    """The same-model skip read through the real endpoint builder: judge_url
+    serving judge_model, and judge_second_model naming that same model."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    calls = []
+
+    def fake_judge_merges(self, proposals):
+        calls.append(self.model)
+        self.served_model = self.model
+        return [{"n": p["n"], "verdict": "reject", "confidence": 0.6, "note": "stub"}
+                for p in proposals]
+
+    monkeypatch.setattr(OpenAICompatExtractor, "judge_merges", fake_judge_merges)
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "auto-reject"
+    cfg.judge_second_opinion = True
+    cfg.judge_url, cfg.judge_model = "https://judge.example.com/v1", "claude-opus-5-5"
+    cfg.judge_second_url, cfg.judge_second_model = "", "claude-opus-5-5"
+    pid = _propose(svc, "chi svc", "chi harness")
+    assert svc.deep_dream_judge()["judged"] == 1
+    out = svc.deep_dream_judge()
+    assert out["second_opinion_skipped_same_model"] == 1 and calls == ["claude-opus-5-5"]
+    # A distinct model is asked. Changing the knob changes the signed
+    # judging policy, so the first verdict is re-judged on the next tick and
+    # the second opinion follows on the one after.
+    cfg.judge_second_model = "claude-sonnet-5-5"
+    assert svc.deep_dream_judge()["judged"] == 1 and calls[-1] == "claude-opus-5-5"
+    out = svc.deep_dream_judge()
+    assert out["second_opinions"] == 1 and calls[-1] == "claude-sonnet-5-5"
+    assert _merge_row(svc, pid)["judge2_verdict"] == "reject"
+
+
+class _KeyedJudge(_MergeJudge):
+    base_url = "https://judge.example.com/v1"
+    api_key = "sk-first"
+
+
+class _UnkeyedSecond(_DownJudge):
+    base_url = "https://judge.example.com/v1"
+    api_key = None
+
+
+def test_a_second_opinion_on_the_same_url_with_another_key_never_starves_first_opinions(svc):
+    """judge_url has its own key since 2026-09-30, so a second endpoint on
+    the same URL can fail (401 without the key) where the first call would
+    not: that failure must not end the tick, or first opinions stop for
+    good (review finding on the follow-up)."""
+    cfg = svc.config.memory.deep_dream
+    cfg.judge_mode = "shadow"
+    cfg.judge_second_opinion = True
+    waiting = _propose(svc, "psi svc", "psi harness")
+    judge = _KeyedJudge({("psi svc", "psi harness"): ("reject", 0.6),
+                         ("omega svc", "omega harness"): ("leave", 0.5)})
+    assert svc.deep_dream_judge(judge, limit=1)["judged"] == 1
+    fresh = _propose(svc, "omega svc", "omega harness")
+    out = svc.deep_dream_judge(judge, limit=2, second_extractor=_UnkeyedSecond({}))
+    assert "401" in out["second_opinion_error"] and out["judged"] == 1
+    assert _merge_row(svc, fresh)["judge_verdict"] == "leave"
+    assert _merge_row(svc, waiting)["judge2_verdict"] is None
+
+
 def test_compose_forwards_the_second_judge_key_to_the_daemon():
     from pathlib import Path
 
@@ -641,8 +784,8 @@ def test_compose_forwards_the_second_judge_key_to_the_daemon():
                     root / "pseudolife_memory" / "compose" / "docker-compose.yml"):
         env = yaml.safe_load(compose.read_text(encoding="utf-8"))[
             "services"]["pseudolife-daemon"]["environment"]
-        assert env.get("PSEUDOLIFE_JUDGE_SECOND_API_KEY") == (
-            "${PSEUDOLIFE_JUDGE_SECOND_API_KEY:-}"), compose
+        for key in ("PSEUDOLIFE_JUDGE_API_KEY", "PSEUDOLIFE_JUDGE_SECOND_API_KEY"):
+            assert env.get(key) == "${" + key + ":-}", (compose, key)
 
 
 def test_an_unset_new_judge_knob_leaves_every_review_fingerprint_as_it_was(svc, monkeypatch):
@@ -1190,3 +1333,47 @@ def test_first_opinion_relation_is_recovered_for_the_link(svc):
     out = svc.deep_dream_judge(judge, second_extractor=second)
     assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
     assert _merge_links(svc) == [("phi module", "part-of", "phi concept", "merge-judge-relate")]
+
+
+@pytest.mark.parametrize("result, logged", [
+    ({"judged": 0}, False),
+    ({"judged": 0, "second_opinions": 0, "auto_reject_refused_same_model": 0,
+      "served_model_mismatch": 0, "served_model_mismatches": []}, False),
+    ({"judged": 1}, True),
+    ({"judged": 0, "reconsideration": {"reopened": 1}}, True),
+    ({"judged": 0, "second_opinions": 2}, True),
+    ({"judged": 0, "second_opinions": 1, "auto_reject_refused_same_model": 1}, True),
+    ({"judged": 0, "served_model_mismatch": 1}, True),
+    ({"judged": 0, "second_opinion_error": "HTTP Error 401"}, True),
+])
+def test_sweep_logs_the_merge_judge_whenever_it_did_or_refused_something(caplog, result, logged):
+    """The sweep logged the merge judge only when it judged or reopened
+    something, so a tick of second opinions, refused same-model rejects, a
+    served-model substitution or a failing second endpoint left no line."""
+    import logging
+
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    class _FakeService:
+        class config:  # noqa: D106
+            class memory:
+                class dream:
+                    enabled = True
+
+        def compact_superseded(self):
+            return {"total": 0}
+
+        def prune_dream_runs(self):
+            return 0
+
+        def dream_status(self):
+            return {"would_fire": False, "backlog": 0}
+
+        def deep_dream_judge(self):
+            return dict(result)
+
+    with caplog.at_level(logging.INFO, logger="pseudolife_memory.memory.dream"):
+        run_sweep_once(_FakeService())
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("deep-dream judge: {")]
+    assert bool(lines) is logged, lines

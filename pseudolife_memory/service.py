@@ -8353,12 +8353,15 @@ class MemoryService(DreamOps):
                          max_world: int = 3, *,
                          session_id: str | None = None,
                          include_coordination: bool = True,
-                         include_dream_stall: bool = True) -> dict[str, Any]:
+                         include_dream_stall: bool = True,
+                         include_review_queue: bool = True) -> dict[str, Any]:
         """Assemble the session-start briefing: graph 'unsure-about' + avoid-first
         lessons + fresh world facts + a one-line recap of the last closed session.
         While live dreams are stalled, the markdown opens with one line naming
-        the stall and its remedy; the SessionStart hook puts that line in its
-        own prefix instead (``include_dream_stall=False``).
+        the stall and its remedy; while the review queue needs attention
+        (``review_queue_health``), one line saying so follows it. The
+        SessionStart hook puts both lines in its own prefix instead
+        (``include_dream_stall=False``, ``include_review_queue=False``).
         The memory startup hook skips coordination; its separate hook owns
         that output. Read-only; no LLM. Each sub-call takes the lock itself, so this
         orchestrator must not hold it."""
@@ -8402,11 +8405,19 @@ class MemoryService(DreamOps):
         markdown = format_briefing(surprises, questions, lessons,
                                    world=world, recap=recap,
                                    coordination=coordination)
+        notices: list[str] = []
         if include_dream_stall:
             from pseudolife_memory.memory.dream import dream_stall_line
-            line = dream_stall_line(self.dream_stall_state()["stall"])
-            if line:
-                markdown = line + ("\n\n" + markdown if markdown else "")
+            notices.append(dream_stall_line(self.dream_stall_state()["stall"]))
+        if include_review_queue:
+            from pseudolife_memory.memory.briefing import review_queue_line
+            try:
+                notices.append(review_queue_line(self.review_queue_health()))
+            except Exception:  # noqa: BLE001 — never break the briefing
+                pass
+        notices = [n for n in notices if n]
+        if notices:
+            markdown = "\n\n".join(notices) + ("\n\n" + markdown if markdown else "")
         result = {
             "available": bool(markdown),
             "markdown": markdown,

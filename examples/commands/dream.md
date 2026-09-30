@@ -16,7 +16,7 @@ residue: rows whose verdict sat below a gate, a `split` second opinion, a
 such row carries the judge's `judge` / `judge2` blocks — treat them as
 leads, read the evidence, and disagree freely.
 
-1. Call `memory_dream(action="status")` and read three things:
+1. Call `memory_dream(action="status")` and read four things:
    - `deep_dream` — `{recommended, reason, new_entities, days_since}`:
      whether the mechanical pass is due. The tick normally handles this;
      if `recommended` is still true (tick disabled, or the daemon just
@@ -30,6 +30,11 @@ leads, read the evidence, and disagree freely.
      deployment has ANY automatic cortex writer.
    - `backlog` / `would_fire`: whether unconsolidated memories are waiting
      for the next sweep.
+   - `review_queue` — pending merge / junk / link counts, the age of the
+     oldest pending merge, each judge's mode, and `attention: {needed,
+     reasons}`. When `attention.needed` is true, tell the user the reason
+     before triaging: a judge left in `shadow`/`off`, or one configured
+     but not running, keeps refilling the queue this session clears.
 2. ONLY when no extractor endpoint is configured (primary and fallback
    both null) or both are unreachable: you are this deployment's only
    cortex writer — run the manual extraction pass:

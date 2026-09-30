@@ -1,6 +1,7 @@
 """Mailbox ownership, leases, mutation durability and concurrent ordering."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+import json
 import threading
 import time
 
@@ -421,6 +422,300 @@ def test_credential_shaped_child_label_is_refused(store):
     assert len(shaped) == 40
     with pytest.raises(CoordinationError, match="secret_like_body"):
         store.update(*creds(a), children=[shaped])
+
+
+# --- subagents: the parent link and hook-kept children (schema v50) --------
+# A Codex native child (collaboration.spawn_agent) has its own thread and so
+# its own row; the shim passes the parent thread it read from Codex's turn
+# metadata, and the daemon links the row to the parent's row under the same
+# principal and the Codex namespace, whenever the parent registers. A Claude
+# Code subagent shares its parent's row; the plugin's SubagentStart and
+# SubagentStop hooks keep it listed among the parent's children.
+
+PARENT_THREAD = "01a0ec35-a19d-7043-9336-ac6b9863afd7"
+CHILD_THREAD = "01a0ec35-a4b3-7651-a945-81ed1f6cb638"
+CODEX = {"pull": True, "channel": False, "codex": False, "resumable": True}
+
+
+def codex_agent(store, thread, principal="alice", **kwargs):
+    return store.register(principal, episode=thread, capabilities=dict(CODEX), **kwargs)
+
+
+def test_a_codex_child_links_to_its_registered_parent(store):
+    parent = codex_agent(store, PARENT_THREAD)
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    peer = store.register("alice")
+    assert child["parent_agent_id"] == parent["agent_id"] and child["subagent"] is True
+    assert parent["parent_agent_id"] is None and parent["subagent"] is False
+    assert peer["parent_agent_id"] is None and peer["subagent"] is False
+    listed = {a["agent_id"]: a for a in store.list_agents(*creds(peer))["agents"]}
+    assert listed[child["agent_id"]]["parent_agent_id"] == parent["agent_id"]
+    assert listed[parent["agent_id"]]["parent_agent_id"] is None
+    # The register event records the thread it named and the row it found.
+    payload = store.storage.conn.execute(
+        "SELECT payload FROM coordination_events WHERE event='register' AND agent_id=%s",
+        (child["agent_id"],)).fetchone()[0]
+    assert PARENT_THREAD in payload and parent["agent_id"] in payload
+
+
+def test_a_child_registered_before_its_parent_links_when_the_parent_registers(store):
+    """Codex registers a thread on its first Pseudolife call, and a parent
+    may make none before it spawns: the link is made when it does."""
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    assert child["parent_agent_id"] is None and child["subagent"] is True
+    store.test_time[0] = 1005.0
+    parent = codex_agent(store, PARENT_THREAD)
+    assert store.authenticate(*creds(child))["parent_agent_id"] == parent["agent_id"]
+    # The late link is a logged mutation of the child's row.
+    rows = store.storage.conn.execute(
+        "SELECT actor, payload FROM coordination_events WHERE event='update' AND agent_id=%s",
+        (child["agent_id"],)).fetchall()
+    assert [(actor, parent["agent_id"] in payload) for actor, payload in rows] == [("daemon", True)]
+
+
+def test_the_parent_link_stays_inside_the_principal_and_the_codex_namespace(store):
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    codex_agent(store, PARENT_THREAD, principal="bob")         # another principal
+    store.register("alice", episode=PARENT_THREAD)             # not a Codex thread
+    assert store.authenticate(*creds(child))["parent_agent_id"] is None
+    parent = codex_agent(store, PARENT_THREAD)
+    assert store.authenticate(*creds(child))["parent_agent_id"] == parent["agent_id"]
+
+
+def test_a_pruned_parent_unlinks_and_its_next_registration_relinks(store):
+    parent = codex_agent(store, PARENT_THREAD, wake_enabled=False)
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    # Only the parent goes idle past the retention window.
+    store.test_time[0] += 8 * 86400
+    store.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s WHERE agent_id=%s",
+                               (store.test_time[0], child["agent_id"]))
+    store.prune()
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_agents WHERE agent_id=%s",
+                                      (parent["agent_id"],)).fetchone()[0] == 0
+    assert store.authenticate(*creds(child))["parent_agent_id"] is None
+    # The prune event names the removed parent, and the chain still verifies.
+    from pseudolife_memory.storage.coordination import audit_events, verify_audit_chain
+    events = list(audit_events(store.storage.conn))
+    [pruned] = [e for e in events if e["event"] == "prune"]
+    assert parent["agent_id"] in pruned["payload"]
+    assert verify_audit_chain(events)["ok"] is True
+    again = codex_agent(store, PARENT_THREAD)
+    assert store.authenticate(*creds(child))["parent_agent_id"] == again["agent_id"]
+
+
+def test_a_parent_registered_again_takes_over_a_live_link(store):
+    """A thread that registers a new address while its old row is still
+    live (its state file was lost, say) relinks its children to the new
+    row; the daemon's update event records the row it replaced."""
+    first = codex_agent(store, PARENT_THREAD)
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    store.test_time[0] = 1005.0
+    second = codex_agent(store, PARENT_THREAD)
+    assert store.authenticate(*creds(child))["parent_agent_id"] == second["agent_id"]
+    [payload] = [json.loads(p) for (p,) in store.storage.conn.execute(
+        "SELECT payload FROM coordination_events WHERE event='update' AND actor='daemon' "
+        "AND agent_id=%s", (child["agent_id"],)).fetchall()]
+    assert payload == {"fields": {"parent_agent_id": second["agent_id"]},
+                       "before": {"parent_agent_id": first["agent_id"]}}
+    # A child registering now picks the most recently active of the two.
+    store.test_time[0] = 1010.0
+    store.update(*creds(first), status="still here")
+    late = codex_agent(store, "01a0ec35-ffff-7651-a945-81ed1f6cb638", parent_thread=PARENT_THREAD)
+    assert late["parent_agent_id"] == first["agent_id"]
+
+
+@pytest.mark.parametrize("parent_thread,capabilities,episode", [
+    ("not-a-uuid", CODEX, CHILD_THREAD),
+    (PARENT_THREAD.upper(), CODEX, CHILD_THREAD),              # not canonical
+    ("{" + PARENT_THREAD + "}", CODEX, CHILD_THREAD),
+    (7, CODEX, CHILD_THREAD),
+    (CHILD_THREAD, CODEX, CHILD_THREAD),                       # its own thread
+    (PARENT_THREAD, {"pull": True, "channel": False}, CHILD_THREAD),  # not a Codex row
+])
+def test_the_parent_thread_is_validated_before_anything_is_written(
+        store, parent_thread, capabilities, episode):
+    with pytest.raises(CoordinationError, match="invalid_parent"):
+        store.register("alice", episode=episode, capabilities=dict(capabilities),
+                       parent_thread=parent_thread)
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_agents").fetchone()[0] == 0
+
+
+def test_a_subagent_does_not_send_but_keeps_its_own_mailbox(store):
+    """Maintainer decision 2026-09-30: a subagent asks its parent to send.
+    Its own mail, status and park stay its own."""
+    parent = codex_agent(store, PARENT_THREAD)
+    child = codex_agent(store, CHILD_THREAD, parent_thread=PARENT_THREAD)
+    orphan = codex_agent(store, "01a0ec35-ffff-7651-a945-81ed1f6cb638",
+                         parent_thread="01a0ec35-eeee-7651-a945-81ed1f6cb638")
+    peer = store.register("alice")
+    for sender in (child, orphan):  # linked, and a parent not registered yet
+        with pytest.raises(CoordinationError, match="child_send_refused") as refused:
+            store.send(*creds(sender), to=peer["agent_id"], text="hello", request_id="r1")
+        assert "ask your parent session" in refused.value.detail
+        with pytest.raises(CoordinationError, match="child_send_refused"):
+            store.send(*creds(sender), to="all", text="hello all", request_id="r2")
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_messages").fetchone()[0] == 0
+    # The parent and an unlinked peer still send, including to the child.
+    store.send(*creds(parent), to=child["agent_id"], text="status?", request_id="p1")
+    store.send(*creds(peer), to=child["agent_id"], text="from a peer", request_id="q1")
+    store.send(*creds(peer), to=parent["agent_id"], text="to the parent", request_id="q2")
+    got = store.receive(*creds(child))["messages"]
+    assert [m["text"] for m in got] == ["status?", "from a peer"]
+    store.ack(*creds(child), message_id=got[0]["message_id"])
+    out = store.update(*creds(child), status="reviewing", park_reason="waiting_peer")
+    assert out["status"] == "reviewing" and out["park_reason"] == "waiting_peer"
+
+
+def _hook_children(row):
+    return [(c["label"], c.get("agent_id")) for c in row["children"]]
+
+
+def test_hook_children_are_added_and_removed_by_their_agent_id(store):
+    a, b = pair(store)
+    started = store.subagent_started(a["agent_id"], "alice", child="a698026ca4ba524e9",
+                                     kind="general-purpose")
+    assert started["recorded"] is True
+    assert _hook_children(store.authenticate(*creds(a))) == [
+        ("general-purpose#a698026c", "a698026ca4ba524e9")]
+    # Idempotent: a repeated start neither duplicates nor re-stamps it.
+    store.test_time[0] = 1010.0
+    store.subagent_started(a["agent_id"], "alice", child="a698026ca4ba524e9", kind="Explore")
+    [entry] = store.list_agents(*creds(b))["agents"][0]["children"]
+    assert entry["since"] == 1000.0 and entry["label"] == "general-purpose#a698026c"
+    # A type-less start still gets a label.
+    store.subagent_started(a["agent_id"], "alice", child="b1", kind="")
+    assert _hook_children(store.authenticate(*creds(a)))[1] == ("subagent#b1", "b1")
+    assert store.subagent_stopped(a["agent_id"], "alice", child="a698026ca4ba524e9")["recorded"]
+    assert _hook_children(store.authenticate(*creds(a))) == [("subagent#b1", "b1")]
+    # Stopping one that is not listed changes nothing and logs nothing.
+    events = store.storage.conn.execute("SELECT count(*) FROM coordination_events").fetchone()[0]
+    assert store.subagent_stopped(a["agent_id"], "alice", child="gone")["recorded"] is False
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events").fetchone()[0] == events
+    # Another principal's address, or none, is not touched.
+    assert store.subagent_started(a["agent_id"], "bob", child="x1", kind="t")["recorded"] is False
+    assert store.subagent_started("f" * 32, "alice", child="x1", kind="t")["recorded"] is False
+    assert _hook_children(store.authenticate(*creds(a))) == [("subagent#b1", "b1")]
+
+
+@pytest.mark.parametrize("child,kind", [
+    ("", "t"), ("a" * 65, "t"), ("a/b", "t"), ("a b", "t"), (7, "t"), ("ok", "x" * 65),
+    ("ok", "bad type"), ("ok", "line\nbreak"), ("ok", 7),
+])
+def test_hook_children_are_validated(store, child, kind):
+    a = store.register("alice")
+    with pytest.raises(CoordinationError, match="invalid_children"):
+        store.subagent_started(a["agent_id"], "alice", child=child, kind=kind)
+    assert store.authenticate(*creds(a))["children"] == []
+
+
+def test_a_long_subagent_type_is_cut_to_fit_the_label(store):
+    a = store.register("alice")
+    store.subagent_started(a["agent_id"], "alice", child="c0ffee00c0ffee00c", kind="k" * 64)
+    [(label, _)] = _hook_children(store.authenticate(*creds(a)))
+    assert label == "k" * 31 + "#c0ffee00" and len(label) == 40
+
+
+def test_parent_labels_and_hook_children_do_not_drop_each_other(store):
+    """The parent's replace-all update rewrites only its own labels; a hook
+    adds or removes only its own entry."""
+    a = store.register("alice")
+    store.update(*creds(a), children=["review storage"])
+    store.subagent_started(a["agent_id"], "alice", child="c1", kind="Explore")
+    out = store.update(*creds(a), children=["docs"])
+    assert _hook_children(out) == [("docs", None), ("Explore#c1", "c1")]
+    out = store.update(*creds(a), children=[])
+    assert _hook_children(out) == [("Explore#c1", "c1")]
+    store.update(*creds(a), children=["tests"])
+    store.subagent_stopped(a["agent_id"], "alice", child="c1")
+    assert _hook_children(store.authenticate(*creds(a))) == [("tests", None)]
+    # A parent label spelled like a live hook entry names that same child.
+    store.subagent_started(a["agent_id"], "alice", child="c2", kind="Plan")
+    out = store.update(*creds(a), children=["Plan#c2", "tests"])
+    assert _hook_children(out) == [("tests", None), ("Plan#c2", "c2")]
+
+
+def test_hook_children_have_a_cap_of_their_own(store):
+    """Hook entries never count against the parent's eight labels, so a
+    parent update is never refused because of them (PR #481 review). They
+    have their own eight: past it a new start replaces the oldest hook entry
+    (whose stop was likely missed), never a parent label."""
+    a = store.register("alice")
+    parent_labels = [f"p{i}" for i in range(8)]
+    store.update(*creds(a), children=parent_labels)
+    for i in range(8):
+        store.test_time[0] = 1000.0 + i
+        store.subagent_started(a["agent_id"], "alice", child=f"h{i}", kind="t")
+    # Eight parent labels beside eight live hook entries: accepted.
+    out = store.update(*creds(a), status="orchestrating", children=[f"q{i}" for i in range(8)])
+    assert out["status"] == "orchestrating"
+    assert [c["label"] for c in out["children"]][:8] == [f"q{i}" for i in range(8)]
+    assert len(out["children"]) == 16
+    store.test_time[0] = 1100.0
+    store.subagent_started(a["agent_id"], "alice", child="h8", kind="t")
+    children = store.authenticate(*creds(a))["children"]
+    hooked = [c["agent_id"] for c in children if c.get("agent_id")]
+    assert len(hooked) == 8 and "h0" not in hooked and hooked[-1] == "h8"
+    assert [c["label"] for c in children if not c.get("agent_id")] == [f"q{i}" for i in range(8)]
+
+
+def test_a_refused_children_update_applies_nothing_and_says_so(store):
+    """The update is one transaction: a refused ``children`` leaves the
+    status and park sent beside it unapplied, and the detail says so."""
+    a = store.register("alice")
+    store.update(*creds(a), status="working", children=["kept"])
+    for children in ([f"c{i}" for i in range(9)], ["dup", "dup"], ["y" * 41]):
+        with pytest.raises(CoordinationError, match="invalid_children") as refused:
+            store.update(*creds(a), status="parked now", park_reason="blocked",
+                         park_needs="a review", children=children)
+        assert "nothing was updated" in refused.value.detail
+    row = store.authenticate(*creds(a))
+    assert (row["status"], row["park_reason"], _children(row)) == ("working", None,
+                                                                  [("kept", 1000.0)])
+
+
+def test_a_hook_child_whose_stop_was_missed_ages_out(store):
+    """A killed session never sends SubagentStop: past HOOK_CHILD_TTL the
+    entry is no longer listed, and the next write drops it from the row."""
+    from pseudolife_memory.storage.coordination import HOOK_CHILD_TTL
+    a, b = pair(store)
+    store.update(*creds(a), children=["review"])
+    store.subagent_started(a["agent_id"], "alice", child="old", kind="t")
+    store.test_time[0] = 1000.0 + HOOK_CHILD_TTL - 1
+    store.subagent_started(a["agent_id"], "alice", child="new", kind="t")
+    peer_view = next(r for r in store.list_agents(*creds(b))["agents"]
+                     if r["agent_id"] == a["agent_id"])
+    assert _hook_children(peer_view) == [("review", None), ("t#old", "old"), ("t#new", "new")]
+    store.test_time[0] = 1000.0 + HOOK_CHILD_TTL
+    assert _hook_children(store.authenticate(*creds(a))) == [("review", None), ("t#new", "new")]
+    # Stopping the aged-out child is not a change; the next write drops it.
+    assert store.subagent_stopped(a["agent_id"], "alice", child="old")["recorded"] is False
+    store.update(*creds(a), children=["review"])
+    stored = store.storage.conn.execute("SELECT children FROM coordination_agents "
+                                        "WHERE agent_id=%s", (a["agent_id"],)).fetchone()[0]
+    assert [c.get("agent_id") for c in stored] == [None, "new"]
+
+
+def test_a_detach_clears_the_hook_children_and_keeps_the_parent_labels(store):
+    """A detach is the shim ending with its session, and every subagent the
+    hooks listed under it; the change is logged by the daemon."""
+    a = store.register("alice")
+    attached = store.attach(*creds(a), attachment_id="one")
+    store.update(*creds(a), children=["review"])
+    store.subagent_started(a["agent_id"], "alice", child="c1", kind="Explore")
+    store.detach(*creds(a), attachment_id="one", generation=attached["generation"])
+    assert _hook_children(store.authenticate(*creds(a))) == [("review", None)]
+    actors = [actor for (actor,) in store.storage.conn.execute(
+        "SELECT actor FROM coordination_events WHERE event='update' AND agent_id=%s "
+        "ORDER BY seq", (a["agent_id"],)).fetchall()]
+    assert actors == ["agent", "hook", "daemon"]
+    # A detach with no hook entries writes no update.
+    again = store.attach(*creds(a), attachment_id="two")
+    store.detach(*creds(a), attachment_id="two", generation=again["generation"])
+    assert store.storage.conn.execute(
+        "SELECT count(*) FROM coordination_events WHERE event='update' AND agent_id=%s",
+        (a["agent_id"],)).fetchone()[0] == 3
 
 
 # --- park records (schema v49) ---------------------------------------------

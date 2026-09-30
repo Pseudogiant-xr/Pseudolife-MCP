@@ -144,7 +144,7 @@ class CoordinationAdapter:
     def __init__(self, url: str, token: str, *, state_path=None, wake_enabled=False,
                  label="", project="", task="", episode=None, client=None,
                  delivery_transport="channel", provider=None, initial_snapshot=None,
-                 legacy_state_path=None, digest_path=None, ring_path=None):
+                 legacy_state_path=None, digest_path=None, ring_path=None, parent_thread=None):
         parsed = urlsplit(url)
         if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
@@ -216,6 +216,12 @@ class CoordinationAdapter:
             raise AdapterError("unsupported coordination delivery transport")
         if self.ring_path:
             self._registration["capabilities"]["ring"] = True
+        # v50: a Codex native subagent's parent thread, sent with its first
+        # register so the daemon links the new address to its parent's.
+        if parent_thread is not None:
+            if delivery_transport != "codex":
+                raise AdapterError("a parent thread names a Codex subagent's parent")
+            self._registration["parent_thread"] = parent_thread
         self._client = client
         self._owns_client = client is None
         self._identity = None
@@ -790,7 +796,16 @@ class CoordinationAdapter:
             self._unlock_reservation_fd(lock_fd)
 
     async def _register(self, reservation):
-        result = await self._post("register", self._registration)
+        try:
+            result = await self._post("register", self._registration)
+        except AdapterError as error:
+            # A daemon older than v50 refuses the parent link with
+            # unexpected_parameter: register without it, as _post_attach
+            # drops ``ring``, rather than lose the child's address.
+            if error.code != "unexpected_parameter" or "parent_thread" not in self._registration:
+                raise
+            self._registration.pop("parent_thread")
+            result = await self._post("register", self._registration)
         if not all(isinstance(result.get(key), str) and result[key]
                    for key in ("agent_id", "credential")):
             raise AdapterError("coordination registration returned invalid identity")

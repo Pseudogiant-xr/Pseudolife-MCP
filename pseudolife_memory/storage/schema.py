@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 49
+SCHEMA_META_VERSION = 50
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -703,6 +703,25 @@ CREATE INDEX IF NOT EXISTS coordination_wakes_sender_idx
     ON coordination_wakes (sender_agent_id, created_at);
 CREATE INDEX IF NOT EXISTS coordination_wakes_time_idx
     ON coordination_wakes (created_at);
+-- v50: a subagent's link to its parent (maintainer decision 2026-09-30:
+-- subagents are their parent's children, not peers). parent_thread is the
+-- parent's Codex thread id a native child (collaboration.spawn_agent)
+-- registered with, set once at register; NULL on every other row, and a
+-- row that has one sends no mail. parent_agent_id is the row that thread
+-- resolved to under the same principal, filled at register or when the
+-- parent registers later, and cleared when prune removes the parent.
+-- Guarded like the v47 and v49 columns: one probe, then the ALTER only
+-- when missing, so a routine start takes no ACCESS EXCLUSIVE lock.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_agents'::regclass
+                     AND attname = 'parent_agent_id' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_agents
+            ADD COLUMN IF NOT EXISTS parent_agent_id TEXT,
+            ADD COLUMN IF NOT EXISTS parent_thread TEXT;
+    END IF;
+END $$;
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.

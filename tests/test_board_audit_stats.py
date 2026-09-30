@@ -353,6 +353,19 @@ def test_the_adapters_own_delivery_read_is_not_the_recipient_acting():
     assert (report["served"], report["acted_after_served"]) == (1, 0)
 
 
+def test_a_hook_or_daemon_update_is_not_the_recipient_acting():
+    """v50: the subagent hooks update a session's children (actor ``hook``)
+    and the daemon links a subagent to its parent (actor ``daemon``); neither
+    is the model acting on the board."""
+    events = [_event(1, "update", B, 1030.0, actor="hook",
+                     payload={"fields": {"children": []}, "before": {"children": []}}),
+              _event(2, "update", B, 1031.0, actor="daemon",
+                     payload={"fields": {"parent_agent_id": A}, "before": {"parent_agent_id": None}})]
+    wakes = [_wake(B, A, "m1", "rung", 1000.0, 1010.0)]
+    report = compute_stats(events, wakes, [], since=SINCE, until=UNTIL)["wake_precision"]
+    assert (report["served"], report["acted_after_served"]) == (1, 0)
+
+
 def test_an_empty_window_reports_zeros_not_errors():
     report = compute_stats([], [], [], since=SINCE, until=UNTIL)
     assert report["events"] == {"total": 0, "by_kind": {}}

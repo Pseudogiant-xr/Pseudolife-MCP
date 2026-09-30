@@ -115,7 +115,8 @@ async def _send_coordination_error(send, exc):
     detail = public_detail(exc)
     status = (401 if code in {"unauthorized", "authentication_required",
                              "instance_authentication_required"}
-              else 403 if code in {"principal_not_allowed", "invalid_credential"}
+              else 403 if code in {"principal_not_allowed", "invalid_credential",
+                                   "child_send_refused"}
               else 404 if code == "instance_not_found"
               else 409 if code == "bank_identity_mismatch"
               else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full",
@@ -483,6 +484,33 @@ def build_console_app(
                 params = _parse_query(scope)
                 text = await asyncio.get_running_loop().run_in_executor(
                     None, functools.partial(woke, service, headers, agent=params.get("agent"),
+                                            token_map=token_map, token=token))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4f) plugin SubagentStart / SubagentStop hooks (v50): list or unlist
+        # a Claude Code subagent among its session's children. A write, so
+        # POST only; "ok" when recorded, an empty body otherwise. 200
+        # always: the hook does not read the answer.
+        if path == "/api/hook/subagent":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = ""
+            if _authorized(scope):
+                from pseudolife_memory.coordination import subagent
+                headers = {k.decode().lower(): v.decode("latin-1")
+                           for k, v in scope.get("headers", [])}
+                params = _parse_query(scope)
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, functools.partial(subagent, service, headers, agent=params.get("agent"),
+                                            event=params.get("event"), child=params.get("child"),
+                                            kind=params.get("type"),
                                             token_map=token_map, token=token))
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")

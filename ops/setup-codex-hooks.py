@@ -53,12 +53,35 @@ MANUAL_ROLES = {"sessionStart": ("SessionStart", "MemoryPolicy", "CoordinationSt
 # context elsewhere), never the wake, approved with the three lifecycle
 # hooks. Optional: Codex before 0.148 skips async hooks outside SessionEnd
 # and lists three. Manual installs keep EVENTS.
-PLUGIN_EVENTS = {**EVENTS, "stop": "Stop"}
-# A manual bundle copies SCRIPTS; it has no Stop hook, so no stop-wake.sh.
+# SubagentStop runs the same park gate for a Codex child thread, keyed by the
+# child's agent_id (its MCP threadId, probed on Codex 0.158.0 2026-09-29); in
+# Claude Code the entry does nothing. Optional too: a Codex that does not
+# list it still reaches ready.
+# The PreToolUse entry is Claude Code's subagent board guard
+# (subagent-board-guard.sh). Codex 0.158.0 lists it (pre_tool_use:0:0 in
+# hooks/list, 2026-09-30), but a Codex child has a board address of its own,
+# so in Codex it allows every call (lifecycle.ps1 -Event SubagentBoardGuard
+# on Windows, the script's Codex check elsewhere). Approved with the rest,
+# like Stop, and optional the same way.
+# SubagentStart, and a second SubagentStop entry (schema v50), carry Claude
+# Code's subagent liveness hook (subagent-board.sh), a no-op in Codex
+# (lifecycle.ps1 -Event SubagentBoardStart|SubagentBoardStop exits at once;
+# the bash script exits in Codex context): the shim links Codex's native
+# subagents to their parent instead. Async, so a Codex that skips async
+# hooks lists only the park gate's SubagentStop entry.
+PLUGIN_EVENTS = {**EVENTS, "stop": "Stop", "subagentStart": "SubagentStart",
+                 "subagentStop": "SubagentStop", "preToolUse": "PreToolUse"}
+# Each optional event and how many plugin handlers it has in hooks.json
+# (tests/test_codex_hook_setup_edges.py pins this against the manifest). A
+# Codex may list none of them, or any of them; each listed one must still be
+# a distinct handler of the shipped manifest.
+OPTIONAL_PLUGIN_EVENTS = {"stop": 1, "subagentStart": 1, "subagentStop": 2, "preToolUse": 1}
+# A manual bundle copies SCRIPTS; it has no Stop, PreToolUse or subagent
+# hooks, so no stop-wake.sh, subagent-board-guard.sh or subagent-board.sh.
 SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh",
            "coordination-start.sh", "coordination-prompt.sh", "session-end.sh")
 LEGACY_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", "session-end.sh")
-PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh",)
+PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh", "subagent-board-guard.sh", "subagent-board.sh")
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
 
@@ -345,8 +368,10 @@ def complete_set(hooks, source):
     from collections import Counter
     counts = Counter(h["eventName"] for h in hooks)
     required = Counter({event: len(roles) for event, roles in MANUAL_ROLES.items()})
-    if source == "plugin" and counts.get("stop") == 1:
-        del counts["stop"]
+    if source == "plugin":
+        for event, most in OPTIONAL_PLUGIN_EVENTS.items():
+            if 1 <= counts.get(event, 0) <= most:
+                del counts[event]
     return (counts == required
             and len({h.get("command") for h in hooks}) == len(hooks)
             and len({h.get("key") for h in hooks}) == len(hooks))
@@ -423,10 +448,11 @@ def is_legacy(hook, home):
 
 
 def select_hooks(hooks, home, source):
-    # A Stop entry the user disabled in /hooks is a no-op there anyway: keep
-    # that choice instead of refusing setup over it.
+    # A Stop or SubagentStop park-gate entry the user disabled in /hooks
+    # gives up only the park gate, and a PreToolUse or subagent liveness one
+    # is a no-op in Codex: keep that choice instead of refusing setup over it.
     plugin = [h for h in hooks if h.get("pluginId") == PLUGIN_ID
-              and (h["enabled"] or h["eventName"] != "stop")]
+              and (h["enabled"] or h["eventName"] not in OPTIONAL_PLUGIN_EVENTS)]
     manual = [h for h in hooks if owned_manual(h, home)]
     legacy = [h for h in hooks if is_legacy(h, home)]
     other_legacy = [h for h in hooks if h not in legacy and h not in plugin
@@ -475,7 +501,11 @@ def vet_plugin(hooks):
         if len(matches) != 1 or matches[0] in seen[event]:
             raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
         seen[event].add(matches[0])
-    if any(len(seen[event]) != len(roles[event]) for event in seen if event != "Stop" or seen[event]):
+    optional = {PLUGIN_EVENTS[event] for event in OPTIONAL_PLUGIN_EVENTS}
+    # Every lifecycle role must be listed; an optional event may list any of
+    # its handlers (a Codex that skips async hooks lists only SubagentStop's
+    # park gate), each already matched to a distinct role above.
+    if any(len(seen[event]) != len(roles[event]) for event in seen if event not in optional):
         raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
 
 

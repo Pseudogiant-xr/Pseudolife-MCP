@@ -168,6 +168,8 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judge2_confidence"),
     ("entity_proposals", "judge2_model"),
     ("entity_proposals", "judged2_at"),
+    ("coordination_agents", "parent_agent_id"),   # v50: NULL = no parent (yet)
+    ("coordination_agents", "parent_thread"),     # v50: NULL = not a subagent
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled
@@ -209,6 +211,26 @@ def test_additive_columns_are_nullable(pg_conn):
     not_null = [(t, c) for t, c in _NULLABLE_COLUMNS
                 if _column_attr(pg_conn, t, c, "is_nullable") != "YES"]
     assert not not_null, f"must be nullable: {not_null}"
+
+
+def test_a_v49_bank_gains_the_v50_parent_columns_through_the_guarded_pass(pg_conn):
+    """The upgrade path: a bank at v49 (no parent columns) gets both from
+    the schema pass, its rows reading NULL (not subagents), and a second
+    pass finds them present and adds nothing. The pass is guarded (probe,
+    then ALTER only when missing), like v47's and v49's columns."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    pg_conn.autocommit = True
+    pg_conn.execute("INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
+                    "created_at,last_activity) VALUES ('v49-row','alice','h',1,1)")
+    pg_conn.execute("ALTER TABLE coordination_agents DROP COLUMN parent_agent_id, "
+                    "DROP COLUMN parent_thread")
+    assert not {"parent_agent_id", "parent_thread"} & _columns(pg_conn, "coordination_agents")
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert {"parent_agent_id", "parent_thread"} <= _columns(pg_conn, "coordination_agents")
+    assert pg_conn.execute("SELECT parent_agent_id, parent_thread FROM coordination_agents "
+                           "WHERE agent_id='v49-row'").fetchone() == (None, None)
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert {"parent_agent_id", "parent_thread"} <= _columns(pg_conn, "coordination_agents")
 
 
 # ── structural one-offs ───────────────────────────────────────────────────

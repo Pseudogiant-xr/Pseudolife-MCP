@@ -782,3 +782,60 @@ def test_public_link_proposals_resolve_by_name_not_id(svc):
     assert out["proposed"] == 1
     (link,) = st.pending_proposals()
     assert link["src"] == "upsilon c"
+
+
+# ── paginated evidence for outside reviewers (GET /api/graph/proposal-evidence) ──
+
+def _queue(svc):
+    """Five pending merges; 'hub one' and 'hub two' share the endpoint 'hub'."""
+    for frm, into in (("alpha svc", "alpha service"), ("hub one", "hub"),
+                      ("beta svc", "beta service"), ("hub two", "hub"),
+                      ("gamma svc", "gamma service")):
+        _propose(svc, frm, into)
+    return [p for p in svc._storage.pending_entity_proposals()
+            if p.get("kind") == "merge"]
+
+
+def test_proposal_evidence_pages_the_judge_pack(svc):
+    """Every page is the merge judge's own evidence pack for its rows, in
+    queue order, with enough paging metadata to walk the whole queue."""
+    rows = _queue(svc)
+    with svc._lock:
+        evidence = svc._judge_evidence_locked(rows)
+    reference = {r["id"]: r for r in svc._judge_enrich_from(rows, evidence)}
+
+    seen, offset = [], 0
+    while offset is not None:
+        page = svc.merge_proposal_evidence(offset=offset, limit=2)
+        assert page["kind"] == "merge" and page["total"] == len(rows)
+        assert page["offset"] == offset and page["limit"] == 2
+        for item in page["items"]:
+            assert item == reference[item["id"]]
+        seen += [item["id"] for item in page["items"]]
+        offset = page["next_offset"]
+    assert seen == [r["id"] for r in rows]
+
+
+def test_proposal_evidence_groups_span_pages(svc):
+    """A group is one accept-at-most-one decision across the WHOLE queue:
+    two rows sharing an endpoint keep their group even when a page holds
+    only one of them (the judge pack alone would compute it per page)."""
+    rows = _queue(svc)
+    hub_rows = [r["id"] for r in rows if r["into"] == "hub"]
+    groups = {}
+    for offset in range(len(rows)):
+        (item,) = svc.merge_proposal_evidence(offset=offset, limit=1)["items"]
+        groups[item["id"]] = item["group"]
+    assert [groups[i] for i in hub_rows] == ["hub", "hub"]
+    assert all(g is None for i, g in groups.items() if i not in hub_rows)
+
+
+def test_proposal_evidence_clamps_paging(svc):
+    rows = _queue(svc)
+    page = svc.merge_proposal_evidence(offset=-3, limit=1000)
+    assert page["offset"] == 0 and page["limit"] == 100
+    assert len(page["items"]) == len(rows) and page["next_offset"] is None
+    assert svc.merge_proposal_evidence(offset=0, limit=0)["limit"] == 1
+    past = svc.merge_proposal_evidence(offset=len(rows) + 5, limit=10)
+    assert past["items"] == [] and past["next_offset"] is None
+    assert past["total"] == len(rows)

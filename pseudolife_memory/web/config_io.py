@@ -222,7 +222,7 @@ KNOBS: list[dict[str, Any]] = [
      "help": "New dream entity whose name-token Jaccard vs an existing name "
              "reaches this files a merge proposal for review. 0 = off."},
     {"path": "memory.dream.alias_candidate_min_cosine", "group": "Dream",
-     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.5,
+     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.7,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
      "help": "New dream entity whose name-embedding cosine vs an existing "
              "entity reaches this files a merge proposal for review (semantic "
@@ -355,7 +355,10 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Re-judge a pending merge proposal once more in a fresh batch "
              "(optionally judge_second_model) after its first verdict sat "
              "below the single-vote gate; the two-vote gates above apply "
-             "only when this is on."},
+             "only when this is on. Skipped, with no model call, while the "
+             "configuration makes the second opinion the first model again "
+             "(no second endpoint URL, and the second model empty or the "
+             "first's): that vote could authorize nothing."},
     {"path": "memory.deep_dream.judge_second_model", "group": "Deep dream",
      "label": "Merge judge second model", "type": "string", "default": None,
      "restart": False,
@@ -364,9 +367,9 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Model for the merge judge's SECOND opinion, served by the "
              "second endpoint URL when set, else by the same endpoint as the "
              "first (judge_url, else the dream extractor; the CLI shims "
-             "honour claude-* / gpt-* names per request). Empty = "
-             "the same model in a fresh batch (or the second endpoint's "
-             "launch default), which records a second vote but authorizes "
+             "honour claude-* / gpt-* names per request). Empty (or the "
+             "first opinion's model) with no second endpoint URL = no second "
+             "opinion is asked at all, since that vote could authorize "
              "nothing: both two-vote gates (reject since 2026-09-30, "
              "\"auto\" accepts) require the two opinions to come from "
              "DIFFERENT models (2026-09-02 "
@@ -384,8 +387,9 @@ KNOBS: list[dict[str, Any]] = [
              "(merge, link, junk, store-curation, candidates) calls instead "
              "of the dream extractor. Empty = the dream extractor. From "
              "inside the container the host is host.docker.internal "
-             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Sends no "
-             "API key. Read on every judge call. " "Changing it changes the judging policy: recorded "
+             "(Claude CLI shim = :8082, Codex CLI shim = :8086). Its bearer "
+             "key is env-only: PSEUDOLIFE_JUDGE_API_KEY, sent to this endpoint "
+             "and nowhere else. Read on every judge call. Changing it changes the judging policy: recorded "
              "verdicts in every review queue are re-judged and automatic "
              "decisions reconsidered."},
     {"path": "memory.deep_dream.judge_model", "group": "Deep dream",

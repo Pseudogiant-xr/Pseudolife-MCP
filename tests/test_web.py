@@ -226,6 +226,21 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
+def test_proposal_evidence_route_pages(svc, monkeypatch):
+    calls = []
+    def evidence(*, offset, limit):
+        calls.append((offset, limit))
+        return {"kind": "merge", "total": 0, "offset": offset, "limit": limit,
+                "next_offset": None, "items": []}
+    monkeypatch.setattr(svc, "merge_proposal_evidence", evidence, raising=False)
+    routes = ConsoleRoutes(svc)
+    out = routes.dispatch("GET", "/api/graph/proposal-evidence",
+                          {"offset": "40", "limit": "20"}, {})
+    assert calls == [(40, 20)] and out["offset"] == 40
+    routes.dispatch("GET", "/api/graph/proposal-evidence", {}, {})
+    assert calls[-1] == (0, 25)
+
+
 def test_review_rejudge_route_preserves_queue_and_bound(svc, monkeypatch):
     calls = []
     def rejudge(queue, *, limit):

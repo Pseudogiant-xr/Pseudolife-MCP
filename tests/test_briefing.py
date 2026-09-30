@@ -556,6 +556,7 @@ def _stall_service(tmp_path, *, stalled=True):
         {"lesson": "keep the lesson", "polarity": "+"}]}
     svc.world_dump = lambda: {"entries": []}
     svc.episode_list = lambda **kw: {"episodes": []}
+    svc.review_queue_health = lambda: {"attention": {"needed": False, "reasons": []}}
     if stalled:
         failed = {"pulled": 3, "claims": 0, "extractor_failed": True,
                   "extractor_error": {"reason": "login_expired", "error": "HTTP 500"}}
@@ -624,3 +625,126 @@ def test_session_start_is_unchanged_without_a_stall(tmp_path):
 
     assert "stalled" not in hook_session_start(_stall_service(tmp_path, stalled=False),
                                                authorized=True)
+
+
+# ── the review-queue line (2026-09-30) ────────────────────────────────────
+# 2026-09-11..09-29 the merge judge sat in shadow and 1,016 merge proposals
+# piled up unseen. While dream_status's review_queue block says attention is
+# needed, the briefing and a fresh session start carry ONE line saying so.
+
+def _rq_block(*, needed=True, merge=1016, age=18.2, mode="shadow",
+              judges_enabled=True):
+    reasons = ["1016 merge proposals pending"] if needed else []
+    return {"pending": {"merge": merge, "junk": 4, "link": 2},
+            "oldest_merge_age_days": age,
+            "judges": {"judges_enabled": judges_enabled, "judge_mode": mode,
+                       "link_judge_mode": "shadow", "junk_judge_mode": "shadow",
+                       "curation_judge_mode": "shadow",
+                       "candidate_judge_mode": "off"},
+            "attention": {"needed": needed, "reasons": reasons}}
+
+
+RQ_HEAD = "Pseudolife-MCP: review queue has "
+
+
+def test_review_queue_line_names_count_age_judge_and_remedy():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    line = review_queue_line(_rq_block())
+    assert line.startswith(RQ_HEAD)
+    assert "1,016 merge proposals pending" in line
+    assert "oldest 18 days" in line
+    assert "merge judge in shadow" in line
+    assert "/dream" in line and "judge modes" in line
+    assert "\n" not in line and len(line) <= 240
+    assert line.isascii()
+
+
+def test_review_queue_line_variants_and_silence():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    assert review_queue_line(_rq_block(needed=False)) == ""
+    assert review_queue_line(None) == ""
+    assert review_queue_line({"error": "RuntimeError: x"}) == ""
+    assert "merge judges disabled" in review_queue_line(
+        _rq_block(mode="auto", judges_enabled=False))
+    assert "merge judge in auto-reject" in review_queue_line(
+        _rq_block(mode="auto-reject"))
+    one = review_queue_line(_rq_block(merge=1, age=None))
+    assert "1 merge proposal pending" in one and "oldest" not in one
+    assert "oldest under a day" in review_queue_line(_rq_block(age=0.4))
+    assert "oldest 1 day;" in review_queue_line(_rq_block(age=1.2))
+
+
+def test_review_queue_line_remedy_follows_the_merge_judge_mode():
+    from pseudolife_memory.memory.briefing import review_queue_line
+
+    # A judge that applies nothing: the modes are the lever.
+    for mode in ("shadow", "off"):
+        line = review_queue_line(_rq_block(mode=mode))
+        assert "check the deep_dream judge modes" in line, line
+    assert "check the deep_dream judge modes" in review_queue_line(
+        _rq_block(mode="auto", judges_enabled=False))
+    # A judge configured to drain that is not keeping up: its endpoint is.
+    for mode in ("auto-reject", "auto"):
+        line = review_queue_line(_rq_block(mode=mode))
+        assert "is not clearing it" in line and "judge endpoint" in line, line
+
+
+def _rq_service(tmp_path, block):
+    svc = _stall_service(tmp_path, stalled=False)
+    svc.review_queue_health = lambda: block
+    return svc
+
+
+def test_session_briefing_carries_the_review_queue_line(tmp_path):
+    svc = _rq_service(tmp_path, _rq_block())
+    md = svc.session_briefing()["markdown"]
+    assert md.splitlines()[0].startswith(RQ_HEAD)
+    assert md.count(RQ_HEAD) == 1
+    assert "keep the lesson" in md
+    assert RQ_HEAD not in svc.session_briefing(include_review_queue=False)["markdown"]
+
+
+def test_session_briefing_is_silent_on_a_healthy_or_failing_queue(tmp_path):
+    assert RQ_HEAD not in _rq_service(
+        tmp_path, _rq_block(needed=False)).session_briefing()["markdown"]
+    svc = _stall_service(tmp_path, stalled=False)
+
+    def boom():
+        raise RuntimeError("down")
+    svc.review_queue_health = boom
+    md = svc.session_briefing()["markdown"]
+    assert RQ_HEAD not in md and "keep the lesson" in md
+
+
+def test_session_briefing_puts_a_stall_before_the_review_queue(tmp_path):
+    svc = _stall_service(tmp_path)
+    svc.review_queue_health = lambda: _rq_block()
+    lines = [ln for ln in svc.session_briefing()["markdown"].splitlines() if ln]
+    assert lines[0].startswith(STALL_HEAD) and lines[1].startswith(RQ_HEAD)
+
+
+def test_session_start_hook_carries_the_review_queue_line_once(tmp_path):
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    hook_session_start)
+
+    svc = _rq_service(tmp_path, _rq_block())
+    svc.lessons_dump = lambda **kw: {"entries": [
+        {"lesson": f"lesson {i} " + "x" * 400, "polarity": "+"} for i in range(60)]}
+    text = hook_session_start(svc, authorized=True)
+    assert text.startswith(RQ_HEAD)
+    assert text.count(RQ_HEAD) == 1
+    assert len(text.encode("utf-8")) <= HOOK_CONTEXT_MAX_CHARS
+
+
+def test_session_start_review_queue_line_is_authorized_fresh_starts_only(tmp_path):
+    from pseudolife_memory.web.session_hook import hook_session_start
+
+    svc = _rq_service(tmp_path, _rq_block())
+    assert RQ_HEAD not in hook_session_start(svc, authorized=False)
+    # A resumed or compacted session keeps drift notices only.
+    for source in ("resume", "compact"):
+        assert RQ_HEAD not in hook_session_start(svc, source=source, authorized=True)
+    assert RQ_HEAD not in hook_session_start(
+        _rq_service(tmp_path, _rq_block(needed=False)), authorized=True)

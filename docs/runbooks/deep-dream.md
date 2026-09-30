@@ -42,7 +42,11 @@ another model than it was asked for. **Day-one behaviour on an existing bank:** 
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
 without any config edit — measured 8/8 on the 2026-09-02 rows — but since
 2026-09-30 only when the two votes came from different models: with
-neither `judge_second_model` nor `judge_second_url` set, same-model pairs are recorded and counted
+neither `judge_second_model` nor `judge_second_url` set (or a second model
+equal to the first's), the second-opinion pass is skipped outright, no
+model call and no vote, and the waiting rows are counted
+(`second_opinion_skipped_same_model`); a pair whose sameness only the
+served names reveal is recorded, counted
 (`auto_reject_refused_same_model`) and applied by nobody. A
 wrong reject — auto or human; since 2026-09-03 every merge reject writes
 the canonical pair so the verdict outlives its proposal row — also writes
@@ -86,7 +90,11 @@ response is bounded: when the JSON text would exceed ~250 KB, each list is
 cut to its leading 40 items (fewer if still over) and `truncated` maps each
 cut key to its full length, with a `hint`. Cut candidates and duplicate
 listings resurface on the next pass; the pending merge proposals are always
-listed in full by `memory_graph_review(action="list")`. A 316-proposal queue
+listed in full by `memory_graph_review(action="list")`, and
+`GET /api/graph/proposal-evidence?offset=&limit=` pages through them WITH the
+merge judge's evidence pack (up to 100 rows a page; `group` spans the whole
+queue; read every page before settling, since settling or a newly filed
+proposal shifts offsets). A 316-proposal queue
 with snippets was 1.12 MB on the wire on 2026-09-20, past the 1 MiB event
 limit in the SDK client, and failed as a phantom disconnect. The Console
 and the sweep tick read the unbounded service result. Review:
