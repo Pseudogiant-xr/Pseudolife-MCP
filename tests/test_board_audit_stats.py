@@ -398,14 +398,15 @@ def _board_day(store):
     a = store.register("alice", label="sender")
     b = store.register("alice", capabilities={"ring": True})
     store.test_time[0] = 1000.0
-    attached = store.attach(*creds(b), attachment_id="one", ring=True)
+    attached = store.attach(*creds(b), attachment_id="one", ring=True, ring_armed_until=1060.0)
     store.update(*creds(b), status="parked", park_reason="blocked", park_needs="the review",
                  park_clear_by="anyone")
     store.test_time[0] = 1020.0
     first = store.send(*creds(a), to=b["agent_id"], text="review is in", request_id="r1")
     assert first["wake"]["decision"] == "rung"
     store.test_time[0] = 1030.0  # within the 60 s attachment lease
-    store.heartbeat(*creds(b), attachment_id="one", generation=attached["generation"])  # serves it
+    store.heartbeat(*creds(b), attachment_id="one", generation=attached["generation"],
+                    ring_armed_until=1090.0)  # serves it
     store.test_time[0] = 1032.0
     assert store.woke(b["agent_id"], "alice")["rings"] == 1
     store.test_time[0] = 1040.0
@@ -423,6 +424,26 @@ def _board_day(store):
     store.test_time[0] = 4600.0
     store.detach(*creds(b), attachment_id="one", generation=attached["generation"])
     return a, b
+
+
+@pytest.mark.parametrize("listener", ["unknown", "expired"])
+def test_stats_do_not_classify_an_absent_listener_receipt_as_rung(store, cli, tmp_path, listener):
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"ring": True})
+    store.attach(*creds(recipient), attachment_id="listener", ring=True,
+                 ring_armed_until=1001.0 if listener == "expired" else None)
+    store.update(*creds(recipient), park_reason="waiting_peer", park_needs="review", park_clear_by="anyone")
+    store.test_time[0] = 1020.0
+    receipt = store.send(*creds(sender), to=recipient["agent_id"], text="review ready", request_id="absent-listener")
+    assert receipt["wake"]["decision"] == "no_path"
+    assert receipt["wake"]["reason"] == "listener_" + listener
+    code, output = cli("stats", "--since", "0", "--until", "1100",
+                       "--durations", str(tmp_path / "absent.jsonl"))
+    assert code == 0, output.err
+    report = json.loads(output.out)
+    assert report["mail_latency"]["by_decision"]["no_path"]["sends"] == 1
+    assert report["mail_latency"]["by_decision"]["rung"]["sends"] == 0
+    assert report["wake_precision"]["served"] == 0
 
 
 def test_stats_reads_the_bank_the_wakes_table_and_the_durations_file(store, cli, tmp_path):
