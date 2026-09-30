@@ -97,6 +97,48 @@ LEGACY_SCRIPTS = ("lifecycle.ps1", "session-start.sh", "user-prompt-submit.sh", 
 PLUGIN_SCRIPTS = SCRIPTS + ("stop-wake.sh", "subagent-board-guard.sh", "subagent-board.sh")
 RECOVERY = "Open Codex /hooks to review PseudoLife hooks; rerun setup after correcting the reported problem."
 
+# Manual copies run through a launcher (2026-09-30). Codex approves a hook by
+# its definition (command, timeout, async, statusMessage), not by the script
+# the command runs: on Codex 0.158.0 editing a script left `currentHash`
+# unchanged and editing the command changed it. The commands used to name a
+# content-addressed bundle directory, so every script change was a new
+# command and a new approval. They now name run.sh / run.ps1 beside the
+# bundles, which run the bundle `current` names; bundles stay
+# content-addressed and are verified before `current` moves to one, and the
+# launchers are verified byte for byte.
+POINTER = "current"
+LAUNCHERS = {
+    "run.sh": b"""#!/usr/bin/env bash
+# PseudoLife's Codex hooks: runs the script named by $1 from the bundle that
+# ./current names. Codex approves the command naming this file, not the
+# scripts it runs, so a new bundle needs no new approval. Written and
+# verified byte for byte by ops/setup-codex-hooks.py.
+here=$(dirname "$0")
+bundle=$(head -c 64 "$here/current" 2>/dev/null | tr -d '\\r\\n ')
+case "$bundle" in *[!0-9a-f]*|'') exit 0 ;; esac
+[ "${#bundle}" -eq 20 ] || exit 0
+case "${1:-}" in
+    session-start.sh|user-prompt-submit.sh|coordination-start.sh|coordination-prompt.sh|session-end.sh) ;;
+    *) exit 0 ;;
+esac
+script=$1
+shift
+exec bash "$here/$bundle/$script" "$@"
+""",
+    "run.ps1": b"""# PseudoLife's Codex hooks: runs lifecycle.ps1 from the bundle that
+# .\\current names. Codex approves the command naming this file, not the
+# scripts it runs, so a new bundle needs no new approval. Written and
+# verified byte for byte by ops/setup-codex-hooks.py.
+param([string]$Event)
+$bundle = ''
+try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}
+if ($bundle -cnotmatch '^[0-9a-f]{20}$') { exit 0 }
+$global:LASTEXITCODE = 0
+& (Join-Path (Join-Path $PSScriptRoot $bundle) 'lifecycle.ps1') -Event $Event
+exit $LASTEXITCODE
+""",
+}
+
 
 def backup(path: Path) -> str | None:
     if not path.exists():
@@ -113,7 +155,17 @@ def atomic_write(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
-        os.replace(name, path)
+        # On Windows a replace is refused while another process holds the
+        # target for a moment: a hook reading `current`, or a scanner
+        # opening a file just written (a live setup run met it 2026-09-30).
+        for _ in range(40):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError:
+                time.sleep(0.05)
+        else:
+            os.replace(name, path)
     finally:
         if os.path.exists(name):
             os.unlink(name)
@@ -172,22 +224,163 @@ def bundle_digest(files, names=SCRIPTS):
     return digest.hexdigest()[:20]
 
 
-def manual_definitions(directory, codex_marker=True):
-    mapping = {"SessionStart": "session-start.sh", "MemoryPolicy": "session-start.sh",
-               "UserPromptSubmit": "user-prompt-submit.sh",
-               "CoordinationStart": "coordination-start.sh", "CoordinationPrompt": "coordination-prompt.sh",
-               "SessionEnd": "session-end.sh"}
-    arguments = {"MemoryPolicy": " memory-policy"}
+_MANUAL_SCRIPTS = {"SessionStart": "session-start.sh", "MemoryPolicy": "session-start.sh",
+                   "UserPromptSubmit": "user-prompt-submit.sh",
+                   "CoordinationStart": "coordination-start.sh", "CoordinationPrompt": "coordination-prompt.sh",
+                   "SessionEnd": "session-end.sh"}
+_MANUAL_TIMEOUTS = {"SessionStart": 15, "MemoryPolicy": 15, "UserPromptSubmit": 5,
+                    "CoordinationStart": 5, "CoordinationPrompt": 5, "SessionEnd": 3}
+
+
+def _definitions(bash_target, ps_path, codex_marker):
+    """``bash_target(script)`` is the bash command's script and arguments."""
     # Literal single quotes protect $, backticks, and spaces in native paths.
-    ps = str(directory / "lifecycle.ps1").replace("'", "''")
+    ps = str(ps_path).replace("'", "''")
     bash_prefix = "env PSEUDOLIFE_CODEX_HOOK=1 bash " if codex_marker else "bash "
+    arguments = {"MemoryPolicy": " memory-policy"}
     return {event: {"type": "command",
-                    "command": bash_prefix + shlex.quote(str(directory / script)) + arguments.get(event, ""),
+                    "command": bash_prefix + bash_target(script) + arguments.get(event, ""),
                     "commandWindows": f"pwsh -NoProfile -File '{ps}' -Event {event}",
-                    "timeout": {"SessionStart": 15, "MemoryPolicy": 15, "UserPromptSubmit": 5,
-                                "CoordinationStart": 5, "CoordinationPrompt": 5,
-                                "SessionEnd": 3}[event]}
-            for event, script in mapping.items()}
+                    "timeout": _MANUAL_TIMEOUTS[event]}
+            for event, script in _MANUAL_SCRIPTS.items()}
+
+
+def manual_definitions(directory, codex_marker=True):
+    """The definitions naming one bundle directory directly: what setup wrote
+    before the launcher, recognized so that setup can replace them."""
+    return _definitions(lambda script: shlex.quote(str(directory / script)),
+                        directory / "lifecycle.ps1", codex_marker)
+
+
+def hooks_root(home):
+    return Path(home) / "pseudolife" / "hooks"
+
+
+def launcher_definitions(home, codex_marker=True):
+    """The manual hooks' definitions through the launchers. They name no
+    bundle, so a refresh leaves them, and Codex's approval, as they are."""
+    root = hooks_root(home)
+    return _definitions(lambda script: shlex.quote(str(root / "run.sh")) + " " + script,
+                        root / "run.ps1", codex_marker)
+
+
+def launcher_installed(home):
+    """Whether ``hooks.json`` runs every manual role through the launcher."""
+    try:
+        hooks = json.loads((Path(home) / "hooks.json").read_text(encoding="utf-8")).get("hooks", {})
+    except (OSError, ValueError, AttributeError):
+        return False
+    commands = {h.get("command") for groups in (hooks.values() if isinstance(hooks, dict) else [])
+                if isinstance(groups, list) for g in groups if isinstance(g, dict)
+                for h in g.get("hooks", []) if isinstance(h, dict)}
+    return all(d["command"] in commands for d in launcher_definitions(home).values())
+
+
+def _pointer(home):
+    try:
+        name = (hooks_root(home) / POINTER).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    return name if re.fullmatch(r"[a-f0-9]{20}", name) else None
+
+
+def _vet_launcher(home):
+    """The launchers are exactly what setup writes, ``current`` names a
+    bundle, and that bundle's scripts still digest to its name."""
+    root = hooks_root(home)
+    for name, data in LAUNCHERS.items():
+        try:
+            intact = (root / name).read_bytes() == data
+        except OSError:
+            intact = False
+        if not intact:
+            raise SetupError("A PseudoLife hook launcher is missing or was modified; rerun setup with approval to repair it.")
+    name = _pointer(home)
+    if name is None:
+        raise SetupError("The PseudoLife hook pointer is missing or malformed; rerun setup with approval to repair it.")
+    try:
+        matches = bundle_digest(bundle_bytes(root / name)) == name
+    except (OSError, UnicodeError):
+        matches = False
+    if not matches:
+        raise SetupError("An installed PseudoLife script was modified; restore or review it before running verification.")
+    return root / name
+
+
+def _write_bundle(root, files):
+    directory = root / bundle_digest(files)
+    for name, data in files.items():
+        destination = directory / name
+        if destination.exists() and destination.read_bytes() != data:
+            raise SetupError("An installed PseudoLife script was modified; restore or review it before rerunning setup.")
+        if not destination.exists():
+            atomic_write(destination, data)
+    return directory
+
+
+def _write_launchers(root):
+    for name, data in LAUNCHERS.items():
+        path = root / name
+        if not path.exists() or path.read_bytes() != data:
+            atomic_write(path, data)
+
+
+# The bundles written since the launcher, one name per line. Only these are
+# ever removed: every launcher run reads `current` afresh, while a bundle from
+# before the launcher is named in the commands a still-running Codex session
+# may have loaded, so it stays where it is.
+LAUNCHED = "launched"
+
+
+def _launched(root):
+    try:
+        lines = (root / LAUNCHED).read_text(encoding="utf-8").split()
+    except (OSError, UnicodeError):
+        return []
+    return [n for n in lines if re.fullmatch(r"[a-f0-9]{20}", n)]
+
+
+def _point(root, name):
+    """Move ``current`` to ``name``, recording it as a launcher bundle."""
+    launched = _launched(root)
+    if name not in launched:
+        atomic_write(root / LAUNCHED, "".join(n + "\n" for n in launched + [name]).encode())
+    atomic_write(root / POINTER, (name + "\n").encode())
+
+
+def _prune(root, keep):
+    """Remove launcher bundles other than ``keep``. A hook still running from
+    one can hold a file on Windows; what cannot go now goes on a later run."""
+    kept = []
+    for name in _launched(root):
+        if name != keep:
+            shutil.rmtree(root / name, ignore_errors=True)
+        if (root / name).exists():
+            kept.append(name)
+    atomic_write(root / LAUNCHED, "".join(n + "\n" for n in kept).encode())
+
+
+def refresh_manual(home, scripts=None):
+    """Move launcher-run manual copies to ``scripts`` (the checkout's by
+    default) without touching the approved commands: write the new bundle,
+    verify it, point ``current`` at it, then drop the old one. No consent is
+    asked because nothing Codex approves changes."""
+    home = Path(home)
+    if not launcher_installed(home):
+        raise SetupError("These manual hooks name a script bundle directly; approve them once more to switch "
+                         "to the launcher: python ops/setup-codex-hooks.py --source manual --trust ask")
+    root = hooks_root(home)
+    _vet_launcher(home)
+    files = bundle_bytes(Path(scripts) if scripts else ROOT / "plugin/hooks")
+    name = bundle_digest(files)
+    previous = _pointer(home)
+    if name != previous:
+        directory = _write_bundle(root, files)
+        if bundle_digest(bundle_bytes(directory)) != name:
+            raise SetupError("The new PseudoLife script bundle did not verify; the current one stays.")
+        _point(root, name)
+    _prune(root, name)
+    return {"state": "current" if name == previous else "refreshed", "bundle": name, "previous": previous}
 
 
 def owned_manual(hook, home):
@@ -197,6 +390,10 @@ def owned_manual(hook, home):
     source = Path(hook.get("sourcePath", "")).resolve()
     if source != (home / "hooks.json").resolve():
         return False
+    launcher = launcher_definitions(home)
+    if any(hook.get("command") in (launcher[role]["command"], launcher[role]["commandWindows"])
+           for role in MANUAL_ROLES.get(hook.get("eventName"), ())):
+        return True
     for directory in (home / "pseudolife/hooks").glob("*"):
         if not re.fullmatch(r"[a-f0-9]{20}", directory.name):
             continue
@@ -297,9 +494,27 @@ def vet_plugin(hooks):
         raise SetupError("Installed PseudoLife hooks differ from this installer. Update them together or review manually in /hooks.")
 
 
+def _roles_complete(hooks, definitions):
+    for event, roles in MANUAL_ROLES.items():
+        seen = [h.get("command") for h in hooks if h.get("eventName") == event]
+        if len(seen) != len(roles) or any(
+                not any(command in (definitions[role]["command"], definitions[role]["commandWindows"])
+                        for command in seen)
+                for role in roles):
+            raise SetupError("The manual PseudoLife hook roles are incomplete; rerun setup with approval to repair them.")
+
+
 def vet_manual(hooks, home, complete=True):
     if complete and not complete_set(hooks, "manual"):
         raise SetupError("The manual PseudoLife hook set is incomplete; rerun setup with approval to repair it.")
+    launcher = launcher_definitions(home)
+    if hooks and all(any(h.get("command") in (launcher[role]["command"], launcher[role]["commandWindows"])
+                         for role in MANUAL_ROLES.get(h.get("eventName"), ()))
+                     for h in hooks):
+        _vet_launcher(home)
+        if complete:
+            _roles_complete(hooks, launcher)
+        return
     directories = []
     for directory in (home / "pseudolife/hooks").glob("*"):
         current = manual_definitions(directory)
@@ -312,14 +527,7 @@ def vet_manual(hooks, home, complete=True):
     if len(directories) != 1:
         raise SetupError("Manual PseudoLife hooks reference mixed or unknown script bundles; review /hooks.")
     if complete:
-        current = manual_definitions(directories[0])
-        for event, roles in MANUAL_ROLES.items():
-            seen = [h.get("command") for h in hooks if h.get("eventName") == event]
-            if len(seen) != len(roles) or any(
-                    not any(command in (current[role]["command"], current[role]["commandWindows"])
-                            for command in seen)
-                    for role in roles):
-                raise SetupError("The manual PseudoLife hook roles are incomplete; rerun setup with approval to repair them.")
+        _roles_complete(hooks, manual_definitions(directories[0]))
     try:
         matches = bundle_digest(bundle_bytes(directories[0])) == directories[0].name
     except (OSError, UnicodeError):
@@ -339,7 +547,12 @@ def vet_manual(hooks, home, complete=True):
         raise SetupError("An installed PseudoLife script was modified; restore or review it before running verification.")
 
 
-def install_manual(home, report, plugin=False):
+def install_manual(home, report, plugin=False, scripts=None):
+    """Write the manual hooks: the scripts as a content-addressed bundle, the
+    launchers, ``current`` pointing at the bundle, and ``hooks.json``
+    handlers that run the launchers. Handlers setup wrote before (naming a
+    bundle directly, or through the launcher) are replaced; anything else
+    is kept. ``scripts`` defaults to the checkout's."""
     path = home / "hooks.json"
     original = path.read_bytes() if path.exists() else None
     obj = json.loads(original) if original else {}
@@ -350,6 +563,8 @@ def install_manual(home, report, plugin=False):
             for marker in (True, False):
                 for d in manual_definitions(directory, codex_marker=marker).values():
                     known.update((d["command"], d["commandWindows"]))
+    for d in launcher_definitions(home).values():
+        known.update((d["command"], d["commandWindows"]))
     for groups in hooks.values():
         if not isinstance(groups, list):
             continue
@@ -359,18 +574,13 @@ def install_manual(home, report, plugin=False):
                 if any(c in known for c in commands) and any(c and c not in known for c in commands):
                     raise SetupError("A PseudoLife hook has a custom platform command. Review it in /hooks before migration; existing hooks were preserved.")
     definitions = {}
+    current = None
     if not plugin:
-        files = bundle_bytes(ROOT / "plugin/hooks")
-        directory = home / "pseudolife/hooks" / bundle_digest(files)
-        for name, data in files.items():
-            destination = directory / name
-            if destination.exists() and destination.read_bytes() != data:
-                raise SetupError("An installed PseudoLife script was modified; restore or review it before rerunning setup.")
-            if not destination.exists():
-                atomic_write(destination, data)
-        definitions = manual_definitions(directory)
-        for definition in definitions.values():
-            known.update((definition["command"], definition["commandWindows"]))
+        root = hooks_root(home)
+        current = _write_bundle(root, bundle_bytes(Path(scripts) if scripts else ROOT / "plugin/hooks")).name
+        _write_launchers(root)
+        _point(root, current)
+        definitions = launcher_definitions(home)
     for event in EVENTS.values():
         groups = []
         for group in hooks.get(event, []):
@@ -387,12 +597,14 @@ def install_manual(home, report, plugin=False):
         hooks[event] = groups
     data = (json.dumps(obj, indent=2) + "\n").encode()
     # Compare parsed values so formatting changes alone never create backups.
-    if original is not None and json.loads(original) == obj:
-        return
-    saved = backup(path)
-    if saved:
-        report["backups"].append(saved)
-    atomic_write(path, data)
+    if original is None or json.loads(original) != obj:
+        saved = backup(path)
+        if saved:
+            report["backups"].append(saved)
+        atomic_write(path, data)
+    if current:
+        # Only now does nothing name the older bundles.
+        _prune(hooks_root(home), current)
 
 
 def trust_hooks(client, config, hooks, home, report):

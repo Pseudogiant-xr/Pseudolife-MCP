@@ -253,6 +253,14 @@ took 143 CUDA OOMs.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
+- **`plugin/hooks/hooks.json` is what Codex approves.** Codex approves a
+  hook by its definition (command, commandWindows, timeout, async,
+  statusMessage, matcher), not by the script it runs (measured 2026-09-30),
+  so changing one of those fields, or adding a handler, makes every Codex
+  user approve the hooks again. Put new behaviour in an existing handler's
+  script; when a hooks.json change is unavoidable, update the pin in
+  `tests/test_codex_hook_launcher.py` and say in the CHANGELOG that Codex
+  users approve once more.
 - TDD with a watched RED — write the failing test and watch it fail before
   writing the fix; never trust a test you have not seen red. For invalidation
   contracts, spot-check that each hook is load-bearing by disabling it and

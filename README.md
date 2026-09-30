@@ -628,9 +628,10 @@ On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
 daily task or timer that applies a new release only while
 `updates.unattended_daemon: true` is set and no session is active on the
 agent board, with the same backup and rollback tag, and posts a board
-notice either way. When Codex's hook copy differs from the scripts just
-deployed, every update path prints the complete re-approval steps, and
-nothing otherwise.
+notice either way. Codex keeps its hook approvals across updates (it
+approves the hook definitions, not the scripts), and the update refreshes
+manual Codex hook copies itself; only a changed `hooks.json` makes every
+update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:

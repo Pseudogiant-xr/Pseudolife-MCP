@@ -577,8 +577,12 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     assert codex, "session-end.sh needs a Codex-context curl budget"
     assert "--retry" not in codex.group(1)
     max_time = int(re.search(r"--max-time\s+(\d+)", codex.group(1)).group(1))
-    setup = (ROOT / "ops/setup-codex-hooks.py").read_text(encoding="utf-8")
-    cap = int(re.search(r'"SessionEnd":\s*(\d+)\}\[event\]', setup).group(1))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("codex_hook_setup_cap", ROOT / "ops/setup-codex-hooks.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    cap = setup.launcher_definitions(tmp_path)["SessionEnd"]["timeout"]
+    assert cap == setup.manual_definitions(tmp_path)["SessionEnd"]["timeout"]
     assert max_time + 1 <= cap
     # Live: a daemon that never answers must not hold the hook past the cap.
     attempts = []  # seconds each attempt's connection stayed open

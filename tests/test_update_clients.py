@@ -882,12 +882,18 @@ def test_codex_plugin_hooks_respect_a_handler_the_user_disabled(cli):
     assert uc.check_codex_hooks(ROOT)["state"] == "current"
 
 
-def test_codex_plugin_hooks_stale_when_its_clone_differs(cli):
+def test_codex_plugin_hooks_behind_or_stale_when_its_clone_differs(cli):
+    """A clone with older scripts is only behind (Codex approves hooks.json's
+    definitions, not the scripts); an older hooks.json needs approval."""
     codex_home = _codex_plugin_config(cli)
     clone = codex_home / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin"
     shutil.copytree(ROOT / "plugin", clone)
     hook = clone / "hooks" / "session-end.sh"
     hook.write_bytes(hook.read_bytes() + b"\n# older\n")
+    result = uc.check_codex_hooks(ROOT)
+    assert result["state"] == "behind" and "plugin manager" in result["detail"]
+    manifest = clone / "hooks" / "hooks.json"
+    manifest.write_bytes(manifest.read_bytes().replace(b'"timeout": 5', b'"timeout": 6', 1))
     result = uc.check_codex_hooks(ROOT)
     assert result["state"] == "stale" and "setup-codex-hooks.py" in result["detail"]
 

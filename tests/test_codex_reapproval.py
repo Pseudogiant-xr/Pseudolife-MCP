@@ -1,8 +1,12 @@
 """The Codex re-approval steps: printed by every update path when and only
-when Codex's hook copy differs from the current scripts.
+when Codex would ask to approve PseudoLife's hooks again.
 
-Codex trusts hooks by hash and asks again when a script changes, so no
-update can finish this for the user. Until 2026-09-29 the update printed
+Codex approves a hook by its definition (the command, timeout, async and
+statusMessage), not by the script it runs (measured on Codex 0.158.0,
+2026-09-30). A plugin copy whose scripts changed but whose hooks.json did
+not is only behind: its approvals carry over. Manual copies run through a
+launcher whose commands never change, and the update refreshes them itself.
+Until 2026-09-29 the update printed
 one generic line for any non-current state; now it prints the complete,
 copy-pasteable steps (which files changed, the ``/hooks`` approval or
 ``--trust yes`` for unattended installs, what is off until then, and the
@@ -56,10 +60,10 @@ def test_the_complete_steps_name_the_changed_files_the_approval_and_the_check():
     assert text.count("\n") == 3                                  # one head line, three numbered steps
 
 
-def test_manual_copies_get_the_manual_commands():
+def test_manual_copies_get_the_one_time_switch_to_the_launcher():
     text = uc.codex_reapproval_text({"state": "stale", "source": "manual"})
     assert "--source manual" in text and "--source plugin" not in text and "/hooks" not in text
-    assert "codex_hooks = bundle-present" in text
+    assert "last approval" in text and "codex_hooks = bundle-present" in text
 
 
 def test_the_text_says_what_it_knows_when_files_cannot_be_named():
@@ -82,17 +86,28 @@ def test_changed_hook_files_compares_content_crlf_insensitively(tmp_path):
     assert uc.changed_hook_files(a, tmp_path / "missing") is None
 
 
-def test_check_names_the_files_that_differ_from_the_checkout(cli):
+def test_a_changed_hooks_json_needs_approval_and_is_named(cli):
+    _clone(cli, change="hooks.json")
+    result = uc.check_codex_hooks(ROOT)
+    assert result["state"] == "stale" and result["changed_files"] == ["hooks.json"]
+    assert "hooks.json" in uc.codex_reapproval_text(result)
+
+
+def test_changed_scripts_alone_are_behind_and_keep_their_approval(cli):
+    """Codex does not hash the scripts: a plugin copy whose scripts changed
+    and whose hooks.json did not needs a plugin update, never an approval."""
     _clone(cli, change="session-end.sh")
     result = uc.check_codex_hooks(ROOT)
-    assert result["state"] == "stale" and result["changed_files"] == ["session-end.sh"]
-    assert "session-end.sh" in uc.codex_reapproval_text(result)
+    assert result["state"] == "behind" and result["changed_files"] == ["session-end.sh"]
+    assert uc.codex_reapproval_text(result) == ""
+    assert uc._marker(result["state"]) != "[!]"
+    assert "approvals carry over" in result["detail"]
 
 
 def test_check_names_the_files_through_the_plugin_cache_without_a_checkout(cli):
     """In release mode there is no checkout: the daemon's scripts are read
     from the Claude plugin cache when its digest is the daemon's."""
-    _clone(cli, change="user-prompt-submit.sh")
+    _clone(cli, change="hooks.json")
     plugins = cli.home / ".claude" / "plugins"
     cache = plugins / "cache" / "pseudolife-memory"
     shutil.copytree(ROOT / "plugin", cache)
@@ -101,9 +116,13 @@ def test_check_names_the_files_through_the_plugin_cache_without_a_checkout(cli):
         uc.PLUGIN_ID: [{"version": "0.15.0", "installPath": str(cache)}]}}), encoding="utf-8")
     digest = hooks_digest(ROOT / "plugin" / "hooks")
     result = uc.check_codex_hooks(None, daemon_digest=digest)
-    assert result["state"] == "stale" and result["changed_files"] == ["user-prompt-submit.sh"]
-    # a cache that is not the daemon's scripts names nothing
+    assert result["state"] == "stale" and result["changed_files"] == ["hooks.json"]
+    # a cache that is not the daemon's scripts names nothing, so with older
+    # scripts in the clone whether hooks.json changed is unknown: the
+    # approval steps stay
     (cache / "hooks" / "session-end.sh").write_bytes(b"# different\n")
+    clone_hook = cli.home / "codex" / ".tmp" / "marketplaces" / "pseudolife-mcp" / "plugin" / "hooks" / "session-end.sh"
+    clone_hook.write_bytes(clone_hook.read_bytes() + b"\n# older\n")
     result = uc.check_codex_hooks(None, daemon_digest=digest)
     assert result["state"] == "stale" and result["changed_files"] is None
 
@@ -147,11 +166,16 @@ def test_the_json_report_carries_the_steps(world, tmp_path, monkeypatch, capsys)
 
 
 def test_update_clients_prints_the_steps_after_the_ladder(cli, capsys):
-    _clone(cli, change="stop-wake.sh")
+    _clone(cli, change="hooks.json")
     assert uc.main(["--repo", str(ROOT), "--only", "codex"]) == 0
     out = capsys.readouterr().out
     assert "[!] Codex hooks" in out
-    assert out.index("[!] Codex hooks") < out.index("re-approval (changed: stop-wake.sh)")
+    assert out.index("[!] Codex hooks") < out.index("re-approval (changed: hooks.json)")
+    shutil.rmtree(cli.home / "codex" / ".tmp")
+    _clone(cli, change="stop-wake.sh")
+    assert uc.main(["--repo", str(ROOT), "--only", "codex"]) == 0
+    out = capsys.readouterr().out
+    assert "re-approval" not in out and "[!] Codex hooks" not in out
     shutil.rmtree(cli.home / "codex" / ".tmp")
     _clone(cli)
     assert uc.main(["--repo", str(ROOT), "--only", "codex"]) == 0
@@ -207,3 +231,57 @@ def test_doctor_reports_the_codex_hooks_line(monkeypatch, capsys):
     monkeypatch.setattr(uc, "check_codex_hooks", lambda repo, daemon_digest=None: {"state": "current"})
     _, report = _run_doctor(monkeypatch, capsys, {"status": "ok", "version": __version__})
     assert report["codex_hooks"] == "current"
+
+
+# ── manual copies behind the launcher ───────────────────────────────────────
+
+def _setup_module():
+    return uc._load_from_checkout(ROOT, "ops/setup-codex-hooks.py", "codex_hook_setup_reapproval")
+
+
+def _older_scripts(tmp_path: Path) -> Path:
+    older = tmp_path / "older-hooks"
+    shutil.copytree(ROOT / "plugin" / "hooks", older)
+    (older / "session-end.sh").write_bytes((older / "session-end.sh").read_bytes() + b"\n# older\n")
+    return older
+
+
+def test_the_update_refreshes_launcher_copies_without_an_approval(cli, tmp_path, capsys):
+    """A Codex user without the plugin: the update moves the manual copy to
+    the checkout's scripts itself, and the approved commands stay as they
+    were, so there is nothing to approve."""
+    setup = _setup_module()
+    codex_home = cli.home / "codex"
+    setup.install_manual(codex_home, {"backups": []}, scripts=_older_scripts(tmp_path))
+    approved = (codex_home / "hooks.json").read_bytes()
+    checkout = setup.bundle_digest(setup.bundle_bytes(ROOT / "plugin" / "hooks"))
+    pointer = codex_home / "pseudolife" / "hooks" / "current"
+    # reading does not write: doctor and a plain check see the copy as behind
+    result = uc.check_codex_hooks(ROOT)
+    assert result["state"] == "behind" and pointer.read_text(encoding="utf-8").strip() != checkout
+    assert uc.check_codex_hooks(None)["state"] == "bundle-present"
+    # the update step refreshes
+    assert uc.main(["--repo", str(ROOT), "--only", "codex"]) == 0
+    out = capsys.readouterr().out
+    assert "[x] Codex hooks" in out and "re-approval" not in out
+    assert pointer.read_text(encoding="utf-8").strip() == checkout
+    assert (codex_home / "hooks.json").read_bytes() == approved
+    assert uc.check_codex_hooks(ROOT)["state"] == "current"
+
+
+def test_bundle_named_manual_copies_get_the_one_time_switch(cli, tmp_path):
+    """Copies from before the launcher name a bundle in their commands; the
+    update cannot move them without an approval, so it says so once."""
+    setup = _setup_module()
+    codex_home = cli.home / "codex"
+    older = _older_scripts(tmp_path)
+    bundle = codex_home / "pseudolife" / "hooks" / setup.bundle_digest(setup.bundle_bytes(older))
+    for name, data in setup.bundle_bytes(older).items():
+        setup.atomic_write(bundle / name, data)
+    legacy = setup.manual_definitions(bundle)
+    (codex_home / "hooks.json").write_text(json.dumps({"hooks": {
+        event: [{"hooks": [legacy[role]]} for role in setup.MANUAL_ROLES[key]]
+        for key, event in setup.EVENTS.items()}}), encoding="utf-8")
+    result = uc.run_steps(["codex"], repo=ROOT, source=str(ROOT))["codex"]
+    assert result["state"] == "stale" and result["source"] == "manual"
+    assert "last approval" in uc.codex_reapproval_text(result)

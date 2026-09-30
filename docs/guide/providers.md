@@ -244,6 +244,22 @@ incomplete or unrecognized plugin bundle requires review rather than
 automatically granting trust. Disabled hooks and intentional feature or
 policy restrictions remain in place.
 
+Codex approves a hook by its definition (the command, timeout, `async` and
+`statusMessage`), not by the script the command runs: measured on Codex
+0.158.0, editing a script leaves the approval in place and editing the
+command asks again. The manual copy therefore runs through a launcher,
+`~/.codex/pseudolife/hooks/run.sh` (`run.ps1` on Windows), whose commands
+never change. It runs the script bundle that `current` beside it names.
+Bundles are content-addressed and verified, and so are the launchers. The
+update (`pseudolife-mcp update` from a checkout, `ops/update.ps1 -All`,
+`ops/update.sh --all`, `ops/update_clients.py`) writes the new bundle,
+checks it, moves `current` and removes the bundle it replaced, all without
+asking, because nothing Codex approved changed. A manual copy set up before
+2026-09-30 names a bundle directly in its commands; the update says so, and
+running `python ops/setup-codex-hooks.py` once more is the last approval it
+needs. Bundles from before the launcher stay, since a Codex session started
+earlier may still run them.
+
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
 fourth PseudoLife hook (earlier releases skip async hooks there). In Codex
@@ -407,8 +423,8 @@ registrations are preserved. If one points at a separate virtual environment,
 upgrade that exact environment as described below. For a versioned plugin release,
 update the Pseudolife plugin through the client's plugin manager. For changed
 hooks within the same version, the manager reports "already latest"; use
-`pseudolife-mcp update` or `-All` / `--all` to refresh the cache instead. Then rerun hook setup and
-approve the changed scripts. Editing a plugin cache directly does not
+`pseudolife-mcp update` or `-All` / `--all` to refresh the cache instead. Codex keeps its hook
+approvals when only the scripts change; the update says when a changed `hooks.json` needs one. Editing a plugin cache directly does not
 survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a
