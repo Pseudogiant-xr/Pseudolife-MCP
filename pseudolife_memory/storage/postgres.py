@@ -2845,7 +2845,7 @@ class PostgresStorage:
         confidence: float = 0.8, origin: str | None = None,
         revive: bool = True,
         source_entry_ids=None,
-    ) -> dict:
+    ) -> dict | None:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
         capped 0.99) and keeps the higher-ranked origin claim
         (user > action > agent > none): a dream re-extraction
@@ -2856,8 +2856,22 @@ class PostgresStorage:
         (explicit/human assertion) clears a prior supersession;
         ``revive=False`` (agent re-extraction, e.g. the dream) leaves a
         superseded edge superseded — a human removal must be sticky
-        against the extractor re-planting the same triple."""
-        with self._txn():
+        against the extractor re-planting the same triple. Captured evidence
+        must still have a current source; otherwise return None without
+        publishing or strengthening an edge."""
+        with self.transaction():
+            ids = sorted({int(i) for i in (source_entry_ids or [])})
+            if ids:
+                # Lock current support before publication. A forget or
+                # supersession must serialize with edge/evidence insertion;
+                # reconnect cannot split this pinned transaction either.
+                ids = [int(r[0]) for r in self.conn.execute(
+                    "SELECT id FROM entries WHERE id = ANY(%s) "
+                    "AND superseded_at IS NULL ORDER BY id FOR UPDATE",
+                    (ids,),
+                ).fetchall()]
+                if not ids:
+                    return None
             row = self.conn.execute(
                 """
                 INSERT INTO edges
@@ -2883,7 +2897,6 @@ class PostgresStorage:
                 (src_id, relation, dst_id, confidence, origin, time.time(),
                  bool(revive)),
             ).fetchone()
-            ids = sorted({int(i) for i in (source_entry_ids or [])})
             if ids:
                 self.conn.execute(
                     "INSERT INTO edge_evidence (edge_id, entry_id) "

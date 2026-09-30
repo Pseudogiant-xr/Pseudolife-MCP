@@ -65,6 +65,37 @@ def test_regeneration_retry_exhaustion_does_not_starve_later_session(svc):
     assert svc._episode_digest_body(later) == "Yellow and Orange."
 
 
+def test_forget_during_relation_extraction_does_not_publish_unsupported_edge(svc):
+    text = "Beacon Violet uses Pump Beta"
+    source_id = _stored_id(svc, text)
+
+    class ForgettingRelations:
+        def extract_relations(self, texts, registry):
+            assert svc.delete(text=text)["deleted_count"] == 1
+            return [{"src": "Beacon Violet", "relation": "uses", "dst": "Pump Beta"}]
+
+    svc.config.memory.dream.extract_relations = True
+    svc._dream_extract_relations(ForgettingRelations(), [text],
+        batch_sources={"synthetic"}, batch_entries=[{"text": text, "db_id": source_id}])
+    rows = svc._storage.conn.execute(
+        "SELECT g.id FROM edges g JOIN entities e ON g.src_id=e.id "
+        "WHERE e.display = 'Beacon Violet' AND g.superseded_at IS NULL").fetchall()
+    assert rows == []
+
+
+def test_unrelated_entry_during_digest_does_not_drop_candidate(svc):
+    root, _ = _session(svc, "stable", "Beacon Silver stays", "Beacon Gold stays")
+
+    class UnrelatedWrite:
+        def summarize_session(self, context_text, *, target_chars):
+            svc.episode_start_session("unrelated", "Unrelated")
+            _stored_id(svc, "A distant orchard has apples")
+            return "Silver and Gold."
+
+    assert svc.generate_digests_stage(UnrelatedWrite())["written"] == 1
+    assert svc._episode_digest_body(root) == "Silver and Gold."
+
+
 def test_ordinary_exception_rolls_back_all_derived_updates(svc, monkeypatch):
     root, source_id = _session(svc, "rollback", "Beacon Teal uses Pump Zeta", "Beacon Rose remains")
     svc.cortex_write("Beacon Teal", "pump", "Pump Zeta", support="agent")
@@ -170,3 +201,32 @@ def test_exhausted_regeneration_preserves_advanced_cursor(svc, monkeypatch, fail
         assert cur["ts"] == advanced
         assert root not in cur.get("regenerate", [])
         assert root not in cur["retry"]
+
+
+@pytest.mark.parametrize("source_state", ["forgotten", "superseded"])
+def test_edge_with_lost_captured_evidence_is_not_inserted(svc, source_state):
+    source_id = _stored_id(svc, "Beacon Copper uses Pump Lambda")
+    src = svc._storage.ensure_entity("Beacon Copper")
+    dst = svc._storage.ensure_entity("Pump Lambda")
+    if source_state == "forgotten":
+        svc.delete(text="Beacon Copper uses Pump Lambda")
+    else:
+        svc._storage.supersede_entries(
+            [source_id], superseded_at=123.0, superseded_by_text="synthetic correction")
+    assert svc._graph.upsert_edge(src, "uses", dst, origin="agent",
+        source_entry_ids=[source_id]) is None
+    assert svc._storage.conn.execute("SELECT count(*) FROM edges").fetchone()[0] == 0
+
+
+def test_edge_keeps_surviving_captured_evidence(svc):
+    gone = _stored_id(svc, "Beacon Bronze uses Pump Mu, first report")
+    kept = _stored_id(svc, "Beacon Bronze uses Pump Mu, second report")
+    svc.delete(text="Beacon Bronze uses Pump Mu, first report")
+    src = svc._storage.ensure_entity("Beacon Bronze")
+    dst = svc._storage.ensure_entity("Pump Mu")
+    row = svc._graph.upsert_edge(src, "uses", dst, origin="agent",
+        source_entry_ids=[gone, kept])
+    assert row is not None
+    assert svc._storage.conn.execute(
+        "SELECT entry_id FROM edge_evidence WHERE edge_id=%s", (row["id"],)
+    ).fetchall() == [(kept,)]

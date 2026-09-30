@@ -371,11 +371,12 @@ class DreamOps:
                             if e.get("db_id") is not None
                             and raw_src.casefold() in e["text"].casefold()
                             and raw_dst.casefold() in e["text"].casefold()]
-            self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
+            edge = self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
                                     confidence=conf, origin="agent",
                                     revive=False,
                                     source_entry_ids=evidence_ids)
-            n += 1
+            if edge is not None:
+                n += 1
         return n
 
     def _dream_extract_relations(self, extractor, texts: list[str],
