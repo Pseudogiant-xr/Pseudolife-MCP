@@ -39,27 +39,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counts `relate_links_filed`.
 - Measured before shipping (the private 2026-09-02 panel, merges only, two
   replicates each, the same seed and batch as the 2026-09-29 baseline;
-  Opus 5.5 first opinion, Sonnet 5.5 second): cross-model two-vote
-  reject-class applications 18/18 and 21/21, against the baseline's 18 and
-  17, and links filed on 17 and 21 of them (12 and 16 on pairs the panel
-  itself called related; the link judge settles the rest). Two-vote
-  non-low-differential accepts 4/5 and 5/5; accept precision per arm 19/23
-  for both models, against the baseline's 20/24 and 19/24. Relate votes
-  average 0.70 (Opus 5.5) and 0.71 (Sonnet 5.5) confidence, and 12 and 23
-  of them reach the 0.8 single-vote gate. On rows the panel called
-  related, the relation matches the panel's on 21 of 41 relate votes
-  (Opus 5.5) and 21 of 44 (Sonnet 5.5), so the link judge's own gates
-  matter. Two costs to watch: Sonnet 5.5's majority
-  rejects are 29/34 correct, against the baseline's 32/35 (it names a
-  relation on 8 votes for rows the panel merged; the cross-model gate
-  applied none of them), and accept-versus-reject splits left for a human
-  rise from 5 and 5 to 6 and 7. Artifacts:
+  Opus 5.5 first opinion, Sonnet 5.5 second): in the sweep's order (the
+  first opinion alone at the 0.8 gate, else both at the two-vote gate)
+  the rejects applied are 18/18 and 21/21, against the baseline's 18 and
+  17. Of the rows both models rejected, 17 and 21 carry a relation to
+  file as a link (12 and 16 on pairs the panel itself called related; the
+  link judge settles the rest). Relate votes average 0.70 (Opus 5.5) and
+  0.71 (Sonnet 5.5) confidence, and 12 and 23 of them reach the 0.8
+  single-vote gate. On rows the panel called related, the relation
+  matches the panel's on 21 of 41 relate votes (Opus 5.5) and 21 of 44
+  (Sonnet 5.5), and across all relate votes the untyped `related-to` is
+  named on 29 of 61 and 35 of 68, so the link judge's own gates matter.
+  Costs to watch:
+  - fewer rejects apply on the first opinion alone (7 and 6, against the
+    baseline's 8 and 9), so a few more rows cost a second-opinion call
+    before they apply;
+  - two-vote non-low-differential accepts are 4/5 and 5/5, against the
+    baseline's 6/7 and 6/7, and accept precision per arm is 19/23 for
+    both models, against the baseline's 20/24 and 19/24 (accepts apply
+    only in `auto` mode);
+  - Sonnet 5.5's majority rejects are 29/34 correct, against the
+    baseline's 32/35: it names a relation on 8 votes for rows the panel
+    merged, and the cross-model gate applied none of them;
+  - accept-versus-reject splits left for a human
+    rise from 5 and 5 to 6 and 7.
+- Artifacts for the measurement:
   `evals/results/queue-judge-ladder-20260930-relate-annot-opus55.json`,
   `…-relate-annot-sonnet55.json` and
   `queue-judge-cross-20260930-relate-annot.json`
-  (`evals/merge_relate_gates.py`), and the baseline scored by the same
-  script, `queue-judge-cross-20260929-relate-baseline.json`. `evals/queue_judge_ladder.py` and
-  `evals/judge_ladder.py` count relate as reject-class.
+  (`evals/merge_relate_gates.py`, which now also replays the sweep's
+  order as `production_path` and counts the relations named), and the
+  baseline scored by the same script,
+  `queue-judge-cross-20260929-relate-baseline.json`.
+  `evals/queue_judge_ladder.py` and `evals/judge_ladder.py` count relate
+  as reject-class.
 - Retired before release: a first version asked for `relate` as a verdict
   of its own. Its confidence then covered the relation as well as the
   distinctness, none of the 85 relate votes reached the 0.8 single-vote

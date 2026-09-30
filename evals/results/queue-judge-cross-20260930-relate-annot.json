@@ -73,6 +73,20 @@
    }
   }
  ],
+ "production_path": [
+  {
+   "applied": 18,
+   "bad": 0,
+   "single": 7,
+   "two_vote": 11
+  },
+  {
+   "applied": 21,
+   "bad": 0,
+   "single": 6,
+   "two_vote": 15
+  }
+ ],
  "single_vote": {
   "opus-5-5-relate-annot": [
    {
@@ -151,6 +165,24 @@
     "ge_reject_gate": 23,
     "ge_reject_gate_2": 43
    }
+  }
+ },
+ "relations": {
+  "opus-5-5-relate-annot": {
+   "configures": 6,
+   "depends-on": 1,
+   "hosts": 2,
+   "implements": 12,
+   "part-of": 8,
+   "related-to": 29,
+   "uses": 3
+  },
+  "sonnet-5-5-relate-annot": {
+   "configures": 3,
+   "hosts": 1,
+   "implements": 15,
+   "part-of": 14,
+   "related-to": 35
   }
  },
  "relate_by_arm": {

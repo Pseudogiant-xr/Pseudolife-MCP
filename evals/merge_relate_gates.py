@@ -19,7 +19,10 @@ reject-class, exactly as ``deep_dream_judge`` gates it (2026-09-30):
     for a human; reject vs relate is agreement; the sweep also splits on
     a leave, which this count leaves out);
   * single_vote — per arm and replicate, reject-class votes at/above
-    ``--reject-gate`` (the first opinion's single-vote gate).
+    ``--reject-gate`` (the first opinion's single-vote gate);
+  * production_path — the rejects the sweep would apply, in its order: the
+    first opinion alone at ``--reject-gate``, else the two-vote gate;
+  * relations — per arm, how often each relation was named.
 
 Reads only committed, scrubbed artifacts (ladder per-row votes and the
 panel's labels, verdicts and ``low_differential`` stamps).
@@ -103,6 +106,39 @@ def single_vote(votes: dict, rep: int, gate: float) -> dict:
     return out
 
 
+def production_path(first: dict, second: dict, rep: int, *, reject_gate: float,
+                    reject_gate_2: float) -> dict:
+    """The rejects the sweep applies, in its order: a first-opinion
+    reject-class vote at ``reject_gate`` applies alone; below it, the
+    second opinion is asked and the two-vote gate decides. ``bad`` = the
+    panel labelled the row accept."""
+    out = {"applied": 0, "bad": 0, "single": 0, "two_vote": 0}
+    for rid, row in first.items():
+        a, b = _vote(row, rep), _vote(second.get(rid), rep)
+        if not a or a["verdict"] not in REJECT_CLASS:
+            continue
+        if a["confidence"] >= reject_gate:
+            out["single"] += 1
+        elif (b and b["verdict"] in REJECT_CLASS
+              and (a["confidence"] + b["confidence"]) / 2 >= reject_gate_2):
+            out["two_vote"] += 1
+        else:
+            continue
+        out["applied"] += 1
+        out["bad"] += row["label"] != "reject"
+    return out
+
+
+def relations(votes: dict) -> dict:
+    """How often each relation was named, over every replicate's votes."""
+    out: dict = {}
+    for row in votes.values():
+        for v in row["votes"]:
+            if v and v.get("relation"):
+                out[v["relation"]] = out.get(v["relation"], 0) + 1
+    return dict(sorted(out.items()))
+
+
 def vote_confidence(votes: dict, gate: float, gate_2: float) -> dict:
     """Per verdict, over every replicate's votes: how many, their mean
     confidence, and how many reach the single-vote and two-vote gates —
@@ -139,6 +175,10 @@ def build(first_arm: dict, second_arm: dict, panel_doc: dict, *,
         "replicates": [gates(first, second, panel, k,
                              reject_gate_2=reject_gate_2,
                              accept_gate=accept_gate) for k in range(reps)],
+        "production_path": [production_path(first, second, k,
+                                            reject_gate=reject_gate,
+                                            reject_gate_2=reject_gate_2)
+                            for k in range(reps)],
         "single_vote": {
             arm["arm"]: [single_vote(votes, k, reject_gate)
                          for k in range(arm["replicates"])]
@@ -146,6 +186,8 @@ def build(first_arm: dict, second_arm: dict, panel_doc: dict, *,
         "vote_confidence": {
             arm["arm"]: vote_confidence(votes, reject_gate, reject_gate_2)
             for arm, votes in ((first_arm, first), (second_arm, second))},
+        "relations": {arm["arm"]: relations(votes)
+                      for arm, votes in ((first_arm, first), (second_arm, second))},
         "relate_by_arm": {
             arm["arm"]: arm["queues"]["merges"].get("relate")
             for arm in (first_arm, second_arm)}}

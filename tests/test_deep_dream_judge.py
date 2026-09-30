@@ -696,6 +696,38 @@ def test_shadow_relate_records_and_files_nothing(svc):
     assert row["judge"]["relation"] == "implements"
 
 
+def test_both_review_payloads_show_the_relation_in_the_judges_order(svc):
+    """The relation reads FROM -> INTO as the judge was shown the pair, and
+    the pack re-derives that direction from current evidence. Both review
+    payloads must list the pair the same way, or the Console row would
+    read "A -> B · relate implements" with the relation backwards:
+    ``graph_review`` re-orients merge rows by the same rule before
+    ``merge_candidates`` builds them (the store keeps the old order)."""
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "pi concept", "pi module")        # stored pi concept -> pi module
+    st = svc._storage
+    concept = st.find_entity("pi concept")["id"]
+    for other in ("pi doc one", "pi doc two"):
+        st.ensure_entity(other, display=other)
+        svc._graph.upsert_edge(concept, "related-to", st.find_entity(other)["id"],
+                               confidence=0.7, origin="action")
+    judge = _StubJudge({("pi module", "pi concept"): ("relate", 0.95, "implements")})
+    svc.deep_dream_judge(judge)
+    assert judge.seen == [("pi module", "pi concept")]   # shown flipped
+
+    queue = next(f for f in svc.graph_review()["findings"]
+                 if f["type"] == "merge_candidate")
+    listed = next(m for m in queue["merges"] if m["id"] == pid)
+    assert (listed["from"], listed["into"]) == ("pi module", "pi concept")
+    assert listed["judge"]["verdict"] == "relate"
+    assert listed["judge"]["relation"] == "implements"
+
+    deep = svc.deep_dream(apply=False)
+    row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
+    assert (row["from"]["display"], row["into"]["display"]) == ("pi module", "pi concept")
+    assert row["judge"]["relation"] == "implements"
+
+
 def test_relate_link_follows_the_orientation_the_judge_saw(svc):
     """The pack re-derives fold direction from current evidence: a stored
     FROM with more edges than its INTO is SHOWN as the INTO. The relation

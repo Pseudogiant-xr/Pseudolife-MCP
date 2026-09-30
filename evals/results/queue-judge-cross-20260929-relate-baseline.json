@@ -72,6 +72,20 @@
    }
   }
  ],
+ "production_path": [
+  {
+   "applied": 18,
+   "bad": 0,
+   "single": 8,
+   "two_vote": 10
+  },
+  {
+   "applied": 17,
+   "bad": 0,
+   "single": 9,
+   "two_vote": 8
+  }
+ ],
  "single_vote": {
   "opus-5-5": [
    {
@@ -133,6 +147,10 @@
     "ge_reject_gate_2": 49
    }
   }
+ },
+ "relations": {
+  "opus-5-5": {},
+  "sonnet-5-5": {}
  },
  "relate_by_arm": {
   "opus-5-5": null,

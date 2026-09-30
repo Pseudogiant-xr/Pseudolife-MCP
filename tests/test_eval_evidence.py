@@ -3278,15 +3278,13 @@ for _cid, _needle, _art, _val, _stated, _places in [
 # The shipped design (reject + optional relation) against the 2026-09-29
 # baseline scored by the same script, Opus 5.5 first opinion and Sonnet 5.5
 # second; and the retired first design (relate as its own verdict).
-RELATE_OPUS = "evals/results/queue-judge-ladder-20260930-relate-opus55.json"
-RELATE_SONNET = "evals/results/queue-judge-ladder-20260930-relate-sonnet55.json"
 RELATE_CROSS = "evals/results/queue-judge-cross-20260930-relate.json"
 ANNOT_OPUS = "evals/results/queue-judge-ladder-20260930-relate-annot-opus55.json"
 ANNOT_SONNET = "evals/results/queue-judge-ladder-20260930-relate-annot-sonnet55.json"
 ANNOT_CROSS = "evals/results/queue-judge-cross-20260930-relate-annot.json"
 RELATE_BASE = "evals/results/queue-judge-cross-20260929-relate-baseline.json"
 OPUS55_BASE = "evals/results/queue-judge-ladder-20260929-opus55.json"
-SONNET55_0929 = "evals/results/queue-judge-ladder-20260929-sonnet55.json"
+SONNET55_BASE = "evals/results/queue-judge-ladder-20260929-sonnet55.json"
 
 
 def _relate_arm(arm, *path):
@@ -3302,77 +3300,97 @@ def _relate_cross(rep, gate, field):
     return lambda d: d["replicates"][rep][gate][field]
 
 
+def _path(rep, field):
+    return lambda d: d["production_path"][rep][field]
+
+
 def _splits(rep):
     return lambda d: d["replicates"][rep]["splits"]["n"]
 
 
-def _mean_conf(arm, verdict):
-    return lambda d: d["vote_confidence"][arm][verdict]["mean"]
+def _conf(arm, verdict, field):
+    return lambda d: d["vote_confidence"][arm][verdict][field]
 
 
-def _at_gate(arm, verdict):
-    return lambda d: d["vote_confidence"][arm][verdict]["ge_reject_gate"]
+def _named(arm, relation):
+    return lambda d: d["relations"][arm][relation]
 
 
 _RC = "two_vote_reject_class"
 _AC = "two_vote_accept_not_lowdiff"
 _ANNOT_O, _ANNOT_S = "opus-5-5-relate-annot", "sonnet-5-5-relate-annot"
 for _cid, _needle, _art, _val, _stated, _places in [
-    ("annot-cross-reject-r1-n", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(0, _RC, "n"), 18, 0),
-    ("annot-cross-reject-r1-bad", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(0, _RC, "bad"), 0, 0),
-    ("annot-cross-reject-r2-n", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(1, _RC, "n"), 21, 0),
-    ("annot-cross-reject-r2-bad", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(1, _RC, "bad"), 0, 0),
-    ("annot-base-reject-r1-n", "against the baseline's 18 and", RELATE_BASE, _relate_cross(0, _RC, "n"), 18, 0),
-    ("annot-base-reject-r2-n", "17, and links filed on 17 and 21", RELATE_BASE, _relate_cross(1, _RC, "n"), 17, 0),
-    ("annot-links-r1", "links filed on 17 and 21", ANNOT_CROSS, _relate_cross(0, _RC, "links_filed"), 17, 0),
-    ("annot-links-r2", "links filed on 17 and 21", ANNOT_CROSS, _relate_cross(1, _RC, "links_filed"), 21, 0),
+    ("annot-path-r1-applied", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(0, "applied"), 18, 0),
+    ("annot-path-r1-bad", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(0, "bad"), 0, 0),
+    ("annot-path-r2-applied", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(1, "applied"), 21, 0),
+    ("annot-path-r2-bad", "the rejects applied are 18/18 and 21/21", ANNOT_CROSS, _path(1, "bad"), 0, 0),
+    ("annot-base-path-r1", "against the baseline's 18 and", RELATE_BASE, _path(0, "applied"), 18, 0),
+    ("annot-base-path-r2", "17. Of the rows both models rejected", RELATE_BASE, _path(1, "applied"), 17, 0),
+    ("annot-links-r1", "rejected, 17 and 21 carry a relation", ANNOT_CROSS, _relate_cross(0, _RC, "links_filed"), 17, 0),
+    ("annot-links-r2", "rejected, 17 and 21 carry a relation", ANNOT_CROSS, _relate_cross(1, _RC, "links_filed"), 21, 0),
     ("annot-links-r1-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
      _relate_cross(0, _RC, "links_on_panel_relate"), 12, 0),
     ("annot-links-r2-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
      _relate_cross(1, _RC, "links_on_panel_relate"), 16, 0),
-    ("annot-cross-accept-r1-n", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "n"), 5, 0),
-    ("annot-cross-accept-r1-bad", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "bad"), 1, 0),
-    ("annot-cross-accept-r2-n", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "n"), 5, 0),
-    ("annot-cross-accept-r2-bad", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "bad"), 0, 0),
-    ("annot-opus-accept-n", "accept precision per arm 19/23", ANNOT_OPUS,
+    ("annot-opus-relate-mean", "average 0.70 (Opus 5.5) and", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "mean"), 0.70, 2),
+    ("annot-sonnet-relate-mean", "0.71 (Sonnet 5.5) confidence", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "mean"), 0.71, 2),
+    ("annot-opus-relate-at-gate", "confidence, and 12 and 23 of them", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "ge_reject_gate"), 12, 0),
+    ("annot-sonnet-relate-at-gate", "confidence, and 12 and 23 of them", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "ge_reject_gate"), 23, 0),
+    ("annot-opus-relation-match", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-opus-panel-relate-votes", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "on_panel_verdict", "relate"), 41, 0),
+    ("annot-sonnet-relation-match", "relate votes (Opus 5.5) and 21 of 44", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-sonnet-panel-relate-votes", "relate votes (Opus 5.5) and 21 of 44", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "on_panel_verdict", "relate"), 44, 0),
+    ("annot-opus-related-to", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _named(_ANNOT_O, "related-to"), 29, 0),
+    ("annot-opus-relate-votes", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _conf(_ANNOT_O, "relate", "n"), 61, 0),
+    ("annot-sonnet-related-to", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _named(_ANNOT_S, "related-to"), 35, 0),
+    ("annot-sonnet-relate-votes", "named on 29 of 61 and 35 of 68", ANNOT_CROSS,
+     _conf(_ANNOT_S, "relate", "n"), 68, 0),
+    ("annot-path-r1-single", "(7 and 6, against the", ANNOT_CROSS, _path(0, "single"), 7, 0),
+    ("annot-path-r2-single", "(7 and 6, against the", ANNOT_CROSS, _path(1, "single"), 6, 0),
+    ("annot-base-path-r1-single", "baseline's 8 and 9)", RELATE_BASE, _path(0, "single"), 8, 0),
+    ("annot-base-path-r2-single", "baseline's 8 and 9)", RELATE_BASE, _path(1, "single"), 9, 0),
+    ("annot-cross-accept-r1-n", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r1-bad", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "bad"), 1, 0),
+    ("annot-cross-accept-r2-n", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r2-bad", "accepts are 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "bad"), 0, 0),
+    ("annot-base-accept-r1-n", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(0, _AC, "n"), 7, 0),
+    ("annot-base-accept-r1-bad", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(0, _AC, "bad"), 1, 0),
+    ("annot-base-accept-r2-n", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(1, _AC, "n"), 7, 0),
+    ("annot-base-accept-r2-bad", "baseline's 6/7 and 6/7", RELATE_BASE, _relate_cross(1, _AC, "bad"), 1, 0),
+    ("annot-opus-accept-n", "precision per arm is 19/23", ANNOT_OPUS,
      _relate_arm(_ANNOT_O, "accept_precision", "n"), 23, 0),
-    ("annot-opus-accept-bad", "accept precision per arm 19/23", ANNOT_OPUS,
+    ("annot-opus-accept-bad", "precision per arm is 19/23", ANNOT_OPUS,
      _relate_arm(_ANNOT_O, "accept_precision", "bad"), 4, 0),
-    ("annot-sonnet-accept-n", "accept precision per arm 19/23", ANNOT_SONNET,
+    ("annot-sonnet-accept-n", "precision per arm is 19/23", ANNOT_SONNET,
      _relate_arm(_ANNOT_S, "accept_precision", "n"), 23, 0),
-    ("annot-sonnet-accept-bad", "accept precision per arm 19/23", ANNOT_SONNET,
+    ("annot-sonnet-accept-bad", "precision per arm is 19/23", ANNOT_SONNET,
      _relate_arm(_ANNOT_S, "accept_precision", "bad"), 4, 0),
     ("annot-base-opus-accept-n", "the baseline's 20/24 and 19/24", OPUS55_BASE,
      _relate_arm("opus-5-5", "accept_precision", "n"), 24, 0),
     ("annot-base-opus-accept-bad", "the baseline's 20/24 and 19/24", OPUS55_BASE,
      _relate_arm("opus-5-5", "accept_precision", "bad"), 4, 0),
-    ("annot-base-sonnet-accept-n", "the baseline's 20/24 and 19/24", SONNET55_0929,
+    ("annot-base-sonnet-accept-n", "the baseline's 20/24 and 19/24", SONNET55_BASE,
      _relate_arm("sonnet-5-5", "accept_precision", "n"), 24, 0),
-    ("annot-base-sonnet-accept-bad", "the baseline's 20/24 and 19/24", SONNET55_0929,
+    ("annot-base-sonnet-accept-bad", "the baseline's 20/24 and 19/24", SONNET55_BASE,
      _relate_arm("sonnet-5-5", "accept_precision", "bad"), 5, 0),
-    ("annot-opus-relate-mean", "average 0.70 (Opus 5.5) and 0.71", ANNOT_CROSS,
-     _mean_conf(_ANNOT_O, "relate"), 0.70, 2),
-    ("annot-sonnet-relate-mean", "average 0.70 (Opus 5.5) and 0.71", ANNOT_CROSS,
-     _mean_conf(_ANNOT_S, "relate"), 0.71, 2),
-    ("annot-opus-relate-at-gate", "confidence, and 12 and 23", ANNOT_CROSS,
-     _at_gate(_ANNOT_O, "relate"), 12, 0),
-    ("annot-sonnet-relate-at-gate", "confidence, and 12 and 23", ANNOT_CROSS,
-     _at_gate(_ANNOT_S, "relate"), 23, 0),
-    ("annot-opus-relation-match", "on 21 of 41 relate votes", ANNOT_OPUS,
-     _relate_arm(_ANNOT_O, "relate", "panel_relate_rows", "relation_match"), 21, 0),
-    ("annot-opus-panel-relate-votes", "on 21 of 41 relate votes", ANNOT_OPUS,
-     _relate_arm(_ANNOT_O, "relate", "on_panel_verdict", "relate"), 41, 0),
-    ("annot-sonnet-relation-match", "and 21 of 44 (Sonnet 5.5)", ANNOT_SONNET,
-     _relate_arm(_ANNOT_S, "relate", "panel_relate_rows", "relation_match"), 21, 0),
-    ("annot-sonnet-panel-relate-votes", "and 21 of 44 (Sonnet 5.5)", ANNOT_SONNET,
-     _relate_arm(_ANNOT_S, "relate", "on_panel_verdict", "relate"), 44, 0),
-    ("annot-sonnet-reject-n", "rejects are 29/34 correct", ANNOT_SONNET,
+    ("annot-sonnet-reject-n", "majority rejects are 29/34 correct", ANNOT_SONNET,
      _relate_arm(_ANNOT_S, "reject_precision", "n"), 34, 0),
-    ("annot-sonnet-reject-bad", "rejects are 29/34 correct", ANNOT_SONNET,
+    ("annot-sonnet-reject-bad", "majority rejects are 29/34 correct", ANNOT_SONNET,
      _relate_arm(_ANNOT_S, "reject_precision", "bad"), 5, 0),
-    ("annot-base-sonnet-reject-n", "against the baseline's 32/35", SONNET55_0929,
+    ("annot-base-sonnet-reject-n", "baseline's 32/35:", SONNET55_BASE,
      _relate_arm("sonnet-5-5", "reject_precision", "n"), 35, 0),
-    ("annot-base-sonnet-reject-bad", "against the baseline's 32/35", SONNET55_0929,
+    ("annot-base-sonnet-reject-bad", "baseline's 32/35:", SONNET55_BASE,
      _relate_arm("sonnet-5-5", "reject_precision", "bad"), 3, 0),
     ("annot-sonnet-relate-on-accept", "relation on 8 votes", ANNOT_SONNET,
      _relate_arm(_ANNOT_S, "relate", "on_label", "accept"), 8, 0),

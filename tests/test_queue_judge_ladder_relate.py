@@ -88,3 +88,26 @@ def test_cross_gates_count_relate_as_reject_class_and_file_links():
     assert doc["vote_confidence"]["b"]["relate"] == {
         "n": 2, "mean": 0.9, "ge_reject_gate": 2, "ge_reject_gate_2": 2}
     assert doc["vote_confidence"]["a"]["reject"]["ge_reject_gate"] == 1
+
+
+def test_cross_gates_replay_the_sweep_order_and_count_relations():
+    """The sweep applies a first-opinion reject-class vote at the single
+    gate, and asks the second opinion only below it: ``production_path``
+    splits the applied rejects that way, so a design that moves rejects
+    from the single gate to the two-vote gate shows the extra second
+    calls. ``relations`` counts the relations each arm named."""
+    labels = {1: "reject", 2: "reject", 3: "reject", 4: "accept"}
+    panel = {"merges": [{"id": i, "panel_verdict": "reject",
+                         "low_differential": False} for i in labels]}
+    first = _arm("a", {1: _v("relate", 0.9, "uses"), 2: _v("reject", 0.7),
+                       3: _v("reject", 0.6), 4: _v("relate", 0.85, "related-to")},
+                 labels)
+    second = _arm("b", {1: _v("accept", 0.9), 2: _v("relate", 0.8, "related-to"),
+                        3: _v("reject", 0.7), 4: _v("accept", 0.9)}, labels)
+    doc = MG.build(first, second, panel)
+    # Row 1 and row 4 apply at the single gate (row 4 wrongly); row 2 at
+    # the two-vote gate (mean 0.75); row 3's mean 0.65 misses it.
+    assert doc["production_path"] == [
+        {"applied": 3, "bad": 1, "single": 2, "two_vote": 1}]
+    assert doc["relations"] == {"a": {"related-to": 1, "uses": 1},
+                                "b": {"related-to": 1}}
