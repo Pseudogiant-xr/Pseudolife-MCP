@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — a shim that could not reach the daemon at startup gets its board address later)
+- A Claude Code session whose shim started while the daemon was unreachable,
+  overloaded or slow (2026-09-30: the desktop app restarted while this
+  host's tailnet link was stuck) stayed off the board for its whole life:
+  the startup registration gave up after its 3 s budget and was never tried
+  again, memory tools worked, and every `memory_agents update` and
+  `memory_message` went out without instance headers and was refused with
+  `instance_authentication_required`. Only a session restart fixed it.
+- The shim now retries that registration in the background when it failed
+  for a transient reason (a timeout, a refused or dropped connection, a 5xx
+  or 429, or `attachment_busy` from an attach the startup budget cancelled
+  after the daemon committed it) on the adapter's re-attach schedule (1, 2,
+  5, 10, 30 s, then every 60 s) until it lands or the session ends. Until
+  then a board write is refused locally with a message that says
+  registration is being retried; memory calls are unaffected. Once it
+  lands, board calls carry the instance headers, pending-mail hints and
+  channel delivery start, and the next tool result says once that the board
+  now works. The retry stops when the session ends (an attempt in flight is
+  cancelled and releases its state-file reservation) and on a refusal
+  retrying cannot change (unauthorized, principal not allowed, bank
+  mismatch, invalid saved state, a state file another process is
+  registering): that keeps the old stderr message and pass-through, and the
+  next tool result says once that registration stopped. A refusal at the
+  first attempt behaves exactly as before. Adapter requests the daemon never
+  answered now carry `code="transport_unavailable"` so the shim can tell
+  them from local state errors. The Claude desktop app's shared shim (no
+  board identity) and the Codex per-thread registry (already retried per
+  thread) are unchanged.
+
 ### Changed (2026-09-30 — subagents show on the board as their parent's children, not as peers; schema v50)
 - **Behaviour change for Codex users: a Codex subagent can no longer send
   board mail.** A Codex native subagent (`collaboration.spawn_agent`) has
