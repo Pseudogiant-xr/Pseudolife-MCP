@@ -99,3 +99,15 @@ def test_misconfigured_tokens_env():
     assert misconfigured_tokens_env("", {}) is False
     assert misconfigured_tokens_env("  ", {}) is False
     assert misconfigured_tokens_env("a:x", {"a": "x"}) is False
+
+
+def test_resolve_principal_matches_non_ascii_token_from_latin1_header():
+    # HTTP stacks (Starlette, the daemon's own header maps) decode header
+    # bytes as latin-1, so a UTF-8 token arrives as mojibake text. The
+    # comparison must still be against the bytes the client sent.
+    m = {"café-token": "hermes-box"}
+    wire = "café-token".encode("utf-8").decode("latin-1")
+    assert resolve_principal("Bearer " + wire, m, None) == "hermes-box"
+    assert resolve_principal("Bearer " + wire, {}, "café-token") == DEFAULT_PRINCIPAL
+    assert resolve_principal("Bearer " + "café-tok2".encode().decode("latin-1"),
+                             m, None) is None

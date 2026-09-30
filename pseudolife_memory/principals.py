@@ -102,11 +102,22 @@ def resolve_principal(auth_header: str | None,
         return None
     # Compare bytes: compare_digest raises TypeError on non-ASCII str, which
     # would 500 the gate instead of 401ing (review 2026-08-10, finding 1).
-    presented_b = presented.encode("utf-8")
+    # HTTP header text is usually latin-1-decoded (Starlette, the daemon's
+    # header maps), so a UTF-8 token also arrives as its latin-1 text: its
+    # latin-1 encoding is the bytes the client sent.
+    candidates = [presented.encode("utf-8")]
+    try:
+        candidates.append(presented.encode("latin-1"))
+    except UnicodeEncodeError:
+        pass
+
+    def matches(token: str) -> bool:
+        token_b = token.encode("utf-8")
+        return any([hmac.compare_digest(c, token_b) for c in candidates])
+
     for token, principal in token_map.items():
-        if hmac.compare_digest(presented_b, token.encode("utf-8")):
+        if matches(token):
             return principal
-    if single_token is not None and hmac.compare_digest(
-            presented_b, single_token.encode("utf-8")):
+    if single_token is not None and matches(single_token):
         return DEFAULT_PRINCIPAL
     return None

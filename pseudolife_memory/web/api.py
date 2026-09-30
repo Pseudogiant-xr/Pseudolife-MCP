@@ -206,7 +206,9 @@ def build_console_app(
     def _principal(scope) -> str | None:
         if not auth_configured:
             return DEFAULT_PRINCIPAL
-        headers = {k.decode().lower(): v.decode()
+        # latin-1 like every other header read here: it cannot fail, and
+        # resolve_principal compares the bytes the client sent.
+        headers = {k.decode().lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         return resolve_principal(
             headers.get("authorization"), token_map, token)

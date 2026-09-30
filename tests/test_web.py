@@ -504,6 +504,21 @@ def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
     assert st == 401
 
 
+def test_asgi_auth_gate_invalid_utf8_bearer_is_401_not_500(svc):
+    """Header bytes that are not UTF-8 must be refused, never crash the
+    gate's decode. A non-ASCII token authenticates whether the client sent
+    it as UTF-8 or as latin-1 (urllib/http.client encode headers latin-1)."""
+    app = build_console_app(stub_mcp, None, lambda: {"status": "ok"},
+                            svc, token_map={"café-tok": "hermes-box"})
+    st, _ = call(app, "GET", "/api/overview",
+                  headers=[(b"authorization", b"Bearer \xff\xfe-tok")])
+    assert st == 401
+    for sent in ("Bearer café-tok".encode("utf-8"),
+                 "Bearer café-tok".encode("latin-1")):
+        st, _ = call(app, "GET", "/api/overview", headers=[(b"authorization", sent)])
+        assert st == 200, sent
+
+
 def test_asgi_auth_gate_map_only_closes_gate(svc):
     """A token map with no singular token still closes the gate — auth is
     configured, so anonymous callers are rejected."""
