@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — session digest prompt echo)
+- Session digest parsing rejects distinctive instructions echoed from its own
+  prompt when those phrases are absent from the session record. The existing
+  bounded retry handles the rejected output; sessions that discuss the same
+  wording can still retain it in their digest. Whitespace differences in the
+  comparison do not reject wrapped source text or reformat the returned prose.
+
 ### Fixed (2026-09-30 — JSON-shaped memory text can be corrected)
 - Nullable MCP string arguments now preserve JSON object, array and `null`
   text instead of the SDK decoding it before validation. This lets
