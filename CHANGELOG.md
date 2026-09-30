@@ -42,6 +42,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them from local state errors. The Claude desktop app's shared shim (no
   board identity) and the Codex per-thread registry (already retried per
   thread) are unchanged.
+- The same holds on the default path (`PSEUDOLIFE_AGENT_COORDINATION`
+  unset), where the shim first asks `GET /api/hook/coordination-start`
+  whether the daemon serves its bearer the board. A question the daemon did
+  not answer (no connection, a timeout past the 1.5 s bound, a 5xx, 408 or
+  429) was read as "no board" for the life of the process; it is now asked
+  again before each background attempt, and the shim registers once the
+  answer is yes. A definite no (an empty 200, another 4xx, a daemon older
+  than the route) keeps the quiet default: no adapter, no further warning,
+  no note. An unanswered check adds no board check-in to the MCP
+  instructions; the one-time note after registration says the board works.
+  While the check stays unanswered, board writes are refused locally with
+  the retry message rather than forwarded to a daemon that is not
+  answering. `_board_available` now returns `None`
+  for no answer (falsy, so Codex's default still reads it as no for that
+  process).
 
 ### Fixed (2026-09-30 — session digest prompt echo)
 - Session digest parsing rejects distinctive instructions echoed from its own

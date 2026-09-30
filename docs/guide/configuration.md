@@ -166,7 +166,11 @@ naming the principal that posted it.
 The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
 `PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
-asks once at startup and otherwise stays quiet. `PSEUDOLIFE_AGENT_COORDINATION=0`
+asks at startup and otherwise stays quiet. A question the daemon does not
+answer (no connection, a timeout, a 5xx, 408 or 429) is not a no: a Claude Code session's
+shim asks again in the background on the registration retry schedule below,
+registers once the answer is yes, and stays quiet if it is no. A Codex shim
+still reads no answer as no for that process. `PSEUDOLIFE_AGENT_COORDINATION=0`
 (any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
 `=1` skips the question and reports any refusal on stderr.
 
