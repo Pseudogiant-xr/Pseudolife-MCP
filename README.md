@@ -629,9 +629,9 @@ daily task or timer that applies a new release only while
 `updates.unattended_daemon: true` is set and no session is active on the
 agent board, with the same backup and rollback tag, and posts a board
 notice either way. Codex keeps its hook approvals across updates (it
-approves the hook definitions, not the scripts), and the update refreshes
-manual Codex hook copies itself; only a changed `hooks.json` makes every
-update path print the approval steps.
+approves the hook definitions, not the scripts), and an update from a
+checkout refreshes manual Codex hook copies itself; only a changed
+`hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:
@@ -1067,7 +1067,10 @@ See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 definitions: the memory and coordination SessionStart and UserPromptSubmit
 handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's wake
 hook, on by default; in Codex it runs only the park gate). It does not approve other plugins or bypass
-future trust checks. Changed definitions need approval again, and so does a
+future trust checks. Codex approves the definitions, not the scripts they
+run, so the approval also covers the scripts later PseudoLife updates
+install (for manual copies the update installs them itself, verified by
+content). Changed definitions need approval again, and so does a
 handler a plugin update adds; Codex skips an unapproved one silently in the
 desktop app, which `pseudolife-mcp update` (from a checkout, `ops/update.ps1
 -All` or `ops/update_clients.py`) reports as `needs-approval`. If automatic setup cannot

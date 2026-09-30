@@ -285,3 +285,60 @@ def test_bundle_named_manual_copies_get_the_one_time_switch(cli, tmp_path):
     result = uc.run_steps(["codex"], repo=ROOT, source=str(ROOT))["codex"]
     assert result["state"] == "stale" and result["source"] == "manual"
     assert "last approval" in uc.codex_reapproval_text(result)
+
+
+def test_a_current_pointer_is_verified_before_it_reads_current(cli, tmp_path):
+    """Review finding: with `current` already the checkout's bundle the
+    check returned current without verifying anything."""
+    setup = _setup_module()
+    codex_home = cli.home / "codex"
+    setup.install_manual(codex_home, {"backups": []})
+    (codex_home / "pseudolife" / "hooks" / "run.sh").write_bytes(b"echo tampered\n")
+    assert uc.check_codex_hooks(ROOT)["state"] == "failed"
+
+
+def test_a_refresh_that_cannot_write_is_a_failed_step_not_a_crash(cli, tmp_path, monkeypatch):
+    setup = _setup_module()
+    codex_home = cli.home / "codex"
+    setup.install_manual(codex_home, {"backups": []}, scripts=_older_scripts(tmp_path))
+    real = uc._load_from_checkout
+
+    def loaded(repo, relative, name):
+        module = real(repo, relative, name)
+        if relative == "ops/setup-codex-hooks.py":
+            def refuse(*a, **k):
+                raise PermissionError("locked")
+            module.refresh_manual = refuse
+        return module
+    monkeypatch.setattr(uc, "_load_from_checkout", loaded)
+    result = uc.check_codex_hooks(ROOT, refresh=True)
+    assert result["state"] == "failed" and "locked" in result["detail"]
+
+
+def test_the_codex_home_is_resolved_as_setup_resolves_it(cli, tmp_path, monkeypatch):
+    """Setup writes hooks.json commands under the resolved Codex home; a
+    relative or linked CODEX_HOME must name the same one here, or a
+    launcher install reads as stale forever (review finding)."""
+    setup = _setup_module()
+    codex_home = (cli.home / "codex").resolve()
+    setup.install_manual(codex_home, {"backups": []})
+    monkeypatch.chdir(cli.home)
+    monkeypatch.setenv("CODEX_HOME", "codex")
+    assert uc.check_codex_hooks(ROOT)["state"] == "current"
+
+
+def test_an_older_checkout_without_the_launcher_reads_as_before(cli, tmp_path, monkeypatch):
+    """A newer client_updates beside an older checkout's setup script (a
+    rollback) must not crash on the missing launcher functions."""
+    setup = _setup_module()
+    codex_home = cli.home / "codex"
+    setup.install_manual(codex_home, {"backups": []})
+    real = uc._load_from_checkout
+
+    def older(repo, relative, name):
+        module = real(repo, relative, name)
+        if relative == "ops/setup-codex-hooks.py":
+            del module.launcher_installed
+        return module
+    monkeypatch.setattr(uc, "_load_from_checkout", older)
+    assert uc.check_codex_hooks(ROOT, refresh=True)["state"] in ("bundle-present", "stale")

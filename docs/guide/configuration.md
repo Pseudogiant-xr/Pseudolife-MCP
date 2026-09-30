@@ -3025,7 +3025,10 @@ whose `hooks.json` did not needs no approval:
 An approval is due only when `hooks.json` changed, when a new handler
 position appears, or when a manual copy from before 2026-09-30 still names
 a script bundle in its commands (one last approval moves it to the
-launcher). Then, and only then, every update path (`pseudolife-mcp
+launcher). When the scripts cannot be compared at all (release mode with no
+Claude plugin cache holding the daemon's scripts), a plugin copy whose
+scripts differ is treated as needing approval too, to be safe. Then, and
+only then, every update path (`pseudolife-mcp
 update`, `ops/update.ps1` / `update.sh`, `ops/update_clients.py`, the
 unattended run's board notice) prints the complete steps: which files
 changed (read from Codex's marketplace clone against the checkout, or

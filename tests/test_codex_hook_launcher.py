@@ -173,6 +173,69 @@ def test_verification_refuses_a_changed_launcher_bundle_or_pointer(tmp_path, dam
         setup.refresh_manual(tmp_path, _scripts(tmp_path / "src", tweak="newer"))
 
 
+def test_an_old_bundle_the_checkout_matches_is_never_pruned(tmp_path):
+    """Review finding 2026-09-30: when the old bundle-named install already
+    ran the checkout's scripts, migration pointed at that very directory
+    and recorded it as a launcher bundle, so the next refresh deleted what
+    a still-running session's commands name. Only a bundle a call created
+    is ever recorded."""
+    files = setup.bundle_bytes(ROOT / "plugin" / "hooks")
+    bundle = _hooks_root(tmp_path) / setup.bundle_digest(files)
+    for name, data in files.items():
+        setup.atomic_write(bundle / name, data)
+    legacy = setup.manual_definitions(bundle)
+    (tmp_path / "hooks.json").write_text(json.dumps({"hooks": {
+        event: [{"hooks": [legacy[role]]} for role in setup.MANUAL_ROLES[key]]
+        for key, event in setup.EVENTS.items()}}), encoding="utf-8")
+    setup.install_manual(tmp_path, report())
+    assert _current(tmp_path) == bundle.name
+    setup.refresh_manual(tmp_path, _scripts(tmp_path / "newer", tweak="newer"))
+    assert bundle.is_dir() and setup.bundle_digest(setup.bundle_bytes(bundle)) == bundle.name
+
+
+@pytest.mark.parametrize("damage", ["launcher", "pointer", "missing-pointer"])
+def test_an_approved_setup_repairs_the_launcher_and_pointer(tmp_path, damage):
+    """Setup with approval vets before it installs (complete=False); a
+    broken launcher or pointer must not stop the step that rewrites them.
+    A modified bundle still does (test_verification_refuses_...)."""
+    setup.install_manual(tmp_path, report())
+    root = _hooks_root(tmp_path)
+    if damage == "launcher":
+        (root / "run.ps1").write_text("# edited\n", encoding="utf-8")
+    elif damage == "pointer":
+        (root / "current").write_text("not-a-bundle\n", encoding="utf-8")
+    else:
+        (root / "current").unlink()
+    setup.vet_manual(_ours(tmp_path), tmp_path, complete=False)
+    setup.install_manual(tmp_path, report())
+    setup.vet_manual(_ours(tmp_path), tmp_path)
+
+
+def test_a_launcher_from_an_earlier_release_is_rewritten_by_a_refresh(tmp_path, monkeypatch):
+    """The first release that edits run.sh or run.ps1 must not strand every
+    install: a launcher some release shipped is replaced by a refresh (Codex
+    does not hash it); only one no release shipped is refused."""
+    setup.install_manual(tmp_path, report())
+    root = _hooks_root(tmp_path)
+    shipped_before = b"# an earlier release's run.sh\n"
+    (root / "run.sh").write_bytes(shipped_before)
+    monkeypatch.setitem(setup.PREVIOUS_LAUNCHERS, "run.sh",
+                        setup.PREVIOUS_LAUNCHERS.get("run.sh", frozenset())
+                        | {hashlib.sha256(shipped_before).hexdigest()})
+    setup.refresh_manual(tmp_path, _scripts(tmp_path / "newer", tweak="newer"))
+    assert (root / "run.sh").read_bytes() == setup.LAUNCHERS["run.sh"]
+
+
+def test_every_shipped_launcher_is_known_to_later_releases():
+    """Changing a launcher? Add the previous bytes' sha256 to
+    PREVIOUS_LAUNCHERS in ops/setup-codex-hooks.py and the new ones here,
+    or every existing manual install stops refreshing."""
+    assert {name: hashlib.sha256(data).hexdigest() for name, data in setup.LAUNCHERS.items()} == {
+        "run.sh": "23dc357bbddc1b4687f9ddfe54f8591b03fbc6e1b19bd41c3aeb2834b0f0a1ce",
+        "run.ps1": "0ff3ff20c091588aa5b8bf2d2f6859c0ade5a922ba83f9ac8b824415f09d2bc7",
+    }
+
+
 # ── the launchers themselves ───────────────────────────────────────────────
 
 def _bash() -> str | None:
@@ -212,12 +275,13 @@ def test_the_bash_launcher_runs_the_current_bundle_with_its_arguments_and_input(
                          env=dict(os.environ, PSEUDOLIFE_CODEX_HOOK="1"))
     assert run.returncode == 0, run.stderr
     assert run.stdout.decode() == 'args=memory-policy stdin={"session_id":"s"} codex=1 dir=' + "b" * 20
-    # a pointer that is not a bundle name, or a script that is not a hook, runs nothing
+    # a pointer that is not a bundle name, or a script that is not a hook,
+    # runs nothing and says so: a silent exit would drop the briefing unseen
     for pointer, script in (("../x", "session-start.sh"), ("b" * 20, "../../evil.sh")):
         (root / "current").write_text(pointer, encoding="utf-8")
         run = subprocess.run([bash, (root / "run.sh").as_posix(), script], input=b"",
                              capture_output=True, timeout=60)
-        assert run.returncode == 0 and run.stdout == b""
+        assert run.returncode == 1 and run.stdout == b"" and b"PseudoLife" in run.stderr
 
 
 def test_the_powershell_launcher_runs_the_current_bundle_with_its_event_input_and_exit_code(tmp_path):
@@ -232,7 +296,7 @@ def test_the_powershell_launcher_runs_the_current_bundle_with_its_event_input_an
     (root / "current").write_text("..\\x", encoding="utf-8")
     run = subprocess.run([pwsh, "-NoProfile", "-File", str(root / "run.ps1"), "-Event", "SessionStart"],
                          input=b"", capture_output=True, timeout=60)
-    assert run.returncode == 0 and run.stdout.strip() == b""
+    assert run.returncode == 1 and run.stdout.strip() == b"" and b"PseudoLife" in run.stderr
 
 
 def test_real_codex_keeps_trusting_the_manual_hooks_across_a_refresh(tmp_path, monkeypatch):

@@ -114,12 +114,13 @@ LAUNCHERS = {
 # scripts it runs, so a new bundle needs no new approval. Written and
 # verified byte for byte by ops/setup-codex-hooks.py.
 here=$(dirname "$0")
+fail() { printf 'PseudoLife hooks: %s; rerun: python ops/setup-codex-hooks.py\\n' "$1" >&2; exit 1; }
 bundle=$(head -c 64 "$here/current" 2>/dev/null | tr -d '\\r\\n ')
-case "$bundle" in *[!0-9a-f]*|'') exit 0 ;; esac
-[ "${#bundle}" -eq 20 ] || exit 0
+case "$bundle" in *[!0-9a-f]*|'') fail "$here/current names no script bundle" ;; esac
+[ "${#bundle}" -eq 20 ] || fail "$here/current names no script bundle"
 case "${1:-}" in
     session-start.sh|user-prompt-submit.sh|coordination-start.sh|coordination-prompt.sh|session-end.sh) ;;
-    *) exit 0 ;;
+    *) fail "no hook script named ${1:-(none)}" ;;
 esac
 script=$1
 shift
@@ -132,12 +133,21 @@ exec bash "$here/$bundle/$script" "$@"
 param([string]$Event)
 $bundle = ''
 try { $bundle = ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'current'))).Trim() } catch {}
-if ($bundle -cnotmatch '^[0-9a-f]{20}$') { exit 0 }
+if ($bundle -cnotmatch '^[0-9a-f]{20}$') {
+    [Console]::Error.WriteLine("PseudoLife hooks: $PSScriptRoot\\current names no script bundle; rerun: python ops/setup-codex-hooks.py")
+    exit 1
+}
 $global:LASTEXITCODE = 0
 & (Join-Path (Join-Path $PSScriptRoot $bundle) 'lifecycle.ps1') -Event $Event
 exit $LASTEXITCODE
 """,
 }
+# The sha256 of every launcher an earlier release shipped, by name. A
+# refresh replaces one of these with LAUNCHERS (Codex does not hash it), so
+# editing a launcher never strands an install; one no release shipped is
+# refused as modified. Changing LAUNCHERS? Add the old bytes' sha256 here
+# (tests/test_codex_hook_launcher.py pins the current ones).
+PREVIOUS_LAUNCHERS = {"run.sh": frozenset(), "run.ps1": frozenset()}
 
 
 def backup(path: Path) -> str | None:
@@ -284,37 +294,59 @@ def _pointer(home):
     return name if re.fullmatch(r"[a-f0-9]{20}", name) else None
 
 
-def _vet_launcher(home):
-    """The launchers are exactly what setup writes, ``current`` names a
-    bundle, and that bundle's scripts still digest to its name."""
+def _launcher_shipped(data, name):
+    """This release's launcher, or one an earlier release shipped."""
+    return data == LAUNCHERS[name] or hashlib.sha256(data).hexdigest() in PREVIOUS_LAUNCHERS.get(name, ())
+
+
+def _vet_launcher(home, repairable=False):
+    """The launchers are ones a release shipped, ``current`` names a bundle,
+    and that bundle's scripts still digest to its name. ``repairable``
+    (setup with approval, which rewrites the launchers and the pointer next)
+    checks only the bundle, and only when the pointer names one: a modified
+    bundle is refused either way."""
     root = hooks_root(home)
-    for name, data in LAUNCHERS.items():
-        try:
-            intact = (root / name).read_bytes() == data
-        except OSError:
-            intact = False
-        if not intact:
-            raise SetupError("A PseudoLife hook launcher is missing or was modified; rerun setup with approval to repair it.")
+    if not repairable:
+        for name in LAUNCHERS:
+            try:
+                intact = _launcher_shipped((root / name).read_bytes(), name)
+            except OSError:
+                intact = False
+            if not intact:
+                raise SetupError("A PseudoLife hook launcher is missing or was modified; rerun setup with "
+                                 "approval to repair it: python ops/setup-codex-hooks.py --source manual --trust ask")
     name = _pointer(home)
     if name is None:
-        raise SetupError("The PseudoLife hook pointer is missing or malformed; rerun setup with approval to repair it.")
+        if repairable:
+            return None
+        raise SetupError("The PseudoLife hook pointer is missing or malformed; rerun setup with approval to "
+                         "repair it: python ops/setup-codex-hooks.py --source manual --trust ask")
     try:
         matches = bundle_digest(bundle_bytes(root / name)) == name
     except (OSError, UnicodeError):
         matches = False
-    if not matches:
+    if not matches and not (repairable and not (root / name).exists()):
         raise SetupError("An installed PseudoLife script was modified; restore or review it before running verification.")
     return root / name
 
 
 def _write_bundle(root, files):
+    """Write ``files`` as their content-addressed bundle. A bundle this call
+    writes into is recorded as a launcher bundle, and so may be pruned
+    later; one that already held every file is not: it may be a bundle from
+    before the launcher that a running session's commands still name."""
     directory = root / bundle_digest(files)
+    wrote = False
     for name, data in files.items():
         destination = directory / name
         if destination.exists() and destination.read_bytes() != data:
             raise SetupError("An installed PseudoLife script was modified; restore or review it before rerunning setup.")
         if not destination.exists():
             atomic_write(destination, data)
+            wrote = True
+    launched = _launched(root)
+    if wrote and directory.name not in launched:
+        atomic_write(root / LAUNCHED, "".join(n + "\n" for n in launched + [directory.name]).encode())
     return directory
 
 
@@ -341,10 +373,6 @@ def _launched(root):
 
 
 def _point(root, name):
-    """Move ``current`` to ``name``, recording it as a launcher bundle."""
-    launched = _launched(root)
-    if name not in launched:
-        atomic_write(root / LAUNCHED, "".join(n + "\n" for n in launched + [name]).encode())
     atomic_write(root / POINTER, (name + "\n").encode())
 
 
@@ -363,8 +391,9 @@ def _prune(root, keep):
 def refresh_manual(home, scripts=None):
     """Move launcher-run manual copies to ``scripts`` (the checkout's by
     default) without touching the approved commands: write the new bundle,
-    verify it, point ``current`` at it, then drop the old one. No consent is
-    asked because nothing Codex approves changes."""
+    verify it, point ``current`` at it, bring the launchers to this
+    release's, then drop the old bundle. No consent is asked because nothing
+    Codex approves changes."""
     home = Path(home)
     if not launcher_installed(home):
         raise SetupError("These manual hooks name a script bundle directly; approve them once more to switch "
@@ -379,6 +408,7 @@ def refresh_manual(home, scripts=None):
         if bundle_digest(bundle_bytes(directory)) != name:
             raise SetupError("The new PseudoLife script bundle did not verify; the current one stays.")
         _point(root, name)
+    _write_launchers(root)
     _prune(root, name)
     return {"state": "current" if name == previous else "refreshed", "bundle": name, "previous": previous}
 
@@ -511,7 +541,7 @@ def vet_manual(hooks, home, complete=True):
     if hooks and all(any(h.get("command") in (launcher[role]["command"], launcher[role]["commandWindows"])
                          for role in MANUAL_ROLES.get(h.get("eventName"), ()))
                      for h in hooks):
-        _vet_launcher(home)
+        _vet_launcher(home, repairable=not complete)
         if complete:
             _roles_complete(hooks, launcher)
         return
@@ -825,8 +855,9 @@ def consent(args):
     if args.trust == "no" or args.non_interactive or not sys.stdin.isatty():
         return False, args.instructions == "append"
     if args.instructions != "auto":
-        print("Approve PseudoLife's current hook scripts (briefing, reminders, cleanup, "
-              "agent-board check-in, new-mail hint) to run outside the sandbox? [y/N] ",
+        print("Approve PseudoLife's hooks (briefing, reminders, cleanup, agent-board check-in, "
+              "new-mail hint) to run outside the sandbox, including the scripts later PseudoLife "
+              "updates install? [y/N] ",
               end="", file=sys.stderr, flush=True)
         approved = sys.stdin.readline().strip().lower() in ("y", "yes")
         return approved, args.instructions == "append"
@@ -834,7 +865,8 @@ def consent(args):
           "  1. Enable automatic briefings, reminders, and session cleanup (recommended).\n"
           "     Where the agent board is on, also an agent-board check-in at session start\n"
           "     and a new-mail hint when a peer's message is waiting.\n"
-          "     Approves only PseudoLife's current hook scripts to run outside the sandbox;\n"
+          "     Approves only PseudoLife's hooks to run outside the sandbox, including the\n"
+          "     scripts later PseudoLife updates install;\n"
           "     adds standing memory instructions if verification fails.\n"
           "  2. Standing memory instructions only.\n"
           "  3. Skip both.\nChoose [1/2/3, default 1]: ", end="", file=sys.stderr, flush=True)

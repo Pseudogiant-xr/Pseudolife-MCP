@@ -780,7 +780,9 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     scripts are the checkout's when ``repo`` is given, else the daemon's
     (``daemon_digest``, its ``/health`` ``hooks_digest``)."""
     repo = Path(repo) if repo else None
-    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex")
+    # Resolved as setup-codex-hooks.py resolves it: the launcher commands in
+    # hooks.json name the resolved path.
+    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex").expanduser().resolve()
     hooks_root = codex_home / "pseudolife" / "hooks"
     if hooks_root.is_dir():
         if repo is None or not (repo / "ops" / "setup-codex-hooks.py").is_file():
@@ -789,19 +791,22 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                               "python ops/setup-codex-hooks.py --source manual --trust ask"}
         setup = _load_from_checkout(repo, "ops/setup-codex-hooks.py", "codex_hook_setup")
         checkout = codex_bundle_digest(repo)
-        if setup.launcher_installed(codex_home):
-            if setup._pointer(codex_home) == checkout:
-                return {"state": "current", "source": "manual",
-                        "detail": "manual hook copies run the checkout's scripts through the launcher"}
-            if not refresh:
-                return {"state": "behind", "source": "manual",
-                        "detail": "manual hook copies run older scripts; the update refreshes them, with no "
-                                  "approval needed (Codex approves the launcher's commands, not the scripts)"}
+        # An older checkout's setup script has no launcher: read as before.
+        launcher_installed = getattr(setup, "launcher_installed", None)
+        if launcher_installed is not None and launcher_installed(codex_home):
             try:
+                if setup._pointer(codex_home) == checkout:
+                    setup._vet_launcher(codex_home)
+                    return {"state": "current", "source": "manual",
+                            "detail": "manual hook copies run the checkout's scripts through the launcher"}
+                if not refresh:
+                    return {"state": "behind", "source": "manual",
+                            "detail": "manual hook copies run older scripts; the update refreshes them, with no "
+                                      "approval needed (Codex approves the launcher's commands, not the scripts)"}
                 moved = setup.refresh_manual(codex_home, repo / "plugin" / "hooks")
-            except setup.SetupError as exc:
+            except (setup.SetupError, OSError, UnicodeError) as exc:
                 return {"state": "failed", "source": "manual",
-                        "detail": f"manual hook copies were not refreshed: {exc}"}
+                        "detail": f"manual hook copies were not refreshed or verified: {exc}"}
             return {"state": "current", "source": "manual",
                     "detail": f"manual hook copies refreshed to the checkout's scripts (bundle {moved['bundle']}); "
                               "Codex keeps its approval, which covers the launcher's commands, not the scripts"}

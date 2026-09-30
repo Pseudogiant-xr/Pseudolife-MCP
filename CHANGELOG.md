@@ -35,6 +35,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `plugin/hooks/hooks.json`, so a change that would ask every Codex user
   again has to be deliberate. File writes in `ops/setup-codex-hooks.py`
   retry a replace Windows refuses for a moment (a live setup run met one).
+- One approval now also covers the scripts later updates install, and the
+  consent prompt says so. A launcher an earlier release shipped is replaced
+  by a refresh (`PREVIOUS_LAUNCHERS`), so editing a launcher never strands
+  an install; setup with approval repairs a missing or changed launcher or
+  pointer, while a modified script bundle is still refused. A launcher
+  whose pointer names no bundle prints why on stderr and exits 1 instead of
+  running nothing silently. A manual refresh that cannot write or verify is
+  a failed client step, so the update exits non-zero for it.
 
 ### Fixed (2026-09-29 — forget cascade for derived state)
 - Bulk source forget retains matching digests as retired history and excludes them from deleted-entry counts. Explicit digest-only deletion still removes the selected digest entries, as does a forget whose matched digest cannot be retired (its session episode is gone, or no matched source was persisted).
