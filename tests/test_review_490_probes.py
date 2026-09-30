@@ -131,6 +131,13 @@ def test_schema_49_50_51_upgrade(pg_conn):
     import subprocess
     import types
     from pseudolife_memory.storage import schema
+    # The v49/v50 schema modules come from git history. CI checks out one
+    # commit (a shallow clone), so skip there rather than fail; a local run
+    # with history still climbs the full ladder.
+    for ref in ("b81942cf^", "b81942cf"):
+        if subprocess.run(["git", "cat-file", "-e", ref + ":pseudolife_memory/storage/schema.py"],
+                          capture_output=True).returncode != 0:
+            pytest.skip(f"needs git history for {ref} (shallow checkout)")
     # Remove exactly the additive v50/v51 shapes in this fixture-owned DB.
     pg_conn.execute("DROP TABLE edge_evidence")
     pg_conn.execute("ALTER TABLE coordination_agents DROP COLUMN parent_thread, DROP COLUMN parent_agent_id")
