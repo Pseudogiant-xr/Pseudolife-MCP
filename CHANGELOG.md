@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 — JSON-shaped memory text can be corrected)
+- Nullable MCP string arguments now preserve JSON object, array and `null`
+  text instead of the SDK decoding it before validation. This lets
+  `memory_supersede(old_text=...)` select JSON-shaped memories by their exact
+  text. Plain strings and JSON-encoded list arguments keep their existing
+  behavior; tool schemas are unchanged.
+
 ### Changed (2026-09-30 — subagents show on the board as their parent's children, not as peers; schema v50)
 - **Behaviour change for Codex users: a Codex subagent can no longer send
   board mail.** A Codex native subagent (`collaboration.spawn_agent`) has
