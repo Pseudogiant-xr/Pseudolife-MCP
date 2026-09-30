@@ -82,6 +82,16 @@ _REMOTE_PROBE_TIMEOUT_S = 2.0
 # wait_for also awaits bounded adapter cleanup; the subsequent instruction fetch
 # has its own 5s timeout. These limits do not guarantee a 10s host startup deadline.
 _ADAPTER_STARTUP_SECONDS = 3.0
+# When that startup registration fails because the daemon did not answer in
+# time (2026-09-30: a stuck tailnet link at app restart), the shim retries it
+# in the background on this schedule, then every 60 s until it lands or the
+# session ends. It is the adapter's own re-attach schedule
+# (CoordinationAdapter.REATTACH_DELAYS), reused rather than tuned.
+_ADAPTER_RETRY_DELAYS = (1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
+# Bound on one background attempt. Its context, register and attach requests
+# each carry the adapter's 5 s timeout, so this only ends a wedged attempt: a
+# design bound, not a measurement.
+_ADAPTER_RETRY_ATTEMPT_SECONDS = 30.0
 # Bound on the default-mode board probe (GET /api/hook/coordination-start),
 # which runs before the downstream handshake: a design bound, not a measured
 # tuning constant. A healthy daemon answers it without storage I/O in a
@@ -934,6 +944,169 @@ def _serves_many_conversations() -> bool:
     return os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower() == "claude-desktop"
 
 
+def _report_coordination_unavailable(state_path) -> None:
+    where = f" ({state_path})" if state_path else ""
+    print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
+          "Check the daemon's coordination setting, authentication and "
+          f"private adapter state{where}.",
+          file=sys.stderr)
+
+
+def _transient_board_failure(exc: BaseException) -> bool:
+    """Whether a failed board registration is worth retrying: the daemon did
+    not answer (a timeout, a refused or dropped connection), said it is
+    overloaded (5xx, 429), or still holds the saved address's previous
+    attachment (``attachment_busy``: an attach the startup budget cancelled
+    after the daemon committed it, or a killed process's; its lease runs out
+    within a minute). A verdict about this bearer, this bank or the saved
+    adapter state is not; retrying cannot change it, and a state file another
+    process is registering must not end up shared by two. The daemon answers
+    those verdicts with 4xx codes, never 5xx or 429."""
+    import asyncio
+    from pseudolife_memory.coordination_adapter import AdapterError
+
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return True
+    if not isinstance(exc, AdapterError):
+        return False
+    if exc.code in {"transport_unavailable", "attachment_busy"}:
+        return True
+    return exc.status is not None and (exc.status >= 500 or exc.status == 429)
+
+
+# The refusal a board write gets while a late registration is still pending,
+# and the notes one tool result carries once it lands or once it stops.
+_BOARD_PENDING_REFUSAL = (
+    "This session's board registration did not complete at startup (the memory "
+    "daemon was unreachable or slow) and is being retried in the background; "
+    "memory tools work meanwhile. Retry this call in a minute.")
+_BOARD_REGISTERED_NOTE = (
+    "Coordination: board registration completed after a startup delay; "
+    "memory_agents update and memory_message now work here. Check in again "
+    "if an earlier board call was refused.")
+_BOARD_STOPPED_NOTE = (
+    "Coordination: board registration stopped retrying (the daemon refused it; "
+    "check bearer access and the private adapter state). Board writes here are "
+    "refused until the session restarts; memory tools work.")
+
+
+class _LateBoardAdapter:
+    """A board registration that failed at startup for a transient reason,
+    retried in the background until it lands or the session ends.
+
+    It stands in for the adapter in :func:`_proxy`, which binds
+    ``coordination_adapter`` once, before the handshake. Until a registration
+    lands, a board write is refused with a message that says it is being
+    retried (rather than going out without instance headers for the daemon to
+    refuse), and ordinary memory calls go out without them, as before. Once
+    one lands every call delegates to the real adapter, as if it had been
+    there from the start. A refusal that retrying cannot change stops the
+    retry and restores the pass-through a failed startup has always had.
+
+    ``build`` returns a fresh, unentered adapter: one cannot be re-entered,
+    and a failed or cancelled entry has already released its state-file
+    reservation, so every attempt starts clean."""
+
+    def __init__(self, build, state_path=None):
+        import asyncio
+        self._build = build
+        self._state_path = state_path
+        self._adapter = None
+        self._stopped = False
+        # The one-time note for the next result; a registered note waits for
+        # a call the adapter validated, so it never rides a refusal.
+        self._note = None
+        self._validated = False
+        self._closing = False
+        self._settled = asyncio.Event()
+        self._task = None
+
+    def start(self) -> None:
+        import asyncio
+        self._task = asyncio.create_task(self._retry())
+
+    async def _retry(self) -> None:
+        import asyncio
+        attempt = 0
+        # wait_for can lose a cancellation that lands as an attempt fails
+        # (Python 3.11; an unreachable daemon fails at once), so the closing
+        # flag, not the cancellation alone, ends the loop.
+        while not self._closing:
+            await asyncio.sleep(
+                _ADAPTER_RETRY_DELAYS[min(attempt, len(_ADAPTER_RETRY_DELAYS) - 1)])
+            attempt += 1
+            try:
+                adapter = self._build()
+                await asyncio.wait_for(
+                    adapter.__aenter__(), timeout=_ADAPTER_RETRY_ATTEMPT_SECONDS)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - classified below
+                if _transient_board_failure(exc):
+                    continue
+                self._stopped = True
+                self._note = _BOARD_STOPPED_NOTE
+                self._settled.set()
+                _report_coordination_unavailable(self._state_path)
+                return
+            self._adapter = adapter
+            self._note = _BOARD_REGISTERED_NOTE
+            self._settled.set()
+            print("pseudolife-mcp: coordination registered after a startup delay; "
+                  "board tools are available.", file=sys.stderr)
+            return
+
+    async def aclose(self) -> None:
+        import asyncio
+        import anyio
+        self._closing = True
+        # Shielded like the adapter's own exit: under a level cancellation a
+        # second delivery would otherwise skip the detach below.
+        with anyio.CancelScope(shield=True):
+            if self._task is not None:
+                self._task.cancel()
+                await asyncio.wait({self._task})
+            # An attempt that entered as the close began still holds an address.
+            if self._adapter is not None:
+                await self._adapter.__aexit__(None, None, None)
+
+    async def validate_snapshot(self, snapshot) -> None:
+        if self._adapter is not None:
+            await self._adapter.validate_snapshot(snapshot)
+        elif not self._stopped:
+            raise _CoordinationUnavailableError(message=_BOARD_PENDING_REFUSAL)
+
+    @property
+    def instance_headers(self) -> dict[str, str]:
+        return self._adapter.instance_headers if self._adapter is not None else {}
+
+    def note_turn(self) -> None:
+        # Called only for a call whose snapshot validated.
+        if self._adapter is not None:
+            self._adapter.note_turn()
+            self._validated = True
+
+    def deliver_hint(self) -> str | None:
+        hint = self._adapter.deliver_hint() if self._adapter is not None else None
+        if self._note is not None and (self._adapter is None or self._validated):
+            note, self._note = self._note, None
+            hint = "\n".join(filter(None, (note, hint)))
+        return hint
+
+    async def inbox(self):
+        """The channel's event source: idle until registration lands, then
+        the adapter's own; idle for good if the retry stopped."""
+        from contextlib import aclosing
+        import anyio
+        await self._settled.wait()
+        if self._adapter is None:
+            await anyio.sleep_forever()
+            return
+        async with aclosing(self._adapter.inbox()) as events:
+            async for event in events:
+                yield event
+
+
 async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None,
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
@@ -1087,9 +1260,11 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                 if coordination_adapter is not None:
                     try:
                         await coordination_adapter.validate_snapshot(snapshot)
-                    except Exception:
+                    except Exception as exc:
                         if _requires_coordination_identity(
                                 params.name, params.arguments):
+                            if isinstance(exc, _CoordinationUnavailableError):
+                                raise  # carries its own message
                             hint = (coordination_hint()
                                     if coordination_hint is not None else None)
                             raise _CoordinationUnavailableError(hint)
@@ -1461,6 +1636,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             return
 
         adapter = None
+        late = None
         if _serves_many_conversations():
             # No adapter: an address here would be every conversation's, and
             # one conversation's status would overwrite another's (seen
@@ -1478,11 +1654,12 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             wake = channel and os.environ.get("PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
                 "1", "true", "yes", "on"}
             state_path = os.environ.get("PSEUDOLIFE_AGENT_STATE") or _session_state_path(url)
-            try:
-                startup_snapshot = provider.snapshot()
-                adapter = await asyncio.wait_for(stack.enter_async_context(CoordinationAdapter(
-                    url, startup_snapshot.token, provider=provider,
-                    initial_snapshot=startup_snapshot, state_path=state_path,
+
+            def build_adapter():
+                snapshot = provider.snapshot()
+                return CoordinationAdapter(
+                    url, snapshot.token, provider=provider,
+                    initial_snapshot=snapshot, state_path=state_path,
                     wake_enabled=wake, label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "agent"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""), episode=session_uid,
@@ -1490,21 +1667,40 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                     # map later sessions of this Claude Code process (after
                     # /clear or /resume) back to it; a host without an id
                     # gets hints only.
-                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))),
+                    digest_path=digest_path_for(os.environ.get("CLAUDE_CODE_SESSION_ID", "")))
+
+            try:
+                adapter = await asyncio.wait_for(
+                    stack.enter_async_context(build_adapter()),
                     timeout=_ADAPTER_STARTUP_SECONDS)
-            except (AdapterError, CredentialError, TimeoutError):
-                where = f" ({state_path})" if state_path else ""
-                print("pseudolife-mcp: coordination unavailable; memory proxy remains active. "
-                      "Check the daemon's coordination setting, authentication and "
-                      f"private adapter state{where}.",
-                      file=sys.stderr)
+            except (AdapterError, CredentialError, TimeoutError, asyncio.TimeoutError) as exc:
+                if _transient_board_failure(exc):
+                    # Not a verdict, only no answer in time: keep trying, or
+                    # this process stays off the board for its whole life.
+                    late = _LateBoardAdapter(build_adapter, state_path)
+                    stack.push_async_callback(late.aclose)
+                    late.start()
+                    print("pseudolife-mcp: coordination registration did not complete at "
+                          "startup (daemon unreachable or slow); memory proxy remains "
+                          "active and registration is retried in the background.",
+                          file=sys.stderr)
+                else:
+                    _report_coordination_unavailable(state_path)
         if adapter is not None:
             kwargs["agent_headers"] = adapter.instance_headers
             kwargs["coordination_adapter"] = adapter
             kwargs["coordination_hint"] = adapter.deliver_hint
             kwargs["board_checkin"] = True
+        elif late is not None:
+            # The check-in stays in the instructions: a board write before
+            # the registration lands is refused with the reason, and the
+            # first result after it lands says the board works.
+            kwargs["coordination_adapter"] = late
+            kwargs["coordination_hint"] = late.deliver_hint
+            kwargs["board_checkin"] = True
         if channel:
-            kwargs["channel_inbox"] = adapter.inbox if adapter is not None else idle_inbox
+            kwargs["channel_inbox"] = (adapter.inbox if adapter is not None
+                                       else late.inbox if late is not None else idle_inbox)
         await _proxy(url, token, session_uid, provider=provider, **kwargs)
 
 

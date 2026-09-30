@@ -1544,10 +1544,21 @@ infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before
 the adapter receives the new address, the adapter releases its empty state
-reservation and the next launch registers a fresh address; it never retries
-inside the same start and never overwrites a state file that already holds an
-identity. An address the daemon created for a lost response was never held by
-any adapter, receives no mail, and is pruned with the other idle addresses. Do
+reservation and never overwrites a state file that already holds an identity.
+When the daemon simply did not answer in time (a timeout, a refused or dropped
+connection, a 5xx or 429, or `attachment_busy` while the lease of an attach the
+startup budget cancelled runs out), the shim keeps the session's memory tools and
+retries the registration in the background, after 1, 2, 5, 10 and 30 seconds
+and then every minute, until it lands or the session ends; each attempt starts
+from a fresh adapter. Until it lands, `memory_agents` update, claim and release
+and `memory_message` are refused with a message saying registration is being
+retried, and the first tool result after it lands says the board now works. A
+refusal retrying cannot change (unauthorized, principal not allowed, bank
+mismatch, invalid saved state, or a state file another process is registering)
+stops there, as before, and the next tool result says so once. An address the
+daemon created for a lost response was never held by any adapter, receives no
+mail, and is pruned with the other idle addresses; a link slow enough to lose
+register responses can leave one per background attempt. Do
 not revoke every mailbox to repair one failed registration. A lost attachment
 response can leave a lease until expiry; failed competing attachment attempts
 do not renew it.

@@ -21,7 +21,10 @@ machines see each other and exchange mail with no further setup.
 
 What this is not: there is no offline mode and no replica. When the daemon is
 unreachable the remote shim exits and the plugin hooks degrade to
-"coordination unavailable"; there is one bank and one writer of record.
+"coordination unavailable"; there is one bank and one writer of record. A link
+that answers the shim's health check but stalls its board registration leaves
+memory working and the registration retrying in the background (see
+[configuration](configuration.md)).
 Replicating the bank across machines is not part of this feature.
 
 ## What the daemon allows

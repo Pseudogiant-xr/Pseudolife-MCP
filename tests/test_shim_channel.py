@@ -111,7 +111,10 @@ def test_opted_in_shim_injects_private_instance_identity(monkeypatch):
     assert seen["proxy"]["channel_inbox"] is not None
 
 
-def test_slow_adapter_startup_falls_back_after_cancellation(monkeypatch):
+def test_slow_adapter_startup_falls_back_to_a_background_retry(monkeypatch):
+    """A startup the budget cancels no longer leaves the process off the
+    board: the proxy gets the retrying stand-in (tests/test_shim_board_retry.py
+    drives it), never the raw instance headers."""
     from pseudolife_memory import coordination_adapter
     called = []
     class SlowAdapter:
@@ -130,7 +133,10 @@ def test_slow_adapter_startup_falls_back_after_cancellation(monkeypatch):
     asyncio.run(asyncio.wait_for(shim._run_session_proxy("http://fixture", "token", "s"), 0.2))
     assert len(called) == 1
     assert repr(called[0].pop("provider")) == "CredentialProvider(source='static')"
-    assert called == [{}]
+    late = called[0].pop("coordination_adapter")
+    assert isinstance(late, shim._LateBoardAdapter)
+    assert called[0].pop("coordination_hint") == late.deliver_hint
+    assert called == [{"board_checkin": True}]
 
 
 def test_codex_tool_metadata_overrides_session_and_attaches_lazily(monkeypatch):
