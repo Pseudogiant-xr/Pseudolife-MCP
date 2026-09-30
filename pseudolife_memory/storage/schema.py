@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 50
+SCHEMA_META_VERSION = 51
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS edges (
 -- dst-side dedup/repoint, any "what points to X" traversal) had no
 -- supporting index and fell back to a sequential scan.
 CREATE INDEX IF NOT EXISTS edges_dst_idx ON edges (dst_id);
+
+-- v51: entry-level support for dream edges. Legacy and explicit edges have
+-- no rows here and are never inferred to belong to a forgotten entry.
+CREATE TABLE IF NOT EXISTS edge_evidence (
+  edge_id BIGINT NOT NULL REFERENCES edges(id) ON DELETE CASCADE,
+  entry_id BIGINT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  PRIMARY KEY (edge_id, entry_id)
+);
+CREATE INDEX IF NOT EXISTS edge_evidence_entry_idx ON edge_evidence (entry_id);
 
 CREATE TABLE IF NOT EXISTS edge_proposals (
   id BIGSERIAL PRIMARY KEY,
@@ -751,7 +760,7 @@ SCHEMA_SQL += COORDINATION_SCHEMA_SQL
 # A multi-table TRUNCATE is order-independent in Postgres.
 BENCH_RESET_TABLES = (
     "meta", "episodes", "entries", "entities", "entity_aliases", "relations",
-    "edges", "edge_proposals", "entity_proposals", "entity_kinds",
+    "edges", "edge_evidence", "edge_proposals", "entity_proposals", "entity_kinds",
     "dismissed_pairs", "facts", "world_facts", "lessons", "outcome_signals",
     "lesson_search_events",
     "communities", "entity_communities", "memory_traces",

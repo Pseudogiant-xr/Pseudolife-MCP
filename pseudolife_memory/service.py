@@ -3245,6 +3245,67 @@ class MemoryService(DreamOps):
     # Tool: delete — hygiene
     # ------------------------------------------------------------------
 
+    def _forget_entries_locked(self, matches):
+        """Cascade the synchronous CMS delete callback; caller holds the lock."""
+        if self._storage is None:
+            return
+        import time as _time
+        episodes = self._cms.episodes.episodes
+        def _root_id(episode_id):
+            ep = episodes.get(episode_id)
+            while ep is not None and ep.parent_id is not None:
+                ep = episodes.get(ep.parent_id)
+            return ep.id if ep is not None else None
+        roots = set()
+        for entry in matches:
+            root_id = _root_id(entry.episode_id)
+            if root_id is not None:
+                roots.add(root_id)
+        # A source/bulk forget retires matching digests as history too.
+        # A digest-only selection remains an explicit entry deletion, and so
+        # does a digest this cascade would not retire (no persisted row, its
+        # session root is gone, or no persisted source matched): holding it
+        # back would leave it live and served.
+        has_source = any(e.source != "digest" and e.db_id is not None
+                         for e in matches)
+        retained = [
+            e for e in matches
+            if has_source and e.source == "digest" and e.db_id is not None
+            and (e.superseded_at is not None or e.episode_id in roots)]
+        retained_objects = {id(e) for e in retained}
+        ids = [int(e.db_id) for e in matches
+               if e.db_id is not None and id(e) not in retained_objects]
+        if not ids:
+            return
+        slots = self._storage.slots_for_entries(ids)
+        source_for_slot = {
+            (row["entity_norm"], row["attribute_norm"]): row["entry_id"]
+            for row in slots}
+        match_objects = {id(e) for e in matches}
+        surviving_roots = {
+            _root_id(e.episode_id)
+            for band in self._cms.bands for e in band.entries
+            if id(e) not in match_objects and e.source != "digest"}
+        digests = [e for band in self._cms.bands for e in band.entries
+                   if e.source == "digest" and e.episode_id in roots
+                   and e.superseded_at is None and e.db_id is not None
+                   and (id(e) not in match_objects or id(e) in retained_objects)]
+        cur = self._load_digest_cursor()
+        cur["regenerate"] = sorted(
+            set(cur.get("regenerate", [])) | (roots & surviving_roots))
+        now = _time.time()
+        changed = self._storage.forget_entry_ids(
+            ids, digest_ids=[e.db_id for e in digests],
+            digest_cursor=cur, now=now)
+        if self._cortex is not None:
+            for key in changed["slots"]:
+                self._cortex.retire_unsupported(
+                    *key, source_entry_id=source_for_slot[key], now=now)
+        for entry in digests:
+            entry.superseded_at = now
+            entry.superseded_by_text = f"forgotten source entry {ids[0]}"
+        return retained
+
     def delete(
         self,
         text: str | None = None,
@@ -3272,6 +3333,13 @@ class MemoryService(DreamOps):
         guard counts matches whatever the filters are: a broad substring
         is as dangerous as a bare source.
 
+        With PostgreSQL, when sources and digests match together, digests
+        are retained as retired history. A digest-only selection still
+        deletes those entries, as does a match whose digest cannot be
+        retired (its session episode is gone, or no matched source was
+        persisted). Retained history is excluded from the deleted count and
+        text list.
+
         Returns ``{"deleted_count": N, "deleted_texts": [...]}``. The
         sample of deleted texts is capped at 20 so MCP responses stay
         small even on large purges; the default threshold is that same
@@ -3287,6 +3355,8 @@ class MemoryService(DreamOps):
                 removed = self._cms.delete_entries(
                     text=text, substring=substring, source=source,
                     episode=episode, tag=tag, max_removed=max_removed,
+                    before_delete=(lambda matches: self._forget_entries_locked(matches))
+                    if self._storage is not None else None,
                 )
             except BulkDeleteRefused as refused:
                 return {
@@ -6625,7 +6695,7 @@ class MemoryService(DreamOps):
             return counts
         for band in self._cms.bands:
             for entry in band.entries:
-                if entry.episode_id:
+                if entry.episode_id and entry.source != "digest":
                     counts[entry.episode_id] = counts.get(entry.episode_id, 0) + 1
         return counts
 

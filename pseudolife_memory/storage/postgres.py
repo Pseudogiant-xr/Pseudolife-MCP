@@ -1132,6 +1132,80 @@ class PostgresStorage:
             cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
 
+    def forget_entry_ids(self, ids: list[int], *, digest_ids: list[int],
+                         digest_cursor: dict, now: float) -> dict:
+        """Retract entry-backed facts, digests and dream edges with the delete.
+
+        Current surviving entries are the only remaining support. Legacy
+        edges without edge_evidence rows are intentionally untouched.
+        """
+        ids = sorted(set(int(i) for i in ids))
+        if not ids:
+            return {"slots": [], "digests": [], "edges": []}
+        with self.transaction():
+            slots = self.conn.execute(
+                "SELECT DISTINCT t.entity_norm, t.attribute_norm "
+                "FROM memory_traces t WHERE t.entry_id = ANY(%s) "
+                "AND NOT EXISTS ("
+                " SELECT 1 FROM memory_traces s "
+                " JOIN entries e ON e.id = s.entry_id "
+                " WHERE s.entity_norm = t.entity_norm "
+                " AND s.attribute_norm = t.attribute_norm "
+                " AND NOT (s.entry_id = ANY(%s)) "
+                " AND e.superseded_at IS NULL) "
+                "ORDER BY t.entity_norm, t.attribute_norm",
+                (ids, ids),
+            ).fetchall()
+            edge_ids = [int(r[0]) for r in self.conn.execute(
+                "SELECT DISTINCT ev.edge_id FROM edge_evidence ev "
+                "JOIN edges g ON g.id = ev.edge_id "
+                "WHERE ev.entry_id = ANY(%s) AND g.superseded_at IS NULL "
+                "AND g.origin = 'agent' AND NOT EXISTS ("
+                " SELECT 1 FROM edge_evidence s "
+                " JOIN entries e ON e.id = s.entry_id "
+                " WHERE s.edge_id = ev.edge_id "
+                " AND NOT (s.entry_id = ANY(%s)) "
+                " AND e.superseded_at IS NULL)",
+                (ids, ids),
+            ).fetchall()]
+            for entity, attribute in slots:
+                source_id = next(int(r[0]) for r in self.conn.execute(
+                    "SELECT entry_id FROM memory_traces WHERE "
+                    "entity_norm = %s AND attribute_norm = %s "
+                    "AND entry_id = ANY(%s) ORDER BY entry_id LIMIT 1",
+                    (entity, attribute, ids),
+                ).fetchall())
+                self.conn.execute(
+                    "UPDATE facts SET status = 'retired', "
+                    "superseded_at = %s, superseded_by_value = %s "
+                    "WHERE entity_norm = %s AND attribute_norm = %s "
+                    "AND status = 'current'",
+                    (now, f"forgotten source entry {source_id}",
+                     entity, attribute),
+                )
+            if edge_ids:
+                self.conn.execute(
+                    "UPDATE edges SET superseded_at = %s WHERE id = ANY(%s)",
+                    (now, edge_ids),
+                )
+            digest_ids = sorted(set(int(i) for i in digest_ids))
+            if digest_ids:
+                self.conn.execute(
+                    "UPDATE entries SET superseded_at = %s, "
+                    "superseded_by_text = %s "
+                    "WHERE id = ANY(%s) AND source = 'digest' "
+                    "AND superseded_at IS NULL",
+                    (now, f"forgotten source entry {ids[0]}", digest_ids),
+                )
+            self.set_meta("session_digest_cursor", digest_cursor)
+            deleted = self.conn.execute(
+                "DELETE FROM entries WHERE id = ANY(%s)", (ids,),
+            ).rowcount
+            if deleted != len(ids):
+                raise RuntimeError("forget entry delete was incomplete")
+        return {"slots": [tuple(r) for r in slots],
+                "digests": digest_ids, "edges": edge_ids}
+
     def delete_evicted_entry(
         self, entry_id: int | None, *, source: str, superseded: bool,
     ) -> int:
@@ -2770,7 +2844,8 @@ class PostgresStorage:
         self, src_id: int, relation: str, dst_id: int, *,
         confidence: float = 0.8, origin: str | None = None,
         revive: bool = True,
-    ) -> dict:
+        source_entry_ids=None,
+    ) -> dict | None:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
         capped 0.99) and keeps the higher-ranked origin claim
         (user > action > agent > none): a dream re-extraction
@@ -2781,8 +2856,22 @@ class PostgresStorage:
         (explicit/human assertion) clears a prior supersession;
         ``revive=False`` (agent re-extraction, e.g. the dream) leaves a
         superseded edge superseded — a human removal must be sticky
-        against the extractor re-planting the same triple."""
-        with self._txn():
+        against the extractor re-planting the same triple. Captured evidence
+        must still have a current source; otherwise return None without
+        publishing or strengthening an edge."""
+        with self.transaction():
+            ids = sorted({int(i) for i in (source_entry_ids or [])})
+            if ids:
+                # Lock current support before publication. A forget or
+                # supersession must serialize with edge/evidence insertion;
+                # reconnect cannot split this pinned transaction either.
+                ids = [int(r[0]) for r in self.conn.execute(
+                    "SELECT id FROM entries WHERE id = ANY(%s) "
+                    "AND superseded_at IS NULL ORDER BY id FOR UPDATE",
+                    (ids,),
+                ).fetchall()]
+                if not ids:
+                    return None
             row = self.conn.execute(
                 """
                 INSERT INTO edges
@@ -2808,6 +2897,14 @@ class PostgresStorage:
                 (src_id, relation, dst_id, confidence, origin, time.time(),
                  bool(revive)),
             ).fetchone()
+            if ids:
+                self.conn.execute(
+                    "INSERT INTO edge_evidence (edge_id, entry_id) "
+                    "SELECT %s, e.id FROM entries e "
+                    "WHERE e.id = ANY(%s) AND e.superseded_at IS NULL "
+                    "ON CONFLICT DO NOTHING",
+                    (int(row[0]), ids),
+                )
         return {"id": int(row[0]), "confidence": float(row[1])}
 
     def bless_edge(self, src_id: int, relation: str, dst_id: int, *,

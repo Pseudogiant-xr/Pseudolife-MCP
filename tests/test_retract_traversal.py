@@ -488,8 +488,13 @@ def test_public_consolidate_warning_survives_source_cleanup(svc, cleanup):
             band.entries = [e for e in band.entries if e is not entry]
 
     rec = svc.cortex_lookup("payments-db", "host")
-    assert rec["re_verify"] is True
-    assert rec["value"] == "db-prod-1"
+    if cleanup == "delete":
+        assert rec is None
+        assert any(r.status == "retired" and r.value == "db-prod-1"
+                   for r in svc._cortex.records)
+    else:
+        assert rec["re_verify"] is True
+        assert rec["value"] == "db-prod-1"
 
 
 def test_a_mark_that_never_reached_postgres_does_not_flag(svc):
@@ -544,8 +549,8 @@ def test_evicting_the_superseded_source_preserves_the_flag(svc):
     assert rec["value"] == "db-prod-1"          # the fact itself is untouched
 
 
-def test_deleting_an_unsuperseded_source_entry_produces_no_flag(svc):
-    """Evidence removal alone is not a semantic correction."""
+def test_deleting_an_unsuperseded_last_source_retires_fact(svc):
+    """Forgetting the last source removes the answer but keeps fact history."""
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
@@ -555,11 +560,13 @@ def test_deleting_an_unsuperseded_source_entry_produces_no_flag(svc):
 
     assert svc.delete(text="payments db is db-prod-1")["deleted_count"] == 1
 
-    assert "re_verify" not in svc.cortex_lookup("payments-db", "host")
+    assert svc.cortex_lookup("payments-db", "host") is None
+    assert any(r.status == "retired" and r.value == "db-prod-1"
+               for r in svc._cortex.records)
 
 
-def test_deleting_a_superseded_source_entry_preserves_the_flag(svc):
-    """A semantic correction remains visible after explicit source cleanup."""
+def test_deleting_a_superseded_last_source_retires_fact(svc):
+    """A stale citation cannot keep an unsupported fact current."""
     svc.cortex_write("payments-db", "host", "db-prod-1", support="agent")
     svc.store("payments db is db-prod-1", source="pseudolife")
     with svc._lock:
@@ -571,7 +578,9 @@ def test_deleting_a_superseded_source_entry_preserves_the_flag(svc):
 
     assert svc.delete(text="payments db is db-prod-1")["deleted_count"] == 1
 
-    assert svc.cortex_lookup("payments-db", "host")["re_verify"] is True
+    assert svc.cortex_lookup("payments-db", "host") is None
+    assert any(r.status == "retired" and r.value == "db-prod-1"
+               for r in svc._cortex.records)
 
 
 def test_warning_survives_full_snapshot_compaction_and_restart(

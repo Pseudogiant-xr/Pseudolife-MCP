@@ -189,6 +189,7 @@ def _seed_bank(conn) -> None:
         "VALUES (1, 'uses', 2, 0.9, 'agent', 110.0, 110.0, 110.0, "
         "1750000000000, 4, 'seed-writer', 'sess-1', 1)"
     )
+    cur.execute("INSERT INTO edge_evidence (edge_id, entry_id) VALUES (1, 1)")
     cur.execute(
         "INSERT INTO edge_proposals (src_id, relation, dst_id, confidence, "
         "similarity, rationale, source, created_at, status) "
@@ -370,6 +371,7 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
     assert result["path"] == out
     assert result["counts"]["entries"] == 2
     assert result["counts"]["facts"] == 3
+    assert result["counts"]["edge_evidence"] == 1
 
     with _bank(pg_url):
         pass  # truncate back to empty, then release the connection

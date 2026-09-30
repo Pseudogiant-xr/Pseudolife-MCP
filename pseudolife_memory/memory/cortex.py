@@ -1033,6 +1033,26 @@ class CortexStore:
         self._log(rec, rec.value, rec.confidence, t, "retired", "rollback")
         return WriteResult("retired", rec)
 
+    def retire_unsupported(self, entity: str, attribute: str, *,
+                           source_entry_id: int, now: float) -> int:
+        """Retire every current value at a slot after its last source is forgotten."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        reason = f"forgotten source entry {source_entry_id}"
+        count = 0
+        for rec in self.records:
+            if rec.key != key or rec.status != "current":
+                continue
+            rec.status = "retired"
+            rec.superseded_at = now
+            rec.superseded_by_value = reason
+            self._log(rec, None, rec.confidence, now, "retired", reason)
+            count += 1
+        if count:
+            self._current.pop(key, None)
+            self._members.pop(key, None)
+            self.dirty_slots.add(key)
+        return count
+
     def members(
         self, entity: str, attribute: str, include_removed: bool = False,
     ) -> list[CortexRecord]:
