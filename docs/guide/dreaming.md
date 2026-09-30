@@ -912,11 +912,12 @@ default `shadow`; the dream extractor, or a dedicated `judge_url` serving
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
-(`decided_by='dream-judge'`, pair dismissed). Besides accept, reject and
-leave, the merge judge may answer **relate** (since 2026-09-30): the two
-are distinct, but a relation from the link judge's vocabulary holds from
-FROM to INTO as the judge was shown them (a file and the concept it
-implements, a component and its parent). For the merge, relate counts as a
+(`decided_by='dream-judge'`, pair dismissed). A merge reject may also name
+a relation from the link judge's vocabulary (since 2026-09-30) that holds
+from FROM to INTO as the judge was shown them (a file and the concept it
+implements, a component and its parent). The relation never changes the
+verdict or its confidence, which stays about whether the two are different
+things; such a reject is recorded as **relate**. For the merge, relate counts as a
 reject in every gate, and a reject beside a relate is agreement, not a
 `split`. The relation rides on the row's note (`relate:<relation> | …`, and
 `2nd (<model>): relate:<relation> …` for a second opinion); the review

@@ -540,9 +540,10 @@ def test_judge_payload_carries_low_differential_flag(svc):
 # ── the "relate" verdict (2026-09-30) ─────────────────────────────────────
 # Most merge rejects in the 2026-09-29 triage (795 of 1,016 proposals) were
 # RELATED-but-not-same pairs, and a reject dropped the relationship. The
-# judge may now answer "relate" with a link-judge vocabulary relation, FROM
-# as src and INTO as dst: reject-class for the merge, and a link proposal
-# for the link judge once the reject is applied.
+# judge's reject may now name a link-judge vocabulary relation, FROM as src
+# and INTO as dst, recorded as the internal "relate" verdict: reject-class
+# for the merge, and a link proposal for the link judge once the reject is
+# applied.
 
 def _judge_merges_returning(verdicts):
     """Run the shipped parser over a canned model response."""

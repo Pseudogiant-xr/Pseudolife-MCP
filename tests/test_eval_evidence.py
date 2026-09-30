@@ -3274,11 +3274,19 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
-# The merge judge's relate verdict (2026-09-30): the prompt change measured
-# on the same panel, Opus 5.5 first opinion and Sonnet 5.5 second.
+# The merge judge's relate (2026-09-30): a reject may name a relation.
+# The shipped design (reject + optional relation) against the 2026-09-29
+# baseline scored by the same script, Opus 5.5 first opinion and Sonnet 5.5
+# second; and the retired first design (relate as its own verdict).
 RELATE_OPUS = "evals/results/queue-judge-ladder-20260930-relate-opus55.json"
 RELATE_SONNET = "evals/results/queue-judge-ladder-20260930-relate-sonnet55.json"
 RELATE_CROSS = "evals/results/queue-judge-cross-20260930-relate.json"
+ANNOT_OPUS = "evals/results/queue-judge-ladder-20260930-relate-annot-opus55.json"
+ANNOT_SONNET = "evals/results/queue-judge-ladder-20260930-relate-annot-sonnet55.json"
+ANNOT_CROSS = "evals/results/queue-judge-cross-20260930-relate-annot.json"
+RELATE_BASE = "evals/results/queue-judge-cross-20260929-relate-baseline.json"
+OPUS55_BASE = "evals/results/queue-judge-ladder-20260929-opus55.json"
+SONNET55_0929 = "evals/results/queue-judge-ladder-20260929-sonnet55.json"
 
 
 def _relate_arm(arm, *path):
@@ -3294,47 +3302,97 @@ def _relate_cross(rep, gate, field):
     return lambda d: d["replicates"][rep][gate][field]
 
 
+def _splits(rep):
+    return lambda d: d["replicates"][rep]["splits"]["n"]
+
+
+def _mean_conf(arm, verdict):
+    return lambda d: d["vote_confidence"][arm][verdict]["mean"]
+
+
+def _at_gate(arm, verdict):
+    return lambda d: d["vote_confidence"][arm][verdict]["ge_reject_gate"]
+
+
 _RC = "two_vote_reject_class"
 _AC = "two_vote_accept_not_lowdiff"
-for _cid, _needle, _art, _val, _stated in [
-    ("relate-cross-reject-r1-n", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "n"), 5),
-    ("relate-cross-reject-r1-bad", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "bad"), 0),
-    ("relate-cross-reject-r2-n", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "n"), 9),
-    ("relate-cross-reject-r2-bad", "two-vote rejects 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "bad"), 0),
-    ("relate-cross-accept-r1-n", "non-low-differential accepts 5/6", RELATE_CROSS, _relate_cross(0, _AC, "n"), 6),
-    ("relate-cross-accept-r1-bad", "non-low-differential accepts 5/6", RELATE_CROSS, _relate_cross(0, _AC, "bad"), 1),
-    ("relate-cross-accept-r2-n", "in both replicates", RELATE_CROSS, _relate_cross(1, _AC, "n"), 6),
-    ("relate-cross-accept-r2-bad", "in both replicates", RELATE_CROSS, _relate_cross(1, _AC, "bad"), 1),
-    ("relate-opus-accept-n", "21/25 (Opus 5.5)", RELATE_OPUS,
-     _relate_arm("opus-5-5-relate", "accept_precision", "n"), 25),
-    ("relate-opus-accept-bad", "21/25 (Opus 5.5)", RELATE_OPUS,
-     _relate_arm("opus-5-5-relate", "accept_precision", "bad"), 4),
-    ("relate-sonnet-accept-n", "and 17/23", RELATE_SONNET,
-     _relate_arm("sonnet-5-5-relate", "accept_precision", "n"), 23),
-    ("relate-sonnet-accept-bad", "and 17/23", RELATE_SONNET,
-     _relate_arm("sonnet-5-5-relate", "accept_precision", "bad"), 6),
-    ("relate-opus-votes", "46 (Opus 5.5) and 39 (Sonnet 5.5)", RELATE_OPUS,
-     _relate_arm("opus-5-5-relate", "relate", "votes"), 46),
-    ("relate-sonnet-votes", "46 (Opus 5.5) and 39 (Sonnet 5.5)", RELATE_SONNET,
-     _relate_arm("sonnet-5-5-relate", "relate", "votes"), 39),
-    ("relate-opus-on-reject", "42 and 36 landed", RELATE_OPUS,
-     _relate_arm("opus-5-5-relate", "relate", "on_label", "reject"), 42),
-    ("relate-sonnet-on-reject", "42 and 36 landed", RELATE_SONNET,
-     _relate_arm("sonnet-5-5-relate", "relate", "on_label", "reject"), 36),
+_ANNOT_O, _ANNOT_S = "opus-5-5-relate-annot", "sonnet-5-5-relate-annot"
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("annot-cross-reject-r1-n", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(0, _RC, "n"), 18, 0),
+    ("annot-cross-reject-r1-bad", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(0, _RC, "bad"), 0, 0),
+    ("annot-cross-reject-r2-n", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(1, _RC, "n"), 21, 0),
+    ("annot-cross-reject-r2-bad", "applications 18/18 and 21/21", ANNOT_CROSS, _relate_cross(1, _RC, "bad"), 0, 0),
+    ("annot-base-reject-r1-n", "against the baseline's 18 and", RELATE_BASE, _relate_cross(0, _RC, "n"), 18, 0),
+    ("annot-base-reject-r2-n", "17, and links filed on 17 and 21", RELATE_BASE, _relate_cross(1, _RC, "n"), 17, 0),
+    ("annot-links-r1", "links filed on 17 and 21", ANNOT_CROSS, _relate_cross(0, _RC, "links_filed"), 17, 0),
+    ("annot-links-r2", "links filed on 17 and 21", ANNOT_CROSS, _relate_cross(1, _RC, "links_filed"), 21, 0),
+    ("annot-links-r1-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
+     _relate_cross(0, _RC, "links_on_panel_relate"), 12, 0),
+    ("annot-links-r2-panel", "(12 and 16 on pairs the panel", ANNOT_CROSS,
+     _relate_cross(1, _RC, "links_on_panel_relate"), 16, 0),
+    ("annot-cross-accept-r1-n", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r1-bad", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(0, _AC, "bad"), 1, 0),
+    ("annot-cross-accept-r2-n", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "n"), 5, 0),
+    ("annot-cross-accept-r2-bad", "accepts 4/5 and 5/5", ANNOT_CROSS, _relate_cross(1, _AC, "bad"), 0, 0),
+    ("annot-opus-accept-n", "accept precision per arm 19/23", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "accept_precision", "n"), 23, 0),
+    ("annot-opus-accept-bad", "accept precision per arm 19/23", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "accept_precision", "bad"), 4, 0),
+    ("annot-sonnet-accept-n", "accept precision per arm 19/23", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "accept_precision", "n"), 23, 0),
+    ("annot-sonnet-accept-bad", "accept precision per arm 19/23", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "accept_precision", "bad"), 4, 0),
+    ("annot-base-opus-accept-n", "the baseline's 20/24 and 19/24", OPUS55_BASE,
+     _relate_arm("opus-5-5", "accept_precision", "n"), 24, 0),
+    ("annot-base-opus-accept-bad", "the baseline's 20/24 and 19/24", OPUS55_BASE,
+     _relate_arm("opus-5-5", "accept_precision", "bad"), 4, 0),
+    ("annot-base-sonnet-accept-n", "the baseline's 20/24 and 19/24", SONNET55_0929,
+     _relate_arm("sonnet-5-5", "accept_precision", "n"), 24, 0),
+    ("annot-base-sonnet-accept-bad", "the baseline's 20/24 and 19/24", SONNET55_0929,
+     _relate_arm("sonnet-5-5", "accept_precision", "bad"), 5, 0),
+    ("annot-opus-relate-mean", "average 0.70 (Opus 5.5) and 0.71", ANNOT_CROSS,
+     _mean_conf(_ANNOT_O, "relate"), 0.70, 2),
+    ("annot-sonnet-relate-mean", "average 0.70 (Opus 5.5) and 0.71", ANNOT_CROSS,
+     _mean_conf(_ANNOT_S, "relate"), 0.71, 2),
+    ("annot-opus-relate-at-gate", "confidence, and 12 and 23", ANNOT_CROSS,
+     _at_gate(_ANNOT_O, "relate"), 12, 0),
+    ("annot-sonnet-relate-at-gate", "confidence, and 12 and 23", ANNOT_CROSS,
+     _at_gate(_ANNOT_S, "relate"), 23, 0),
+    ("annot-opus-relation-match", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-opus-panel-relate-votes", "on 21 of 41 relate votes", ANNOT_OPUS,
+     _relate_arm(_ANNOT_O, "relate", "on_panel_verdict", "relate"), 41, 0),
+    ("annot-sonnet-relation-match", "and 21 of 44 (Sonnet 5.5)", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "panel_relate_rows", "relation_match"), 21, 0),
+    ("annot-sonnet-panel-relate-votes", "and 21 of 44 (Sonnet 5.5)", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "on_panel_verdict", "relate"), 44, 0),
+    ("annot-sonnet-reject-n", "rejects are 29/34 correct", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "reject_precision", "n"), 34, 0),
+    ("annot-sonnet-reject-bad", "rejects are 29/34 correct", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "reject_precision", "bad"), 5, 0),
+    ("annot-base-sonnet-reject-n", "against the baseline's 32/35", SONNET55_0929,
+     _relate_arm("sonnet-5-5", "reject_precision", "n"), 35, 0),
+    ("annot-base-sonnet-reject-bad", "against the baseline's 32/35", SONNET55_0929,
+     _relate_arm("sonnet-5-5", "reject_precision", "bad"), 3, 0),
+    ("annot-sonnet-relate-on-accept", "relation on 8 votes", ANNOT_SONNET,
+     _relate_arm(_ANNOT_S, "relate", "on_label", "accept"), 8, 0),
+    ("annot-base-splits-r1", "rise from 5 and 5 to 6 and 7", RELATE_BASE, _splits(0), 5, 0),
+    ("annot-base-splits-r2", "rise from 5 and 5 to 6 and 7", RELATE_BASE, _splits(1), 5, 0),
+    ("annot-splits-r1", "rise from 5 and 5 to 6 and 7", ANNOT_CROSS, _splits(0), 6, 0),
+    ("annot-splits-r2", "rise from 5 and 5 to 6 and 7", ANNOT_CROSS, _splits(1), 7, 0),
+    # The retired first design, kept as the record.
+    ("relate-cross-reject-r1-n", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "n"), 5, 0),
+    ("relate-cross-reject-r1-bad", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(0, _RC, "bad"), 0, 0),
+    ("relate-cross-reject-r2-n", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "n"), 9, 0),
+    ("relate-cross-reject-r2-bad", "fell to 5/5 and 9/9", RELATE_CROSS, _relate_cross(1, _RC, "bad"), 0, 0),
     ("relate-votes-total", "none of the 85 relate votes", RELATE_CROSS,
-     lambda d: sum(a["relate"]["n"] for a in d["vote_confidence"].values()), 85),
+     lambda d: sum(a["relate"]["n"] for a in d["vote_confidence"].values()), 85, 0),
     ("relate-votes-at-gate", "none of the 85 relate votes", RELATE_CROSS,
-     lambda d: sum(a["relate"]["ge_reject_gate"] for a in d["vote_confidence"].values()), 0),
-    ("relate-links-r1", "links filed on 1 and 6", RELATE_CROSS, _relate_cross(0, _RC, "links_filed"), 1),
-    ("relate-links-r2", "links filed on 1 and 6", RELATE_CROSS, _relate_cross(1, _RC, "links_filed"), 6),
-    ("relate-links-r1-panel", "links filed on 1 and 6", RELATE_CROSS,
-     _relate_cross(0, _RC, "links_on_panel_relate"), 1),
-    ("relate-links-r2-panel", "links filed on 1 and 6", RELATE_CROSS,
-     _relate_cross(1, _RC, "links_on_panel_relate"), 6),
+     lambda d: sum(a["relate"]["ge_reject_gate"] for a in d["vote_confidence"].values()), 0, 0),
 ]:
     CLAIMS.append(Claim(
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
-        value=_val, stated=_stated, places=0))
+        value=_val, stated=_stated, places=_places))
 
 
 # The 2026-09-29 merge-detector replay: the dream-alias screen's filing
