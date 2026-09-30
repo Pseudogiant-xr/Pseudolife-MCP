@@ -3334,9 +3334,11 @@ class MemoryService(DreamOps):
         is as dangerous as a bare source.
 
         With PostgreSQL, when sources and digests match together, digests
-        are retained as
-        retired history. A digest-only selection still deletes those entries.
-        Retained history is excluded from the deleted count and text list.
+        are retained as retired history. A digest-only selection still
+        deletes those entries, as does a match whose digest cannot be
+        retired (its session episode is gone, or no matched source was
+        persisted). Retained history is excluded from the deleted count and
+        text list.
 
         Returns ``{"deleted_count": N, "deleted_texts": [...]}``. The
         sample of deleted texts is capped at 20 so MCP responses stay

@@ -1612,9 +1612,10 @@ def memory_forget(
                     "(20) matches; else refused, reporting would_delete.")] = False,
 ) -> dict[str, Any]:
     """Forget from one memory store. ``memory`` hard-deletes the matched
-    entries (cleanup for junk/test data) and retires what they supported:
-    facts they cited, their session digests (kept as history) and
-    source-backed edges. ``fact`` hard-deletes (no audit trail); ``world`` and ``lesson``
+    entries (cleanup for junk/test data) and retires what depended on them
+    alone: facts left with no current citation, their session digests (kept
+    as history) and dream edges left with no current evidence. ``fact``
+    hard-deletes (no audit trail); ``world`` and ``lesson``
     RETIRE the slot with an audit row, undone by ``memory_graph_review(
     action="restore_slot")``. For "now wrong, keep history" use
     ``memory_fact_set`` (facts) or ``memory_supersede`` (memories) instead.
