@@ -68,7 +68,7 @@ class Daemon:
 
 
 def _board_session(monkeypatch, daemon, *, driver, channel=False, wake=False,
-                   state_path=None):
+                   state_path=None, coordination="1", probe=None):
     """Run ``_run_session_proxy`` with the adapter on ``daemon`` and the
     upstream MCP faked; ``driver(handler, calls, inbox)`` plays the client.
     Returns the upstream calls, after checking no task outlived the session."""
@@ -124,7 +124,12 @@ def _board_session(monkeypatch, daemon, *, driver, channel=False, wake=False,
     monkeypatch.setattr(channel_module, "serve_channel", serve_channel)
     monkeypatch.setattr(shim, "_ADAPTER_STARTUP_SECONDS", 0.2)
     monkeypatch.setattr(shim, "_ADAPTER_RETRY_DELAYS", (0.02,), raising=False)
-    monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
+    if coordination is None:
+        monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", coordination)
+    if probe is not None:
+        monkeypatch.setattr(shim, "_board_available", probe)
     for name in ("PSEUDOLIFE_WRITER_ID", "PSEUDOLIFE_AGENT_STATE",
                  "PSEUDOLIFE_AGENT_STATE_DIR", "PSEUDOLIFE_AGENT_WAKE"):
         monkeypatch.delenv(name, raising=False)
@@ -374,3 +379,87 @@ def test_registered_note_waits_for_a_validated_call():
     late.note_turn()
     assert late.deliver_hint() == shim._BOARD_REGISTERED_NOTE
     assert late.deliver_hint() is None
+
+
+def _scripted_probe(*answers):
+    """The default-mode board check, answering in turn (the last repeats):
+    True serves the board, False refuses it, None is no answer."""
+    asked = []
+
+    def probe(url, provider):
+        asked.append(url)
+        return answers[min(len(asked), len(answers)) - 1]
+
+    probe.asked = asked
+    return probe
+
+
+def test_unanswered_default_probe_is_retried_then_registers(monkeypatch, capsys):
+    """Coordination unset (the default): the startup board check got no
+    answer, which is not a no. The shim keeps asking, then registers."""
+    daemon = Daemon()
+    daemon.up = True
+    probe = _scripted_probe(None, None, True)
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        with pytest.raises(Exception) as caught:
+            await handler(None, _update())
+        seen["refusal"] = caught.value.message
+        seen["headers"], seen["first"] = await _until_registered(handler, calls)
+
+    _board_session(monkeypatch, daemon, driver=driver, coordination=None, probe=probe)
+    assert "retried" in seen["refusal"]
+    assert seen["headers"]["X-PL-Agent"] == "agent-late"
+    assert any("board registration completed" in t for t in _texts(seen["first"]))
+    assert len(probe.asked) == 3
+    err = capsys.readouterr().err
+    assert "did not answer the board check" in err
+    assert "coordination registered after" in err
+
+
+def test_unanswered_probe_then_a_refusal_stops_quietly(monkeypatch, capsys):
+    """A board the daemon, once it answers, does not serve this bearer is
+    today's quiet default: no adapter, no warning, no note; board writes go
+    to the daemon, whose refusal says why."""
+    daemon = Daemon()
+    daemon.up = True
+    probe = _scripted_probe(None, False)
+
+    async def driver(handler, calls, inbox):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(probe.asked) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        texts = _texts(await handler(None, _update()))
+        assert "X-PL-Agent" not in calls[-1]["headers"]
+        assert texts == []
+
+    _board_session(monkeypatch, daemon, driver=driver, coordination=None, probe=probe)
+    assert len(probe.asked) == 2
+    assert daemon.calls == []  # no adapter was ever built
+    err = capsys.readouterr().err
+    assert "coordination unavailable" not in err and "registered" not in err
+
+
+def test_a_board_check_answered_as_the_close_begins_registers_nothing(monkeypatch):
+    """The check's wait_for can lose a cancellation the way an attempt's can;
+    a yes that arrives after the close began must not start a registration."""
+    built = []
+
+    async def run():
+        late = None
+
+        async def ask_board():
+            late._closing = True  # the close began while the check was out
+            return True
+
+        late = shim._LateBoardAdapter(lambda: built.append(1), ask_board=ask_board)
+        late.start()
+        await asyncio.wait({late._task}, timeout=2)
+        return late._task.done()
+
+    monkeypatch.setattr(shim, "_ADAPTER_RETRY_DELAYS", (0.001,))
+    assert asyncio.run(run()) is True
+    assert built == []
