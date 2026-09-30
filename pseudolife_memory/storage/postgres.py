@@ -1142,7 +1142,7 @@ class PostgresStorage:
         ids = sorted(set(int(i) for i in ids))
         if not ids:
             return {"slots": [], "digests": [], "edges": []}
-        with self._txn():
+        with self.transaction():
             slots = self.conn.execute(
                 "SELECT DISTINCT t.entity_norm, t.attribute_norm "
                 "FROM memory_traces t WHERE t.entry_id = ANY(%s) "
