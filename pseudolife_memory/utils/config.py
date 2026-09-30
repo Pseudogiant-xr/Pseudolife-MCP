@@ -443,7 +443,14 @@ class DreamConfig:
     # "Pseudolife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
-    alias_candidate_min_cosine: float = 0.5
+    # 0.7 since 2026-09-29: the 0.5 above was calibrated on MiniLM and went
+    # stale with the Qwen3-Embedding-0.6B swap, which scores that paraphrase
+    # 0.750 and the unrelated 'ship pipeline' / 'release train' 0.558. In the
+    # 2026-09-29 triage of 1,016 merge proposals this screen had filed 574
+    # (16 accepted, 524 rejected, 34 left); past the merge veto, 0.7 keeps
+    # 420 of the remaining 538 and loses one accepted paraphrase (0.655) —
+    # the scrubbed replay is evals/results/merge-detector-replay-20260929.json.
+    alias_candidate_min_cosine: float = 0.7
     # TiMem-inspired known-facts window
     # (docs/specs/2026-07-10-known-facts-window-design.md): when > 0, the dream
     # prompt also shows the CURRENT VALUES of the top-N relevance-ranked slots
@@ -534,13 +541,33 @@ class DeepDreamConfig:
     auto_tick: bool = True               # False disables the tick entirely
     auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
     auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
+    # Review-queue health (dream_status["review_queue"], and one briefing
+    # line while it needs attention). Measured on the live bank: a full
+    # triage settled the merge queue on 2026-09-02 (63 rows); by 2026-09-29
+    # it held 1,016 pending (~38 a day over 27 days, the merge judge in
+    # shadow from 09-11) and nothing reported it until a human looked.
+    # Any judge mode: 500 is about twice the largest backlog ever cleared by
+    # hand (239 merges, 2026-08-05); that episode crossed it around day 13.
+    # 0 disables.
+    review_queue_alert_pending: int = 500
+    # While no judge applies merge verdicts (judge_mode off/shadow, or
+    # judges_enabled false), alert once the oldest pending merge is older
+    # than this AND at least review_queue_alert_min_pending rows wait. In
+    # auto-reject/auto the same rule reads the oldest merge no judge has
+    # recorded a verdict on, which catches a judge that is configured but
+    # not running (no endpoint). The floor is about one routine hand triage
+    # (109 merges on 2026-08-21), so a handful of old rows on a small bank
+    # stays quiet. 0 disables the age rule.
+    review_queue_alert_age_days: float = 14.0
+    review_queue_alert_min_pending: int = 100
     # Autonomous Step-C judge (2026-08-16 design, extended 2026-09-02): the
     # sweep sends pending merge proposals to the configured extractor.
     # "off" = never; "shadow" = record the verdict on the proposal, apply
     # nothing; "auto-reject" = additionally apply reject verdicts at/above
     # judge_reject_min_confidence (decided_by='dream-judge', pair
     # dismissed — and, with judge_second_opinion on, two agreeing rejects
-    # at mean >= judge_reject_min_confidence_2); "auto" = additionally
+    # from DIFFERENT models (since 2026-09-30) at mean >=
+    # judge_reject_min_confidence_2); "auto" = additionally
     # fold a pair on two agreeing accepts from DIFFERENT models on
     # non-low-differential evidence (the only path that applies an
     # accept). Automatic rejections are bound to their evidence and policy;
@@ -562,8 +589,10 @@ class DeepDreamConfig:
     # the cap also moves the auto-accept gate's precondition.
     judge_snippet_max_chars: int = 240
     judge_reject_min_confidence: float = 0.8
-    judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
-    judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
+    # str | None like judge_second_model: both are Console knobs since
+    # 2026-09-30, and the Console clears a string knob to None.
+    judge_url: str | None = ""           # optional OpenAI-compatible override endpoint; empty = the dream extractor
+    judge_model: str | None = ""         # model name for judge_url (ignored when judge_url is empty)
     # One switch for every judge stage below (merge, link, junk, curation,
     # candidates): False makes each return {"skipped": "judges_disabled"}
     # without reading a queue. Also stops ordinary-sweep analyzer filing
@@ -584,16 +613,30 @@ class DeepDreamConfig:
     # >= 0.6 — while single-vote accept precision on the same rows was 0.74
     # and 9 of 10 two-vote accepts on low-differential rows were right but
     # the tenth folded the wrong way. A wrong fold deletes an entity, so
-    # accepts additionally require judge_mode "auto".
+    # accepts additionally require judge_mode "auto". Since 2026-09-30 the
+    # pass is skipped (no call) when the configuration makes the second
+    # opinion the first model again: no judge_second_url, and
+    # judge_second_model empty or the first endpoint's configured name.
     judge_second_opinion: bool = True
     # A same-model second vote (temperature 0) is independent only through
     # batch composition — 2/129 flips on the 2026-08-16 ladder — which is
-    # enough to double-check a reject but not to authorize a fold: "auto"
-    # accepts require a DIFFERENT model here (with claude-fable-5 as the
-    # second model the same 63 rows gave 6/6 accepts, 8/8 rejects).
+    # not enough to authorize a fold, nor (since 2026-09-30, after one
+    # model's two votes authorized rejects from 2026-09-03 to 09-11) a
+    # reject: both two-vote gates require a DIFFERENT model here (with
+    # claude-fable-5 as the second model the same 63 rows gave 6/6
+    # accepts, 8/8 rejects). A same-model second opinion by configuration
+    # is not asked at all (judge_second_opinion above); one whose sameness
+    # only the served name reveals is recorded and authorizes nothing.
     # str | None: the Console setter clears a string knob to None (config_io
     # _coerce); every reader tests truthiness, so "" and None mean the same.
     judge_second_model: str | None = ""  # empty = same endpoint, fresh batch
+    # Where the second opinion is asked (2026-09-30): empty = the first
+    # opinion's endpoint (judge_url, else the dream extractor) with
+    # judge_second_model swapped in; set = an OpenAI-compatible endpoint of
+    # its own, serving judge_second_model (empty = its launch default), so
+    # the two opinions can come from different providers. Its bearer key is
+    # env-only, PSEUDOLIFE_JUDGE_SECOND_API_KEY, and never goes anywhere else.
+    judge_second_url: str | None = ""
     judge_reject_min_confidence_2: float = 0.7   # two-vote mean gate
     judge_accept_min_confidence: float = 0.6     # two-vote mean gate ("auto" only)
     # Link judge over pending edge_proposals. Edges are reversible

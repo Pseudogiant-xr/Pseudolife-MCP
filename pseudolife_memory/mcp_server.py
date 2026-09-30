@@ -310,7 +310,7 @@ def memory_agents(
     shows open sessions of unknown scope. Idle peers are counted
     (idle_omitted), not listed; activity is evidence, not a lock. Update
     needs an authenticated adapter; omitted fields stay. expect (seconds):
-    status overdue past that. children: subagent labels, max 8; [] clears.
+    status overdue past that. children: subagent labels, max 8; [] clears yours.
     When you stop, park: park_reason (done, blocked, needs_approval,
     needs_info, needs_resource, waiting_peer), park_needs, park_clear_by
     (agent id, maintainer, anyone), park_resume, park_expires (epoch,

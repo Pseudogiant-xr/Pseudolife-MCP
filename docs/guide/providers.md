@@ -273,6 +273,19 @@ Codex's startup hook review, so approve it there or rerun
 `python ops/setup-codex-hooks.py --source plugin --trust ask` after the
 update.
 
+The plugin also carries Claude Code's subagent board guard on `PreToolUse`
+(matched to `memory_agents` and `memory_message` only; since 2026-09-30),
+which stops a Claude Code subagent writing to the board under its parent's
+address ([Delivery and recovery](configuration.md#delivery-and-recovery)).
+Codex 0.158 lists it as a further PseudoLife hook (`pre_tool_use`), but a
+Codex child has a board address of its own, so in Codex it allows every
+call: the native command exits at once, and the bash script sees the Codex
+context and exits too. Setup approves it with the others and does not
+require it: a Codex that does not list it, or a user who disabled it in
+`/hooks`, still reaches ready. Left unapproved, Codex skips it, which is
+the same outcome; `pseudolife-mcp doctor` reports it among the unapproved
+handler positions until setup reruns.
+
 For authenticated stdio connections, setup prepares a private bearer file and
 records the same daemon URL and file path for the shim and lifecycle hooks.
 Updating that file changes the credential used by subsequent operations; users

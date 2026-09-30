@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v49). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v50). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -570,6 +570,21 @@ desktop runtime probes confirmed that this metadata survives resume and changes
 on fork. Process environment variables, checkout names and titles do not select
 the mailbox. Missing or malformed metadata leaves ordinary memory available
 without attaching a mailbox.
+
+A native subagent (`collaboration.spawn_agent`) is a thread of its own, so it
+gets its own address too, and since schema v50 that address is linked to its
+parent's. Codex 0.158.0 (CLI and desktop, measured 2026-09-29) sends
+`x-codex-turn-metadata` beside `threadId`; for a subagent it carries
+`thread_source: "subagent"`, the child's `thread_id` and the spawning
+thread's `parent_thread_id`. The shim accepts that parent only when the
+metadata's thread is the call's validated `threadId` and the parent is a
+different canonical UUID, and passes it when the thread registers; anything
+malformed is ignored and the call goes on. A user's fork of a conversation
+carries no subagent source and stays a peer. The daemon links the child to
+the parent's row under the same principal (only among Codex thread rows),
+at once or when the parent makes its first call later; peers see
+`parent_agent_id` on the child. A subagent does not send board mail: its
+parent does ([Delivery and recovery](#delivery-and-recovery)).
 
 For an existing Codex stdio registration, run the following from a checkout using
 the Python environment where Pseudolife is installed:
@@ -1339,13 +1354,66 @@ status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
 `memory_message(action="receive")` without `ack`, `memory_search`), and the
-orchestrating session owns the address. The served check-in says so. The
+orchestrating session owns the address. The served check-in says so, and
+since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
+(`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
+puts in a subagent's hook input, and never in the parent's, and denies that
+subagent's `memory_agents` update, claim and release and `memory_message`
+send and ack, whatever the server's name. Its list and receive pass, and so
+does every call the parent makes. The subagent reads the refusal as
+`PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
+it to ask the parent instead (probed on Claude Code 2.1.283: the child's
+update never reached the server, its list and the parent's update did). A
+payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
+anything but a yes, let the call through. Installs without the plugin keep
+the instruction only. In Codex the same entry allows everything: a Codex
+child has a board address of its own. Claude Code
 subagents get no addresses of their own: the parent names them on its own row
 with `memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 `{label, since}` in which the daemon stamps `since` and keeps it for a label
 the next update carries over. Omitting `children` leaves it unchanged and `[]`
 clears it; a children-only update does not move `status_set_at`.
+
+Since schema v50 (maintainer decision 2026-09-30: subagents are liveness
+information on their parent, not peers) the plugin keeps that list current
+on its own. Its SubagentStart and SubagentStop hooks
+(`plugin/hooks/subagent-board.sh`) read the payload's `agent_id` and
+`agent_type`, find the session's board address in the `<key>.agent` file the
+shim writes beside its digest (as the Stop hook does), and make one bounded
+`POST /api/hook/subagent?agent=<id>&event=start|stop&child=<agent_id>&type=<agent_type>`
+each: a start adds `{label: "<agent_type>#<first 8 of the id>", since,
+agent_id}`, a stop removes it. SubagentStart carries no task description,
+hence the label. The hooks are `async` (their answer is ignored) and fail
+open: a down daemon, a refused bearer or a session without an address adds
+nothing and never holds a subagent back. A parent's `children=[...]` update
+replaces only its own labels and keeps the live hook entries (`[]` clears
+the parent's labels); a hook never removes a parent label; a parent label
+spelled like a live hook entry names that same child. Hook entries have a
+cap of their own, eight, and never count against the parent's eight labels,
+so a parent's update is never refused because of them; past it a new start
+replaces the oldest hook entry. A hook entry whose stop never came (a killed
+session, a hook that failed open, or an async stop that overtook its own
+start) does not stay: past three hours (`HOOK_CHILD_TTL`, the attached-idle
+window) it is no longer listed and goes at the next write to the list, and a
+detach (the shim ending with its session) clears every hook entry, logged as
+an `update` by the daemon; the parent's own labels stay. An update is one
+transaction: a refused `children` (more than eight labels, a duplicate, one
+over 40 characters) applies nothing else sent with it, status and park
+included, and the `invalid_children` detail says nothing was updated. In
+Codex these hooks do nothing: a Codex native subagent has an address of its
+own (next paragraph).
+
+A Codex native subagent (spawned with `collaboration.spawn_agent`) runs on its
+own thread, so it gets its own board address like any Codex thread (see
+[Codex CLI and desktop](#codex-cli-and-desktop)), linked to its parent: the
+row carries `parent_agent_id` and `subagent: true`. Its parent sends for it:
+`memory_message(action="send")` from a subagent's address is refused with
+`child_send_refused` ("a subagent does not send board mail; ask your parent
+session"; HTTP 403 on REST), whether or not the parent has registered yet.
+It still receives and acknowledges its own mail and sets its own status and
+park record. A peer that sees a subagent working on something it is
+touching messages the parent.
 
 ### Park records and the wake decision
 
@@ -1641,6 +1709,17 @@ also capped (below, and by the daemon's `wake` caps under
   decision of a hook declared `async` has not been probed on a live install.
   `ops/setup-codex-hooks.py` approves it with the other three definitions
   (see [Codex specifics](providers.md#codex-specifics)).
+- The plugin's subagent liveness hook (schema v50, `subagent-board.sh`),
+  which keeps a Claude Code session's `children` current (see [Delivery and
+  recovery](#delivery-and-recovery)), runs on SubagentStart and from a
+  second SubagentStop group, separate from the child park gate's group
+  below. Both entries are no-ops in Codex: `lifecycle.ps1 -Event
+  SubagentBoardStart|SubagentBoardStop` exits at once, and the bash script
+  exits in Codex context. Codex's native subagents are linked to their
+  parent by the shim instead. `ops/setup-codex-hooks.py` approves the
+  entries Codex lists and treats them as optional, like Stop, accepting
+  either or both of SubagentStop's two handlers; one disabled in `/hooks`
+  stays disabled.
 - **A Codex child thread's stop (SubagentStop).** A native Codex child
   (`collaboration.spawn_agent`) or fork has a board address of its own: the
   shim keys it by the child's MCP `threadId` and writes the child's
@@ -2944,7 +3023,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v49**; migrations are additive
+The current Postgres meta version is **v50**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -2999,6 +3078,7 @@ The milestones:
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
 | v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
 | v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
+| v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
