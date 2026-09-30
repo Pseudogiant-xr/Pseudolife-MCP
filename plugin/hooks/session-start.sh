@@ -228,11 +228,14 @@ if [ "${1:-}" = memory-policy ]; then
 fi
 # The plugin release this hook runs from, read beside the script so the
 # daemon can open the briefing with a notice when the two differ (a cached
-# plugin moves only on /plugin update; the daemon on every deploy). A copy
-# without a manifest beside it (Codex's content-addressed hooks) sends
-# nothing. Only a version-shaped value goes on the wire.
+# plugin moves only on an update; the daemon on every deploy). It lives in
+# release.json, not the manifest: Claude Code names its cache folder by the
+# manifest version, and the plugin carries none there so that each update
+# installs beside the copy running sessions use. A copy without release.json
+# beside it (Codex's content-addressed hooks) sends nothing. Only a
+# version-shaped value goes on the wire.
 PLUGIN_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9A-Za-z.+-]*\)".*/\1/p' \
-    "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/.claude-plugin/plugin.json" 2>/dev/null | head -1)
+    "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/release.json" 2>/dev/null | head -1)
 # A digest of the hook scripts beside this one, so the daemon can tell
 # a cached plugin at its own version apart from its own hooks (the version
 # only moves with a release). Same function as pseudolife_memory.plugin_hooks

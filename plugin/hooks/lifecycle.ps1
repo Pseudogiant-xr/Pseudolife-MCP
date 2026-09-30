@@ -46,14 +46,16 @@ function Get-DigestDir {
     return Join-Path $HOME '.pseudolife-mcp/digests'
 }
 
-# The plugin release this hook runs from (the manifest beside the script),
+# The plugin release this hook runs from (release.json beside the script),
 # sent with SessionStart so the daemon can open the briefing with a notice
-# when the two differ. '' without a manifest or for a non-version value.
+# when the two differ. Not the manifest: the plugin carries no version there,
+# so Claude Code installs each update beside the copy running sessions use.
+# '' without release.json or for a non-version value.
 function Get-PluginVersion {
     $root = if ($env:CLAUDE_PLUGIN_ROOT) { $env:CLAUDE_PLUGIN_ROOT } else { Join-Path $PSScriptRoot '..' }
     try {
-        $manifest = Get-Content -LiteralPath (Join-Path $root '.claude-plugin/plugin.json') -Raw | ConvertFrom-Json
-        $version = [string]$manifest.version
+        $release = Get-Content -LiteralPath (Join-Path $root 'release.json') -Raw | ConvertFrom-Json
+        $version = [string]$release.version
     } catch { return '' }
     if ($version -match '^[0-9A-Za-z.+-]{1,32}$') { return $version }
     return ''

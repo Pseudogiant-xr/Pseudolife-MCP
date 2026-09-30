@@ -577,8 +577,12 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     assert codex, "session-end.sh needs a Codex-context curl budget"
     assert "--retry" not in codex.group(1)
     max_time = int(re.search(r"--max-time\s+(\d+)", codex.group(1)).group(1))
-    setup = (ROOT / "ops/setup-codex-hooks.py").read_text(encoding="utf-8")
-    cap = int(re.search(r'"SessionEnd":\s*(\d+)\}\[event\]', setup).group(1))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("codex_hook_setup_cap", ROOT / "ops/setup-codex-hooks.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    cap = setup.launcher_definitions(tmp_path)["SessionEnd"]["timeout"]
+    assert cap == setup.manual_definitions(tmp_path)["SessionEnd"]["timeout"]
     assert max_time + 1 <= cap
     # Live: a daemon that never answers must not hold the hook past the cap.
     attempts = []  # seconds each attempt's connection stayed open
@@ -1044,11 +1048,7 @@ function codex {{
 def test_fresh_tokenless_install_ignores_unforwarded_ambient_connection(
         tmp_path, shell, env_supported):
     if shell == "bash":
-        executable = shutil.which("bash")
-        if os.name == "nt":
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            executable = str(candidate) if candidate and candidate.is_file() else None
+        executable = bash_exe()
     else:
         executable = shutil.which("pwsh")
     if not executable:
@@ -1305,11 +1305,7 @@ def test_powershell_shim_lookup_tolerates_an_unrunnable_interpreter(tmp_path):
 def test_installer_preserves_existing_forwarded_user_credential(
         tmp_path, shell, installer_token):
     if shell == "bash":
-        executable = shutil.which("bash")
-        if os.name == "nt":
-            git = shutil.which("git")
-            candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-            executable = str(candidate) if candidate and candidate.is_file() else None
+        executable = bash_exe()
     else:
         executable = shutil.which("pwsh")
     if not executable:
@@ -1575,14 +1571,8 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
             + stages + "\nWrite-Output ('RESULT:' + $hookState['codex'] + ':' + $instrState['codex'])\n",
             encoding="utf-8")
         return pwsh_run("-File", script, env=env).stdout
-    bash = shutil.which("bash")
-    if os.name == "nt":
-        # The system32 bash is a WSL launcher; use native Git Bash here.
-        git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin/bash.exe" if git else None
-        bash = str(candidate) if candidate and candidate.is_file() else None
-    if not bash:
-        pytest.skip("Bash is not installed")
+    # bash_exe() skips the native-Windows System32 WSL launcher for Git Bash.
+    bash = bash_exe()
     text = (ROOT / "ops/install.sh").read_text(encoding="utf-8")
     parts = re.search(r"(?ms)^# [^\n]*9\. session lifecycle hooks[^\n]*\n(.*?)^# [^\n]*11\. wire into selected MCP clients", text)
     assert parts, "installer stage boundaries changed"
@@ -1603,7 +1593,7 @@ def run_installer_stages(tmp_path, shell, repo, env, source, trust, instructions
 
 
 def _plugin_version():
-    return json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    return json.loads((ROOT / "plugin/release.json").read_text(encoding="utf-8"))["version"]
 
 
 def _recording_daemon():
@@ -1635,7 +1625,7 @@ def _hook_env(tmp_path, port):
 
 def test_bash_session_start_sends_the_plugin_version(tmp_path):
     """The SessionStart hook tells the daemon which plugin release it runs
-    from (read beside the script, in .claude-plugin/plugin.json), with and
+    from (read beside the script, in release.json), with and
     without a session id, so the briefing can open with a mismatch notice.
     2026-09-21: a stale plugin cache ran an hour against a newer daemon
     with nothing to say so."""
@@ -1694,13 +1684,10 @@ def test_native_session_start_sends_the_plugin_version(tmp_path):
 
 
 def _plugin_with_version(tmp_path, version):
-    """A plugin tree whose manifest carries ``version``; hooks run from it."""
+    """A plugin tree whose release.json carries ``version``; hooks run from it."""
     root = tmp_path / "plugin"
     shutil.copytree(ROOT / "plugin", root)
-    manifest = root / ".claude-plugin/plugin.json"
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    data["version"] = version
-    manifest.write_text(json.dumps(data), encoding="utf-8")
+    (root / "release.json").write_text(json.dumps({"version": version}), encoding="utf-8")
     return root
 
 

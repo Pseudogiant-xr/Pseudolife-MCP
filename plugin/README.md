@@ -249,17 +249,19 @@ does not move when the daemon is redeployed. The updater moves it with the
 daemon: `pseudolife-mcp update` (from a checkout, `ops\update.ps1 -All` /
 `ops/update.sh --all`, or `python ops/update_clients.py` on its own)
 refreshes the marketplace clone, compares the plugin tree byte for byte
-against the cache, and
-reinstalls the plugin only when they differ — the plugin's version string
-is pinned to the package version, so `/plugin update` alone says "already
-latest" after a plugin-only change. By hand, when the version did change:
+against the cache, and runs `claude plugin update` only when they differ.
+The manifest carries no version, so Claude Code names each marketplace
+commit's copy by its commit and installs the new one beside the one
+running sessions use; nothing is uninstalled, and no session has to close.
+By hand:
 
 ```
 /plugin marketplace update pseudolife-mcp
 /plugin update pseudolife-memory@pseudolife-mcp
 ```
 
-Either way, start a new session afterwards. The SessionStart hook sends
+Either way, sessions already running keep the copy they loaded; a session
+started afterwards runs the new one. The SessionStart hook sends
 the plugin's version and a digest of its hook scripts to the daemon; when
 the version differs, or the version matches but the hooks do not, the
 session briefing opens with a one-line notice naming the command that

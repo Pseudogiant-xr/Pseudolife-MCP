@@ -628,9 +628,10 @@ On a headless host, `pseudolife-mcp update --schedule 03:30` installs a
 daily task or timer that applies a new release only while
 `updates.unattended_daemon: true` is set and no session is active on the
 agent board, with the same backup and rollback tag, and posts a board
-notice either way. When Codex's hook copy differs from the scripts just
-deployed, every update path prints the complete re-approval steps, and
-nothing otherwise.
+notice either way. Codex keeps its hook approvals across updates (it
+approves the hook definitions, not the scripts), and an update from a
+checkout refreshes manual Codex hook copies itself; only a changed
+`hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:
@@ -716,9 +717,9 @@ runtimes once no process runs from them and no registration names them.
 Sessions already running keep the runtime they started with; the next
 session start uses the new one. A shim running straight from this
 checkout's `.venv` is already live and is named instead. It then
-refreshes the plugin cache by comparing bytes against the marketplace
-clone (the plugin's version string only moves with a release, so
-`/plugin update` alone would say "already latest"), and reports whether
+refreshes the plugin cache when its bytes differ from the marketplace
+clone (`claude plugin update` installs the new copy beside the one
+running sessions use; nothing is uninstalled), and reports whether
 Codex's hook copy matches the checkout (that refresh is a consent step:
 `python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
 and which clients need a restart; a client-side step that fails is
@@ -1066,7 +1067,10 @@ See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 definitions: the memory and coordination SessionStart and UserPromptSubmit
 handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's wake
 hook, on by default; in Codex it runs only the park gate). It does not approve other plugins or bypass
-future trust checks. Changed definitions need approval again, and so does a
+future trust checks. Codex approves the definitions, not the scripts they
+run, so the approval also covers the scripts later PseudoLife updates
+install (for manual copies the update installs them itself, verified by
+content). Changed definitions need approval again, and so does a
 handler a plugin update adds; Codex skips an unapproved one silently in the
 desktop app, which `pseudolife-mcp update` (from a checkout, `ops/update.ps1
 -All` or `ops/update_clients.py`) reports as `needs-approval`. If automatic setup cannot

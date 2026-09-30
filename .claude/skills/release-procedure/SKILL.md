@@ -55,9 +55,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the compose daemon image tag, **both** version fields in `server.json`,
-   `plugin/.claude-plugin/plugin.json` (pinned to pyproject by
-   `tests/test_plugin_packaging.py`; the plugin marketplace serves from
-   this repo, so bumping it is also what ships plugin updates), and
+   `plugin/release.json` (pinned to pyproject by
+   `tests/test_plugin_packaging.py`; the release the hooks report for the
+   version handshake. `plugin/.claude-plugin/plugin.json` carries no
+   version: Claude Code keys its cache by it, and the marketplace ships the
+   plugin from every master commit), and
    `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
    re-verify the map's claims, don't just renumber it — update
    `meta.verified` to the date you actually checked). `server.json` (both

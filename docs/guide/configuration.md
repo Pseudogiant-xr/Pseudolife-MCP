@@ -2477,6 +2477,58 @@ at startup, the daemon serves nothing rather than a partly loaded bank:
 configured, such as an embedding-dimension mismatch, and the shim exits on
 it.
 
+## Claude Code plugin
+
+### Where the plugin lives: one cache folder per commit
+
+The plugin (`plugin/`, served by the `pseudolife-mcp` marketplace straight
+from this repository's master) is an install of its own, like the shim.
+Claude Code copies it into its plugin cache,
+`~/.claude/plugins/cache/pseudolife-mcp/pseudolife-memory/<version>/`
+(`CLAUDE_CODE_PLUGIN_CACHE_DIR` moves the whole `plugins` directory), and
+each session runs its hooks from the folder it started with.
+
+Claude Code names that folder by the `version` in the plugin's manifest,
+and `plugin/.claude-plugin/plugin.json` deliberately carries none. The
+version is then the marketplace commit (12 hex characters, as for
+Anthropic's own plugins), so every change to the plugin gets a folder of
+its own and an update never replaces a folder a session is using:
+
+- `pseudolife-mcp update`, `ops/update.ps1 -All` / `ops/update.sh --all`
+  and `python ops/update_clients.py` refresh the marketplace clone and
+  compare its plugin tree with the installed cache, byte for byte (CRLF
+  read as LF; the top-level dot entries Claude Code keeps there, such as
+  `.in_use/` and `.orphaned_at`, are skipped). When the two differ they run
+  `claude plugin update pseudolife-memory@pseudolife-mcp`, which installs
+  the new copy in a new folder beside the old one and switches the record
+  in `installed_plugins.json`, and they compare again. Nothing is
+  uninstalled at any point: an update that fails leaves the installed copy
+  installed.
+- Sessions already running keep the copy they loaded. A session started
+  afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
+  then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
+  do the same.
+- Claude Code stamps the replaced folder `.orphaned_at` and deletes it
+  itself 14 days later, once no running session marks it `.in_use`
+  (Claude Code 2.1.283; the sweep runs at most once a day).
+- The plugin's release, which the SessionStart hook reports to the daemon
+  for the version handshake, is in `plugin/release.json`, pinned to
+  `pyproject.toml` by `tests/test_plugin_packaging.py`.
+
+Until 2026-09-30 the manifest carried the release version. Every plugin
+change on master then landed on the same folder name: `/plugin update`
+answered "already at the latest version", and the updater's uninstall and
+reinstall could not replace a folder running sessions held (EPERM on
+Windows), which left the plugin uninstalled until the apps were restarted.
+The first update past that change installs a commit-named copy beside the
+release-named one. A marketplace clone that still offers the installed
+version (an older clone, or a fork that pins one) cannot install beside
+it; the updater reports that as failed and leaves the plugin installed.
+
+Codex keeps a copy of its own (a plugin without a version sits under
+`local/` in `~/.codex/plugins/cache/`) and runs plugin hooks only once
+they are approved; see `ops/setup-codex-hooks.py`.
+
 ## Session identity
 
 Every request resolves "which session/episode does this write belong to"
@@ -2812,9 +2864,10 @@ daemon that comes back healthy at a version other than the one pulled
 fails the update with that rollback and moves no client. Release mode
 builds nothing, so it prunes no build cache. `PSEUDOLIFE_DOCKER` names
 the docker command (the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or
-`--daemon-url` names the daemon. The Codex hook step is printed, never
-automated: Codex trusts hooks by hash and asks again when a script
-changes; the check compares Codex's clone with the daemon just deployed,
+`--daemon-url` names the daemon. Release mode moves no Codex hook copy (a
+checkout's client step refreshes manual copies; Codex's plugin manager
+moves its plugin copy); it prints approval steps only when Codex would ask
+again, and the check compares Codex's clone with the daemon just deployed,
 never with a checkout at some other commit.
 
 ### Being told, and the unattended client half (`updates`)
@@ -2901,8 +2954,8 @@ sessions the board lists as active, provided the run's bearer principal is
 listed in [`coordination.daemon_notice_principals`](#experimental-agent-coordination)
 (empty by default, so out of the box the notice is refused, the run says so
 in one line, and the log is the only record): updated (with the rollback tag, the
-client states and, when the hook scripts changed, the Codex re-approval
-steps), or held off and why (which sessions are active; the board
+client states and, when Codex would ask to approve its hooks again, the
+approval steps), or held off and why (which sessions are active; the board
 unreadable). With the knob off it only logs, so a daily run never
 nags. The durable record is `~/.pseudolife-mcp/unattended-update.log`,
 which every step line reaches; the notice is best effort. An update succeeds
@@ -3008,27 +3061,41 @@ hour; a run never counts that label as a session.
 
 ### Codex hook re-approval, on every update path
 
-Codex trusts hooks by hash and runs only handlers it has approved, so no
-update can finish this for you. Whenever Codex's copy of the plugin hooks
-differs from the scripts just deployed, and only then, every update path
-(`pseudolife-mcp update`, `ops/update.ps1` / `update.sh`,
-`ops/update_clients.py`, the unattended run's board notice) prints the
-complete steps: which hook files changed (read from Codex's marketplace
-clone against the checkout, or against the Claude plugin cache when that
-holds the daemon's scripts), the refresh (update the plugin in Codex's
-plugin manager so its clone holds the new scripts;
-`ops/setup-codex-hooks.py --source plugin` approves what the clone holds
-and does not pull one), the approval (`/hooks` in a Codex session, or
-`python ops/setup-codex-hooks.py --source plugin --trust yes` /
+Codex runs only hook handlers it has approved, and it approves a handler by
+its definition in `hooks.json` (the command, timeout, `async` and
+`statusMessage`), not by the script the command runs: measured on Codex
+0.158.0 on 2026-09-30, editing a script left the approval in place and
+editing the command asked again. So an update whose scripts changed but
+whose `hooks.json` did not needs no approval:
+
+- A plugin copy with older scripts is reported as `behind`: update the
+  plugin in Codex's plugin manager and its approvals carry over.
+- Manual copies (`setup-codex-hooks.py --source manual`) run through a
+  launcher whose commands never change, and the update refreshes them
+  itself ([the launcher](providers.md)).
+
+An approval is due only when `hooks.json` changed, when a new handler
+position appears, or when a manual copy from before 2026-09-30 still names
+a script bundle in its commands (one last approval moves it to the
+launcher). When the scripts cannot be compared at all (release mode with no
+Claude plugin cache holding the daemon's scripts), a plugin copy whose
+scripts differ is treated as needing approval too, to be safe. Then, and
+only then, every update path (`pseudolife-mcp
+update`, `ops/update.ps1` / `update.sh`, `ops/update_clients.py`, the
+unattended run's board notice) prints the complete steps: which files
+changed (read from Codex's marketplace clone against the checkout, or
+against the Claude plugin cache when that holds the daemon's scripts), the
+refresh (update the plugin in Codex's plugin manager so its clone holds the
+new scripts; `ops/setup-codex-hooks.py --source plugin` approves what the
+clone holds and does not pull one), the approval (`/hooks` in a Codex
+session, or `python ops/setup-codex-hooks.py --source plugin --trust yes` /
 `--codex-hook-trust yes` for an unattended install), what is off until
-then (the memory briefing, the per-turn memory and mail notes, the board
-check-in, the SessionEnd close and the Stop-hook park gate, including a
-child thread's `SubagentStop` gate, a new handler position that an
-existing install asks to approve once), and the
-check: `pseudolife-mcp doctor` reports `codex_hooks = current`. A manual
-copy (`setup-codex-hooks.py --source manual`) gets its own commands, and
-`doctor` reports `bundle-present` for it. An update whose hooks did not
-change says nothing about Codex, and neither does one that finds no
+then (the handlers Codex has not approved), and the check:
+`pseudolife-mcp doctor` reports `codex_hooks = current`, or
+`bundle-present` for a manual copy. `tests/test_codex_hook_launcher.py`
+pins the fields Codex approves in the plugin's `hooks.json`, so a change
+that would ask every Codex user again is a deliberate one. An update that
+needs no approval says nothing about it, and neither does one that finds no
 marketplace clone at all. A daemon-only update (`ops/update.ps1` without
 `-All`, `update --daemon-only`) whose hook scripts changed says in one
 line that the client side and these steps are still to do; the shim's

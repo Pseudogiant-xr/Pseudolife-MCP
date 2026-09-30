@@ -1,10 +1,9 @@
 """The plugin's hook scripts, digested the same way on every side.
 
-The Claude Code plugin's version is pinned to the package version, so a
-change to ``plugin/hooks`` without a release leaves the version string
-alone: on 2026-09-21 ``/plugin update`` answered "already at the latest
-version" while the cached scripts differed from master, and the version
-handshake saw two equal strings. The daemon therefore also publishes a
+The plugin's release string (``plugin/release.json``) is pinned to the
+package version, so a change to ``plugin/hooks`` without a release leaves it
+alone: on 2026-09-21 the cached scripts differed from master while the
+version handshake saw two equal strings. The daemon therefore also publishes a
 digest of the scripts it was built with (``/health`` ``hooks_digest``), the
 SessionStart hooks send a digest of the scripts beside them, and the
 briefing says when the two differ.

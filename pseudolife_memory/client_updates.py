@@ -28,16 +28,20 @@ reinstalled. A registration that would spawn its own daemon (pip / lite
 tier) stays where its full install is. Anything else is left alone and
 named.
 
-Plugin: the version string is pinned to the package version, so a plugin
-change on master does not move ``/plugin update``. The marketplace clone
-is refreshed, its plugin tree compared by bytes (CRLF read as LF) against
-the installed cache, and only when they differ is the plugin uninstalled
-and reinstalled — then compared again, because the read-back is the proof.
+Plugin: the manifest carries no version, so Claude Code names each
+marketplace commit's copy by its commit. The marketplace clone is refreshed,
+its plugin tree compared by bytes (CRLF read as LF, Claude Code's own
+markers skipped) against the installed cache, and only when they differ is
+``claude plugin update`` run: it installs the new copy beside the one
+running sessions loaded and switches the record, then the tree is compared
+again, because the read-back is the proof. Nothing is ever uninstalled.
 
-Codex: hooks are trusted by hash, so a refresh is a consent step
-(``ops/setup-codex-hooks.py``); this reports whether the copy for the
-current scripts exists (the checkout's, or the daemon's ``hooks_digest``
-when there is no checkout) and names the command when not.
+Codex: Codex approves a hook by its definition in hooks.json, not by the
+script it runs (measured on Codex 0.158.0, 2026-09-30). Manual copies run
+through a launcher whose commands never change, so this refreshes them to
+the checkout's scripts with no approval; a plugin copy is reported as
+behind, and only a changed hooks.json names the approval steps
+(``ops/setup-codex-hooks.py``).
 
 Every CLI call goes through :func:`run_cli`, every lookup through
 :func:`which` and :func:`home`, so the tests drive the real logic with
@@ -550,7 +554,16 @@ def _normalised(path: Path) -> bytes:
 def _tree_files(root: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or ".git" in path.relative_to(root).parts:
+        parts = path.relative_to(root).parts
+        if not path.is_file() or ".git" in parts:
+            continue
+        # Claude Code keeps its own bookkeeping in a cache folder's top-level
+        # dot entries: `.in_use/<pid>` while a session runs from it,
+        # `.orphaned_at` once no record names it. Counting them made every
+        # cache look stale while any session was open (2026-09-30). The
+        # plugin ships no top-level dot entry but its manifest directory
+        # (pinned by tests/test_plugin_packaging.py).
+        if parts[0].startswith(".") and parts[0] != ".claude-plugin":
             continue
         files[path.relative_to(root).as_posix()] = _normalised(path)
     return files
@@ -558,8 +571,17 @@ def _tree_files(root: Path) -> dict[str, bytes]:
 
 def tree_differs(a: Path, b: Path) -> bool:
     """Whether two plugin trees differ in file set or (CRLF-insensitive)
-    content; ``.git`` metadata is ignored."""
+    content; ``.git`` metadata and Claude Code's top-level markers are
+    ignored."""
     return _tree_files(Path(a)) != _tree_files(Path(b))
+
+
+def plugins_root() -> Path:
+    """Claude Code's plugins directory (records, marketplace clones, cache):
+    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, else ``~/.claude/plugins``
+    (``CLAUDE_CONFIG_DIR`` is not followed here, as before)."""
+    override = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+    return Path(override) if override else home() / ".claude" / "plugins"
 
 
 def _read_json(path: Path) -> dict:
@@ -581,10 +603,22 @@ def _clone_plugin_dir(plugins_dir: Path) -> Path:
 
 
 def update_plugin(repo: Path | None = None) -> dict:
+    """Move the installed plugin to the marketplace clone's copy without
+    touching the one running sessions loaded.
+
+    Claude Code names a cache folder by the plugin's manifest version, and
+    the plugin carries none, so each marketplace commit is its own version
+    (its commit, 12 hex characters). ``claude plugin update`` installs it
+    into a new folder beside the recorded one, switches the record, and
+    stamps the old folder ``.orphaned_at``; Claude Code deletes that folder
+    14 days later once no session marks it ``.in_use`` (measured on 2.1.283,
+    2026-09-30). Nothing here uninstalls: on 2026-09-30 an uninstall followed
+    by an install the in-use folder refused (EPERM) left the plugin
+    uninstalled until the apps were restarted."""
     claude = which("claude")
     if not claude:
         return {"state": "no-cli", "detail": "the claude CLI is not on PATH"}
-    plugins_dir = home() / ".claude" / "plugins"
+    plugins_dir = plugins_root()
     record = _plugin_record(plugins_dir)
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
@@ -600,22 +634,55 @@ def update_plugin(repo: Path | None = None) -> dict:
     if cache.is_dir() and not tree_differs(clone, cache):
         return {"state": f"current:{version}", "marketplace_update": marketplace_update,
                 "detail": f"cache matches the marketplace clone (v{version})"}
-    run_cli([claude, "plugin", "uninstall", PLUGIN_ID])
-    _, help_text = run_cli([claude, "plugin", "install", "--help"])
-    yes = ["--yes"] if "--yes" in help_text else []
-    code, out = run_cli([claude, "plugin", "install", *yes, PLUGIN_ID])
-    record = _plugin_record(plugins_dir)
-    cache = Path(str(record.get("installPath", ""))) if record else cache
-    if code == 0 and record and cache.is_dir() and not tree_differs(clone, cache):
-        return {"state": f"refreshed:{record.get('version', version)}",
-                "marketplace_update": marketplace_update,
-                "detail": f"cache reinstalled from the marketplace clone (v{record.get('version', version)}); "
-                          f"restart Claude Code sessions to load it"}
+    # A project or local install is found from its project, at its scope;
+    # from anywhere else the update would act on another project's install.
+    scope = str(record.get("scope") or "user")
+    project = record.get("projectPath") if scope in ("project", "local") else None
+    if scope in ("project", "local") and not project:
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the {scope}-scope install of {PLUGIN_ID} names no project; left as it is. Run "
+                          f"claude plugin update {PLUGIN_ID} --scope {scope} from that project"}
+    code, out = run_cli([claude, "plugin", "update", PLUGIN_ID, "--scope", scope],
+                        cwd=str(project) if project else None)
+    said = out.strip().splitlines()[-1] if out.strip() else f"exit {code}"
+    updated = _plugin_record(plugins_dir)
+    new_cache = Path(str(updated.get("installPath", ""))) if updated else None
+    if code == 0 and updated and new_cache.is_dir() and not tree_differs(clone, new_cache):
+        new_version = str(updated.get("version", ""))
+        return {"state": f"refreshed:{new_version}", "marketplace_update": marketplace_update,
+                "detail": f"{new_version} installed from the marketplace clone beside {version}; sessions "
+                          f"already running keep the copy they loaded, new sessions start on this one, and "
+                          f"Claude Code deletes the old copy 14 days after it was replaced, once no session "
+                          f"runs from it"}
+    if updated is None:
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"{PLUGIN_ID} is no longer recorded as installed after claude plugin update "
+                          f"({said}); {INSTALLER_HINT}"}
+    kept = (f"{version} was left installed and sessions keep running it" if updated == record
+            else f"the record now names {updated.get('installPath')} ({updated.get('version')})")
+    retry = (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
+             else "pseudolife-mcp update --clients-only")
+    offered = _read_json(clone / ".claude-plugin" / "plugin.json").get("version")
+    if code == 0 and updated == record and offered == version:
+        # Claude Code found nothing newer: the clone's manifest still
+        # carries the installed version, and replacing that folder in place
+        # is what failed under running sessions.
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the marketplace clone's plugin differs from the cache but offers the same version "
+                          f"({version}; claude said: {said}), so Claude Code will not install it beside the "
+                          f"copy sessions run; {kept}. A current clone's plugin.json carries no version: "
+                          f"claude plugin marketplace update {MARKETPLACE}, then {retry}"}
+    if code == 0 and updated == record:
+        # Nothing newer to install, yet the cache is not the clone: the
+        # folder the record names is gone or was edited in place.
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the cache folder the plugin record names ({cache}) is missing or was changed by "
+                          f"hand, and Claude Code has nothing newer to install (claude said: {said}); {kept}. "
+                          f"With no Claude Code session open: claude plugin uninstall {PLUGIN_ID}, then "
+                          f"claude plugin install {PLUGIN_ID}"}
     return {"state": "failed", "marketplace_update": marketplace_update,
-            "detail": f"claude plugin install {PLUGIN_ID} did not leave a cache matching the clone "
-                      f"({out.strip().splitlines()[-1] if out.strip() else code}); check `claude plugin list`, "
-                      f"or inside Claude Code: /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP then "
-                      f"/plugin install {PLUGIN_ID}"}
+            "detail": f"claude plugin update {PLUGIN_ID} did not leave a cache matching the clone ({said}); "
+                      f"{kept}. Retry: {retry}"}
 
 
 # ── Codex hooks ─────────────────────────────────────────────────────────────
@@ -679,8 +746,10 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
 # What Codex loses while its hook copy is unapproved, and the steps back.
 # Printed by every update path (pseudolife-mcp update, ops/update.*,
 # ops/update_clients.py, the unattended updater's board notice) when and only
-# when Codex's copy differs from the current scripts: Codex trusts hooks by
-# hash and asks again when a script changes, so no update can finish this.
+# when Codex would ask again: a changed hooks.json (Codex approves hook
+# definitions, not scripts), new handler positions, or manual copies that
+# still name a script bundle. An approval is the user's, so no update can
+# finish this.
 CODEX_HOOK_NAMES = HOOK_SCRIPTS + ("hooks.json",)
 CODEX_REAPPROVAL_VERIFY = "pseudolife-mcp doctor reports codex_hooks = current"
 
@@ -725,13 +794,16 @@ def codex_reapproval_text(codex: dict | None) -> str:
     off = ("so until this is done Codex sessions start without the memory briefing, the per-turn "
            "memory and mail notes, the board check-in, the SessionEnd close and the Stop-hook park gate.")
     if (codex or {}).get("source") == "manual":
-        # Content-addressed manual copies (ops/setup-codex-hooks.py --source
-        # manual): the same script refreshes, approves and verifies them.
+        # Manual copies whose commands still name a script bundle
+        # (ops/setup-codex-hooks.py before 2026-09-30): one approval moves
+        # them to the launcher, whose commands never change, and later
+        # updates refresh them without asking.
         return "\n".join([
-            f"Codex: its manual hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
-            f"approved handlers, {off}",
-            "  1. Refresh and approve the copy from a checkout: python ops/setup-codex-hooks.py --source manual "
-            "--trust ask (unattended: --trust yes)",
+            "Codex: its manual hook copy still names an older script bundle, so it needs one last approval "
+            "to move to the launcher; after that, updates refresh it without asking. Until then Codex keeps "
+            "running the older scripts.",
+            "  1. From a checkout: python ops/setup-codex-hooks.py --source manual --trust ask "
+            "(unattended: --trust yes)",
             "  2. Verify: the same command reports status ready; pseudolife-mcp doctor reports "
             "codex_hooks = bundle-present for manual copies.",
         ])
@@ -753,36 +825,64 @@ def _daemon_scripts_dir(daemon_digest: str | None) -> Path | None:
     daemon reports. ``None`` otherwise (the files cannot be named then)."""
     if not daemon_digest:
         return None
-    record = _plugin_record(home() / ".claude" / "plugins")
+    record = _plugin_record(plugins_root())
     if not record:
         return None
     hooks = Path(str(record.get("installPath", ""))) / "hooks"
     return hooks if hooks.is_dir() and hooks_digest(hooks) == daemon_digest else None
 
 
-def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None) -> dict:
-    """Codex hooks come either as content-addressed manual copies under
-    ``<codex home>/pseudolife/hooks/<digest>`` (``setup-codex-hooks.py``) or
-    from the Codex plugin, whose marketplace clone Codex keeps itself. Both
-    are refreshed with consent (hooks are trusted by hash), so this reports
-    and names the command rather than acting. The current scripts are the
-    checkout's when ``repo`` is given, else the daemon's (``daemon_digest``,
-    its ``/health`` ``hooks_digest``)."""
+def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None,
+                      refresh: bool = False) -> dict:
+    """Codex hooks come either as manual copies under ``<codex
+    home>/pseudolife/hooks`` (``setup-codex-hooks.py``) or from the Codex
+    plugin, whose marketplace clone Codex keeps itself. Codex approves a hook
+    by its definition, not by the script it runs (measured on Codex 0.158.0,
+    2026-09-30), so only a changed ``hooks.json`` asks for approval again.
+    Manual copies run through a launcher whose commands never change; with
+    ``refresh`` (the update step) they are moved to the checkout's scripts
+    here, with no consent needed. Everything else is reported. The current
+    scripts are the checkout's when ``repo`` is given, else the daemon's
+    (``daemon_digest``, its ``/health`` ``hooks_digest``)."""
     repo = Path(repo) if repo else None
-    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex")
+    # Resolved as setup-codex-hooks.py resolves it: the launcher commands in
+    # hooks.json name the resolved path.
+    codex_home = Path(os.environ.get("CODEX_HOME") or home() / ".codex").expanduser().resolve()
     hooks_root = codex_home / "pseudolife" / "hooks"
     if hooks_root.is_dir():
         if repo is None or not (repo / "ops" / "setup-codex-hooks.py").is_file():
             return {"state": "bundle-present",
                     "detail": "manual hook copies present; whether they are current needs a checkout: "
                               "python ops/setup-codex-hooks.py --source manual --trust ask"}
-        if (hooks_root / codex_bundle_digest(repo)).is_dir():
+        setup = _load_from_checkout(repo, "ops/setup-codex-hooks.py", "codex_hook_setup")
+        checkout = codex_bundle_digest(repo)
+        # An older checkout's setup script has no launcher: read as before.
+        launcher_installed = getattr(setup, "launcher_installed", None)
+        if launcher_installed is not None and launcher_installed(codex_home):
+            try:
+                if setup._pointer(codex_home) == checkout:
+                    setup._vet_launcher(codex_home)
+                    return {"state": "current", "source": "manual",
+                            "detail": "manual hook copies run the checkout's scripts through the launcher"}
+                if not refresh:
+                    return {"state": "behind", "source": "manual",
+                            "detail": "manual hook copies run older scripts; the update refreshes them, with no "
+                                      "approval needed (Codex approves the launcher's commands, not the scripts)"}
+                moved = setup.refresh_manual(codex_home, repo / "plugin" / "hooks")
+            except (setup.SetupError, OSError, UnicodeError) as exc:
+                return {"state": "failed", "source": "manual",
+                        "detail": f"manual hook copies were not refreshed or verified: {exc}"}
+            return {"state": "current", "source": "manual",
+                    "detail": f"manual hook copies refreshed to the checkout's scripts (bundle {moved['bundle']}); "
+                              "Codex keeps its approval, which covers the launcher's commands, not the scripts"}
+        if (hooks_root / checkout).is_dir():
             return {"state": "bundle-present",
                     "detail": "bundle present; trust and execution not checked; rerun setup to verify with "
                               "consent: python ops/setup-codex-hooks.py --source manual --trust ask"}
         return {"state": "stale", "source": "manual",
-                "detail": "the installed copy predates the checkout's hook scripts; hooks are trusted by "
-                          "hash, so refresh with consent: python ops/setup-codex-hooks.py --trust ask"}
+                "detail": "the manual hook copies name an older script bundle in their commands, so moving "
+                          "them needs one more approval; after it, updates refresh them without asking: "
+                          "python ops/setup-codex-hooks.py --source manual --trust ask"}
     config = codex_home / "config.toml"
     try:
         config_text = config.read_text(encoding="utf-8")
@@ -795,7 +895,12 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     if current is None:
         return {"state": "unknown", "detail": "Codex runs the plugin's hooks; nothing to compare its clone with "
                                               "(no checkout, and the daemon reported no hooks_digest)"}
-    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current:
+    # Name the files that differ when the current scripts can be read here:
+    # the checkout's, or the daemon's through the plugin cache. The scripts'
+    # digest leaves hooks.json out, so it is compared here too.
+    reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
+    changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
+    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current and not changed:
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
         if missing:
             return {"state": "needs-approval", "source": "plugin", "changed_files": [],
@@ -804,10 +909,13 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                               "(or /hooks in the Codex terminal app)"}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its marketplace clone matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
-    # Name the files that differ when the current scripts can be read here:
-    # the checkout's, or the daemon's through the plugin cache.
-    reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
-    changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
+    if changed and "hooks.json" not in changed:
+        # Codex approves hook definitions (hooks.json), not the scripts
+        # they run: only the plugin copy is behind, no approval is due.
+        return {"state": "behind", "source": "plugin", "changed_files": changed,
+                "detail": f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)}); "
+                          "update the plugin in Codex's plugin manager. Its approvals carry over: Codex "
+                          "approves hook definitions, which did not change, not the scripts"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
             "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "
@@ -881,7 +989,7 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
     if "plugin" in steps:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
-        report["codex"] = check_codex_hooks(repo, daemon_digest)
+        report["codex"] = check_codex_hooks(repo, daemon_digest, refresh=True)
     if repo is not None:
         # Informational, after the client steps: never "failed", so never
         # fails the run.

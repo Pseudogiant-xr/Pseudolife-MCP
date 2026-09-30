@@ -72,10 +72,11 @@ exactly; they exist because each one was violated at least once.
    volumes are external precisely so that this is survivable, but don't test it.
    **A change under `plugin/` or to the shim needs `-All`** (or
    `ops/update_clients.py` afterwards): the plugin cache and the shim are
-   separate installs that a daemon deploy never touches, and the plugin's
-   version string cannot move between releases, so `/plugin update` says
-   "already latest" — the 2026-09-21 deploy ran an hour on the old hooks.
-   Then restart the clients.
+   separate installs that a daemon deploy never touches — the 2026-09-21
+   deploy ran an hour on the old hooks. Both install beside what running
+   sessions use (the plugin's cache is keyed by marketplace commit since
+   2026-09-30, its manifest carrying no version), so no client closes; new
+   sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
 
@@ -253,6 +254,15 @@ took 143 CUDA OOMs.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
+- **`plugin/hooks/hooks.json` is what Codex approves.** Codex approves a
+  hook by its definition (command, commandWindows, timeout, async and
+  statusMessage measured 2026-09-30; the pin also covers matcher, not
+  measured), not by the script it runs, so changing one of those fields,
+  or adding a handler, makes every Codex
+  user approve the hooks again. Put new behaviour in an existing handler's
+  script; when a hooks.json change is unavoidable, update the pin in
+  `tests/test_codex_hook_launcher.py` and say in the CHANGELOG that Codex
+  users approve once more.
 - TDD with a watched RED — write the failing test and watch it fail before
   writing the fix; never trust a test you have not seen red. For invalidation
   contracts, spot-check that each hook is load-bearing by disabling it and
