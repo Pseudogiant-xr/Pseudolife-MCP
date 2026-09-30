@@ -36,6 +36,20 @@ logger = logging.getLogger("pseudolife-mcp.web")
 STATIC_DIR = Path(__file__).parent / "static"
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+# Control patches and graph actions are small JSON objects. Text-bearing
+# writes need room for whole documents; coordination keeps its own 32 KiB
+# contract. These are wire-byte limits, including JSON escaping/metadata.
+_CONTROL_BODY_LIMIT = 256 * 1024
+_TEXT_BODY_LIMIT = 4 * 1024 * 1024
+_SESSION_END_BODY_LIMIT = 16 * 1024
+_TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
+
+
+def _body_limit(path: str) -> int:
+    if path.startswith("/api/coordination/"):
+        return 32768
+    return _TEXT_BODY_LIMIT if path in _TEXT_BODY_PATHS else _CONTROL_BODY_LIMIT
+
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("application/json", ".json")
 mimetypes.add_type("image/svg+xml", ".svg")
@@ -180,7 +194,7 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
-    from pseudolife_memory.principals import resolve_principal
+    from pseudolife_memory.principals import DEFAULT_PRINCIPAL, resolve_principal
 
     token = token or None
     token_map = dict(token_map or {})
@@ -189,13 +203,16 @@ def build_console_app(
     from pseudolife_memory.web.coordination import CoordinationHub
     coordination = CoordinationHub(service)
 
-    def _authorized(scope) -> bool:
+    def _principal(scope) -> str | None:
         if not auth_configured:
-            return True
+            return DEFAULT_PRINCIPAL
         headers = {k.decode().lower(): v.decode()
                    for k, v in scope.get("headers", [])}
         return resolve_principal(
-            headers.get("authorization"), token_map, token) is not None
+            headers.get("authorization"), token_map, token)
+
+    def _authorized(scope) -> bool:
+        return _principal(scope) is not None
 
     def _hdr(scope, name: bytes) -> str | None:
         for k, v in scope.get("headers", []):
@@ -299,7 +316,8 @@ def build_console_app(
             if method != "GET":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
-            authorized = _authorized(scope)
+            principal = _principal(scope)
+            authorized = principal is not None
             params = _parse_query(scope)
             session_id = params.get("session_id") if authorized else None
             source = params.get("source") if authorized else None
@@ -318,7 +336,7 @@ def build_console_app(
                     bind_request_headers, unbind_request_headers)
                 headers = {k.decode().lower(): v.decode("latin-1")
                            for k, v in scope.get("headers", [])}
-                binding = bind_request_headers(headers)
+                binding = bind_request_headers(headers, principal=principal)
                 try:
                     return hook_session_start(service, session_id, source, authorized,
                                               plugin_version=plugin_version,
@@ -397,7 +415,11 @@ def build_console_app(
                     "error": "unauthorized",
                     "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
                 return
-            raw = await _read_body(receive)
+            try:
+                raw = await _read_body(receive, max_bytes=_SESSION_END_BODY_LIMIT)
+            except ValueError:
+                await _send_json(send, 413, {"error": "request_too_large"})
+                return
             body: dict = {}
             if raw:
                 try:
@@ -525,7 +547,8 @@ def build_console_app(
                     "hint": "tokenless /api serves loopback browsers only; "
                             "set PSEUDOLIFE_MCP_TOKEN for remote access"})
                 return
-            if not _authorized(scope):
+            principal = _principal(scope)
+            if principal is None:
                 await _send_json(send, 401, {
                     "error": "unauthorized",
                     "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
@@ -541,7 +564,7 @@ def build_console_app(
                 return
             if method == "POST":
                 try:
-                    raw = await _read_body(receive, max_bytes=32768 if coordination_path else None)
+                    raw = await _read_body(receive, max_bytes=_body_limit(path))
                 except ValueError:
                     await _send_json(send, 413, {"error": "request_too_large"})
                     return
@@ -587,17 +610,15 @@ def build_console_app(
                     await _send_json(send, 200, result)
                     return
                 def dispatch():
-                    # Headers are bound only where a handler reads the
-                    # caller's principal: the awareness section, and the
-                    # session registration record (v43) episode/start writes.
-                    if path not in ("/api/agents", "/api/briefing",
-                                    "/api/episode/start", "/api/daemon-notice"):
-                        return routes.dispatch(method, path, params, body)
+                    # run_in_executor does not propagate contextvars: bind in
+                    # the worker for every route and always restore its context.
                     from pseudolife_memory.writer_context import (
                         bind_request_headers, unbind_request_headers)
                     headers = {k.decode().lower(): v.decode("latin-1")
                                for k, v in scope.get("headers", [])}
-                    binding = bind_request_headers(headers)
+                    # Carry the identity already accepted by the gate; never
+                    # re-decode/re-authenticate Authorization in the worker.
+                    binding = bind_request_headers(headers, principal=principal)
                     try:
                         return routes.dispatch(method, path, params, body)
                     finally:

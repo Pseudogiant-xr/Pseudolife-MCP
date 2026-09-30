@@ -58,6 +58,36 @@ def test_pointer_persists_and_clear_only_if_owner(pg_service):
     assert svc._storage.get_meta("active_session_pointer") is None
 
 
+def test_rest_and_mcp_fact_writes_persist_same_identity(pg_service, monkeypatch):
+    import json
+    from pseudolife_memory import mcp_server, writer_context
+    from pseudolife_memory.web.api import build_console_app
+    from tests.asgi_helpers import call, stub_mcp
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "test-token:named-writer")
+    monkeypatch.setattr(mcp_server, "service", pg_service)
+    headers = {"authorization": "Bearer test-token", "x-pl-writer": "spoofed",
+               "x-pl-session": "named-session"}
+    binding = writer_context.bind_request_headers(headers)
+    try:
+        mcp_server.memory_fact_set("mcp-project", "state", "ready")
+    finally:
+        writer_context.unbind_request_headers(binding)
+    app = build_console_app(stub_mcp, None, lambda: {}, pg_service,
+                            token_map={"test-token": "named-writer"})
+    status, raw = call(app, "POST", "/api/facts/set",
+                       headers=[(k.encode(), v.encode()) for k, v in headers.items()]
+                       + [(b"content-type", b"application/json")],
+                       body=json.dumps({"entity": "rest-project", "attribute": "state",
+                                        "value": "ready"}).encode())
+    assert status == 200, raw
+    rows = pg_service._storage.conn.execute(
+        "SELECT entity, writer_id, session_id FROM facts WHERE entity IN (%s, %s)",
+        ("mcp-project", "rest-project")).fetchall()
+    assert sorted(rows) == [("mcp-project", "named-writer", "named-session"),
+                            ("rest-project", "named-writer", "named-session")]
+
+
 # ── Pointer TTL (finding 4, 2026-07-19): a crashed client that never fires
 # SessionEnd must not attract other clients' tier-3 writes forever ───────────
 

@@ -1029,15 +1029,17 @@ class MemoryService(DreamOps):
     def clear_active_session(self, session_id: str) -> bool:
         """Clear the pointer only if it currently names ``session_id``.
 
-        Must not hold ``self._lock`` while calling :meth:`set_active_session`
-        (non-reentrant) — check ownership under the lock, release, then
-        delegate the actual clear."""
+        Ownership check, in-memory clear and persistence share the same lock:
+        an old SessionEnd must never erase a newer SessionStart. Do not call
+        ``set_active_session`` here; the lock is non-reentrant."""
         with self._lock:
             self._ensure_init()
             cur = getattr(self, "_active_session", None)
             if cur is None or cur[0] != session_id:
                 return False
-        self.set_active_session(None)
+            self._active_session = None
+            if self._storage is not None:
+                self._storage.set_meta(self._ACTIVE_SESSION_META_KEY, None)
         return True
 
     def _assert_public_search_path(self) -> None:
