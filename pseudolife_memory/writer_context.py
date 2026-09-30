@@ -67,16 +67,22 @@ def _http_writer_session() -> tuple[str | None, str | None]:
 # the same binding.
 _REQUEST_HEADERS: contextvars.ContextVar = contextvars.ContextVar(
     "pl_request_headers", default=None)
+_REQUEST_PRINCIPAL: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "pl_request_principal", default=None)
 
 
-def bind_request_headers(headers):
+def bind_request_headers(headers, *, principal: str | None = None):
     """Bind the live request's headers for the current context; returns the
-    token for ``unbind_request_headers``. ``None`` clears (binds nothing)."""
-    return _REQUEST_HEADERS.set(headers)
+    tokens for ``unbind_request_headers``. ``principal`` is the transport's
+    validated identity, when supplied; otherwise resolve from the bearer as
+    before. ``None`` headers clear the request binding."""
+    return (_REQUEST_HEADERS.set(headers), _REQUEST_PRINCIPAL.set(principal))
 
 
 def unbind_request_headers(token) -> None:
-    _REQUEST_HEADERS.reset(token)
+    headers_token, principal_token = token
+    _REQUEST_PRINCIPAL.reset(principal_token)
+    _REQUEST_HEADERS.reset(headers_token)
 
 
 def _http_request_headers():
@@ -153,6 +159,9 @@ def current_principal() -> str:
     ``"default"``; identity resolution must never fail a request."""
     from pseudolife_memory.principals import DEFAULT_PRINCIPAL
 
+    principal = _REQUEST_PRINCIPAL.get()
+    if principal is not None:
+        return principal
     try:
         headers = _http_request_headers()
         auth = headers.get("authorization") if headers is not None else None

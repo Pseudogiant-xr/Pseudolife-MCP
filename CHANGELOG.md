@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-30 - REST identity and concurrent Console writes)
+- REST routes bind the authenticated principal and request headers in their worker, restoring the previous context on success or failure so writes carry the same writer/session attribution as MCP calls.
+- SessionEnd checks ownership and clears the active-session pointer atomically, preserving a newer session that starts concurrently.
+- Console config updates serialize YAML read/merge, backup, replacement and live publication within the daemon process. Unique temporary and backup files avoid collisions; failed persistence leaves runtime values unchanged. External editors and separate processes remain outside this lock.
+- Float config knobs reject NaN and infinities before persistence, including settings without a maximum.
+- REST POST bodies are bounded by group: 256 KiB for control requests, 4 MiB for fact/consolidation/supersession text writes, and 16 KiB for session-end hooks. Oversized requests return HTTP 413; coordination retains its 32 KiB limit.
+
 ### Fixed (2026-09-30 — updating the plugin with sessions open installs beside them and never uninstalls)
 - Running the update while any Claude Code or Claude Desktop session was
   open left the plugin uninstalled (2026-09-30). The updater compared the

@@ -17,13 +17,22 @@ Write -> validate a ``{dotted.path: value}`` patch, merge it into
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# One daemon process owns the bank/config (daemon.py's uvicorn.run has no
+# workers). Serialize Console writes through runtime publication, including
+# calls through different service objects sharing a path. This is a process
+# lock, not coordination with external editors or other daemon processes.
+_CONFIG_WRITE_LOCK = threading.Lock()
 
 # ── Knob registry ──────────────────────────────────────────────────────────
 # Each entry:
@@ -718,6 +727,8 @@ def _coerce(knob: dict, value: Any) -> Any:
         v = int(value)
     elif t == "float":
         v = float(value)
+        if not math.isfinite(v):
+            raise ValueError(f"{knob['path']}: must be finite")
     elif t == "enum":
         v = str(value)
         if v not in knob.get("options", []):
@@ -782,6 +793,11 @@ def write_config(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     "backup": ...|None}``. Raises ``ValueError`` on an unknown/invalid knob
     (the caller maps that to a 400).
     """
+    with _CONFIG_WRITE_LOCK:
+        return _write_config_locked(service, patch)
+
+
+def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict) or not patch:
         raise ValueError("empty patch")
 
@@ -804,14 +820,27 @@ def write_config(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     backup = None
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     if cfg_path.exists():
-        backup = str(cfg_path) + f".{time.strftime('%Y%m%d-%H%M%S')}.bak"
-        shutil.copy2(cfg_path, backup)
+        fd, backup = tempfile.mkstemp(
+            dir=cfg_path.parent,
+            prefix=cfg_path.name + f".{time.strftime('%Y%m%d-%H%M%S')}.",
+            suffix=".bak")
+        os.close(fd)
+        try:
+            shutil.copy2(cfg_path, backup)
+        except BaseException:
+            Path(backup).unlink(missing_ok=True)
+            raise
 
     # Atomic write: temp in the same dir, then os.replace.
-    tmp = cfg_path.with_suffix(cfg_path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
-    os.replace(tmp, cfg_path)
+    fd, tmp_name = tempfile.mkstemp(dir=cfg_path.parent, prefix=cfg_path.name + ".",
+                                    suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp, cfg_path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
     applied, restart = [], []
     for path, value in coerced.items():
