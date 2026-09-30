@@ -399,20 +399,22 @@ _JUDGE_SYSTEM_PROMPT = (
     "3. A dated run/session slug paired with a broader name (a project, a "
     "process) is one event vs a category — reject.\n"
     "4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool "
-    "pairs are related but distinct — \"relate\", naming the relation that "
-    "holds from FROM to INTO; \"reject\" when no relation below fits.\n"
+    "pairs are related but distinct — reject, and name the relation that "
+    "holds from FROM to INTO in \"relation\" when one below fits.\n"
     "5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the "
     "same file, bare-vs-qualified name, abbreviation-vs-full name — when "
     "the evidence agrees.\n"
     "6. Use \"leave\" only when the evidence is genuinely insufficient to "
     "decide; do not use it to avoid judging.\n"
-    "Relations for \"relate\" (src is FROM, dst is INTO): "
-    + _RELATION_VOCAB + ".\n"
+    "\"relation\" is optional and only annotates a reject (src is FROM, "
+    "dst is INTO): " + _RELATION_VOCAB + ". Null when none fits. It never "
+    "changes the verdict or its confidence.\n"
     'Return JSON only: {"verdicts":[{"id":<proposal number>,'
-    '"verdict":"accept"|"reject"|"relate"|"leave","confidence":<0..1>,'
-    '"relation":<vocab, with relate only>,'
+    '"verdict":"accept"|"reject"|"leave","confidence":<0..1>,'
+    '"relation":<vocab or null, with reject only>,'
     '"note":"<reason, max 25 words>"}]} — one entry per proposal, '
-    "confidence is your honest probability that the verdict is correct."
+    "confidence is your honest probability that the verdict is correct "
+    "(for a reject: that FROM and INTO are different things)."
 )
 
 
@@ -1610,10 +1612,12 @@ class OpenAICompatExtractor:
         degree, scopes, snippets), ``reason`` and ``score`` — see
         :func:`format_judge_proposal`. Returns validated verdict dicts
         ``{"n", "verdict", "confidence", "note", "relation"}``; proposals
-        the model skipped are simply absent. ``relation`` is set only on
-        ``relate`` (distinct, but related FROM -> INTO), normalized into
-        the link judge's vocabulary; a relate naming no vocabulary
-        relation degrades to ``reject``, since the pair is still distinct.
+        the model skipped are simply absent. A reject naming a relation from
+        the link judge's vocabulary (distinct, but related FROM -> INTO) is
+        returned as the internal ``relate`` verdict with ``relation`` set;
+        any other reject, or a relate naming no vocabulary relation, is a
+        plain ``reject`` with ``relation`` None, since the pair is still
+        distinct. Only ``relate`` carries a relation.
         Raises :class:`ExtractorError` on transport/parse failure so the
         caller can tell failure from a genuine empty result."""
         from pseudolife_memory.graph import norm_name
@@ -1642,9 +1646,15 @@ class OpenAICompatExtractor:
                 conf = 0.5
             note = str(v.get("note", "")).strip()[:200]
             relation = None
-            if verdict == "relate":
+            if verdict in ("reject", "relate"):
+                # The prompt asks for reject + an optional relation, so the
+                # confidence stays about distinctness (2026-09-30: a separate
+                # relate verdict averaged 0.58 and starved the reject gates).
+                # A vocabulary relation makes it the internal relate verdict.
                 relation = norm_name(str(v.get("relation") or ""))
-                if relation not in _RELATION_NAMES:
+                if relation in _RELATION_NAMES:
+                    verdict = "relate"
+                else:
                     verdict, relation = "reject", None
             out.append({"n": n, "verdict": verdict, "confidence": conf,
                         "note": note, "relation": relation})

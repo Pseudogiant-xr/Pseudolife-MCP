@@ -570,26 +570,44 @@ def _judge_merges_returning(verdicts):
         return D.OpenAICompatExtractor("http://x/v1", "m").judge_merges(proposals)
 
 
-def test_judge_merges_accepts_relate_only_with_a_vocabulary_relation():
+def test_judge_merges_reads_a_reject_relation_as_relate():
+    """The prompt asks for reject plus an optional relation (2026-09-30
+    redesign): the reject's confidence is about distinctness alone, and the
+    relation only annotates it. The parser folds a reject carrying a
+    vocabulary relation into the internal ``relate`` verdict."""
     out = _judge_merges_returning([
-        {"id": 1, "verdict": "relate", "relation": "part-of", "confidence": 0.9, "note": "n1"},
-        {"id": 2, "verdict": "RELATE", "relation": "Stores Data In", "confidence": 0.8, "note": "n2"},
-        {"id": 3, "verdict": "relate", "relation": "sibling-of", "confidence": 0.9, "note": "n3"},
-        {"id": 4, "verdict": "relate", "confidence": 0.9, "note": "n4"},
-        {"id": 5, "verdict": "reject", "relation": "uses", "confidence": 0.9, "note": "n5"},
-        {"id": 6, "verdict": "accept", "confidence": 0.7, "note": "n6"},
+        {"id": 1, "verdict": "reject", "relation": "part-of", "confidence": 0.9, "note": "n1"},
+        {"id": 2, "verdict": "REJECT", "relation": "Stores Data In", "confidence": 0.8, "note": "n2"},
+        {"id": 3, "verdict": "reject", "relation": "sibling-of", "confidence": 0.9, "note": "n3"},
+        {"id": 4, "verdict": "reject", "relation": None, "confidence": 0.9, "note": "n4"},
+        {"id": 5, "verdict": "reject", "confidence": 0.9, "note": "n5"},
+        {"id": 6, "verdict": "accept", "relation": "uses", "confidence": 0.7, "note": "n6"},
+        {"id": 7, "verdict": "leave", "relation": "uses", "confidence": 0.4, "note": "n7"},
     ])
     by_n = {v["n"]: v for v in out}
     assert (by_n[1]["verdict"], by_n[1]["relation"]) == ("relate", "part-of")
     assert (by_n[2]["verdict"], by_n[2]["relation"]) == ("relate", "stores-data-in")
-    # A relation outside the vocabulary, or none at all, cannot be filed as
-    # a link; the pair is still distinct for merge purposes.
-    for n in (3, 4):
+    assert by_n[1]["confidence"] == 0.9
+    # A relation outside the vocabulary, or none at all, is a plain reject:
+    # nothing can be filed as a link, and the pair is still distinct.
+    for n in (3, 4, 5):
         assert (by_n[n]["verdict"], by_n[n]["relation"]) == ("reject", None)
         assert by_n[n]["confidence"] == 0.9
-    # Only relate carries a relation.
-    assert by_n[5]["relation"] is None and by_n[6]["relation"] is None
-    assert by_n[6]["verdict"] == "accept"
+    # Only a reject carries a relation.
+    assert (by_n[6]["verdict"], by_n[6]["relation"]) == ("accept", None)
+    assert (by_n[7]["verdict"], by_n[7]["relation"]) == ("leave", None)
+
+
+def test_judge_merges_still_reads_an_explicit_relate():
+    """A model that answers the #484 draft's ``relate`` verdict is read the
+    same way, so a stale prompt cache or a hand-written verdict still works."""
+    out = _judge_merges_returning([
+        {"id": 1, "verdict": "relate", "relation": "implements", "confidence": 0.9, "note": "n1"},
+        {"id": 2, "verdict": "relate", "relation": "sibling-of", "confidence": 0.8, "note": "n2"},
+    ])
+    by_n = {v["n"]: v for v in out}
+    assert (by_n[1]["verdict"], by_n[1]["relation"]) == ("relate", "implements")
+    assert (by_n[2]["verdict"], by_n[2]["relation"]) == ("reject", None)
 
 
 def test_relation_names_are_the_link_judge_vocabulary():
@@ -597,9 +615,14 @@ def test_relation_names_are_the_link_judge_vocabulary():
     assert D._RELATION_NAMES == (
         "depends-on", "part-of", "runs-on", "hosts", "uses", "configures",
         "stores-data-in", "tests", "implements", "superseded-by", "related-to")
-    # The merge prompt offers relate with that same vocabulary.
-    assert '"relate"' in D._JUDGE_SYSTEM_PROMPT
+    # The merge prompt offers the same vocabulary, as an optional annotation
+    # of a reject, not as a verdict of its own: the 2026-09-30 ladder of a
+    # separate "relate" verdict measured its confidence at 0.58 on average
+    # (0 of 85 votes at the 0.8 single-vote gate), which starved the
+    # automatic reject gates.
     assert D._RELATION_VOCAB in D._JUDGE_SYSTEM_PROMPT
+    assert '"verdict":"accept"|"reject"|"leave"' in D._JUDGE_SYSTEM_PROMPT
+    assert '"relate"' not in D._JUDGE_SYSTEM_PROMPT
 
 
 def test_relate_note_round_trips_both_opinions():
