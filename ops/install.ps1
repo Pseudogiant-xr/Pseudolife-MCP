@@ -37,7 +37,9 @@
 # Client-only install (this machine runs no daemon; one runs elsewhere,
 # typically reached over a tailnet): no Docker, volumes, ops/.env, token
 # minting or local daemon. Shim, registrations, plugin, hooks and standing
-# instructions are set up as usual, aimed at the remote daemon.
+# instructions are set up as usual, aimed at the remote daemon. An
+# interactive run that names no daemon asks first where the bank lives:
+# answering "another machine" is this mode, with the URL and token asked for.
 # -DaemonUrl <url>: the daemon's URL (default: the PSEUDOLIFE_MCP_DAEMON_URL
 #   environment variable). A host other than 127.0.0.1, localhost or ::1
 #   implies -ClientOnly.
@@ -255,93 +257,6 @@ if (Test-ModelBlank) {
 if ($Extractor) { Assert-ExtractorArgs }
 # <<< extractor modes <<<
 
-# >>> client-only mode >>>
-# A client-only install wires this machine's clients to a daemon that runs
-# elsewhere (typically over a tailnet). The URL comes from -DaemonUrl, else
-# from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
-# loopback implies -ClientOnly, since no local daemon answers there.
-function Get-DaemonUrlHost([string]$url) {
-    # Its host, lowercased, without brackets, read from the text as given:
-    # [Uri] would rewrite a short form such as 127.1 that the shim rejects.
-    $authority = ($url -split '://', 2)[-1]
-    $authority = ($authority -split '/', 2)[0]
-    $authority = ($authority -split '@')[-1]
-    $name = if ($authority.StartsWith("[")) {
-        ($authority.Substring(1) -split '\]', 2)[0]
-    } else { ($authority -split ':', 2)[0] }
-    return $name.ToLowerInvariant()
-}
-function Test-LoopbackUrl([string]$url) {
-    # The shim's own answer (daemon_url._is_loopback_url), so the installer
-    # and the shim never disagree on a form such as 127.0.0.01 or
-    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
-    # an import that failed) falls back to the host rule below.
-    $python = Get-InstallerPython
-    if ($python) {
-        try {
-            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 10) { return $true }
-            if ($LASTEXITCODE -eq 11) { return $false }
-        } catch { }
-    }
-    $name = Get-DaemonUrlHost $url
-    if ($name -eq "localhost") { return $true }
-    # Dotted quads without leading zeros (Python's ipaddress rejects those).
-    if (($name -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$') -and -not $name.Contains(":")) { return $false }
-    $address = $null
-    return [Net.IPAddress]::TryParse($name, [ref]$address) -and [Net.IPAddress]::IsLoopback($address)
-}
-$clientOnlyVia = ""
-$daemonUrlFromEnv = $false
-if (-not $DaemonUrl -and $env:PSEUDOLIFE_MCP_DAEMON_URL) {
-    $DaemonUrl = "$env:PSEUDOLIFE_MCP_DAEMON_URL"
-    $daemonUrlFromEnv = $true
-}
-if ($DaemonUrl.EndsWith("/")) { $DaemonUrl = $DaemonUrl.Substring(0, $DaemonUrl.Length - 1) }
-if ($DaemonUrl) {
-    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
-    # http(s), a host and an optional numeric port; no credentials, path,
-    # query, fragment or whitespace. The URL is not echoed: it may hold a
-    # password.
-    $urlAuthority = ($DaemonUrl -split '://', 2)[-1]
-    $urlPort = ""
-    if ($urlAuthority -match '^\[.*\]:(.*)$') { $urlPort = $Matches[1] }
-    elseif ($urlAuthority -match '^[^\[][^:]*:(.*)$') { $urlPort = $Matches[1] }
-    $urlOk = ($DaemonUrl -cmatch '^https?://.') -and ($urlAuthority -notmatch '[/?#@\s]') -and
-        ($urlPort -notmatch '\D') -and [bool](Get-DaemonUrlHost $DaemonUrl)
-    if (-not $urlOk) {
-        Write-Host "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)"
-        exit 2
-    }
-    if (-not $ClientOnly -and -not (Test-LoopbackUrl $DaemonUrl)) {
-        $ClientOnly = [switch]$true
-        if ($daemonUrlFromEnv) {
-            $clientOnlyVia = " (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
-        }
-    }
-}
-if ($ClientOnly) {
-    if (-not $DaemonUrl) {
-        Write-Host "-ClientOnly needs the daemon's URL: pass -DaemonUrl http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL"
-        exit 2
-    }
-    $localFlags = @()
-    if ($Extractor) { $localFlags += "-Extractor" }
-    if ($ExtractorUrl) { $localFlags += "-ExtractorUrl" }
-    if ($Model) { $localFlags += "-Model" }
-    if ($ShimPort -ne 0) { $localFlags += "-ShimPort" }
-    if ($NoToken) { $localFlags += "-NoToken" }
-    if ($Transport -ne "shim") { $localFlags += "-Transport http" }
-    if ($localFlags) {
-        Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
-        exit 2
-    }
-} elseif ($TokenFile -or $ReadToken) {
-    Write-Host "client-only install: -TokenFile and -ReadToken name a remote daemon's token, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
-    exit 2
-}
-# <<< client-only mode <<<
-
 # -- presentation helpers -------------------------------------------------------
 # Art and color are interactive sugar only: NO_COLOR unset, no -NoArt, and an
 # interactive session. Escapes are generated ([char]27), never raw ESC bytes —
@@ -465,6 +380,30 @@ function Show-ClientOnlyNotes {
 }
 # <<< client-only notes <<<
 
+# >>> shared bank notes >>>
+function Show-SharedBankNotes {
+    Write-Host @'
+  Other machines will use this bank: three steps here, then the
+  installer on each of them (docs/guide/remote-bank.md has the detail
+  and the other ways to expose the daemon).
+  1. Expose the daemon, after checking that
+     curl -s http://127.0.0.1:8765/health reports "auth": true. Over
+     Tailscale, no certificate needed:
+       tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765
+     The others then use http://<this machine's tailnet IP>:8765.
+  2. Give each of their clients its own principal, in ops/.env:
+       PSEUDOLIFE_MCP_TOKENS=<token>:<machine>-claude-code
+       PSEUDOLIFE_MCP_TIER_MAP=<machine>-claude-code:full
+     then redeploy (ops/update.sh, or ops\update.ps1 on Windows).
+  3. Admit those principals to the agent board: list them, with default,
+     in coordination.allowed_principals in the daemon's config.yaml, and
+     restart the daemon.
+  On each other machine, run the installer, answer 2 and give it the
+  daemon's URL and that client's token.
+'@
+}
+# <<< shared bank notes <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 function Get-ProviderList([string]$Spec) {
     $expanded = @()
@@ -484,6 +423,230 @@ function Get-ProviderList([string]$Spec) {
 }
 
 Show-Banner
+
+# >>> bank location >>>
+# The installer's first question, for an interactive run that does not name
+# the daemon already (-DaemonUrl, -ClientOnly, or PSEUDOLIFE_MCP_DAEMON_URL in
+# the environment): where the memory bank lives. "Another machine" is the
+# client-only install, with the daemon's URL asked for here and its token
+# after the agents are chosen; "shared" is a local install that ends with the
+# steps to expose it. -TokenFile or -ReadToken already mean another
+# machine, so with either only the URL is asked. The mode block below then
+# resolves and checks the answer exactly as it does the parameters. Without
+# a terminal nothing is asked; end of input at one is no answer (exit 2).
+$script:bankLocation = "local"
+function Show-BankLocationQuestion {
+    Write-Host @'
+
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+'@
+}
+function Read-BankAnswer([string]$Prompt) {
+    # The reply, or $null at the end of input.
+    return (Read-Host $Prompt)
+}
+function Get-BankReply($reply) {
+    # A reply without surrounding whitespace or one pair of quotes: a path
+    # pasted from a file manager, or a URL copied with its quotes.
+    $value = "$reply".Trim()
+    if (($value.Length -ge 2) -and ($value[0] -in '"', "'") -and ($value[-1] -eq $value[0])) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+}
+function Invoke-BankLocationQuestion {
+    if ($script:DaemonUrl -or $script:ClientOnly -or $env:PSEUDOLIFE_MCP_DAEMON_URL) { return }
+    if (-not $interactive) { return }
+    if (-not $script:TokenFile -and -not $script:ReadToken) {
+        Show-BankLocationQuestion
+        $remote = $false
+        while (-not $remote) {
+            $reply = Read-BankAnswer "Choose 1-3 (Enter = 1)"
+            if ($null -eq $reply) {
+                Write-Host "no answer was given: re-run and answer, or pass -DaemonUrl <url> to use a daemon on another machine"
+                exit 2
+            }
+            switch (Get-BankReply $reply) {
+                { $_ -in "", "1" } { return }
+                "2" { $remote = $true }
+                "3" {
+                    if ($script:NoToken) {
+                        Write-Host "-NoToken installs a bank without a bearer token, and an unauthenticated bank must never be exposed to other machines (docs/guide/remote-bank.md). Drop -NoToken, or answer 1"
+                        exit 2
+                    }
+                    $script:bankLocation = "shared"
+                    return
+                }
+                default { Write-Host "  please answer 1, 2 or 3" }
+            }
+        }
+    }
+    $script:bankLocation = "remote"
+    $script:ClientOnly = [switch]$true
+    while (-not $script:DaemonUrl) {
+        $reply = Read-BankAnswer "The daemon's URL (for example http://100.64.0.2:8765)"
+        if ($null -eq $reply) {
+            Write-Host "no daemon URL was given: re-run and answer, or pass -DaemonUrl <url>"
+            exit 2
+        }
+        $script:DaemonUrl = Get-BankReply $reply
+    }
+}
+function Invoke-BankTokenQuestion {
+    # The other machine's token file: an existing one, or a new one from a
+    # pasted token.
+    if (($script:bankLocation -ne "remote") -or $script:TokenFile) { return }
+    if (-not $script:ReadToken -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
+        Step "Token file: $($env:PSEUDOLIFE_MCP_TOKEN_FILE) (PSEUDOLIFE_MCP_TOKEN_FILE in the environment)."
+        return
+    }
+    # One token file per principal: named for the one client this run wires,
+    # as docs/guide/remote-bank.md recommends, else shared.
+    $name = "shared"
+    if (@($clients).Count -eq 1) {
+        $name = switch ($clients[0]) {
+            "claude" { "claude-code" }
+            "generic" { "mcp-client" }
+            default { $clients[0] }
+        }
+    }
+    if (-not $script:ReadToken) {
+        Write-Host ""
+        Write-Host "The daemon's bearer token:"
+        Write-Host "  1) Paste it now: it is written to a new owner-only token file (default)"
+        Write-Host "  2) It is already in a token file on this machine"
+        $choice = $null
+        while (-not $choice) {
+            $reply = Read-BankAnswer "Choose 1-2 (Enter = 1)"
+            if ($null -eq $reply) {
+                Write-Host "no answer was given: re-run and answer, or pass -TokenFile <path>"
+                exit 2
+            }
+            switch (Get-BankReply $reply) {
+                { $_ -in "", "1" } { $choice = "paste" }
+                "2" { $choice = "file" }
+                default { Write-Host "  please answer 1 or 2" }
+            }
+        }
+        if ($choice -eq "paste") { $script:ReadToken = [switch]$true }
+    }
+    $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    while (-not $script:TokenFile) {
+        $prompt = if ($script:ReadToken) {
+            "The token file to write (Enter = ~/.pseudolife-mcp/$name.token)"
+        } else { "The token file" }
+        $reply = Read-BankAnswer $prompt
+        if ($null -eq $reply) {
+            Write-Host "no token file was given: re-run and answer, or pass -TokenFile <path>"
+            exit 2
+        }
+        $path = Get-BankReply $reply
+        if (-not $path -and $script:ReadToken) { $path = "~/.pseudolife-mcp/$name.token" }
+        if ($path -eq "~") {
+            $path = $userHome
+        } elseif ($path.StartsWith("~/") -or $path.StartsWith("~\")) {
+            $path = Join-Path $userHome ($path.Substring(2) -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+        }
+        # A pasted token only ever goes to a new file.
+        if ($path -and $script:ReadToken -and (Test-Path -LiteralPath $path)) {
+            Write-Host "  $path exists already: name another file, or re-run and answer 2 to use it"
+            $path = ""
+        }
+        $script:TokenFile = $path
+    }
+}
+# <<< bank location <<<
+Invoke-BankLocationQuestion
+
+# >>> client-only mode >>>
+# A client-only install wires this machine's clients to a daemon that runs
+# elsewhere (typically over a tailnet). The URL comes from -DaemonUrl, else
+# from PSEUDOLIFE_MCP_DAEMON_URL in the environment; a host other than
+# loopback implies -ClientOnly, since no local daemon answers there.
+function Get-DaemonUrlHost([string]$url) {
+    # Its host, lowercased, without brackets, read from the text as given:
+    # [Uri] would rewrite a short form such as 127.1 that the shim rejects.
+    $authority = ($url -split '://', 2)[-1]
+    $authority = ($authority -split '/', 2)[0]
+    $authority = ($authority -split '@')[-1]
+    $name = if ($authority.StartsWith("[")) {
+        ($authority.Substring(1) -split '\]', 2)[0]
+    } else { ($authority -split ':', 2)[0] }
+    return $name.ToLowerInvariant()
+}
+function Test-LoopbackUrl([string]$url) {
+    # The shim's own answer (daemon_url._is_loopback_url), so the installer
+    # and the shim never disagree on a form such as 127.0.0.01 or
+    # ::ffff:127.0.0.1. Exit 10/11 are its answers; anything else (no Python,
+    # an import that failed) falls back to the host rule below.
+    $python = Get-InstallerPython
+    if ($python) {
+        try {
+            & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.daemon_url import _is_loopback_url; sys.exit(10 if _is_loopback_url(sys.argv[2]) else 11)" $repo $url 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 10) { return $true }
+            if ($LASTEXITCODE -eq 11) { return $false }
+        } catch { }
+    }
+    $name = Get-DaemonUrlHost $url
+    if ($name -eq "localhost") { return $true }
+    # Dotted quads without leading zeros (Python's ipaddress rejects those).
+    if (($name -notmatch '^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$') -and -not $name.Contains(":")) { return $false }
+    $address = $null
+    return [Net.IPAddress]::TryParse($name, [ref]$address) -and [Net.IPAddress]::IsLoopback($address)
+}
+$clientOnlyVia = ""
+$daemonUrlFromEnv = $false
+if (-not $DaemonUrl -and $env:PSEUDOLIFE_MCP_DAEMON_URL) {
+    $DaemonUrl = "$env:PSEUDOLIFE_MCP_DAEMON_URL"
+    $daemonUrlFromEnv = $true
+}
+if ($DaemonUrl.EndsWith("/")) { $DaemonUrl = $DaemonUrl.Substring(0, $DaemonUrl.Length - 1) }
+if ($DaemonUrl) {
+    # An origin only, as the shim requires (daemon_url._validated_daemon_url):
+    # http(s), a host and an optional numeric port; no credentials, path,
+    # query, fragment or whitespace. The URL is not echoed: it may hold a
+    # password.
+    $urlAuthority = ($DaemonUrl -split '://', 2)[-1]
+    $urlPort = ""
+    if ($urlAuthority -match '^\[.*\]:(.*)$') { $urlPort = $Matches[1] }
+    elseif ($urlAuthority -match '^[^\[][^:]*:(.*)$') { $urlPort = $Matches[1] }
+    $urlOk = ($DaemonUrl -cmatch '^https?://.') -and ($urlAuthority -notmatch '[/?#@\s]') -and
+        ($urlPort -notmatch '\D') -and [bool](Get-DaemonUrlHost $DaemonUrl)
+    if (-not $urlOk) {
+        Write-Host "invalid daemon URL: use an http(s) origin without credentials, a path, query, or fragment (http://<host>:<port> or https://<host>)"
+        exit 2
+    }
+    if (-not $ClientOnly -and -not (Test-LoopbackUrl $DaemonUrl)) {
+        $ClientOnly = [switch]$true
+        if ($daemonUrlFromEnv) {
+            $clientOnlyVia = " (implied by PSEUDOLIFE_MCP_DAEMON_URL in the environment; unset it for a local install)"
+        }
+    }
+}
+if ($ClientOnly) {
+    if (-not $DaemonUrl) {
+        Write-Host "-ClientOnly needs the daemon's URL: pass -DaemonUrl http://<host>:8765, or set PSEUDOLIFE_MCP_DAEMON_URL"
+        exit 2
+    }
+    $localFlags = @()
+    if ($Extractor) { $localFlags += "-Extractor" }
+    if ($ExtractorUrl) { $localFlags += "-ExtractorUrl" }
+    if ($Model) { $localFlags += "-Model" }
+    if ($ShimPort -ne 0) { $localFlags += "-ShimPort" }
+    if ($NoToken) { $localFlags += "-NoToken" }
+    if ($Transport -ne "shim") { $localFlags += "-Transport http" }
+    if ($localFlags) {
+        Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
+        exit 2
+    }
+} elseif ($TokenFile -or $ReadToken) {
+    Write-Host "client-only install: -TokenFile and -ReadToken name a remote daemon's token, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
+    exit 2
+}
+# <<< client-only mode <<<
 
 # -- 1. provider selection (before preflight, so it checks what you picked) ------
 if (-not $Client) {
@@ -533,6 +696,7 @@ if ($interactive) {
     Show-Matrix
     Write-Host ""
 }
+Invoke-BankTokenQuestion
 
 # -- 2. preflight --------------------------------------------------------------
 # The status field of an ops/client_credentials.py JSON report, or $null.
@@ -1143,305 +1307,10 @@ function Describe-LegacyHooks($state) {
 # Claude skips hooks owned by its plugin. Codex resolves ownership, consent,
 # exact hook trust, runtime verification, and instruction fallback together.
 # Gemini/generic have no hook system.
-$installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
-$claudePluginInstalled = (Test-Path $installedPlugins) -and
-    ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
-$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
-if ($claudePluginInstalled -and ($clients -contains "claude")) {
-    Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
-    if ($instructionChoice -eq "append") {
-        Write-Host "    hook (the plugin provides it, serving a compact memory core); the full"
-        Write-Host "    CLAUDE.md block is still appended, as requested. The plugin no longer"
-        Write-Host "    bundles an MCP server, so the transport is still wired below."
-    } else {
-        Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
-        Write-Host "    compact memory core; the full block stays optional). The plugin no"
-        Write-Host "    longer bundles an MCP server, so the transport is still wired below."
-    }
-}
-
-$hookState = @{}
-$codexSetup = $null
-$codexSetupValid = $false
-$codexCredentialFile = $null
-$codexCredentialUrl = $null
-$codexConnectionConfigured = $false
-$codexCredentialBootstrapFailed = $false
-$codexRuntimeDefaults = $null
-$codexRuntimeRecovery = $null
-$briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
-foreach ($selectedClient in $clients) {
-    if ($selectedClient -notin "claude", "codex") { continue }
-    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
-        $hookState["claude"] = "plugin"
-        Invoke-ClaudeLegacyHookCleanup
-        continue
-    }
-    if ($selectedClient -eq "codex") {
-        $codexSetup = [pscustomobject]@{
-            source = "skip"; status = "unavailable"; instructions = "skipped"
-            recovery = "Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
-        }
-        # Probe real interpreters; Windows Store aliases and old Python versions
-        # must not prevent trying the next candidate. Do not alter the user's PATH.
-        $codexPython = $null
-        foreach ($candidate in @("python", "python3", "py")) {
-            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
-            $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
-            try {
-                $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
-                if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
-            } catch { continue }
-        }
-        if ($codexPython) {
-            $savedCredentialToken = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN", "Process")
-            $savedCredentialFile = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
-            $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
-                "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
-            # A client-only install: the remote daemon's token, from the
-            # operator's file on stdin, and its URL.
-            $installerToken = if ($ClientOnly) {
-                (Get-Content -LiteralPath $TokenFile -Raw).Trim()
-            } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
-            $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
-            if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
-            try {
-                $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
-                    "--credentials")
-                if ($installerToken) {
-                    $credentialArgs += "--installer-token-stdin"
-                }
-                $credentialArgs += @("--installer-daemon-url", $installerUrl)
-                $credentialOutput = if ($installerToken) {
-                    $installerToken | & $codexPython @credentialArgs
-                } else {
-                    & $codexPython @credentialArgs
-                }
-                $credentialExit = $LASTEXITCODE
-                $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
-                if (($credentialExit -eq 0) -and
-                    ($credentialResult.status -in "ready", "tokenless") -and
-                    ($credentialResult.credential_file_configured -in $true, $false) -and
-                    ($credentialResult.connection_configured -in $true, $false) -and
-                    (-not $credentialResult.connection_configured -or
-                     $credentialResult.daemon_url -is [string]) -and
-                    (-not $credentialResult.credential_file_configured -or
-                     $credentialResult.credential_file_path -is [string])) {
-                    $codexConnectionConfigured = [bool]$credentialResult.connection_configured
-                    if ($codexConnectionConfigured) {
-                        $codexCredentialUrl = [string]$credentialResult.daemon_url
-                        $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
-                        $env:PSEUDOLIFE_MCP_TOKEN = $null
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
-                    }
-                    if ($credentialResult.credential_file_configured) {
-                        $codexCredentialFile = [string]$credentialResult.credential_file_path
-                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
-                        Step "Codex credential file ready; future rotations are picked up by new requests."
-                    }
-                } else {
-                    throw "Invalid credential setup result"
-                }
-            } catch {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
-            }
-            # An existing Codex registration keeps its own daemon URL.
-            if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
-                ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
-                $codexCredentialBootstrapFailed = $true
-                $codexSetup.recovery = "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-            }
-            if (-not $codexCredentialBootstrapFailed) {
-                $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
-                    "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
-                if (-not $interactive) { $setupArgs += "--non-interactive" }
-                $setupLaunchFailed = $false
-                try {
-                    $setupOutput = & $codexPython @setupArgs
-                    $setupExit = $LASTEXITCODE
-                } catch {
-                    $setupLaunchFailed = $true
-                } finally {
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
-                    [Environment]::SetEnvironmentVariable(
-                        "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
-                }
-                try {
-                    if ($setupLaunchFailed) { throw "Codex setup launch failed" }
-                    $result = ($setupOutput -join "`n") | ConvertFrom-Json
-                    if (($setupExit -notin 0, 1) -or
-                        ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
-                        ($result.source -notin "manual", "plugin", "skip") -or
-                        ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
-                        throw "Invalid Codex setup result"
-                    }
-                    $codexSetup = $result
-                    $codexSetupValid = $true
-                } catch {
-                    $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
-                }
-            }
-        }
-        $hookState["codex"] = $codexSetup.status
-        Step "Codex hooks: $($codexSetup.status); standing instructions: $($codexSetup.instructions)."
-        if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
-        continue
-    }
-    if ($ClientOnly) {
-        # No daemon container here: the hook runs the installed shim by its
-        # path, known once section 11 installed it (after section 12's check).
-        $hookState["claude"] = "deferred"
-        continue
-    }
-    Step "Installing $selectedClient session hook..."
-    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
-    $hookState[$selectedClient] = "hook"
-}
-
-# -- 10. standing memory instructions (consent; never edited without it) ----------
-# Codex instructions are resolved by the setup helper after hook verification.
-# Other clients retain the existing auto/append/skip behavior and prompts.
-$instrState = @{}
-function Add-MemoryBlock($path, $provider) {
-    # Presence check HERE, not only at the loop top: the generic prompt
-    # resolves its target path after that check ran against an empty
-    # -AgentsFile, and a re-run must never double-append.
-    if ((Test-Path $path) -and ((Get-Content $path -Raw) -match 'pseudolife-memory')) {
-        Step "Memory block already present in $path - skipping."
-        $instrState[$provider] = "present:$path"
-        return
-    }
-    # A bare filename has no parent — Split-Path returns "", and New-Item ""
-    # is a terminating binder error under EAP=Stop.
-    $parent = Split-Path -Parent $path
-    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-    Add-Content -Path $path -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
-    Step "Appended memory block to $path"
-    $instrState[$provider] = "appended:$path"
-}
-foreach ($selectedClient in $clients) {
-    if ($selectedClient -eq "codex") {
-        # Explicit consent also covers instruction-only setup when Python or
-        # the helper is unavailable. A valid helper result already owns this.
-        if (-not $codexSetupValid -and ($instructionChoice -eq "append" -or
-            ($instructionChoice -eq "auto" -and $CodexHookTrust -eq "yes"))) {
-            try {
-                $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-                $override = Join-Path $codexHome "AGENTS.override.md"
-                $fallbackPath = if ((Test-Path $override) -and ([string](Get-Content $override -Raw)).Trim()) {
-                    $override
-                } else { Join-Path $codexHome "AGENTS.md" }
-                $existing = if (Test-Path $fallbackPath) { Get-Content $fallbackPath -Raw } else { "" }
-                if ($existing -cmatch '(?m)^## Memory\b' -and $existing -match 'pseudolife-memory' -and
-                    $existing -cmatch 'RECALL' -and $existing -cmatch 'CAPTURE' -and $existing -cmatch 'REFLECT') {
-                    $codexSetup.instructions = "present"
-                } else {
-                    $block = Get-Content (Join-Path $repo "examples/CLAUDE.memory.md") -Raw
-                    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
-                    if (Test-Path $fallbackPath) {
-                        $saved = "$fallbackPath.bak-pseudolife-$([guid]::NewGuid().ToString('N'))"
-                        Copy-Item -LiteralPath $fallbackPath -Destination $saved
-                        Step "Backed up Codex standing instructions to $saved"
-                    }
-                    Add-Content -LiteralPath $fallbackPath -Value ("`n`n" + $block) -Encoding utf8
-                    $codexSetup.instructions = "appended"
-                }
-                Step "Codex standing instructions: $($codexSetup.instructions) ($fallbackPath). Hooks still require setup."
-            } catch {
-                $codexSetup.recovery += " Could not write standing instructions; check the Codex home and file permissions."
-                Step $codexSetup.recovery
-            }
-        }
-        $instrState["codex"] = $codexSetup.instructions
-        continue
-    }
-    if ($selectedClient -eq "claude-desktop") {
-        # Desktop reads no standing file; the MCP instructions field is its
-        # only briefing channel.
-        continue
-    }
-    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
-        # The plugin's SessionStart hook serves a compact memory core, not
-        # this block: auto and skip leave CLAUDE.md alone (the summary says
-        # so), and an explicit append still writes it.
-        if ($instructionChoice -ne "append") {
-            $instrState["claude"] = "covered-by-plugin"
-            continue
-        }
-    }
-    $instructionPath = switch ($selectedClient) {
-        "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
-        "generic" { $AgentsFile }
-        default { Join-Path $env:USERPROFILE ".claude\CLAUDE.md" }
-    }
-    $hasBlock = $instructionPath -and (Test-Path $instructionPath) -and
-        ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
-    if ($hasBlock) {
-        Step "Memory block already present in $instructionPath - skipping."
-        $instrState[$selectedClient] = "present:$instructionPath"
-        continue
-    }
-    $choice = $instructionChoice
-    if ($choice -eq "auto") {
-        switch ($selectedClient) {
-            "claude" {
-                # Skipped by default. The settings.json SessionStart hook
-                # serves the compact memory core and the live briefing, not
-                # this block; the summary names the file to append it to.
-                $choice = "skip"
-            }
-            "gemini" {
-                if ($interactive) {
-                    $yn = Read-Host "Gemini CLI has no hook system - append the standing memory block to $instructionPath? [Y/n]"
-                    $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
-                } else {
-                    $choice = "skip"
-                }
-            }
-            "generic" {
-                if ($AgentsFile) {
-                    $choice = "append"
-                } elseif ($interactive) {
-                    $default = Join-Path $env:USERPROFILE "AGENTS.md"
-                    $answer = Read-Host "Append the standing memory block to which file? (Enter = $default, `"-`" to skip)"
-                    if ($answer -eq "-") {
-                        $choice = "skip"
-                    } else {
-                        $instructionPath = if ($answer) { $answer } else { $default }
-                        $choice = "append"
-                    }
-                } else {
-                    $choice = "skip"
-                }
-            }
-        }
-    }
-    if (($choice -eq "append") -and ($selectedClient -eq "generic") -and -not $instructionPath) {
-        Write-Host "NOTE: generic append needs a target - pass -AgentsFile <path>."
-        $choice = "skip"
-    }
-    if ($choice -eq "append") {
-        Add-MemoryBlock $instructionPath $selectedClient
-    } else {
-        $hintPath = if ($instructionPath) { $instructionPath } else { "<your AGENTS.md>" }
-        Step "Standing memory block not written for $selectedClient. To add it:"
-        Write-Host "  Add-Content `"$hintPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
-        $instrState[$selectedClient] = "skipped:$hintPath"
-    }
-}
-
-# -- 11. wire into selected MCP clients ----------------------------------------------
-# Runs even with the plugin installed: the plugin is the hooks/commands layer
-# only, so the MCP transport (shim by default) always comes from here.
+# The stdio shim helpers come first: a client-only install runs the
+# installed shim's connect (the client-only connect block) before the
+# Codex credential setup here and the registrars in section 11.
+#
 # The shim install itself is client-agnostic; memoize one attempt so
 # multi-provider runs don't run pipx/pip twice.
 $script:shimInstallResult = $null
@@ -1740,6 +1609,432 @@ function Test-ShimRegistrationMigrates($Client, $RegisteredPath = $null) {
 # incident). CLI env-flag support is probed, never assumed: a missing flag
 # fails closed before registration. HTTP transport cannot carry env, so there
 # the daemon default (ops/.env) applies and no shim exists to spawn anything.
+
+# >>> client-only connect >>>
+# A client-only install re-points the registrations this machine already has
+# (an earlier install's, naming another daemon) with the installed shim's
+# `connect`, before the Codex credential setup below and the registrars in
+# section 11: those create only what is still missing, and the Codex setup
+# refuses a daemon URL its configured server does not name. The dry run sends
+# no token and writes nothing; when it finds no registration (exit 3),
+# connect is not run again. A failed connect stops the install.
+$script:connectedClients = @()
+$script:connectChecked = $false
+function Get-ConnectClientNames {
+    # The selected clients as connect names them, comma-separated.
+    $names = foreach ($selectedClient in $clients) {
+        switch ($selectedClient) {
+            "claude" { "claude-code" }
+            { $_ -in "claude-desktop", "codex", "gemini" } { $_ }
+        }
+    }
+    return (@($names) -join ",")
+}
+function Test-ConnectReport($report) {
+    # connect's report, or nothing to trust: a JSON object with rows and exit.
+    return ($report -is [pscustomobject]) -and
+        ($report.PSObject.Properties.Name -contains "rows") -and
+        ($report.PSObject.Properties.Name -contains "exit")
+}
+function Get-ConnectRows($report) {
+    if (Test-ConnectReport $report) { return @(@($report.rows) | Where-Object { $_ }) }
+    return @()
+}
+function Write-ConnectPlan($report, [switch]$ManualOnly) {
+    foreach ($row in (Get-ConnectRows $report)) {
+        # An absent client is for the registrars to create, not a connect action.
+        if (($row.state -eq "absent") -or ($ManualOnly -and ($row.state -ne "manual"))) { continue }
+        $where = (@($row.file, $(if ($row.key) { "[$($row.key)]" })) | Where-Object { $_ }) -join " "
+        Write-Host ("    {0,-8} {1} {2}{3}" -f $row.state, $row.client, $row.place, $(if ($where) { ": $where" } else { "" }))
+        if ($row.changes) {
+            foreach ($change in $row.changes.PSObject.Properties) {
+                $pair = @($change.Value) + @($null, $null)
+                $old = if ($null -eq $pair[0]) { "(unset)" } else { $pair[0] }
+                $new = if ($null -eq $pair[1]) { "(removed)" } else { $pair[1] }
+                Write-Host "             $($change.Name): $old -> $new"
+            }
+        }
+        if ($row.detail) { Write-Host "             $($row.detail)" }
+    }
+}
+function Invoke-ClientOnlyConnect {
+    $names = Get-ConnectClientNames
+    if (-not $names) { return }
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "Existing registrations were not checked against $($DaemonUrl): the pseudolife-mcp shim is unavailable (see above). One that names another daemon stays as it is."
+        return
+    }
+    $shim = $script:shimInstallPath
+    try {
+        $global:LASTEXITCODE = 0
+        $planOutput = & $shim connect $DaemonUrl --token-file $TokenFile --client $names --dry-run --json
+        $planExit = $LASTEXITCODE
+    } catch {
+        Write-Warning "Existing registrations were not checked against $($DaemonUrl): $shim could not be run ($($_.Exception.Message)). One that names another daemon stays as it is."
+        return
+    }
+    $report = try { (@($planOutput) -join "`n") | ConvertFrom-Json } catch { $null }
+    # Only connect's own report is trusted. Anything else (a shim from before
+    # connect, a held one) leaves the install as it was: the registrars run,
+    # with their earlier advice for a mismatch.
+    if (-not (Test-ConnectReport $report)) {
+        $why = "$shim did not answer with connect's plan (exit $planExit; a shim from before connect has none)"
+        if ($script:shimUpgradeHeld) { $why += ". It is the shim left in place: $($script:shimUpgradeHeld)" }
+        Write-Warning "Existing registrations were not checked against $($DaemonUrl): $why. One that names another daemon stays as it is."
+        return
+    }
+    $script:connectChecked = $true
+    if ($planExit -eq 3) {
+        # No registration connect can write: the registrars create them.
+        if (@(Get-ConnectRows $report | Where-Object { $_.state -eq "manual" }).Count -gt 0) {
+            Write-Warning "pseudolife-mcp connect found entries it does not rewrite; change them by hand:"
+            Write-ConnectPlan $report -ManualOnly
+        }
+        return
+    }
+    if ($planExit -ne 0) {
+        # Under --json the reason is only in the report.
+        $reason = if ($report.PSObject.Properties.Name -contains "error" -and $report.error) { ": $($report.error)" } else { "" }
+        Write-Host "client-only install: pseudolife-mcp connect could not check this machine's existing registrations (it exited $planExit$reason). Nothing was changed; fix that, then re-run"
+        exit 1
+    }
+    Step "Existing registrations: pseudolife-mcp connect points them at $($DaemonUrl):"
+    Write-ConnectPlan $report
+    try {
+        $global:LASTEXITCODE = 0
+        & $shim connect $DaemonUrl --token-file $TokenFile --client $names --yes | Out-Host
+        $applyExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $applyExit = 1
+    }
+    if ($applyExit -ne 0) {
+        $meaning = switch ($applyExit) {
+            1 { "a write failed, and every file it wrote was rolled back" }
+            4 { "the daemon refused the token file or the MCP handshake, and nothing was written" }
+            5 { "the plan was applied, but the check after it failed; restore the backups it listed, or re-run connect" }
+            default { "see its message above" }
+        }
+        Write-Host "client-only install: pseudolife-mcp connect exited $($applyExit): $meaning. The install stopped before the Codex setup and the registrations; fix that, then re-run"
+        exit 1
+    }
+    $script:connectedClients = @(Get-ConnectRows $report |
+        Where-Object { ($_.place -eq "registration") -and ($_.state -in "current", "change") } |
+        ForEach-Object { [string]$_.client })
+}
+# <<< client-only connect <<<
+if ($ClientOnly) { Invoke-ClientOnlyConnect }
+
+$installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+$claudePluginInstalled = (Test-Path $installedPlugins) -and
+    ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
+if ($claudePluginInstalled -and ($clients -contains "claude")) {
+    Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
+    if ($instructionChoice -eq "append") {
+        Write-Host "    hook (the plugin provides it, serving a compact memory core); the full"
+        Write-Host "    CLAUDE.md block is still appended, as requested. The plugin no longer"
+        Write-Host "    bundles an MCP server, so the transport is still wired below."
+    } else {
+        Write-Host "    hook and CLAUDE.md block (the plugin provides the hook, which serves a"
+        Write-Host "    compact memory core; the full block stays optional). The plugin no"
+        Write-Host "    longer bundles an MCP server, so the transport is still wired below."
+    }
+}
+
+$hookState = @{}
+$codexSetup = $null
+$codexSetupValid = $false
+$codexCredentialFile = $null
+$codexCredentialUrl = $null
+$codexConnectionConfigured = $false
+$codexCredentialBootstrapFailed = $false
+$codexRuntimeDefaults = $null
+$codexRuntimeRecovery = $null
+$briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+foreach ($selectedClient in $clients) {
+    if ($selectedClient -notin "claude", "codex") { continue }
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
+        $hookState["claude"] = "plugin"
+        Invoke-ClaudeLegacyHookCleanup
+        continue
+    }
+    if ($selectedClient -eq "codex") {
+        $codexSetup = [pscustomobject]@{
+            source = "skip"; status = "unavailable"; instructions = "skipped"
+            recovery = "Install Python 3.10 or newer, then rerun this installer to finish Codex memory setup."
+        }
+        # Probe real interpreters; Windows Store aliases and old Python versions
+        # must not prevent trying the next candidate. Do not alter the user's PATH.
+        $codexPython = $null
+        foreach ($candidate in @("python", "python3", "py")) {
+            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+            $probeArgs = if ($candidate -eq "py") { @("-3") } else { @() }
+            try {
+                $probe = & $candidate @probeArgs -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' 2>$null
+                if (($LASTEXITCODE -eq 0) -and $probe) { $codexPython = "$probe".Trim(); break }
+            } catch { continue }
+        }
+        if ($codexPython) {
+            $savedCredentialToken = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_TOKEN", "Process")
+            $savedCredentialFile = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_TOKEN_FILE", "Process")
+            $savedCredentialUrl = [Environment]::GetEnvironmentVariable(
+                "PSEUDOLIFE_MCP_DAEMON_URL", "Process")
+            # A client-only install: the remote daemon's token, from the
+            # operator's file on stdin, and its URL.
+            $installerToken = if ($ClientOnly) {
+                (Get-Content -LiteralPath $TokenFile -Raw).Trim()
+            } else { Get-EnvValue "PSEUDOLIFE_MCP_TOKEN" }
+            $installerUrl = if ($DaemonUrl) { $DaemonUrl } else { Get-EnvValue "PSEUDOLIFE_MCP_DAEMON_URL" }
+            if (-not $installerUrl) { $installerUrl = "http://127.0.0.1:8765" }
+            try {
+                $credentialArgs = @((Join-Path $repo "ops/setup-codex-coordination.py"),
+                    "--credentials")
+                if ($installerToken) {
+                    $credentialArgs += "--installer-token-stdin"
+                }
+                $credentialArgs += @("--installer-daemon-url", $installerUrl)
+                $credentialOutput = if ($installerToken) {
+                    $installerToken | & $codexPython @credentialArgs
+                } else {
+                    & $codexPython @credentialArgs
+                }
+                $credentialExit = $LASTEXITCODE
+                $credentialResult = ($credentialOutput -join "`n") | ConvertFrom-Json
+                if (($credentialExit -eq 0) -and
+                    ($credentialResult.status -in "ready", "tokenless") -and
+                    ($credentialResult.credential_file_configured -in $true, $false) -and
+                    ($credentialResult.connection_configured -in $true, $false) -and
+                    (-not $credentialResult.connection_configured -or
+                     $credentialResult.daemon_url -is [string]) -and
+                    (-not $credentialResult.credential_file_configured -or
+                     $credentialResult.credential_file_path -is [string])) {
+                    $codexConnectionConfigured = [bool]$credentialResult.connection_configured
+                    if ($codexConnectionConfigured) {
+                        $codexCredentialUrl = [string]$credentialResult.daemon_url
+                        $env:PSEUDOLIFE_MCP_DAEMON_URL = $codexCredentialUrl
+                        $env:PSEUDOLIFE_MCP_TOKEN = $null
+                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $null
+                    }
+                    if ($credentialResult.credential_file_configured) {
+                        $codexCredentialFile = [string]$credentialResult.credential_file_path
+                        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $codexCredentialFile
+                        Step "Codex credential file ready; future rotations are picked up by new requests."
+                    }
+                } else {
+                    throw "Invalid credential setup result"
+                }
+            } catch {
+                $codexCredentialBootstrapFailed = $true
+                $codexSetup.recovery = "Codex credential setup failed. Repair the configured token file or Codex configuration, then rerun the installer."
+            }
+            # pseudolife-mcp connect (the client-only connect block)
+            # re-pointed an existing registration already; one still naming
+            # another daemon is one it could not write, or connect did not
+            # run (a shim from before it).
+            if ($ClientOnly -and -not $codexCredentialBootstrapFailed -and
+                ("$codexCredentialUrl".TrimEnd("/") -ne $DaemonUrl)) {
+                $codexCredentialBootstrapFailed = $true
+                $codexSetup.recovery = if ($script:connectChecked) {
+                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl where that Codex configuration sets it, or run pseudolife-mcp connect $DaemonUrl --client codex --token-file $TokenFile, then re-run."
+                } else {
+                    "The existing Codex registration names the daemon at $(if ($codexCredentialUrl) { $codexCredentialUrl } else { '(none)' }), not the daemon at $DaemonUrl. Edit it in place in the Codex config.toml: set PSEUDOLIFE_MCP_DAEMON_URL=$DaemonUrl in [mcp_servers.pseudolife-memory.env], then re-run."
+                }
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                [Environment]::SetEnvironmentVariable("PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+            }
+            if (-not $codexCredentialBootstrapFailed) {
+                $setupArgs = @((Join-Path $repo "ops/setup-codex-hooks.py"), "--source", $CodexHooks,
+                    "--trust", $CodexHookTrust, "--instructions", $instructionChoice)
+                if (-not $interactive) { $setupArgs += "--non-interactive" }
+                $setupLaunchFailed = $false
+                try {
+                    $setupOutput = & $codexPython @setupArgs
+                    $setupExit = $LASTEXITCODE
+                } catch {
+                    $setupLaunchFailed = $true
+                } finally {
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_TOKEN", $savedCredentialToken, "Process")
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_TOKEN_FILE", $savedCredentialFile, "Process")
+                    [Environment]::SetEnvironmentVariable(
+                        "PSEUDOLIFE_MCP_DAEMON_URL", $savedCredentialUrl, "Process")
+                }
+                try {
+                    if ($setupLaunchFailed) { throw "Codex setup launch failed" }
+                    $result = ($setupOutput -join "`n") | ConvertFrom-Json
+                    if (($setupExit -notin 0, 1) -or
+                        ($result.status -notin "ready", "pending", "unavailable", "skipped") -or
+                        ($result.source -notin "manual", "plugin", "skip") -or
+                        ($result.instructions -notin "present", "appended", "skipped", "covered-by-hooks")) {
+                        throw "Invalid Codex setup result"
+                    }
+                    $codexSetup = $result
+                    $codexSetupValid = $true
+                } catch {
+                    $codexSetup.recovery = "Codex setup did not return a valid result. Run python ops/setup-codex-hooks.py to retry."
+                }
+            }
+        }
+        $hookState["codex"] = $codexSetup.status
+        Step "Codex hooks: $($codexSetup.status); standing instructions: $($codexSetup.instructions)."
+        if ($codexSetup.recovery) { Write-Host "    $($codexSetup.recovery)" }
+        continue
+    }
+    if ($ClientOnly) {
+        # No daemon container here: the hook runs the installed shim by its
+        # path, known once section 11 installed it (after section 12's check).
+        $hookState["claude"] = "deferred"
+        continue
+    }
+    Step "Installing $selectedClient session hook..."
+    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
+    $hookState[$selectedClient] = "hook"
+}
+
+# -- 10. standing memory instructions (consent; never edited without it) ----------
+# Codex instructions are resolved by the setup helper after hook verification.
+# Other clients retain the existing auto/append/skip behavior and prompts.
+$instrState = @{}
+function Add-MemoryBlock($path, $provider) {
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # -AgentsFile, and a re-run must never double-append.
+    if ((Test-Path $path) -and ((Get-Content $path -Raw) -match 'pseudolife-memory')) {
+        Step "Memory block already present in $path - skipping."
+        $instrState[$provider] = "present:$path"
+        return
+    }
+    # A bare filename has no parent — Split-Path returns "", and New-Item ""
+    # is a terminating binder error under EAP=Stop.
+    $parent = Split-Path -Parent $path
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    Add-Content -Path $path -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
+    Step "Appended memory block to $path"
+    $instrState[$provider] = "appended:$path"
+}
+foreach ($selectedClient in $clients) {
+    if ($selectedClient -eq "codex") {
+        # Explicit consent also covers instruction-only setup when Python or
+        # the helper is unavailable. A valid helper result already owns this.
+        if (-not $codexSetupValid -and ($instructionChoice -eq "append" -or
+            ($instructionChoice -eq "auto" -and $CodexHookTrust -eq "yes"))) {
+            try {
+                $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
+                $override = Join-Path $codexHome "AGENTS.override.md"
+                $fallbackPath = if ((Test-Path $override) -and ([string](Get-Content $override -Raw)).Trim()) {
+                    $override
+                } else { Join-Path $codexHome "AGENTS.md" }
+                $existing = if (Test-Path $fallbackPath) { Get-Content $fallbackPath -Raw } else { "" }
+                if ($existing -cmatch '(?m)^## Memory\b' -and $existing -match 'pseudolife-memory' -and
+                    $existing -cmatch 'RECALL' -and $existing -cmatch 'CAPTURE' -and $existing -cmatch 'REFLECT') {
+                    $codexSetup.instructions = "present"
+                } else {
+                    $block = Get-Content (Join-Path $repo "examples/CLAUDE.memory.md") -Raw
+                    New-Item -ItemType Directory -Force -Path $codexHome | Out-Null
+                    if (Test-Path $fallbackPath) {
+                        $saved = "$fallbackPath.bak-pseudolife-$([guid]::NewGuid().ToString('N'))"
+                        Copy-Item -LiteralPath $fallbackPath -Destination $saved
+                        Step "Backed up Codex standing instructions to $saved"
+                    }
+                    Add-Content -LiteralPath $fallbackPath -Value ("`n`n" + $block) -Encoding utf8
+                    $codexSetup.instructions = "appended"
+                }
+                Step "Codex standing instructions: $($codexSetup.instructions) ($fallbackPath). Hooks still require setup."
+            } catch {
+                $codexSetup.recovery += " Could not write standing instructions; check the Codex home and file permissions."
+                Step $codexSetup.recovery
+            }
+        }
+        $instrState["codex"] = $codexSetup.instructions
+        continue
+    }
+    if ($selectedClient -eq "claude-desktop") {
+        # Desktop reads no standing file; the MCP instructions field is its
+        # only briefing channel.
+        continue
+    }
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
+        # The plugin's SessionStart hook serves a compact memory core, not
+        # this block: auto and skip leave CLAUDE.md alone (the summary says
+        # so), and an explicit append still writes it.
+        if ($instructionChoice -ne "append") {
+            $instrState["claude"] = "covered-by-plugin"
+            continue
+        }
+    }
+    $instructionPath = switch ($selectedClient) {
+        "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
+        "generic" { $AgentsFile }
+        default { Join-Path $env:USERPROFILE ".claude\CLAUDE.md" }
+    }
+    $hasBlock = $instructionPath -and (Test-Path $instructionPath) -and
+        ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
+    if ($hasBlock) {
+        Step "Memory block already present in $instructionPath - skipping."
+        $instrState[$selectedClient] = "present:$instructionPath"
+        continue
+    }
+    $choice = $instructionChoice
+    if ($choice -eq "auto") {
+        switch ($selectedClient) {
+            "claude" {
+                # Skipped by default. The settings.json SessionStart hook
+                # serves the compact memory core and the live briefing, not
+                # this block; the summary names the file to append it to.
+                $choice = "skip"
+            }
+            "gemini" {
+                if ($interactive) {
+                    $yn = Read-Host "Gemini CLI has no hook system - append the standing memory block to $instructionPath? [Y/n]"
+                    $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
+                } else {
+                    $choice = "skip"
+                }
+            }
+            "generic" {
+                if ($AgentsFile) {
+                    $choice = "append"
+                } elseif ($interactive) {
+                    $default = Join-Path $env:USERPROFILE "AGENTS.md"
+                    $answer = Read-Host "Append the standing memory block to which file? (Enter = $default, `"-`" to skip)"
+                    if ($answer -eq "-") {
+                        $choice = "skip"
+                    } else {
+                        $instructionPath = if ($answer) { $answer } else { $default }
+                        $choice = "append"
+                    }
+                } else {
+                    $choice = "skip"
+                }
+            }
+        }
+    }
+    if (($choice -eq "append") -and ($selectedClient -eq "generic") -and -not $instructionPath) {
+        Write-Host "NOTE: generic append needs a target - pass -AgentsFile <path>."
+        $choice = "skip"
+    }
+    if ($choice -eq "append") {
+        Add-MemoryBlock $instructionPath $selectedClient
+    } else {
+        $hintPath = if ($instructionPath) { $instructionPath } else { "<your AGENTS.md>" }
+        Step "Standing memory block not written for $selectedClient. To add it:"
+        Write-Host "  Add-Content `"$hintPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+        $instrState[$selectedClient] = "skipped:$hintPath"
+    }
+}
+
+# -- 11. wire into selected MCP clients ----------------------------------------------
+# Runs even with the plugin installed: the plugin is the hooks/commands layer
+# only, so the MCP transport (shim by default) always comes from here.
+# Its shim helpers (Install-ShimOnce and the registration checks) are
+# defined at the top of section 9, where a client-only install first needs
+# them.
+#
 # Claude Desktop launches MCP servers with a sanitized environment, so a
 # token-gated daemon needs a token FILE path on the entry - never the value,
 # and never an OS env var, which Desktop cannot see (2026-09-19 incident).
@@ -2136,8 +2431,9 @@ foreach ($selectedClient in $clients) {
                 $mcpState["gemini"] = "present"
             }
             # `gemini mcp list` shows no env, so the installer cannot tell
-            # whether this registration carries a token; say how to add one.
-            if ($geminiTokenFile) {
+            # whether this registration carries a token; say how to add one,
+            # unless pseudolife-mcp connect just wrote or confirmed it.
+            if ($geminiTokenFile -and (@($script:connectedClients) -notcontains "gemini")) {
                 Write-Warning "The daemon requires a bearer token; unless the existing Gemini CLI registration already carries one, its memory calls will be refused. Edit it in place in ~/.gemini/settings.json and set PSEUDOLIFE_MCP_TOKEN_FILE=$geminiTokenFile (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with -NoToken."
             }
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
@@ -2259,11 +2555,16 @@ foreach ($selectedClient in $clients) {
             if ((-not $claudeCredentialOk) -and $claudeTokenFile -and ($existingClaude -notmatch 'PSEUDOLIFE_MCP_TOKEN')) {
                 Write-Warning "The daemon requires a bearer token, but the existing Claude Code registration carries none, so its memory calls will be refused. Edit the registration in place and set PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile (an HTTP registration cannot carry it: register the stdio shim instead), or re-run with -NoToken."
             }
-            # The in-place edit above only adds what is missing, so a
-            # registration from an earlier local install may still name that
-            # daemon.
+            # pseudolife-mcp connect (the client-only connect block)
+            # re-pointed an existing registration already; one still naming
+            # another daemon is one it could not write (a project scope, an
+            # HTTP entry), or connect did not run (a shim from before it).
             if ($ClientOnly -and -not ([string](claude mcp get pseudolife-memory 2>$null | Out-String)).Contains($clientDaemonUrl)) {
-                Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile."
+                if ($script:connectChecked) {
+                    Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl, and pseudolife-mcp connect did not re-point it (see its lines above for why). Set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile in the entry it names, or run pseudolife-mcp connect $clientDaemonUrl --client claude-code --token-file $claudeTokenFile."
+                } else {
+                    Write-Warning "The existing Claude Code registration does not name the daemon at $clientDaemonUrl. Edit it in place and set PSEUDOLIFE_MCP_DAEMON_URL=$clientDaemonUrl and PSEUDOLIFE_MCP_TOKEN_FILE=$claudeTokenFile."
+                }
             }
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
@@ -2621,6 +2922,7 @@ if ($codexShimMode) {
     Write-Host "Note: Codex-served extraction quality is unmeasured - see the 'OpenAI primary' section of docs/guide/dreaming.md."
 }
 if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
+if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare

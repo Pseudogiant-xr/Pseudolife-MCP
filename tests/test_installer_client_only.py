@@ -848,7 +848,11 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     repo = _copy_repo(tmp_path)
     installed = tmp_path / "installed-bin"
     installed.mkdir()
-    _stub(installed / "pseudolife-mcp", "exit 0\n")
+    _stub(installed / "pseudolife-mcp",
+          "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+          "if [ \"$1\" = connect ]; then\n"
+          "  echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3\nfi\n"
+          "exit 0\n")
     python = shell.path(sys.executable)
     for name in ("python3", "python"):
         _stub(shell.bin / name, f"exec '{python}' \"$@\"\n")
@@ -921,6 +925,10 @@ def test_a_client_only_install_wires_clients_to_the_remote_daemon(bash, tmp_path
     assert re.search(r"\[x\] Agent board\s+on", proc.stdout)
     assert any(seen.endswith(f"Bearer {FIXTURE_TOKEN}") for seen in _Board.seen)
     assert "Waiting for the daemon" not in proc.stdout
+    # A fresh machine: connect's dry run found nothing, so it was not run again.
+    connects = [call for call in calls if call.startswith("shim|connect")]
+    assert len(connects) == 1 and "--dry-run" in connects[0]
+    assert "not checked" not in output
 
 
 # -- parity with install.ps1 ----------------------------------------------------
@@ -961,7 +969,7 @@ def _messages(text: str) -> set[str]:
 def test_client_only_messages_match_across_installers():
     sh = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
     ps = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8")
-    for name in ("client-only mode", "client-only preflight"):
+    for name in ("client-only mode", "client-only preflight", "client-only connect"):
         sh_block = "\n".join(_marker_block(sh, name))
         ps_block = "\n".join(_marker_block(ps, name))
         assert _messages(sh_block), name

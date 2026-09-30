@@ -18,7 +18,9 @@ different (seeded) row order each, so replicate 2 is a genuine second
 opinion — the same independence the sweep gets from re-batching.
 
 Per queue (majority vote across replicates):
-  * merges     — accept/reject precision; single-vote auto-reject at
+  * merges     — accept/reject precision, a ``relate`` vote counting as
+                 reject-class (the ``relate`` block reports where those
+                 votes land); single-vote auto-reject at
                  ``--reject-gate``; with ``--replicates >= 2`` the two-vote
                  simulation: rejects at mean >= ``--reject-gate-2`` and
                  accepts on non-low-differential rows at mean >=
@@ -193,7 +195,50 @@ def _prec(rows, final, verdict, label_ok, gate=None, extra=None):
     return {"n": hit, "bad": bad, "precision": _rate(hit - bad, hit)}
 
 
+def _merge_class(v):
+    """A merge vote as the gates read it: ``relate`` (distinct, but related;
+    2026-09-30) is reject-class, like the sweep's reject gates. The panel
+    label ``reject`` covers both distinct and related-but-distinct pairs
+    (``panel_verdict`` says which)."""
+    return {**v, "verdict": "reject"} if v and v["verdict"] == "relate" else v
+
+
+def relate_report(rows, reps):
+    """Where the relate votes land (every replicate's vote counted): by the
+    row's label (reject-class labels are correct), by the panel's own
+    verdict (``relate`` rows are the panel's related-but-distinct pairs),
+    and, on panel ``relate`` rows, whether the relation and its direction
+    (FROM -> INTO as shown) match the panel's."""
+    out = {"votes": 0, "on_label": collections.Counter(),
+           "on_panel_verdict": collections.Counter(),
+           "panel_relate_rows": {"relation_match": 0, "direction_same": 0,
+                                 "direction_reversed": 0}}
+    for i, r in enumerate(rows):
+        for rep in reps:
+            v = rep[i]
+            if not v or v["verdict"] != "relate":
+                continue
+            out["votes"] += 1
+            out["on_label"][r.get("label")] += 1
+            out["on_panel_verdict"][r.get("panel_verdict")] += 1
+            panel = r.get("relate") if r.get("panel_verdict") == "relate" else None
+            if not isinstance(panel, dict):
+                continue
+            side = out["panel_relate_rows"]
+            side["relation_match"] += v.get("relation") == panel.get("relation")
+            shown = ((r.get("from") or {}).get("display"),
+                     (r.get("into") or {}).get("display"))
+            pair = (panel.get("src"), panel.get("dst"))
+            side["direction_same"] += pair == shown
+            side["direction_reversed"] += pair == shown[::-1]
+    out["on_label"] = dict(out["on_label"])
+    out["on_panel_verdict"] = dict(out["on_panel_verdict"])
+    return out
+
+
 def score_merges(rows, reps, args):
+    raw = reps
+    reps = [[_merge_class(v) for v in rep] for rep in reps]
     final = [majority([rep[i] for rep in reps]) for i in range(len(rows))]
     lab = lambda r, v: r["label"] == v["verdict"]  # noqa: E731
     out = {"rows": len(rows),
@@ -221,6 +266,7 @@ def score_merges(rows, reps, args):
         out["two_vote_accept_not_lowdiff"] = two(
             "accept", args.accept_gate, lambda r: not r.get("low_differential"))
         out["two_vote_accept_any"] = two("accept", args.accept_gate)
+    out["relate"] = relate_report(rows, raw)
     return out
 
 

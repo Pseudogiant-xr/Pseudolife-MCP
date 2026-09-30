@@ -21,7 +21,10 @@ machines see each other and exchange mail with no further setup.
 
 What this is not: there is no offline mode and no replica. When the daemon is
 unreachable the remote shim exits and the plugin hooks degrade to
-"coordination unavailable"; there is one bank and one writer of record.
+"coordination unavailable"; there is one bank and one writer of record. A link
+that answers the shim's health check but stalls its board registration leaves
+memory working and the registration retrying in the background (see
+[configuration](configuration.md)).
 Replicating the bank across machines is not part of this feature.
 
 ## What the daemon allows
@@ -48,7 +51,10 @@ token; a `--no-token` install must not be exposed.
 
 ## Exposing the daemon
 
-In order of preference.
+In order of preference. An installer run on the daemon host that answers
+**3** to its first question ("On this machine, and other machines will
+connect to it") is a local install that ends by printing a short version of
+these steps and the two sections after them.
 
 ### 1. Tailscale Serve, TCP mode
 
@@ -187,10 +193,43 @@ owner-only check. Or let `-ReadToken` write it.
 
 ### With the installer (client-only path)
 
-The installers take a client-only mode that skips the Docker stack, mints no
-token, and wires the selected clients against a remote daemon. A
-non-loopback `--daemon-url` implies it; pass it explicitly for a loopback URL
-that is really an SSH tunnel.
+Run the installer on the client machine (`ops/install.sh`, or
+`ops\install.ps1` on Windows). Its first question is where the bank lives:
+
+```
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+```
+
+Answer **2**. It asks for the daemon's URL, then, once you have chosen the
+agents, for the token: paste it, and it is written to a new owner-only file
+(`~/.pseudolife-mcp/<client>.token` by default; it never replaces an
+existing file), or name a token file that already holds it. The
+client-only install follows: it skips the Docker stack, mints no token,
+checks the daemon's `/health`, and sets up the shim, the plugin and hooks
+and each client's registration against the remote daemon.
+
+The same install without questions takes flags: a non-loopback
+`--daemon-url` implies client-only; pass `--client-only` explicitly for a
+loopback URL that is really an SSH tunnel. A run that names the daemon
+(the flag, or `PSEUDOLIFE_MCP_DAEMON_URL` in the environment), or has no
+terminal, is not asked; one given `--token-file` or `--read-token` without
+a URL is asked only for the URL.
+
+**Re-running it re-points what is already registered.** When this machine
+already has registrations (from an earlier local install, or a client-only
+install against a daemon that has since moved), the installer runs
+[`pseudolife-mcp connect`](#moving-a-client-to-a-new-daemon) for the
+clients it installs, with that run's token file, before the Codex
+credential setup and the registrars: it shows connect's plan, applies it,
+and stops if connect fails.
+The registrars then create only what is still missing. Entries connect does
+not rewrite (a project-scoped Claude Code entry, for example) are named, for
+you to change by hand. A shim too old to have `connect` (one a running
+session kept in place) only gets a warning: that run leaves existing
+registrations as they are, as before.
 
 The installer takes one token file per run, so run it once per client, each
 with that client's own token file:
@@ -273,6 +312,66 @@ reads `on - token present, principal allowed` when admission worked, and
 `off - this token's principal is not in coordination.allowed_principals`
 (the daemon's `principal_not_allowed` reason) when it is missing from the
 list.
+
+## Moving a client to a new daemon
+
+When the daemon moves (a new host, a new tailnet address, a restore onto
+another machine), point this machine's clients at it with one command:
+
+```bash
+pseudolife-mcp connect http://100.64.0.2:8765 --dry-run   # the plan; writes nothing, sends no token
+pseudolife-mcp connect http://100.64.0.2:8765             # asks once, then applies
+```
+
+It finds every registration of the shim (Claude Code, Codex, Claude
+Desktop, Gemini CLI) and the copies the plugin hooks read (the `env` block
+of `~/.claude/settings.json`, and Codex's `~/.codex/pseudolife/connection.json`),
+and reports each as `current`, `change`, `manual` (found but not written; the
+line says what to do) or `absent` (with the command that registers it;
+`connect` never creates a registration). Only the daemon URL, the token-file
+path and, for a daemon on another machine, `PSEUDOLIFE_MCP_NO_SPAWN=1`
+change; the command, writer id and anything else in an entry stay as they
+are.
+
+Before writing anything it proves the target accepts every credential it
+would point there: the shim's owner-only check of each token file, an
+authenticated request, and an MCP handshake. A refusal exits 4 with nothing
+written. The writes are all or nothing: each file is backed up beside itself
+first, and if one write fails the files already written are restored.
+
+- **Token files.** Without `--token-file`, each registration keeps the token
+  file it names, which is right when the bank was restored with its tokens.
+  `--token-file` applies one file to every selected client, so to keep one
+  principal per client run it once per client:
+
+  ```bash
+  pseudolife-mcp connect <url> --client claude-code --token-file ~/.pseudolife-mcp/claude-code.token
+  pseudolife-mcp connect <url> --client codex --token-file ~/.pseudolife-mcp/codex.token
+  ```
+
+  Add `--read-token` to create that file from a token typed without echo
+  (it refuses a file that exists).
+- **Not written:** project-scoped Claude Code entries (`projects[...]` in
+  `~/.claude.json`, a `.mcp.json`), a project's `.claude/settings*.json`,
+  non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
+  name (the installer's Desktop step migrates it), Codex settings that come
+  from another Codex config layer, a `PSEUDOLIFE_MCP_DAEMON_URL` in your
+  shell or Windows user environment, and a scheduled unattended update
+  (the report names the `--schedule` command to re-run). Edit those by hand.
+- **Afterwards:** restart the sessions the report lists (and fully quit and
+  relaunch Claude Desktop when its entry changed). Each session gets a new
+  board address on the new URL.
+- **Rolling back:** run `connect` with the old URL, or restore the backups
+  the report names.
+- **With the installer:** a client-only installer run (answer 2, or
+  `--daemon-url`) runs `connect` for the clients it installs, so re-running
+  the installer against the new URL re-points them too.
+
+`--yes` applies without asking (a run that is not interactive needs it),
+and `--json` prints one machine-readable report. Exit codes: 0 done or
+already current, 1 a write failed and was rolled back, 2 usage or not
+confirmed, 3 no registration it can write (none found, or only `manual`
+ones), 4 verification refused, 5 applied but the post-apply check failed.
 
 ## Troubleshooting
 

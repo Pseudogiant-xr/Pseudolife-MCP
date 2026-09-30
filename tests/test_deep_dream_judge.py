@@ -34,7 +34,8 @@ class _StubJudge:
     model = "stub-judge"
 
     def __init__(self, verdicts):
-        self._verdicts = verdicts       # {(from, into): (verdict, conf)}
+        # {(from, into): (verdict, conf[, relation])}
+        self._verdicts = verdicts
         self.seen: list[tuple[str, str]] = []
 
     def judge_merges(self, proposals):
@@ -45,7 +46,8 @@ class _StubJudge:
             v = self._verdicts.get(key)
             if v is not None:
                 out.append({"n": p["n"], "verdict": v[0],
-                            "confidence": v[1], "note": "stub"})
+                            "confidence": v[1], "note": "stub",
+                            "relation": v[2] if len(v) > 2 else None})
         return out
 
 
@@ -533,6 +535,286 @@ def test_judge_payload_carries_low_differential_flag(svc):
     out = svc.deep_dream_judge(extractor=judge)
     assert out["judged"] == 1
     assert judge.proposals[0]["low_differential"] is True
+
+
+# ── the "relate" verdict (2026-09-30) ─────────────────────────────────────
+# Most merge rejects in the 2026-09-29 triage (795 of 1,016 proposals) were
+# RELATED-but-not-same pairs, and a reject dropped the relationship. The
+# judge's reject may now name a link-judge vocabulary relation, FROM as src
+# and INTO as dst, recorded as the internal "relate" verdict: reject-class
+# for the merge, and a link proposal for the link judge once the reject is
+# applied.
+
+def _judge_merges_returning(verdicts):
+    """Run the shipped parser over a canned model response."""
+    import json
+    from unittest import mock
+
+    from pseudolife_memory.memory import dream as D
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            content = json.dumps({"verdicts": verdicts})
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+
+    proposals = [{"n": i + 1, "from": {"display": f"a{i}"},
+                  "into": {"display": f"b{i}"}, "reason": "t"}
+                 for i in range(len(verdicts))]
+    with mock.patch("pseudolife_memory.utils.no_redirect.urlopen",
+                    lambda req, timeout=None: _Resp()):
+        return D.OpenAICompatExtractor("http://x/v1", "m").judge_merges(proposals)
+
+
+def test_judge_merges_reads_a_reject_relation_as_relate():
+    """The prompt asks for reject plus an optional relation (2026-09-30
+    redesign): the reject's confidence is about distinctness alone, and the
+    relation only annotates it. The parser folds a reject carrying a
+    vocabulary relation into the internal ``relate`` verdict."""
+    out = _judge_merges_returning([
+        {"id": 1, "verdict": "reject", "relation": "part-of", "confidence": 0.9, "note": "n1"},
+        {"id": 2, "verdict": "REJECT", "relation": "Stores Data In", "confidence": 0.8, "note": "n2"},
+        {"id": 3, "verdict": "reject", "relation": "sibling-of", "confidence": 0.9, "note": "n3"},
+        {"id": 4, "verdict": "reject", "relation": None, "confidence": 0.9, "note": "n4"},
+        {"id": 5, "verdict": "reject", "confidence": 0.9, "note": "n5"},
+        {"id": 6, "verdict": "accept", "relation": "uses", "confidence": 0.7, "note": "n6"},
+        {"id": 7, "verdict": "leave", "relation": "uses", "confidence": 0.4, "note": "n7"},
+    ])
+    by_n = {v["n"]: v for v in out}
+    assert (by_n[1]["verdict"], by_n[1]["relation"]) == ("relate", "part-of")
+    assert (by_n[2]["verdict"], by_n[2]["relation"]) == ("relate", "stores-data-in")
+    assert by_n[1]["confidence"] == 0.9
+    # A relation outside the vocabulary, or none at all, is a plain reject:
+    # nothing can be filed as a link, and the pair is still distinct.
+    for n in (3, 4, 5):
+        assert (by_n[n]["verdict"], by_n[n]["relation"]) == ("reject", None)
+        assert by_n[n]["confidence"] == 0.9
+    # Only a reject carries a relation.
+    assert (by_n[6]["verdict"], by_n[6]["relation"]) == ("accept", None)
+    assert (by_n[7]["verdict"], by_n[7]["relation"]) == ("leave", None)
+
+
+def test_judge_merges_still_reads_an_explicit_relate():
+    """A model that answers the #484 draft's ``relate`` verdict is read the
+    same way, so a stale prompt cache or a hand-written verdict still works."""
+    out = _judge_merges_returning([
+        {"id": 1, "verdict": "relate", "relation": "implements", "confidence": 0.9, "note": "n1"},
+        {"id": 2, "verdict": "relate", "relation": "sibling-of", "confidence": 0.8, "note": "n2"},
+    ])
+    by_n = {v["n"]: v for v in out}
+    assert (by_n[1]["verdict"], by_n[1]["relation"]) == ("relate", "implements")
+    assert (by_n[2]["verdict"], by_n[2]["relation"]) == ("reject", None)
+
+
+def test_relation_names_are_the_link_judge_vocabulary():
+    from pseudolife_memory.memory import dream as D
+    assert D._RELATION_NAMES == (
+        "depends-on", "part-of", "runs-on", "hosts", "uses", "configures",
+        "stores-data-in", "tests", "implements", "superseded-by", "related-to")
+    # The merge prompt offers the same vocabulary, as an optional annotation
+    # of a reject, not as a verdict of its own: the 2026-09-30 ladder of a
+    # separate "relate" verdict measured its confidence at 0.58 on average
+    # (0 of 85 votes at the 0.8 single-vote gate), which starved the
+    # automatic reject gates.
+    assert D._RELATION_VOCAB in D._JUDGE_SYSTEM_PROMPT
+    assert '"verdict":"accept"|"reject"|"leave"' in D._JUDGE_SYSTEM_PROMPT
+    assert '"relate"' not in D._JUDGE_SYSTEM_PROMPT
+
+
+def test_relate_note_round_trips_both_opinions():
+    from pseudolife_memory.memory.graph_review import (
+        merge_verdict_token, relate_note, relate_relations)
+    first = relate_note("implements", "code for the concept")
+    assert first == "relate:implements | code for the concept"
+    assert relate_note("uses", None) == "relate:uses"
+    combined = (f"{first[:160]} | 2nd (model (x)): "
+                f"{merge_verdict_token('relate', 'part-of')} 0.85 [agree]")
+    assert relate_relations(combined) == ("implements", "part-of")
+    assert relate_relations("plain note | 2nd (m): reject 0.90 [agree]") == (None, None)
+    assert relate_relations(None) == (None, None)
+    assert merge_verdict_token("reject", None) == "reject"
+
+
+def _note(svc, pid):
+    return svc._storage.conn.execute(
+        "SELECT judge_note FROM entity_proposals WHERE id=%s", (pid,)).fetchone()[0]
+
+
+def _pending_links(svc):
+    return [(p["src"], p["relation"], p["dst"], p["source"])
+            for p in svc._storage.pending_proposals()]
+
+
+def test_single_vote_relate_rejects_the_merge_and_files_a_link(svc):
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    svc.config.memory.deep_dream.judge_reject_min_confidence = 0.8
+    pid = _propose(svc, "kappa module", "kappa concept")
+    low = _propose(svc, "lambda module", "lambda concept")
+    judge = _StubJudge({
+        ("kappa module", "kappa concept"): ("relate", 0.9, "implements"),
+        ("lambda module", "lambda concept"): ("relate", 0.5, "implements"),
+    })
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 2 and out["auto_rejected"] == 1
+    assert out["relate_links_filed"] == 1
+    decided = svc._storage.get_entity_proposal(pid)
+    assert decided["status"] == "rejected" and decided["decided_by"] == "dream-judge"
+    assert decided["judge_verdict"] == "relate"
+    assert _note(svc, pid).startswith("relate:implements")
+    # The link goes to the link judge's queue, never straight to an edge.
+    assert _pending_links(svc) == [
+        ("kappa module", "implements", "kappa concept", "merge-judge-relate")]
+    assert not svc._storage.load_graph()["edges"]
+    # Filed by entity id: these canonicals ("kappa module") are not what
+    # norm_name(display) gives, so a by-name filing would mint new nodes.
+    (link,) = svc._storage.pending_proposals()
+    merge = svc._storage.get_entity_proposal(pid)
+    assert (link["src_id"], link["dst_id"]) == (merge["entity_id"], merge["into_id"])
+    # Below the gate: an opinion only, nothing filed.
+    assert _row(svc, low)["status"] == "pending"
+    assert _row(svc, low)["judge_verdict"] == "relate"
+
+
+def test_shadow_relate_records_and_files_nothing(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "mu module", "mu concept")
+    judge = _StubJudge({("mu module", "mu concept"): ("relate", 0.95, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 1 and out["auto_rejected"] == 0
+    assert out["relate_links_filed"] == 0
+    assert _row(svc, pid)["judge_verdict"] == "relate"
+    assert _pending_links(svc) == []
+    # The reviewer sees the relation beside the verdict.
+    deep = svc.deep_dream(apply=False)
+    row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
+    assert row["judge"]["verdict"] == "relate"
+    assert row["judge"]["relation"] == "implements"
+
+
+def test_both_review_payloads_show_the_relation_in_the_judges_order(svc):
+    """The relation reads FROM -> INTO as the judge was shown the pair, and
+    the pack re-derives that direction from current evidence. Both review
+    payloads must list the pair the same way, or the Console row would
+    read "A -> B · relate implements" with the relation backwards:
+    ``graph_review`` re-orients merge rows by the same rule before
+    ``merge_candidates`` builds them (the store keeps the old order)."""
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "pi concept", "pi module")        # stored pi concept -> pi module
+    st = svc._storage
+    concept = st.find_entity("pi concept")["id"]
+    for other in ("pi doc one", "pi doc two"):
+        st.ensure_entity(other, display=other)
+        svc._graph.upsert_edge(concept, "related-to", st.find_entity(other)["id"],
+                               confidence=0.7, origin="action")
+    judge = _StubJudge({("pi module", "pi concept"): ("relate", 0.95, "implements")})
+    svc.deep_dream_judge(judge)
+    assert judge.seen == [("pi module", "pi concept")]   # shown flipped
+
+    queue = next(f for f in svc.graph_review()["findings"]
+                 if f["type"] == "merge_candidate")
+    listed = next(m for m in queue["merges"] if m["id"] == pid)
+    assert (listed["from"], listed["into"]) == ("pi module", "pi concept")
+    assert listed["judge"]["verdict"] == "relate"
+    assert listed["judge"]["relation"] == "implements"
+
+    deep = svc.deep_dream(apply=False)
+    row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
+    assert (row["from"]["display"], row["into"]["display"]) == ("pi module", "pi concept")
+    assert row["judge"]["relation"] == "implements"
+
+
+def test_relate_link_follows_the_orientation_the_judge_saw(svc):
+    """The pack re-derives fold direction from current evidence: a stored
+    FROM with more edges than its INTO is SHOWN as the INTO. The relation
+    reads FROM -> INTO as shown, so the link must be filed that way."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pid = _propose(svc, "nu concept", "nu module")        # stored nu concept -> nu module
+    st = svc._storage
+    concept = st.find_entity("nu concept")["id"]
+    for other in ("nu doc one", "nu doc two"):
+        st.ensure_entity(other, display=other)
+        svc._graph.upsert_edge(concept, "related-to", st.find_entity(other)["id"],
+                               confidence=0.7, origin="action")
+    judge = _StubJudge({("nu module", "nu concept"): ("relate", 0.9, "implements")})
+    out = svc.deep_dream_judge(judge)
+    assert judge.seen == [("nu module", "nu concept")]   # shown flipped
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 1
+    assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+    assert ("nu module", "implements", "nu concept", "merge-judge-relate") in _pending_links(svc)
+
+
+def test_a_failing_link_filing_never_undoes_the_reject(svc, monkeypatch):
+    """The link is a side effect of the reject: a filing that raises rolls
+    back only itself, and the rest of the batch is still judged."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    related = _propose(svc, "xi module", "xi concept")
+    plain = _propose(svc, "xi svc", "xi harness")
+
+    def boom(*a, **k):
+        raise RuntimeError("link filing failed")
+    monkeypatch.setattr(svc, "_graph_propose_links_locked", boom)
+    judge = _StubJudge({("xi module", "xi concept"): ("relate", 0.9, "implements"),
+                        ("xi svc", "xi harness"): ("reject", 0.9)})
+    out = svc.deep_dream_judge(judge)
+    assert "error" not in out, out
+    assert out["auto_rejected"] == 2 and out["relate_links_filed"] == 0
+    for pid in (related, plain):
+        assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+
+
+def test_relate_files_at_most_one_link_per_pair(svc):
+    """An accepted relate link changes both sides' degree, so reconsideration
+    reopens the merge reject and the judge sees the pair again. A pair that
+    an edge or any link proposal already joins gets no second link: the
+    loop would otherwise stack one edge per vocabulary relation."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    svc.config.memory.deep_dream.judge_second_opinion = False
+    _propose(svc, "rho2 module", "rho2 concept")
+    first = _StubJudge({("rho2 module", "rho2 concept"): ("relate", 0.9, "implements")})
+    assert svc.deep_dream_judge(first)["relate_links_filed"] == 1
+    (link,) = svc._storage.pending_proposals()
+    assert svc.graph_accept_proposal(link["id"])["accepted"]
+    again = _StubJudge({("rho2 module", "rho2 concept"): ("relate", 0.9, "uses"),
+                        ("rho2 concept", "rho2 module"): ("relate", 0.9, "uses")})
+    out = svc.deep_dream_judge(again)
+    assert out["reconsideration"]["reopened"] == 1, out
+    assert again.seen, "the reopened pair is judged again"
+    assert out["relate_links_filed"] == 0
+    assert svc._storage.pending_proposals() == []
+    assert len(svc._storage.load_graph()["edges"]) == 1
+
+
+def test_an_unregistered_vocabulary_relation_files_no_link(svc):
+    """``tests`` is in the judges' vocabulary but not a registered relation;
+    the filing gate would silently turn it into related-to. The merge is
+    still rejected; no link is filed."""
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    pid = _propose(svc, "tau test", "tau module")
+    judge = _StubJudge({("tau test", "tau module"): ("relate", 0.9, "tests")})
+    out = svc.deep_dream_judge(judge)
+    assert out["auto_rejected"] == 1 and out["relate_links_filed"] == 0
+    assert svc._storage.get_entity_proposal(pid)["status"] == "rejected"
+    assert _pending_links(svc) == []
+
+
+def test_public_link_proposals_resolve_by_name_not_id(svc):
+    """The by-id filing is internal to the merge judge: a public proposal
+    carrying stale ids (a spread candidate row) still files by its names."""
+    st = svc._storage
+    for name in ("upsilon a", "upsilon b", "upsilon c"):
+        st.ensure_entity(name, display=name)
+    a, b = st.find_entity("upsilon a")["id"], st.find_entity("upsilon b")["id"]
+    out = svc.graph_propose_links([{"src": "upsilon c", "dst": "upsilon b",
+                                    "src_id": a, "dst_id": b,
+                                    "relation": "uses", "rationale": "t"}])
+    assert out["proposed"] == 1
+    (link,) = st.pending_proposals()
+    assert link["src"] == "upsilon c"
 
 
 # ── paginated evidence for outside reviewers (GET /api/graph/proposal-evidence) ──

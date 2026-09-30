@@ -229,7 +229,12 @@ ops\install.ps1         # Windows (pwsh 7+)
 # Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-The installer asks which agents to wire (multi-select, with a capability
+The installer first asks where the memory bank lives: on this machine
+(the default, and everything below), on another machine that already runs
+it (a client-only install that asks for the daemon's URL and token), or on
+this machine with other machines connecting to it (see
+[Sharing one bank across machines](docs/guide/remote-bank.md)). It then
+asks which agents to wire (multi-select, with a capability
 matrix showing exactly what each one gets — session briefing, per-turn
 discipline, standing file), runs the preflight (one exact fix line per
 missing prerequisite), then asks which **dream extractor** should
@@ -3592,7 +3597,25 @@ default `shadow`; the dream extractor, or a dedicated `judge_url` serving
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,
 reject verdicts at/above `judge_reject_min_confidence` are applied
-(`decided_by='dream-judge'`, pair dismissed). A row whose first verdict sat
+(`decided_by='dream-judge'`, pair dismissed). A merge reject may also name
+a relation from the link judge's vocabulary (since 2026-09-30) that holds
+from FROM to INTO as the judge was shown them (a file and the concept it
+implements, a component and its parent). The relation never changes the
+verdict or its confidence, which stays about whether the two are different
+things; such a reject is recorded as **relate**. For the merge, relate counts as a
+reject in every gate, and a reject beside a relate is agreement, not a
+`split`. The relation rides on the row's note (`relate:<relation> | …`, and
+`2nd (<model>): relate:<relation> …` for a second opinion); the review
+payloads' `judge` / `judge2` blocks carry it as `relation`. When an
+automatic reject applies and a relate vote was one of its votes, the sweep
+also files that relation (the more confident vote's, if both related) as a
+link proposal with source `merge-judge-relate`, through the ordinary filing
+gate, unless the relation is not a registered one or an edge or link
+proposal already joins the pair (so a reject reopened by a new link's
+evidence change never files a second one). A filing that fails is logged
+and never undoes the reject. The link judge then settles the proposal at
+its own gates; the merge judge never writes an edge, and a shadow verdict
+files nothing. A row whose first verdict sat
 below that gate gets a **second opinion** on a later sweep
 (`judge_second_opinion`, optionally `judge_second_model` — both Console knobs) — a fresh batch,
 so an independent sample. The second opinion is asked on the first
@@ -3602,8 +3625,10 @@ the two opinions can come from different providers; that endpoint's bearer
 key is env-only (`PSEUDOLIFE_JUDGE_SECOND_API_KEY`) and goes nowhere else.
 Two rejects at mean >= `judge_reject_min_confidence_2` apply only when the
 two votes came from different models (since 2026-09-30; the same model
-asked twice is one opinion); a disagreement stamps `split` on the note and
-leaves the row for a human. `judge_mode: auto` goes one step further and folds a pair when two
+asked twice is one opinion; reject and relate are both rejects here); any
+other disagreement (an accept or a leave against a reject or relate, or an
+accept against a leave) stamps `split` on the note and leaves the row for a
+human. `judge_mode: auto` goes one step further and folds a pair when two
 independent accepts from different models agree on a row that is not
 `low_differential` at mean >= `judge_accept_min_confidence` — the only path
 that ever auto-applies an accept. "Different" is decided on what the
@@ -5694,10 +5719,21 @@ infer live delivery from a queued or attempted send result.
 
 If initial registration fails, or the shim's startup budget cancels it before
 the adapter receives the new address, the adapter releases its empty state
-reservation and the next launch registers a fresh address; it never retries
-inside the same start and never overwrites a state file that already holds an
-identity. An address the daemon created for a lost response was never held by
-any adapter, receives no mail, and is pruned with the other idle addresses. Do
+reservation and never overwrites a state file that already holds an identity.
+When the daemon simply did not answer in time (a timeout, a refused or dropped
+connection, a 5xx or 429, or `attachment_busy` while the lease of an attach the
+startup budget cancelled runs out), the shim keeps the session's memory tools and
+retries the registration in the background, after 1, 2, 5, 10 and 30 seconds
+and then every minute, until it lands or the session ends; each attempt starts
+from a fresh adapter. Until it lands, `memory_agents` update, claim and release
+and `memory_message` are refused with a message saying registration is being
+retried, and the first tool result after it lands says the board now works. A
+refusal retrying cannot change (unauthorized, principal not allowed, bank
+mismatch, invalid saved state, or a state file another process is registering)
+stops there, as before, and the next tool result says so once. An address the
+daemon created for a lost response was never held by any adapter, receives no
+mail, and is pruned with the other idle addresses; a link slow enough to lose
+register responses can leave one per background attempt. Do
 not revoke every mailbox to repair one failed registration. A lost attachment
 response can leave a lease until expiry; failed competing attachment attempts
 do not renew it.
@@ -9099,7 +9135,10 @@ machines see each other and exchange mail with no further setup.
 
 What this is not: there is no offline mode and no replica. When the daemon is
 unreachable the remote shim exits and the plugin hooks degrade to
-"coordination unavailable"; there is one bank and one writer of record.
+"coordination unavailable"; there is one bank and one writer of record. A link
+that answers the shim's health check but stalls its board registration leaves
+memory working and the registration retrying in the background (see
+[configuration](configuration.md)).
 Replicating the bank across machines is not part of this feature.
 
 ## What the daemon allows
@@ -9126,7 +9165,10 @@ token; a `--no-token` install must not be exposed.
 
 ## Exposing the daemon
 
-In order of preference.
+In order of preference. An installer run on the daemon host that answers
+**3** to its first question ("On this machine, and other machines will
+connect to it") is a local install that ends by printing a short version of
+these steps and the two sections after them.
 
 ### 1. Tailscale Serve, TCP mode
 
@@ -9265,10 +9307,43 @@ owner-only check. Or let `-ReadToken` write it.
 
 ### With the installer (client-only path)
 
-The installers take a client-only mode that skips the Docker stack, mints no
-token, and wires the selected clients against a remote daemon. A
-non-loopback `--daemon-url` implies it; pass it explicitly for a loopback URL
-that is really an SSH tunnel.
+Run the installer on the client machine (`ops/install.sh`, or
+`ops\install.ps1` on Windows). Its first question is where the bank lives:
+
+```
+Where does the memory bank live?
+  1) On this machine (default)
+  2) On another machine that already runs it
+  3) On this machine, and other machines will connect to it
+```
+
+Answer **2**. It asks for the daemon's URL, then, once you have chosen the
+agents, for the token: paste it, and it is written to a new owner-only file
+(`~/.pseudolife-mcp/<client>.token` by default; it never replaces an
+existing file), or name a token file that already holds it. The
+client-only install follows: it skips the Docker stack, mints no token,
+checks the daemon's `/health`, and sets up the shim, the plugin and hooks
+and each client's registration against the remote daemon.
+
+The same install without questions takes flags: a non-loopback
+`--daemon-url` implies client-only; pass `--client-only` explicitly for a
+loopback URL that is really an SSH tunnel. A run that names the daemon
+(the flag, or `PSEUDOLIFE_MCP_DAEMON_URL` in the environment), or has no
+terminal, is not asked; one given `--token-file` or `--read-token` without
+a URL is asked only for the URL.
+
+**Re-running it re-points what is already registered.** When this machine
+already has registrations (from an earlier local install, or a client-only
+install against a daemon that has since moved), the installer runs
+[`pseudolife-mcp connect`](#moving-a-client-to-a-new-daemon) for the
+clients it installs, with that run's token file, before the Codex
+credential setup and the registrars: it shows connect's plan, applies it,
+and stops if connect fails.
+The registrars then create only what is still missing. Entries connect does
+not rewrite (a project-scoped Claude Code entry, for example) are named, for
+you to change by hand. A shim too old to have `connect` (one a running
+session kept in place) only gets a warning: that run leaves existing
+registrations as they are, as before.
 
 The installer takes one token file per run, so run it once per client, each
 with that client's own token file:
@@ -9351,6 +9426,66 @@ reads `on - token present, principal allowed` when admission worked, and
 `off - this token's principal is not in coordination.allowed_principals`
 (the daemon's `principal_not_allowed` reason) when it is missing from the
 list.
+
+## Moving a client to a new daemon
+
+When the daemon moves (a new host, a new tailnet address, a restore onto
+another machine), point this machine's clients at it with one command:
+
+```bash
+pseudolife-mcp connect http://100.64.0.2:8765 --dry-run   # the plan; writes nothing, sends no token
+pseudolife-mcp connect http://100.64.0.2:8765             # asks once, then applies
+```
+
+It finds every registration of the shim (Claude Code, Codex, Claude
+Desktop, Gemini CLI) and the copies the plugin hooks read (the `env` block
+of `~/.claude/settings.json`, and Codex's `~/.codex/pseudolife/connection.json`),
+and reports each as `current`, `change`, `manual` (found but not written; the
+line says what to do) or `absent` (with the command that registers it;
+`connect` never creates a registration). Only the daemon URL, the token-file
+path and, for a daemon on another machine, `PSEUDOLIFE_MCP_NO_SPAWN=1`
+change; the command, writer id and anything else in an entry stay as they
+are.
+
+Before writing anything it proves the target accepts every credential it
+would point there: the shim's owner-only check of each token file, an
+authenticated request, and an MCP handshake. A refusal exits 4 with nothing
+written. The writes are all or nothing: each file is backed up beside itself
+first, and if one write fails the files already written are restored.
+
+- **Token files.** Without `--token-file`, each registration keeps the token
+  file it names, which is right when the bank was restored with its tokens.
+  `--token-file` applies one file to every selected client, so to keep one
+  principal per client run it once per client:
+
+  ```bash
+  pseudolife-mcp connect <url> --client claude-code --token-file ~/.pseudolife-mcp/claude-code.token
+  pseudolife-mcp connect <url> --client codex --token-file ~/.pseudolife-mcp/codex.token
+  ```
+
+  Add `--read-token` to create that file from a token typed without echo
+  (it refuses a file that exists).
+- **Not written:** project-scoped Claude Code entries (`projects[...]` in
+  `~/.claude.json`, a `.mcp.json`), a project's `.claude/settings*.json`,
+  non-stdio registrations, Claude Desktop's old `pseudolife-memory` entry
+  name (the installer's Desktop step migrates it), Codex settings that come
+  from another Codex config layer, a `PSEUDOLIFE_MCP_DAEMON_URL` in your
+  shell or Windows user environment, and a scheduled unattended update
+  (the report names the `--schedule` command to re-run). Edit those by hand.
+- **Afterwards:** restart the sessions the report lists (and fully quit and
+  relaunch Claude Desktop when its entry changed). Each session gets a new
+  board address on the new URL.
+- **Rolling back:** run `connect` with the old URL, or restore the backups
+  the report names.
+- **With the installer:** a client-only installer run (answer 2, or
+  `--daemon-url`) runs `connect` for the clients it installs, so re-running
+  the installer against the new URL re-points them too.
+
+`--yes` applies without asking (a run that is not interactive needs it),
+and `--json` prints one machine-readable report. Exit codes: 0 done or
+already current, 1 a write failed and was rolled back, 2 usage or not
+confirmed, 3 no registration it can write (none found, or only `manual`
+ones), 4 verification refused, 5 applied but the post-apply check failed.
 
 ## Troubleshooting
 

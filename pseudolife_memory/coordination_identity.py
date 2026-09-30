@@ -131,7 +131,8 @@ async def fetch_context(client, url: str, snapshot, *, identity=None) -> dict:
             headers={"Authorization": "Bearer " + snapshot.token}, timeout=5,
             follow_redirects=False)
     except httpx.TransportError:
-        raise AdapterError("coordination bank context is unavailable") from None
+        raise AdapterError("coordination bank context is unavailable",
+                           code="transport_unavailable") from None
     if response.status_code != 200:
         # No response body is trusted as a diagnostic or recovery instruction.
         code = "unauthorized" if response.status_code == 401 else "context_unavailable"

@@ -28,7 +28,9 @@ class AdapterError(RuntimeError):
     """Sanitized adapter failure; never includes response text or credentials.
 
     ``status`` carries the HTTP status of a refused request (``None`` for
-    transport failures) so callers can tell a daemon's verdict from an outage.
+    transport failures) so callers can tell a daemon's verdict from an outage;
+    a request the daemon never answered carries ``code="transport_unavailable"``,
+    which local state errors (also ``status=None``) never do.
     """
 
     def __init__(self, message: str, *, status: int | None = None,
@@ -914,7 +916,8 @@ class CoordinationAdapter:
                 if attempt + 1 < attempts:
                     await asyncio.sleep(self.RETRY_DELAYS[attempt])
                     continue
-                raise AdapterError(f"coordination {action} unavailable") from None
+                raise AdapterError(f"coordination {action} unavailable",
+                                   code="transport_unavailable") from None
             except ValueError:
                 raise AdapterError(f"coordination {action} returned an invalid response") from None
 

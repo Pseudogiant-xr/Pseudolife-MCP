@@ -1,0 +1,224 @@
+{
+ "built_by": "evals/merge_relate_gates.py",
+ "inputs": [
+  "queue-judge-ladder-20260930-relate-annot-opus55.json",
+  "queue-judge-ladder-20260930-relate-annot-sonnet55.json"
+ ],
+ "panel": "queue-judge-panel-20260902.json",
+ "first": {
+  "arm": "opus-5-5-relate-annot",
+  "model": "claude-opus-5-5"
+ },
+ "second": {
+  "arm": "sonnet-5-5-relate-annot",
+  "model": "claude-sonnet-5-5"
+ },
+ "gates": {
+  "reject_gate": 0.8,
+  "reject_gate_2": 0.7,
+  "accept_gate": 0.6
+ },
+ "replicates": [
+  {
+   "two_vote_reject_class": {
+    "n": 18,
+    "bad": 0,
+    "bad_ids": [],
+    "links_filed": 17,
+    "links_on_panel_relate": 12
+   },
+   "two_vote_accept_not_lowdiff": {
+    "n": 5,
+    "bad": 1,
+    "bad_ids": [
+     2016
+    ]
+   },
+   "splits": {
+    "n": 6,
+    "rows": [
+     1966,
+     2024,
+     2049,
+     2050,
+     2145,
+     2275
+    ]
+   }
+  },
+  {
+   "two_vote_reject_class": {
+    "n": 21,
+    "bad": 0,
+    "bad_ids": [],
+    "links_filed": 21,
+    "links_on_panel_relate": 16
+   },
+   "two_vote_accept_not_lowdiff": {
+    "n": 5,
+    "bad": 0,
+    "bad_ids": []
+   },
+   "splits": {
+    "n": 7,
+    "rows": [
+     1931,
+     1953,
+     2016,
+     2049,
+     2050,
+     2055,
+     2123
+    ]
+   }
+  }
+ ],
+ "production_path": [
+  {
+   "applied": 18,
+   "bad": 0,
+   "single": 7,
+   "two_vote": 11
+  },
+  {
+   "applied": 21,
+   "bad": 0,
+   "single": 6,
+   "two_vote": 15
+  }
+ ],
+ "single_vote": {
+  "opus-5-5-relate-annot": [
+   {
+    "n": 7,
+    "bad": 0,
+    "relate": 6
+   },
+   {
+    "n": 6,
+    "bad": 0,
+    "relate": 6
+   }
+  ],
+  "sonnet-5-5-relate-annot": [
+   {
+    "n": 12,
+    "bad": 1,
+    "relate": 10
+   },
+   {
+    "n": 14,
+    "bad": 1,
+    "relate": 13
+   }
+  ]
+ },
+ "vote_confidence": {
+  "opus-5-5-relate-annot": {
+   "accept": {
+    "n": 53,
+    "mean": 0.7389,
+    "ge_reject_gate": 26,
+    "ge_reject_gate_2": 34
+   },
+   "leave": {
+    "n": 7,
+    "mean": 0.5,
+    "ge_reject_gate": 0,
+    "ge_reject_gate_2": 0
+   },
+   "reject": {
+    "n": 5,
+    "mean": 0.68,
+    "ge_reject_gate": 1,
+    "ge_reject_gate_2": 3
+   },
+   "relate": {
+    "n": 61,
+    "mean": 0.6977,
+    "ge_reject_gate": 12,
+    "ge_reject_gate_2": 38
+   }
+  },
+  "sonnet-5-5-relate-annot": {
+   "accept": {
+    "n": 50,
+    "mean": 0.7506,
+    "ge_reject_gate": 24,
+    "ge_reject_gate_2": 31
+   },
+   "leave": {
+    "n": 2,
+    "mean": 0.4,
+    "ge_reject_gate": 0,
+    "ge_reject_gate_2": 0
+   },
+   "reject": {
+    "n": 6,
+    "mean": 0.75,
+    "ge_reject_gate": 3,
+    "ge_reject_gate_2": 3
+   },
+   "relate": {
+    "n": 68,
+    "mean": 0.7106,
+    "ge_reject_gate": 23,
+    "ge_reject_gate_2": 43
+   }
+  }
+ },
+ "relations": {
+  "opus-5-5-relate-annot": {
+   "configures": 6,
+   "depends-on": 1,
+   "hosts": 2,
+   "implements": 12,
+   "part-of": 8,
+   "related-to": 29,
+   "uses": 3
+  },
+  "sonnet-5-5-relate-annot": {
+   "configures": 3,
+   "hosts": 1,
+   "implements": 15,
+   "part-of": 14,
+   "related-to": 35
+  }
+ },
+ "relate_by_arm": {
+  "opus-5-5-relate-annot": {
+   "votes": 61,
+   "on_label": {
+    "accept": 5,
+    "reject": 56
+   },
+   "on_panel_verdict": {
+    "accept": 5,
+    "relate": 41,
+    "reject": 15
+   },
+   "panel_relate_rows": {
+    "relation_match": 21,
+    "direction_same": 27,
+    "direction_reversed": 9
+   }
+  },
+  "sonnet-5-5-relate-annot": {
+   "votes": 68,
+   "on_label": {
+    "reject": 60,
+    "accept": 8
+   },
+   "on_panel_verdict": {
+    "relate": 44,
+    "reject": 16,
+    "accept": 8
+   },
+   "panel_relate_rows": {
+    "relation_match": 21,
+    "direction_same": 27,
+    "direction_reversed": 11
+   }
+  }
+ }
+}

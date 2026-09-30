@@ -3667,6 +3667,80 @@ class DreamOps:
                                  "note": "model returned no verdict",
                                  **leave_fields})
 
+    @staticmethod
+    def _relate_needs_relation(verdicts: list[dict]) -> None:
+        """A ``relate`` naming no relation is a plain reject (the parser
+        guarantees one; this holds the rule for any other extractor)."""
+        for v in verdicts:
+            if v["verdict"] == "relate" and not v.get("relation"):
+                v["verdict"] = "reject"
+
+    def _file_relate_link(self, out: dict, row: dict, e: dict,
+                          votes: list[tuple]) -> None:
+        """After an APPLIED automatic merge reject, file the relate vote's
+        relation as a link proposal: a pending row the link judge settles
+        through its own gates, never an edge. ``votes`` are the applying
+        ``(verdict, relation, confidence)``; of two relate votes the more
+        confident wins (the first on a tie). The relation reads FROM ->
+        INTO as the judge was shown them (``e``, the signed pack, whose
+        sides are oriented by current evidence), so the link is filed with
+        that orientation, by entity id. Caller holds the lock.
+
+        Files nothing when the relation is not a registered one (the filing
+        gate would silently file it as related-to), or when an edge or any
+        link proposal already joins the pair: an accepted link changes both
+        sides' evidence, so reconsideration reopens the reject and the
+        judge sees the pair again — without this the loop would stack one
+        edge per relation it names."""
+        relates = [(conf, rel) for verdict, rel, conf in votes
+                   if verdict == "relate" and rel]
+        if not relates:
+            return
+        conf, relation = max(relates, key=lambda item: item[0])
+        if relation not in {r["name"] for r in self._graph.load_relations()}:
+            return
+        g = self._storage.load_graph()
+        disp = {ent["id"]: ent["display"] for ent in g["entities"]}
+        stored = (row["entity_id"], row["into_id"])
+        shown = (e["from"]["display"], e["into"]["display"])
+        if shown[0] == shown[1]:
+            return          # the orientation cannot be told apart
+        if shown == (disp.get(stored[0]), disp.get(stored[1])):
+            src_id, dst_id = stored
+        elif shown == (disp.get(stored[1]), disp.get(stored[0])):
+            dst_id, src_id = stored
+        else:
+            return
+        pair = {src_id, dst_id}
+        if any({edge["src_id"], edge["dst_id"]} == pair for edge in g["edges"]):
+            return
+        if self._storage.conn.execute(
+                "SELECT 1 FROM edge_proposals WHERE (src_id=%s AND dst_id=%s) "
+                "OR (src_id=%s AND dst_id=%s) LIMIT 1",
+                (src_id, dst_id, dst_id, src_id)).fetchone():
+            return
+        res = self._graph_propose_links_locked([{
+            "src_id": src_id, "dst_id": dst_id,
+            "src": disp[src_id], "dst": disp[dst_id], "relation": relation,
+            "rationale": (f"merge judge: relate ({relation}) {conf:.2f} on "
+                          f"merge proposal #{row['id']}, rejected as distinct")}],
+            source="merge-judge-relate", _by_id=True)
+        out["relate_links_filed"] += int(res.get("proposed") or 0)
+
+    def _file_relate_link_isolated(self, out: dict, row: dict, e: dict,
+                                   votes: list[tuple]) -> None:
+        """:meth:`_file_relate_link` in a savepoint of its own: the link is a
+        side effect of an applied reject, so a filing that fails rolls back
+        only itself, never the reject or the rest of the batch. Caller
+        holds the lock, inside the reject's transaction."""
+        try:
+            with self._storage.transaction():
+                self._file_relate_link(out, row, e, votes)
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning("deep-dream judge: relate link for merge proposal "
+                           "#%s not filed: %s", row.get("id"), exc)
+            out["relate_link_errors"] = out.get("relate_link_errors", 0) + 1
+
     def review_rejudge(self, queue="all", *, limit=32):
         """Queue a bounded set of pending opinions for the next judge sweep."""
         from pseudolife_memory.memory.review_judgments import requeue
@@ -3709,6 +3783,9 @@ class DreamOps:
         if cfg.judge_mode not in ("shadow", "auto-reject", "auto"):
             return {"judged": 0, "skipped": "disabled"}
         try:
+            from pseudolife_memory.memory.graph_review import (
+                MERGE_REJECT_CLASS, merge_verdict_class, merge_verdict_token,
+                relate_note, relate_relations)
             from pseudolife_memory.memory.review_decisions import (
                 has_active_decisions, refresh_proposal_terminals)
             cap = max(1, int(limit if limit is not None else cfg.judge_batch))
@@ -3764,6 +3841,7 @@ class DreamOps:
                    "second_opinions": 0, "pending_unjudged": 0,
                    "second_opinion_skipped_same_model": skipped,
                    "auto_reject_refused_same_model": 0,
+                   "relate_links_filed": 0,
                    "served_model_mismatch": 0, "served_model_mismatches": [],
                    "reconsideration": reconsidered,
                    "model": getattr(ex, "model", None) or type(ex).__name__,
@@ -3818,6 +3896,7 @@ class DreamOps:
                     second = []
             if second:
                 self._stamp_skipped(verdicts, proposals)
+                self._relate_needs_relation(verdicts)
                 self._report_served_model(out, "second", ex2)
                 model2 = self._model_name(ex2)
                 now = _t.time()
@@ -3839,7 +3918,7 @@ class DreamOps:
                 snap: dict = {}
                 with self._lock:
                     review.validate(batch, response_extractor=ex2, expected_model=second_observed)
-                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in (*MERGE_REJECT_CLASS, "keep")):
                         with self._storage.transaction():
                             e = enriched[v["n"] - 1]
                             row = batch[v["n"] - 1]
@@ -3848,10 +3927,15 @@ class DreamOps:
                             # The first opinion's note is the prefix; the verdict
                             # tail (and any refusal reason appended below) must
                             # survive the 400-char cap, so the prefix is what gets
-                            # truncated.
+                            # truncated. A relate vote's relation rides in both
+                            # (graph_review.relate_relations reads them back).
                             note1 = (row.get("judge_note") or "")[:160]
-                            tag = ("split" if v1 != v2 else "agree")
-                            note = f"{note1} | 2nd ({model2}): {v2} {c2:.2f} [{tag}]"
+                            # "split" is a disagreement about the MERGE: reject
+                            # vs relate is agreement that the pair is distinct.
+                            tag = ("split" if merge_verdict_class(v1) != merge_verdict_class(v2)
+                                   else "agree")
+                            token2 = merge_verdict_token(v2, v.get("relation"))
+                            note = f"{note1} | 2nd ({model2}): {token2} {c2:.2f} [{tag}]"
                             if not review.current(row, first_opinion=True):
                                 continue
                             ok = self._storage.set_entity_proposal_second_judgment(
@@ -3861,7 +3945,7 @@ class DreamOps:
                                 continue
                             out["second_opinions"] += 1
                             mean = (c1 + c2) / 2.0
-                            if (v1 == v2 == "reject"
+                            if (merge_verdict_class(v1) == merge_verdict_class(v2) == "reject"
                                     and cfg.judge_mode in ("auto-reject", "auto")
                                     and mean >= cfg.judge_reject_min_confidence_2):
                                 if not self._second_opinion_distinct(
@@ -3877,6 +3961,10 @@ class DreamOps:
                                     e["id"], decided_by="dream-judge")
                                 if res.get("rejected"):
                                     out["auto_rejected"] += 1
+                                    rel1 = relate_relations(row.get("judge_note"))[0]
+                                    self._file_relate_link_isolated(out, row, e, [
+                                        (v1, rel1, c1),
+                                        (v2, v.get("relation"), c2)])
                             elif (v1 == v2 == "accept" and cfg.judge_mode == "auto"
                                     and e.get("low_differential") is False
                                     and mean >= cfg.judge_accept_min_confidence):
@@ -3941,21 +4029,25 @@ class DreamOps:
                              for i, e in enumerate(enriched)]
                 verdicts = ex.judge_merges(proposals)
                 self._stamp_skipped(verdicts, proposals)
+                self._relate_needs_relation(verdicts)
                 self._report_served_model(out, "first", ex)
                 model = self._model_name(ex, out["model"])
                 out["model"] = model
                 now = _t.time()
                 with self._lock:
                     review.validate(batch)
-                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in ("reject", "keep")):
+                    for v in sorted(verdicts, key=lambda item: item["verdict"] not in (*MERGE_REJECT_CLASS, "keep")):
                         with self._storage.transaction():
                             e = enriched[v["n"] - 1]
                             row = batch[v["n"] - 1]
                             if not review.current(row):
                                 continue
+                            note = v["note"] or None
+                            if v["verdict"] == "relate":
+                                note = relate_note(v.get("relation"), note)
                             ok = self._storage.set_entity_proposal_judgment(
                                 e["id"], verdict=v["verdict"],
-                                confidence=v["confidence"], note=v["note"] or None,
+                                confidence=v["confidence"], note=note,
                                 model=model, at=now)
                             if ok:
                                 review.record(row)
@@ -3963,12 +4055,15 @@ class DreamOps:
                                 continue
                             out["judged"] += 1
                             if (cfg.judge_mode in ("auto-reject", "auto")
-                                    and v["verdict"] == "reject"
+                                    and v["verdict"] in MERGE_REJECT_CLASS
                                     and v["confidence"] >= cfg.judge_reject_min_confidence):
                                 res = review.apply(row, self.graph_reject_entity_proposal,
                                     e["id"], decided_by="dream-judge")
                                 if res.get("rejected"):
                                     out["auto_rejected"] += 1
+                                    self._file_relate_link_isolated(out, row, e, [
+                                        (v["verdict"], v.get("relation"),
+                                         v["confidence"])])
             out["pending_unjudged"] = max(0, len(first) - out["judged"])
             return out
         except Exception as exc:  # noqa: BLE001 — the judge must never kill the sweep
@@ -5254,7 +5349,8 @@ class DreamOps:
         def ev(eid):
             return deg.get(eid, 0) + facts.get(eid, 0)
 
-        from pseudolife_memory.memory.graph_review import shared_pair_groups
+        from pseudolife_memory.memory.graph_review import (
+            add_relate_relations, shared_pair_groups)
         rows = [p for p in pending if p.get("kind") == "merge"]
         oriented = [self._fold_direction(p["entity_id"], p["into_id"], ev)
                     for p in rows]
@@ -5298,5 +5394,6 @@ class DreamOps:
                 row["judge2"] = {"verdict": p["judge2_verdict"],
                                  "confidence": p.get("judge2_confidence"),
                                  "model": p.get("judge2_model")}
+            add_relate_relations(row, p)
             out.append(row)
         return out
