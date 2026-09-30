@@ -36,6 +36,46 @@ class FakeDaemon:
         return [call[0] for call in self.calls]
 
 
+def test_heartbeat_reports_only_a_live_listener_and_expires_a_crashed_waiter(tmp_path, monkeypatch):
+    now = [time.time()]
+    monkeypatch.setattr("pseudolife_memory.coordination_adapter.time.time", lambda: now[0])
+
+    async def drive():
+        daemon = FakeDaemon()
+        digest = tmp_path / "digest.txt"
+        client, instance = adapter(daemon, digest_path=digest)
+        async with client, instance:
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] == 0
+            digest.with_suffix(".wake").write_text("owner\n")
+            digest.with_suffix(".wake-armed").write_text(f"owner\n{now[0] + 60}\n")
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] == now[0] + 60
+            now[0] += 61
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] == 0
+    asyncio.run(drive())
+
+
+def test_an_enabled_doorbell_disarms_after_failure(tmp_path):
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    thread = "aaaaaaaa-1111-4111-8111-111111111111"
+
+    async def drive():
+        daemon = FakeDaemon()
+        client, instance = adapter(daemon, ring_path=True)
+        bell = CodexDoorbell(["fixture-cli"])
+        async with client, instance:
+            bell.watch(thread, instance)
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] > time.time()
+            bell._disable("fixture failure")
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] == 0
+            await bell.aclose()
+    asyncio.run(drive())
+
+
 def adapter(daemon, **kwargs):
     from pseudolife_memory.coordination_adapter import CoordinationAdapter
     client = httpx.AsyncClient(transport=httpx.MockTransport(daemon))
@@ -1446,7 +1486,7 @@ def test_an_adapter_with_a_ring_path_says_so_at_attach(tmp_path):
     refused = []
 
     def hook(action, body):
-        if action == "attach" and "ring" in body and not refused:
+        if action == "attach" and "ring" in body:
             refused.append(body)
             return httpx.Response(400, json={"error": "unexpected_parameter"})
         return None
@@ -1461,7 +1501,9 @@ def test_an_adapter_with_a_ring_path_says_so_at_attach(tmp_path):
     asyncio.run(drive())
     attaches = [body for action, body, _ in daemon.calls if action == "attach"]
     assert attaches[0]["ring"] is True
-    assert "ring" not in attaches[1]
+    assert "ring_armed_until" in attaches[0]
+    assert "ring_armed_until" not in attaches[1]
+    assert "ring" not in attaches[2]
     register = next(body for action, body, _ in daemon.calls if action == "register")
     assert register["capabilities"]["ring"] is True
 

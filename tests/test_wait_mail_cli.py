@@ -97,6 +97,25 @@ def _later(seconds, action):
     return timer
 
 
+def test_waiter_renews_its_short_listener_lease_and_disarms_on_timeout(digests, monkeypatch):
+    digest = _digest(digests)
+    _write(digest, 1)
+    leases = []
+    original_sleep = time.sleep
+
+    def observe(seconds):
+        [armed] = list(digests.glob(f"{digest.stem}.*.wait-armed"))
+        leases.append((time.time(), armed.read_text().splitlines()))
+        original_sleep(seconds)
+
+    monkeypatch.setattr("pseudolife_memory.wait_mail_cli.time.sleep", observe)
+    assert run_wait_mail(["--timeout", "0.1", *FAST]) == 3
+    assert len(leases) >= 2
+    assert all(0 < float(lines[1]) - stamp < 61 for stamp, lines in leases)
+    assert len({lines[1] for _, lines in leases}) >= 2
+    assert not list(digests.glob(f"{digest.stem}.*.wait-armed"))
+
+
 # --- firing rule ------------------------------------------------------------
 
 def test_unshown_mail_fires_at_once_prints_the_body_verbatim_and_marks_it(digests, capsysbinary):

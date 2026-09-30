@@ -603,5 +603,6 @@ def test_a_hold_that_lapsed_moments_ago_still_clears(store):
     store.test_time[0] = 1100.0
     store.list_leases()                     # settles the lapsed hold
     store.test_time[0] = 1105.0
+    store.attach(*creds(parked), attachment_id=parked["agent_id"][:8], wake_enabled=True)
     assert _notice(store, holder, parked, "expired")["reason"] == "clearer"
     assert _notice(store, lister, parked, "lister")["decision"] == "withheld"

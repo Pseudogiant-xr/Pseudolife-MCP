@@ -4,6 +4,7 @@ from contextlib import aclosing
 import threading
 
 import httpx
+import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 from tests.asgi_helpers import stub_mcp
@@ -11,6 +12,145 @@ from pseudolife_memory.memory.hlc import HybridLogicalClock
 from pseudolife_memory.storage.postgres import PostgresStorage
 from pseudolife_memory.web.fixtures import FixtureService
 from pseudolife_memory.web.api import build_console_app
+
+
+@pytest.mark.parametrize("replacement_process", [False, True])
+def test_a_replacement_adapter_recovers_a_queued_ring_after_the_first_answer_is_lost(pg_conn, pg_url, tmp_path, monkeypatch, replacement_process):
+    from pseudolife_memory import coordination
+    from pseudolife_memory.coordination_adapter import AdapterError, CoordinationAdapter
+    now = [1000.0]
+    monkeypatch.setattr("pseudolife_memory.coordination_adapter.time.time", lambda: now[0])
+    monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 1000)
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    original_store = coordination._store
+
+    def store_at_time(current_service):
+        store = original_store(current_service)
+        store.clock = lambda: now[0]
+        return store
+
+    monkeypatch.setattr(coordination, "_store", store_at_time)
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def recipient():
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / "recipient.json", digest_path=tmp_path / "recipient.txt")
+
+            first = recipient()
+            try:
+                async with CoordinationAdapter("http://fixture", "fixture-bearer", client=client) as sender:
+                    await first.__aenter__()
+                    agent_id = first.instance_headers["X-PL-Agent"]
+                    await first._post("update", {"park_reason": "waiting_peer", "park_needs": "review",
+                                                  "park_clear_by": "anyone"})
+                    sent = await sender._post("send", {"to": agent_id, "text": "review complete",
+                                                        "request_id": "lost-handoff"})
+                    assert sent["wake"]["decision"] == "no_path" and sent["wake"]["queued"]
+                    now[0] = 1001
+                    first.ring_listener = lambda: True
+                    request_once = first._request_once
+                    discarded = []
+
+                    async def lose_answer(action, body, headers, timeout):
+                        response = await request_once(action, body, headers, timeout)
+                        if action == "heartbeat":
+                            discarded.append(response.json()["wake"])
+                            raise AdapterError("fixture lost heartbeat response", code="transport_unavailable")
+                        return response
+
+                    monkeypatch.setattr(first, "_request_once", lose_answer)
+                    with pytest.raises(AdapterError, match="lost heartbeat"):
+                        await first._heartbeat()
+                    assert discarded[0]["decision"] == "rung"
+                    assert first.ring_due() is None
+                    async def verify_recovered(current):
+                        assert current.instance_headers["X-PL-Agent"] == agent_id
+                        assert current.ring_due() == ("rung", "anyone")
+                        await current._heartbeat()
+                        assert current.ring_due() is None  # Same-generation replay is deduplicated.
+                        await current._post("ack", {"message_id": sent["message_id"]})
+                        assert (await current._post("receive", {}))["messages"] == []
+
+                    if replacement_process:
+                        first._heartbeat_task.cancel()
+                        await asyncio.gather(first._heartbeat_task, return_exceptions=True)
+                        now[0] = 1062  # Beyond both the handoff repeat and attachment lease.
+                        replacement = recipient()
+                        replacement.ring_listener = lambda: True
+                        async with replacement:
+                            await verify_recovered(replacement)
+                    else:
+                        now[0] = 1031  # Lost answer outlives the retry window, not the attachment.
+                        monkeypatch.setattr(first, "_request_once", request_once)
+                        await first._heartbeat()
+                        await verify_recovered(first)
+            finally:
+                await first.__aexit__(None, None, None)
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()
+
+
+@pytest.mark.parametrize("transport", ["rest", "mcp"])
+def test_send_reports_unknown_listener_until_authenticated_heartbeat(pg_conn, pg_url, monkeypatch, transport):
+    from pseudolife_memory import mcp_server, coordination
+    from pseudolife_memory.writer_context import bind_request_headers, unbind_request_headers
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+    monkeypatch.setattr(mcp_server, "service", service)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-bearer")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            async def post(action, body, agent=None):
+                headers = {"Authorization": "Bearer fixture-bearer"}
+                if agent:
+                    headers.update({"X-PL-Agent": agent["agent_id"], "X-PL-Agent-Key": agent["credential"]})
+                response = await client.post(f"http://fixture/api/coordination/{action}", headers=headers, json=body)
+                assert response.status_code == 200, response.json().get("error")
+                return response.json()
+            sender = await post("register", {})
+            recipient = await post("register", {"capabilities": {"ring": True}})
+            attached = await post("attach", {"attachment_id": "listener", "ring": True}, recipient)
+            await post("update", {"park_reason": "waiting_peer", "park_needs": "review", "park_clear_by": "anyone"}, recipient)
+            body = {"to": recipient["agent_id"], "text": "review complete", "request_id": "listener-unknown"}
+            if transport == "rest":
+                sent = await post("send", body, sender)
+            else:
+                token = bind_request_headers({"authorization": "Bearer fixture-bearer", "x-pl-agent": sender["agent_id"], "x-pl-agent-key": sender["credential"]})
+                try:
+                    sent = mcp_server.memory_message(action="send", **body)
+                finally:
+                    unbind_request_headers(token)
+            assert sent["wake"]["decision"] == "no_path"
+            assert sent["wake"]["reason"] == "listener_unknown"
+            assert sent["wake"]["queued"] is True
+            renewed = await post("heartbeat", {"attachment_id": "listener", "generation": attached["generation"],
+                                               "ring_armed_until": coordination._store(service).clock() + 60}, recipient)
+            assert renewed["wake"]["decision"] == "rung"
+            assert (await post("receive", {}, recipient))["messages"][0]["message_id"] == sent["message_id"]
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()
 
 
 def test_two_adapters_mail_reply_ack_and_resume(pg_conn, pg_url, tmp_path):
@@ -368,6 +508,11 @@ def test_a_plain_shim_session_is_rung_through_its_ring_path(pg_conn, pg_url, tmp
                                                  "park_needs": "the review", "park_clear_by": "anyone"})
                 storage.conn.execute("UPDATE coordination_agents SET last_activity=last_activity-3600")
                 storage.conn.commit()
+                # A ring-capable adapter still needs a running listener.
+                import time
+                armed = tmp_path / "digests" / "plain.wait-armed"
+                armed.write_text(f"fixture-listener\n{time.time() + 60}\n", encoding="ascii")
+                await plain._heartbeat()
                 rung = await post(sender, "send", {"to": plain.instance_headers["X-PL-Agent"],
                                                    "text": "review is in", "request_id": "to-plain"})
                 assert rung["wake"]["decision"] == "rung"

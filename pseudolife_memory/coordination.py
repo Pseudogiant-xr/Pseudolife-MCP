@@ -38,8 +38,8 @@ _PARAMETERS = {
     "lease": {"name", "ttl", "expect", "purpose"},
     "release": {"name"},
     "leases": {"name", "limit"},
-    "attach": {"attachment_id", "wake_enabled", "ring"},
-    "heartbeat": {"attachment_id", "generation", "active"},
+    "attach": {"attachment_id", "wake_enabled", "ring", "ring_armed_until"},
+    "heartbeat": {"attachment_id", "generation", "active", "ring_armed_until"},
     "detach": {"attachment_id", "generation"},
     "send": {"to", "text", "request_id", "reply_to", "clears", "urgent"},
     "receive": {"after", "limit", "attachment_id", "generation"},
@@ -67,7 +67,7 @@ PUBLIC_ERROR_CODES = frozenset({
     "attachment_already_waiting", "wait_capacity_exceeded", "invalid_wait_seconds",
     "invalid_capabilities", "invalid_children", "invalid_cursor", "invalid_expiry", "invalid_limit",
     "invalid_rebind", "invalid_reply", "invalid_text", "invalid_update",
-    "invalid_wake_enabled", "invalid_active", "invalid_message_id", "message_not_found",
+    "invalid_wake_enabled", "invalid_active", "invalid_ring_armed_until", "invalid_message_id", "message_not_found",
     "message_not_pending",
     "queue_full", "rate_limited", "recipient_not_found", "request_conflict",
     "attempts_exhausted",
@@ -215,7 +215,12 @@ PARK_GATE_MESSAGE = (
     "park_resume=...). Use done only when no follow-up is expected: nothing will "
     "ring you. Waiting on a merge click or a review that may still bring fixes? "
     "Park needs_approval with park_clear_by set to the reviewer's agent id or "
-    "maintainer, or waiting_peer.")
+    "maintainer, or waiting_peer. A park records intent; automatic wake requires "
+    "a live listener. Check the sender's wake receipt; no_path means mail is "
+    "queued for receive on a later turn. For waits over 59 minutes, especially "
+    "needs_approval waiting on maintainer, arm wait-mail in the background or "
+    "keep the Codex doorbell active; otherwise record that you are reachable "
+    "on your next turn.")
 
 
 def park_gate(service, headers: Mapping[str, str], *, agent, since,

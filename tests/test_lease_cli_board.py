@@ -274,8 +274,9 @@ def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(
     assert "board skipped" not in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("listener_live", [True, False], ids=["live", "expired"])
 def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch,
-                                                          followed_process):
+                                                          followed_process, listener_live):
     """A session parked until the ``gpu`` lease clears (``park_clear_by:
     gpu``) gets both of the hold's notices and is rung by the release. The
     notice comes from the hold's own address after the board lease is
@@ -289,8 +290,11 @@ def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch
     _post(bridge, "update", {"status": "waiting for the bench server; suite=idle",
                              "park_reason": "needs_resource", "park_needs": "the bench GPU",
                              "park_clear_by": "gpu"}, as_)
-    storage.conn.execute("UPDATE coordination_agents SET wake_enabled=true WHERE agent_id=%s",
-                         (parked["agent_id"],))
+    _post(bridge, "attach", {"attachment_id": "parked-listener", "wake_enabled": True}, as_)
+    if not listener_live:
+        # Simulate a lapsed lease while the persisted wake setting remains.
+        storage.conn.execute("UPDATE coordination_agents SET lease_until=0 WHERE agent_id=%s",
+                             (parked["agent_id"],))
     child = followed_process
     code = lease_cli.main(["hold", "gpu", "--while-pid", str(child.pid), "--worktree", "wt"],
                           transport=bridge)
@@ -299,5 +303,6 @@ def test_a_session_parked_on_the_lease_is_rung_by_its_release(board, monkeypatch
         "SELECT text, wake FROM coordination_messages WHERE recipient_agent_id=%s "
         "ORDER BY recipient_sequence", (parked["agent_id"],)).fetchall()
     assert [text.split(":")[0] for text, _ in rows] == ["LEASE gpu acquired", "LEASE gpu released"]
-    assert [(wake["decision"], wake["reason"]) for _, wake in rows] == [("withheld", "need_not_cleared"),
-                                                               ("rung", "clearer")]
+    expected_release = ("rung", "clearer") if listener_live else ("no_path", "listener_expired")
+    assert [(wake["decision"], wake["reason"]) for _, wake in rows] == [
+        ("withheld", "need_not_cleared"), expected_release]

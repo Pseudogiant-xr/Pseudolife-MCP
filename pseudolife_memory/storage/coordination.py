@@ -1830,11 +1830,12 @@ class CoordinationStore:
                 "pending_preview": self._pending_preview(agent_id)}
 
     def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False,
-               ring=None):
+               ring=None, ring_armed_until=None):
         """Take or renew the adapter lease. ``ring`` (v49) says whether a
         ring the daemon decides reaches this session without a live channel
         (the Claude Stop hook's .ring marker, the Codex doorbell); it is
-        kept in ``capabilities`` and counts as a wake path."""
+        kept in ``capabilities``. A listener must also renew its bounded
+        ``ring_armed_until`` deadline; static capability alone is no live path."""
         _string(attachment_id, 120, "attachment_id", empty=False)
         self._fields(wake_enabled=wake_enabled)
         if ring is not None and not isinstance(ring, bool):
@@ -1842,6 +1843,7 @@ class CoordinationStore:
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             now = self.clock()
+            armed_until = self._listener_deadline(ring_armed_until, now)
             alive = row["attachment_id"] is not None and (row["lease_until"] or 0) > now
             if alive and row["attachment_id"] != attachment_id:
                 raise CoordinationError("attachment_busy")
@@ -1863,6 +1865,7 @@ class CoordinationStore:
                 self.storage.conn.execute(
                     "UPDATE coordination_agents SET capabilities=capabilities || %s "
                     "WHERE agent_id=%s", (Jsonb({"ring": ring}), agent_id))
+            self._record_listener(row, armed_until)
             mailbox = self._mailbox_state(agent_id)
             ring = self._serve_wake(agent_id, now)
             self._append([self._event(
@@ -1871,7 +1874,38 @@ class CoordinationStore:
                 principal=principal, agent_id=agent_id, project=row["project"],
                 task=row["task"])], now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": now + ATTACHMENT_LEASE,
-                **mailbox, "wake": ring}
+                "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
+
+    @staticmethod
+    def _listener_deadline(value, now):
+        if value is None:
+            return None
+        if (type(value) not in (int, float) or value < 0
+                or (type(value) is float and not math.isfinite(value))):
+            raise CoordinationError("invalid_ring_armed_until")
+        # Listener and attachment leases share the same 60-second ceiling;
+        # an abandoned listener cannot remain advertised indefinitely.
+        return min(value, now + ATTACHMENT_LEASE)
+
+    def _record_listener(self, row, deadline):
+        if deadline is not None or "ring_armed_until" in (row.get("capabilities") or {}):
+            self.storage.conn.execute(
+                "UPDATE coordination_agents SET capabilities=capabilities || %s WHERE agent_id=%s",
+                (Jsonb({"ring_armed_until": deadline or 0}), row["agent_id"]))
+
+    @staticmethod
+    def _listener_path(row, now):
+        attached = row["attachment_id"] is not None and (row["lease_until"] or 0) > now
+        if attached and row["wake_enabled"]:
+            return None
+        capabilities = row.get("capabilities") or {}
+        deadline = capabilities.get("ring_armed_until")
+        if (attached and capabilities.get("ring") is True and type(deadline) in (int, float)
+                and math.isfinite(deadline) and deadline > now):
+            return None
+        if deadline is not None or row["wake_enabled"]:
+            return "listener_expired"
+        return "listener_unknown" if capabilities.get("ring") is True else "wake_disabled"
 
     def _attachment(self, row, attachment_id, generation):
         if (row["attachment_id"] != attachment_id or row["generation"] != generation
@@ -1885,7 +1919,7 @@ class CoordinationStore:
                 "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
 
     def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
-                  active=False):
+                  active=False, ring_armed_until=None):
         """Renew the lease. ``active`` says the shim forwarded a tool call
         since its previous heartbeat; only then does the renewal count as
         activity, so a parked shim is not ranked or retained as a working
@@ -1896,34 +1930,43 @@ class CoordinationStore:
             row = self._auth(principal, agent_id, credential, lock=True)
             self._attachment(row, attachment_id, generation)
             now = self.clock()
+            armed_until = self._listener_deadline(ring_armed_until, now)
             until = now + ATTACHMENT_LEASE
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
+            self._record_listener(row, armed_until)
             mailbox = self._mailbox_state(agent_id)
             ring = self._serve_wake(agent_id, now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
-                **mailbox, "wake": ring}
+                "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
 
     def _serve_wake(self, agent_id, now):
-        """Hand the recipient's adapter every ring decided since its last
-        attach or heartbeat, once: the daemon decides, the shim rings. One
-        answer covers them all, the newest ring's reason and the latest
-        ``ring_at`` (a burst staggers them); ``None`` when nothing is due."""
+        """Offer the newest pending ring; the adapter deduplicates its identity.
+        Queued mail retains a stable offer until acknowledgment or expiry,
+        covering lost handoffs and replacement attachments. Other rings
+        repeat only for one heartbeat interval."""
+        row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
+        if self._listener_path(row, now) is not None:
+            return None
         self.storage.conn.execute(
             "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
-            "AND served_at IS NULL", (now, agent_id))
-        # A ring rides the answers of one heartbeat interval: a lost answer
-        # that the adapter retries still carries it, and the adapter takes
-        # each ring once.
+            "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
+            "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)", (now, agent_id, agent_id, now))
         rows = self._all(
-            "SELECT decision,reason,ring_at,created_at,wake_id FROM coordination_wakes "
-            "WHERE recipient_agent_id=%s AND served_at>%s",
-            (agent_id, now - WAKE_SERVE_REPEAT))
+            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,"
+            "coalesce(m.wake->>'queued'='true',false) AS queued FROM coordination_wakes w "
+            "JOIN coordination_messages m ON m.message_id=w.message_id "
+            "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
+            "AND w.served_at IS NOT NULL AND m.acknowledged_at IS NULL AND m.expires_at>%s",
+            (agent_id, now))
         if not rows:
             return None
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
+        if not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
+            return None
         return {"decision": newest["decision"], "reason": newest["reason"],
                 "ring_at": max(r["ring_at"] for r in rows)}
 
@@ -1984,11 +2027,6 @@ class CoordinationStore:
             return {"decision": "hinted", "reason": "active"}
         if park and park["park_reason"] == "done":
             return {"decision": "not_needed", "reason": "parked_done"}
-        # A wake path is a live channel, or a ring path the adapter declared
-        # at attach (the Stop hook's .ring marker, the Codex doorbell).
-        capabilities = recipient.get("capabilities") or {}
-        if not recipient["wake_enabled"] and capabilities.get("ring") is not True:
-            return {"decision": "no_path", "reason": "wake_disabled", **need}
         hour, day = now - 3600, now - 86400
         if park:
             how = None
@@ -2039,6 +2077,12 @@ class CoordinationStore:
             "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
              reason == "urgent", ring_at, now))
+        missing = self._listener_path(recipient, now)
+        if missing is not None:
+            return {"decision": "no_path", "reason": missing, "queued": True,
+                    "last_activity": recipient["last_activity"],
+                    "fallback": "Mail is queued. Use receive on the next turn or contact the maintainer for an immediate response.",
+                    **need}
         return {"decision": decision, "reason": reason, "ring_at": ring_at}
 
     def park_gate(self, agent_id, principal, *, since=None):
@@ -2058,11 +2102,14 @@ class CoordinationStore:
         park = self._live_park(row, now)
         if park is not None:
             if since is not None:
-                # Delivery time, not the staggered ring or its hand-off:
-                # a cleared need requires a park set strictly afterwards.
+                # Immediate rings use their send time. A queued no-path
+                # ring reaches nobody until the listener takes it.
                 latest = self._one(
-                    "SELECT max(created_at) AS created_at FROM coordination_wakes "
-                    "WHERE recipient_agent_id=%s AND decision='rung' AND created_at>%s",
+                    "SELECT max(delivered_at) AS created_at FROM (SELECT CASE WHEN "
+                    "m.wake->>'queued'='true' THEN w.served_at ELSE w.created_at END AS delivered_at "
+                    "FROM coordination_wakes w LEFT JOIN coordination_messages m "
+                    "ON m.message_id=w.message_id AND m.recipient_agent_id=w.recipient_agent_id "
+                    "WHERE w.recipient_agent_id=%s AND w.decision='rung') delivered WHERE delivered_at>%s",
                     (agent_id, since))["created_at"]
                 if latest is not None and (park["park_set_at"] is None or
                                            park["park_set_at"] <= latest):
@@ -2478,7 +2525,8 @@ class CoordinationStore:
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
         attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
-                          "wake->>'decision' IN ('rung','nudged','hinted'))" if for_delivery else "")
+                          "wake->>'decision' IN ('rung','nudged','hinted') OR "
+                          "wake->>'queued'='true')" if for_delivery else "")
         now = self.clock()
         params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
                   + [limit])

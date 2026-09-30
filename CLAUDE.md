@@ -176,6 +176,15 @@ took 143 CUDA OOMs.
   holder is idle from process stats, a quiet board or an old timestamp:
   ask them. This host's dialect for the served check-in's rules is
   `examples/hook-instructions.md`.
+- **A park record does not keep a wake listener alive.** Claude Code's Stop
+  watcher expires after 59 minutes. For a longer wait, arm one main-session
+  background `pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail
+  or timeout; in Codex, use the doorbell where the host supports it. Without
+  a durable host path, say `next-turn-only` in the park/status and tell the
+  maintainer when an urgent dependency cannot wait. Inspect send receipts:
+  `rung` means a currently armed path, not that the recipient acted; for
+  `no_path`, use recipient host messaging when available (Claude Desktop's
+  session `send_message` starts a user turn), otherwise expect its next turn.
 - **A host-shaped symptom is broadcast before it is debugged**: a hung
   interpreter, os error 1455, a database refusing its password, a daemon
   that stopped answering, or anything else that fails in a way unrelated to
