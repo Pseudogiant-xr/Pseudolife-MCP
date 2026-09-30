@@ -269,9 +269,12 @@ function body(f, onAct) {
 function judgeChip(j) {
   if (!j || !j.verdict) return null;
   const confidence = j.confidence == null ? "" : ` ·${Number(j.confidence).toFixed(2)}`;
-  const chip = badge(`🤖 ${j.verdict}${confidence}`,
+  // "relate" (merge judge, 2026-09-30) is a reject that names the relation
+  // holding from FROM to INTO.
+  const verdict = j.verdict === "relate" && j.relation ? `relate ${j.relation}` : j.verdict;
+  const chip = badge(`🤖 ${verdict}${confidence}`,
                      j.verdict === "accept" ? "pos"
-                     : j.verdict === "reject" ? "neg" : "contested");
+                     : j.verdict === "reject" || j.verdict === "relate" ? "neg" : "contested");
   chip.title = `${j.model || "judge"}: ${j.note || "no note"}`;
   return chip;
 }

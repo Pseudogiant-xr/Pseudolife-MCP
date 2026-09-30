@@ -44,13 +44,20 @@ def _lease_holder_pids(conn) -> list[int]:
     return sorted(r[0] for r in rows)
 
 
-def _backends(conn) -> int:
-    count = conn.execute(
-        "SELECT count(*) FROM pg_stat_activity "
-        "WHERE datname = current_database() AND pid <> pg_backend_pid()"
-    ).fetchone()[0]
+def _client_backends(conn) -> set[int]:
+    """Client sessions on this database other than the probe's own.
+
+    Server-side workers (autovacuum, parallel workers) are listed under the
+    database's name too, and come and go on their own schedule. A plain
+    count once saw one extra backend before the refusal and none after it,
+    failing a full-suite run (2026-09-30), so only client backends count."""
+    rows = conn.execute(
+        "SELECT pid FROM pg_stat_activity "
+        "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+        "  AND backend_type = 'client backend'"
+    ).fetchall()
     conn.commit()
-    return count
+    return {r[0] for r in rows}
 
 
 def _kill(conn, pid: int) -> None:
@@ -63,7 +70,7 @@ def test_second_storage_on_same_database_refuses_naming_the_holder(pg_conn, pg_u
     try:
         holder = first.conn.info.backend_pid
         assert _lease_holder_pids(pg_conn) == [holder]
-        before = _backends(pg_conn)
+        before = _client_backends(pg_conn)
 
         with pytest.raises(RuntimeError, match="writer lease") as refused:
             PostgresStorage(pg_url)
@@ -74,8 +81,15 @@ def test_second_storage_on_same_database_refuses_naming_the_holder(pg_conn, pg_u
         # can tell the daemon from a script from a test run.
         assert f"pid={os.getpid()}" in message
         # The refused instance released its connection; nothing leaked
-        # that could keep a half-open session around.
-        assert _backends(pg_conn) == before
+        # that could keep a half-open session around. A session that was
+        # already exiting may leave meanwhile, and a closed one's server
+        # process can take a moment to go, so wait for no NEW session
+        # rather than for an equal count. A leaked one never goes.
+        deadline = time.monotonic() + 5
+        while (_client_backends(pg_conn) - before
+               and time.monotonic() < deadline):
+            time.sleep(0.05)
+        assert _client_backends(pg_conn) - before == set()
         assert _lease_holder_pids(pg_conn) == [holder]
     finally:
         first.close()

@@ -15,6 +15,54 @@ _TEST_PATTERNS = re.compile(
     re.I)
 
 
+# The merge judge's "relate" verdict (2026-09-30): the pair is distinct, so
+# for the merge it counts as a reject, and the named vocabulary relation
+# holds from FROM to INTO as the judge was shown them. entity_proposals has
+# no relation column: the relation rides in the note, as a ``relate:<rel>``
+# token at the head of the first opinion's note and as the verdict token of
+# the second opinion's ``| 2nd (<model>): <token> <conf>`` tail.
+MERGE_REJECT_CLASS = ("reject", "relate")
+_RELATE_TOKEN = re.compile(r"relate:([a-z0-9-]+)")
+
+
+def merge_verdict_class(verdict):
+    """``reject`` for both reject-class merge verdicts, else the verdict."""
+    return "reject" if verdict in MERGE_REJECT_CLASS else verdict
+
+
+def merge_verdict_token(verdict, relation):
+    """The verdict as written into a note: ``relate:<relation>`` or bare."""
+    return f"relate:{relation}" if verdict == "relate" and relation else verdict
+
+
+def relate_note(relation, note):
+    """The first opinion's note for a relate verdict."""
+    return f"relate:{relation} | {note}" if note else f"relate:{relation}"
+
+
+def relate_relations(note):
+    """``(first, second)`` relations recorded in a merge row's note, each
+    None when that opinion recorded none. Callers read an opinion's
+    relation only when its verdict is ``relate``."""
+    note = note or ""
+    head = _RELATE_TOKEN.match(note)
+    tail = None
+    cut = note.rfind("| 2nd (")
+    if cut != -1:
+        tail = re.search(r"\): relate:([a-z0-9-]+) ", note[cut:])
+    return (head.group(1) if head else None, tail.group(1) if tail else None)
+
+
+def add_relate_relations(payload, row):
+    """Stamp ``relation`` on a review payload's ``judge`` / ``judge2``
+    blocks whose verdict is ``relate``; every other block is unchanged."""
+    first, second = relate_relations(row.get("judge_note"))
+    for key, relation in (("judge", first), ("judge2", second)):
+        block = payload.get(key)
+        if block and block.get("verdict") == "relate" and relation:
+            block["relation"] = relation
+
+
 def classify_edge(edge: dict, *, proposed: bool = False) -> str:
     """Three-way provenance tag for an edge (graphify-style).
 
@@ -428,6 +476,7 @@ def merge_candidates(entity_proposals):
             m["judge2"] = {"verdict": p["judge2_verdict"],
                            "confidence": p.get("judge2_confidence"),
                            "model": p.get("judge2_model")}
+        add_relate_relations(m, p)
         merges.append(m)
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]
