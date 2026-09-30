@@ -64,6 +64,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
+from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 from mcp.types import ToolAnnotations  # noqa: E402
 # ``Annotated[T, Field(description=...)]`` on a tool signature is how a
@@ -251,12 +252,35 @@ def _annotations(name: str) -> ToolAnnotations:
     )
 
 
+class _StringSafeMetadata(FuncMetadata):
+    def pre_parse_json(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Keep text literal while retaining the SDK's list/dict compatibility.
+
+        MCP 2.1 skips JSON decoding for str, but not str | None: object/array
+        text fails validation and the text "null" silently becomes None.
+        """
+        text_keys = {
+            key
+            for name, field in self.arg_model.model_fields.items()
+            if field.annotation is str or field.annotation == str | None
+            for key in (name, field.alias)
+            if key is not None
+        }
+        literal = {k: v for k, v in data.items()
+                   if k in text_keys and isinstance(v, str)}
+        parsed = super().pre_parse_json(
+            {k: v for k, v in data.items() if k not in literal})
+        return {**parsed, **literal}
+
+
 def _tool(*, tier: str = "full"):
     """Record the tool's tier and register it (always — tiers gate
     visibility in tools/list, not existence)."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = tier
         mcp.tool(annotations=_annotations(fn.__name__))(_async_offload(fn))
+        tool = mcp._tool_manager.get_tool(fn.__name__)
+        tool.fn_metadata = _StringSafeMetadata(**tool.fn_metadata.model_dump())
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
