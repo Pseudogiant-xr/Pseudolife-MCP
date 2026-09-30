@@ -848,13 +848,56 @@ def test_a_marketplace_that_still_offers_the_installed_version_is_named_not_unin
     clone, a fork) cannot be installed beside the copy sessions run, and
     replacing that copy in place is what stranded the plugin. The updater
     says so instead of uninstalling."""
-    _, cache = _plugin_fixture(cli, tmp_path, differ=True, in_use=True)
+    clone, cache = _plugin_fixture(cli, tmp_path, differ=True, in_use=True)
+    manifest = clone / ".claude-plugin" / "plugin.json"
+    manifest.write_text(json.dumps({**json.loads(manifest.read_text(encoding="utf-8")), "version": "0.15.0"}),
+                        encoding="utf-8")
     cli.offered_version = "0.15.0"
     result = uc.update_plugin(ROOT)
     assert result["state"] == "failed"
     assert "same version" in result["detail"] and "left installed" in result["detail"]
     assert uc._plugin_record(uc.plugins_root())["installPath"] == str(cache)
     assert not any(c[:2] in (["plugin", "uninstall"], ["plugin", "install"]) for c in _claude_calls(cli))
+
+
+def test_a_missing_cache_folder_is_named_as_such_not_as_a_pinned_version(cli, tmp_path):
+    """The record names a folder that is gone (removed by hand) while the
+    clone is still at the recorded commit: Claude Code has nothing newer to
+    install. That is not the pinned-version case, and saying so would send
+    the user round the same failing retry (review finding, 2026-09-30)."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=False)
+    shutil.rmtree(cache)
+    cli.offered_version = "0.15.0"
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert "same version" not in result["detail"]
+    assert "missing or was changed by hand" in result["detail"] and "left installed" in result["detail"]
+    assert not any(c[:2] in (["plugin", "uninstall"], ["plugin", "install"]) for c in _claude_calls(cli))
+
+
+def test_an_update_that_drops_the_record_points_at_the_installer(cli, tmp_path):
+    """Should `claude plugin update` itself ever leave no record, the ladder
+    says the plugin is not installed and how to install it."""
+    _plugin_fixture(cli, tmp_path, differ=True)
+
+    def drop(args, kw):
+        _record_plugin(cli.home, None)
+        return 1, "something went wrong"
+    cli._plugin_update = drop
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert "no longer recorded as installed" in result["detail"] and uc.INSTALLER_HINT in result["detail"]
+
+
+def test_a_project_install_without_its_project_is_not_updated_from_here(cli, tmp_path):
+    """A project or local install is found from its project; without the
+    project path the update would act on whatever project the updater runs
+    in, so it is named and left alone."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=True)
+    _record_plugin(cli.home, cache, scope="local")
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed" and "names no project" in result["detail"]
+    assert cli.update_calls == []
 
 
 def test_plugin_refresh_survives_a_failed_marketplace_update(cli, tmp_path):

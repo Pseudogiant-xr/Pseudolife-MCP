@@ -75,7 +75,7 @@ def test_plugin_manifest_carries_no_version():
 def test_plugin_release_matches_pyproject():
     """The release the hooks report to the daemon (the version handshake)
     lives beside the manifest, not in it. The release version-cut touches
-    this file (CLAUDE.md checklist)."""
+    this file (.claude/skills/release-procedure/SKILL.md)."""
     release = json.loads(_read("plugin/release.json"))
     version = re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"),
                         re.M).group(1)

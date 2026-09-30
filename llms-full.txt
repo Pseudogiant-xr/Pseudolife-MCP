@@ -722,9 +722,9 @@ runtimes once no process runs from them and no registration names them.
 Sessions already running keep the runtime they started with; the next
 session start uses the new one. A shim running straight from this
 checkout's `.venv` is already live and is named instead. It then
-refreshes the plugin cache by comparing bytes against the marketplace
-clone (the plugin's version string only moves with a release, so
-`/plugin update` alone would say "already latest"), and reports whether
+refreshes the plugin cache when its bytes differ from the marketplace
+clone (`claude plugin update` installs the new copy beside the one
+running sessions use; nothing is uninstalled), and reports whether
 Codex's hook copy matches the checkout (that refresh is a consent step:
 `python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
 and which clients need a restart; a client-side step that fails is
@@ -7919,11 +7919,11 @@ update the daemon only by default, and `-All` / `--all` also refresh host
 shims and client plugin caches, followed by a client restart. Follow the [README update recipe](../../README.md#updating)
 for the installer migration and Windows prerequisites. Existing custom MCP
 registrations are preserved. If one points at a separate virtual environment,
-upgrade that exact environment as described below. For a versioned plugin release,
-update the Pseudolife plugin through the client's plugin manager. For changed
-hooks within the same version, the manager reports "already latest"; use
-`pseudolife-mcp update` or `-All` / `--all` to refresh the cache instead. Then rerun hook setup and
-approve the changed scripts. Editing a plugin cache directly does not
+upgrade that exact environment as described below. Update the Pseudolife
+plugin through the client's plugin manager, or with `pseudolife-mcp update` or
+`-All` / `--all`, which install Claude Code's new copy beside the one running
+sessions use ([where the plugin lives](configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)).
+Then rerun hook setup and approve the changed scripts. Editing a plugin cache directly does not
 survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a

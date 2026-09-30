@@ -716,9 +716,9 @@ runtimes once no process runs from them and no registration names them.
 Sessions already running keep the runtime they started with; the next
 session start uses the new one. A shim running straight from this
 checkout's `.venv` is already live and is named instead. It then
-refreshes the plugin cache by comparing bytes against the marketplace
-clone (the plugin's version string only moves with a release, so
-`/plugin update` alone would say "already latest"), and reports whether
+refreshes the plugin cache when its bytes differ from the marketplace
+clone (`claude plugin update` installs the new copy beside the one
+running sessions use; nothing is uninstalled), and reports whether
 Codex's hook copy matches the checkout (that refresh is a consent step:
 `python ops/setup-codex-hooks.py`). It ends with a ladder of what moved
 and which clients need a restart; a client-side step that fails is

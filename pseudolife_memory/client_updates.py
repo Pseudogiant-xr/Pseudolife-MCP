@@ -576,7 +576,8 @@ def tree_differs(a: Path, b: Path) -> bool:
 
 def plugins_root() -> Path:
     """Claude Code's plugins directory (records, marketplace clones, cache):
-    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, as Claude Code reads it."""
+    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, else ``~/.claude/plugins``
+    (``CLAUDE_CONFIG_DIR`` is not followed here, as before)."""
     override = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
     return Path(override) if override else home() / ".claude" / "plugins"
 
@@ -631,9 +632,14 @@ def update_plugin(repo: Path | None = None) -> dict:
     if cache.is_dir() and not tree_differs(clone, cache):
         return {"state": f"current:{version}", "marketplace_update": marketplace_update,
                 "detail": f"cache matches the marketplace clone (v{version})"}
-    # A project or local install is found from its project, at its scope.
+    # A project or local install is found from its project, at its scope;
+    # from anywhere else the update would act on another project's install.
     scope = str(record.get("scope") or "user")
     project = record.get("projectPath") if scope in ("project", "local") else None
+    if scope in ("project", "local") and not project:
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the {scope}-scope install of {PLUGIN_ID} names no project; left as it is. Run "
+                          f"claude plugin update {PLUGIN_ID} --scope {scope} from that project"}
     code, out = run_cli([claude, "plugin", "update", PLUGIN_ID, "--scope", scope],
                         cwd=str(project) if project else None)
     said = out.strip().splitlines()[-1] if out.strip() else f"exit {code}"
@@ -642,23 +648,36 @@ def update_plugin(repo: Path | None = None) -> dict:
     if code == 0 and updated and new_cache.is_dir() and not tree_differs(clone, new_cache):
         new_version = str(updated.get("version", ""))
         return {"state": f"refreshed:{new_version}", "marketplace_update": marketplace_update,
-                "detail": f"v{new_version} installed from the marketplace clone beside v{version}; sessions "
+                "detail": f"{new_version} installed from the marketplace clone beside {version}; sessions "
                           f"already running keep the copy they loaded, new sessions start on this one, and "
                           f"Claude Code deletes the old copy 14 days after it was replaced, once no session "
                           f"runs from it"}
-    kept = (f"v{version} was left installed and sessions keep running it" if updated == record
-            else f"the plugin record now reads {updated!r}")
+    if updated is None:
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"{PLUGIN_ID} is no longer recorded as installed after claude plugin update "
+                          f"({said}); {INSTALLER_HINT}"}
+    kept = (f"{version} was left installed and sessions keep running it" if updated == record
+            else f"the record now names {updated.get('installPath')} ({updated.get('version')})")
     retry = (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
              else "pseudolife-mcp update --clients-only")
-    if code == 0 and updated == record:
+    offered = _read_json(clone / ".claude-plugin" / "plugin.json").get("version")
+    if code == 0 and updated == record and offered == version:
         # Claude Code found nothing newer: the clone's manifest still
         # carries the installed version, and replacing that folder in place
         # is what failed under running sessions.
         return {"state": "failed", "marketplace_update": marketplace_update,
                 "detail": f"the marketplace clone's plugin differs from the cache but offers the same version "
-                          f"(v{version}; claude said: {said}), so Claude Code will not install it beside the "
+                          f"({version}; claude said: {said}), so Claude Code will not install it beside the "
                           f"copy sessions run; {kept}. A current clone's plugin.json carries no version: "
                           f"claude plugin marketplace update {MARKETPLACE}, then {retry}"}
+    if code == 0 and updated == record:
+        # Nothing newer to install, yet the cache is not the clone: the
+        # folder the record names is gone or was edited in place.
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the cache folder the plugin record names ({cache}) is missing or was changed by "
+                          f"hand, and Claude Code has nothing newer to install (claude said: {said}); {kept}. "
+                          f"With no Claude Code session open: claude plugin uninstall {PLUGIN_ID}, then "
+                          f"claude plugin install {PLUGIN_ID}"}
     return {"state": "failed", "marketplace_update": marketplace_update,
             "detail": f"claude plugin update {PLUGIN_ID} did not leave a cache matching the clone ({said}); "
                       f"{kept}. Retry: {retry}"}
