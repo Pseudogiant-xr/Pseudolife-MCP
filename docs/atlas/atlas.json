@@ -131,7 +131,7 @@
    "p": "plugin/.claude-plugin/plugin.json",
    "d": [
     "Deliberately bundles no MCP server (avoids duplicate tool namespaces)",
-    "Version pinned to pyproject by test_plugin_packaging",
+    "Manifest carries no version: Claude Code caches each marketplace commit in its own folder, so updates install beside running sessions; the release is plugin/release.json, pinned to pyproject by test_plugin_packaging",
     "Served straight from master via marketplace.json — no publish step"
    ]
   },

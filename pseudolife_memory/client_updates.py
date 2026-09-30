@@ -28,11 +28,13 @@ reinstalled. A registration that would spawn its own daemon (pip / lite
 tier) stays where its full install is. Anything else is left alone and
 named.
 
-Plugin: the version string is pinned to the package version, so a plugin
-change on master does not move ``/plugin update``. The marketplace clone
-is refreshed, its plugin tree compared by bytes (CRLF read as LF) against
-the installed cache, and only when they differ is the plugin uninstalled
-and reinstalled — then compared again, because the read-back is the proof.
+Plugin: the manifest carries no version, so Claude Code names each
+marketplace commit's copy by its commit. The marketplace clone is refreshed,
+its plugin tree compared by bytes (CRLF read as LF, Claude Code's own
+markers skipped) against the installed cache, and only when they differ is
+``claude plugin update`` run: it installs the new copy beside the one
+running sessions loaded and switches the record, then the tree is compared
+again, because the read-back is the proof. Nothing is ever uninstalled.
 
 Codex: hooks are trusted by hash, so a refresh is a consent step
 (``ops/setup-codex-hooks.py``); this reports whether the copy for the
@@ -550,7 +552,16 @@ def _normalised(path: Path) -> bytes:
 def _tree_files(root: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or ".git" in path.relative_to(root).parts:
+        parts = path.relative_to(root).parts
+        if not path.is_file() or ".git" in parts:
+            continue
+        # Claude Code keeps its own bookkeeping in a cache folder's top-level
+        # dot entries: `.in_use/<pid>` while a session runs from it,
+        # `.orphaned_at` once no record names it. Counting them made every
+        # cache look stale while any session was open (2026-09-30). The
+        # plugin ships no top-level dot entry but its manifest directory
+        # (pinned by tests/test_plugin_packaging.py).
+        if parts[0].startswith(".") and parts[0] != ".claude-plugin":
             continue
         files[path.relative_to(root).as_posix()] = _normalised(path)
     return files
@@ -558,8 +569,16 @@ def _tree_files(root: Path) -> dict[str, bytes]:
 
 def tree_differs(a: Path, b: Path) -> bool:
     """Whether two plugin trees differ in file set or (CRLF-insensitive)
-    content; ``.git`` metadata is ignored."""
+    content; ``.git`` metadata and Claude Code's top-level markers are
+    ignored."""
     return _tree_files(Path(a)) != _tree_files(Path(b))
+
+
+def plugins_root() -> Path:
+    """Claude Code's plugins directory (records, marketplace clones, cache):
+    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, as Claude Code reads it."""
+    override = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+    return Path(override) if override else home() / ".claude" / "plugins"
 
 
 def _read_json(path: Path) -> dict:
@@ -581,10 +600,22 @@ def _clone_plugin_dir(plugins_dir: Path) -> Path:
 
 
 def update_plugin(repo: Path | None = None) -> dict:
+    """Move the installed plugin to the marketplace clone's copy without
+    touching the one running sessions loaded.
+
+    Claude Code names a cache folder by the plugin's manifest version, and
+    the plugin carries none, so each marketplace commit is its own version
+    (its commit, 12 hex characters). ``claude plugin update`` installs it
+    into a new folder beside the recorded one, switches the record, and
+    stamps the old folder ``.orphaned_at``; Claude Code deletes that folder
+    14 days later once no session marks it ``.in_use`` (measured on 2.1.283,
+    2026-09-30). Nothing here uninstalls: on 2026-09-30 an uninstall followed
+    by an install the in-use folder refused (EPERM) left the plugin
+    uninstalled until the apps were restarted."""
     claude = which("claude")
     if not claude:
         return {"state": "no-cli", "detail": "the claude CLI is not on PATH"}
-    plugins_dir = home() / ".claude" / "plugins"
+    plugins_dir = plugins_root()
     record = _plugin_record(plugins_dir)
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
@@ -600,22 +631,37 @@ def update_plugin(repo: Path | None = None) -> dict:
     if cache.is_dir() and not tree_differs(clone, cache):
         return {"state": f"current:{version}", "marketplace_update": marketplace_update,
                 "detail": f"cache matches the marketplace clone (v{version})"}
-    run_cli([claude, "plugin", "uninstall", PLUGIN_ID])
-    _, help_text = run_cli([claude, "plugin", "install", "--help"])
-    yes = ["--yes"] if "--yes" in help_text else []
-    code, out = run_cli([claude, "plugin", "install", *yes, PLUGIN_ID])
-    record = _plugin_record(plugins_dir)
-    cache = Path(str(record.get("installPath", ""))) if record else cache
-    if code == 0 and record and cache.is_dir() and not tree_differs(clone, cache):
-        return {"state": f"refreshed:{record.get('version', version)}",
-                "marketplace_update": marketplace_update,
-                "detail": f"cache reinstalled from the marketplace clone (v{record.get('version', version)}); "
-                          f"restart Claude Code sessions to load it"}
+    # A project or local install is found from its project, at its scope.
+    scope = str(record.get("scope") or "user")
+    project = record.get("projectPath") if scope in ("project", "local") else None
+    code, out = run_cli([claude, "plugin", "update", PLUGIN_ID, "--scope", scope],
+                        cwd=str(project) if project else None)
+    said = out.strip().splitlines()[-1] if out.strip() else f"exit {code}"
+    updated = _plugin_record(plugins_dir)
+    new_cache = Path(str(updated.get("installPath", ""))) if updated else None
+    if code == 0 and updated and new_cache.is_dir() and not tree_differs(clone, new_cache):
+        new_version = str(updated.get("version", ""))
+        return {"state": f"refreshed:{new_version}", "marketplace_update": marketplace_update,
+                "detail": f"v{new_version} installed from the marketplace clone beside v{version}; sessions "
+                          f"already running keep the copy they loaded, new sessions start on this one, and "
+                          f"Claude Code deletes the old copy 14 days after it was replaced, once no session "
+                          f"runs from it"}
+    kept = (f"v{version} was left installed and sessions keep running it" if updated == record
+            else f"the plugin record now reads {updated!r}")
+    retry = (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
+             else "pseudolife-mcp update --clients-only")
+    if code == 0 and updated == record:
+        # Claude Code found nothing newer: the clone's manifest still
+        # carries the installed version, and replacing that folder in place
+        # is what failed under running sessions.
+        return {"state": "failed", "marketplace_update": marketplace_update,
+                "detail": f"the marketplace clone's plugin differs from the cache but offers the same version "
+                          f"(v{version}; claude said: {said}), so Claude Code will not install it beside the "
+                          f"copy sessions run; {kept}. A current clone's plugin.json carries no version: "
+                          f"claude plugin marketplace update {MARKETPLACE}, then {retry}"}
     return {"state": "failed", "marketplace_update": marketplace_update,
-            "detail": f"claude plugin install {PLUGIN_ID} did not leave a cache matching the clone "
-                      f"({out.strip().splitlines()[-1] if out.strip() else code}); check `claude plugin list`, "
-                      f"or inside Claude Code: /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP then "
-                      f"/plugin install {PLUGIN_ID}"}
+            "detail": f"claude plugin update {PLUGIN_ID} did not leave a cache matching the clone ({said}); "
+                      f"{kept}. Retry: {retry}"}
 
 
 # ── Codex hooks ─────────────────────────────────────────────────────────────
@@ -753,7 +799,7 @@ def _daemon_scripts_dir(daemon_digest: str | None) -> Path | None:
     daemon reports. ``None`` otherwise (the files cannot be named then)."""
     if not daemon_digest:
         return None
-    record = _plugin_record(home() / ".claude" / "plugins")
+    record = _plugin_record(plugins_root())
     if not record:
         return None
     hooks = Path(str(record.get("installPath", ""))) / "hooks"

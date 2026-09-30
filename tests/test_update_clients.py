@@ -6,9 +6,9 @@ each was forgotten in turn (2026-09-21). `--all` on the update scripts now
 runs this helper after the daemon is healthy. It installs a new shim
 runtime beside the old one and moves registrations to the launcher path
 (pseudolife_memory/runtimes.py; never refusing for a running session),
-refreshes the plugin cache by
-comparing bytes against the marketplace clone (the version string cannot
-move between releases), and reports whether Codex's content-addressed hook
+refreshes the plugin cache when its bytes differ from the marketplace
+clone (``claude plugin update`` into a new commit-named folder beside the
+one sessions run, never an uninstall), and reports whether Codex's content-addressed hook
 copy matches the checkout. Every CLI call goes through ``run_cli`` and every
 lookup through ``which``/``home``, so these tests drive the real logic with
 a fake CLI and a fixture home and never touch this machine's registrations.
@@ -56,6 +56,11 @@ class FakeCli:
         self.install_records = True
         self.clone_plugin: Path | None = None
         self.cache_plugin: Path | None = None
+        # What the marketplace clone offers: Claude Code names a manifest
+        # without a version by the clone's commit (12 hex characters).
+        self.offered_version = "4352892f0db6"
+        self.update_result: tuple[int, str] | None = None   # forces `claude plugin update`'s answer
+        self.update_calls: list[tuple[list[str], dict]] = []
         self.user_scripts: Path | None = None  # what a fake python reports as its --user scripts dir
         self.install_kinds: dict[str, str] = {}   # interpreter path -> editable | site | missing
         self.run_kwargs: list[dict] = []
@@ -128,25 +133,65 @@ class FakeCli:
             _record_plugin(self.home, None)
             return 0, "uninstalled"
         if name == "claude" and rest[:2] == ["plugin", "install"]:
+            # Claude Code 2.1.283 replaces a same-version cache folder in
+            # place; on Windows a folder a session runs hooks from refuses the
+            # rename (2026-09-30, after the uninstall had already run).
+            if self.cache_plugin and _in_use(self.cache_plugin):
+                return 1, ("The installed copy of this plugin version at " + str(self.cache_plugin)
+                           + " could not be replaced: it is in use by another program (EPERM)")
             if self.install_records and self.clone_plugin and self.cache_plugin:
                 shutil.rmtree(self.cache_plugin, ignore_errors=True)
                 shutil.copytree(self.clone_plugin, self.cache_plugin)
                 _record_plugin(self.home, self.cache_plugin)
             return 0, "installed"
+        if name == "claude" and rest[:2] == ["plugin", "update"]:
+            return self._plugin_update(rest[2:], kw)
         return 91, f"unexpected call {argv}"
 
+    def _plugin_update(self, args, kw):
+        """``claude plugin update`` as measured on Claude Code 2.1.283: a
+        marketplace offering a different version is installed into a NEW
+        cache folder beside the recorded one, the record is switched, and
+        the old folder is stamped ``.orphaned_at`` and never touched while a
+        session marks it ``.in_use``; the same version is "already at the
+        latest version" and nothing moves."""
+        self.update_calls.append((args, kw))
+        if self.update_result is not None:
+            return self.update_result
+        record = uc._plugin_record(uc.plugins_root())
+        if record is None:
+            return 1, f'Plugin "{PLUGIN_ID}" is not installed'
+        if self.offered_version == record["version"]:
+            return 0, f"pseudolife-memory is already at the latest version ({record['version']})."
+        old = Path(record["installPath"])
+        new = old.parent / self.offered_version
+        shutil.copytree(self.clone_plugin, new)
+        _record_plugin(self.home, new, version=self.offered_version, scope=record.get("scope", "user"),
+                       project=record.get("projectPath"))
+        (old / ".orphaned_at").write_text("1790757041269", encoding="utf-8")
+        return 0, (f'Plugin "pseudolife-memory" updated from {record["version"]} to {self.offered_version} '
+                   f"for scope {record.get('scope', 'user')}. Restart to apply changes.")
 
-def _record_plugin(home: Path, cache: Path | None, version: str = "0.15.0") -> None:
-    plugins = home / ".claude" / "plugins"
+
+def _in_use(cache: Path) -> bool:
+    return any((cache / ".in_use").glob("*")) if (cache / ".in_use").is_dir() else False
+
+
+def _record_plugin(home: Path, cache: Path | None, version: str = "0.15.0", scope: str = "user",
+                   project: str | None = None) -> None:
+    plugins = Path(os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / ".claude" / "plugins")
     plugins.mkdir(parents=True, exist_ok=True)
     data = {"version": 2, "plugins": {}}
     if cache is not None:
-        data["plugins"][PLUGIN_ID] = [{"scope": "user", "installPath": str(cache), "version": version}]
+        record = {"scope": scope, "installPath": str(cache), "version": version}
+        if project:
+            record["projectPath"] = project
+        data["plugins"][PLUGIN_ID] = [record]
     (plugins / "installed_plugins.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _record_marketplace(home: Path, clone_root: Path) -> None:
-    plugins = home / ".claude" / "plugins"
+    plugins = Path(os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / ".claude" / "plugins")
     plugins.mkdir(parents=True, exist_ok=True)
     (plugins / "known_marketplaces.json").write_text(json.dumps({
         "pseudolife-mcp": {"source": {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"},
@@ -185,6 +230,7 @@ def cli(tmp_path, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_SHIM_RUNTIMES", str(home / "runtimes"))
     monkeypatch.setenv("PSEUDOLIFE_SHIM_LAUNCHER", str(home / "bin" / f"pseudolife-mcp{EXE}"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+    monkeypatch.delenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
@@ -711,37 +757,104 @@ def test_the_old_pipx_link_in_the_user_bin_is_replaced_by_the_launcher(cli, monk
 
 # ── the plugin cache ────────────────────────────────────────────────────────
 
-def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True):
+def _plugin_fixture(cli, tmp_path, *, differ: bool, installed: bool = True, in_use: bool = False):
+    """A marketplace clone of the checkout's plugin and an installed cache
+    folder at 0.15.0. ``in_use`` marks the cache the way Claude Code does
+    while a session runs from it: ``.in_use/<pid>`` holding the pid and its
+    process start time."""
     clone_root = tmp_path / "marketplace"
     clone = _plugin_tree(clone_root)
-    cache = tmp_path / "cache" / "0.15.0"
+    cache = tmp_path / "cache" / "pseudolife-mcp" / "pseudolife-memory" / "0.15.0"
     shutil.copytree(ROOT / "plugin", cache)
     if differ:
         hook = cache / "hooks" / "session-end.sh"
         hook.write_bytes(hook.read_bytes() + b"\n# stale cache\n")
+    if in_use:
+        (cache / ".in_use").mkdir()
+        (cache / ".in_use" / "42652").write_text('{"pid":42652,"procStartFt":"134352300019189034"}',
+                                                 encoding="utf-8")
     _record_marketplace(cli.home, clone_root)
     _record_plugin(cli.home, cache if installed else None)
     cli.clone_plugin, cli.cache_plugin = clone, cache
     return clone, cache
 
 
-def test_plugin_cache_is_refreshed_when_its_bytes_differ_from_the_clone(cli, tmp_path):
-    clone, cache = _plugin_fixture(cli, tmp_path, differ=True)
+def _claude_calls(cli):
+    return [c[1:] for c in cli.calls if Path(c[0]).name.lower().startswith("claude")]
+
+
+def _snapshot(tree: Path) -> dict[str, bytes]:
+    return {p.relative_to(tree).as_posix(): p.read_bytes() for p in sorted(tree.rglob("*")) if p.is_file()}
+
+
+@pytest.mark.parametrize("in_use", [True, False], ids=["sessions-open", "sessions-closed"])
+def test_a_changed_plugin_installs_beside_the_copy_sessions_run(cli, tmp_path, in_use):
+    """2026-09-30: with sessions open the updater uninstalled the plugin, then
+    `claude plugin install` could not replace the in-use 0.15.0 folder
+    (EPERM) and the plugin stayed uninstalled until the apps were restarted.
+    The plugin now carries no version, so Claude Code names each marketplace
+    commit's copy by its commit and `claude plugin update` installs it into a
+    new folder beside the old one, whether or not a session runs it. The
+    updater never uninstalls, and the copy running sessions loaded is left
+    byte for byte as it was."""
+    clone, cache = _plugin_fixture(cli, tmp_path, differ=True, in_use=in_use)
+    before = _snapshot(cache)
     result = uc.update_plugin(ROOT)
-    assert result["state"] == "refreshed:0.15.0"
-    assert result["marketplace_update"] == "ok"
-    acted = [c[1:] for c in cli.calls if Path(c[0]).name.lower().startswith("claude")]
+    assert result["state"] == "refreshed:4352892f0db6", result
+    acted = _claude_calls(cli)
     assert ["plugin", "marketplace", "update", "pseudolife-mcp"] in acted
-    assert ["plugin", "uninstall", PLUGIN_ID] in acted
-    assert ["plugin", "install", "--yes", PLUGIN_ID] in acted
-    assert uc.tree_differs(clone, cache) is False
+    assert ["plugin", "update", PLUGIN_ID, "--scope", "user"] in acted
+    assert not any(c[:2] in (["plugin", "uninstall"], ["plugin", "install"]) for c in acted), acted
+    record = uc._plugin_record(uc.plugins_root())
+    new = Path(record["installPath"])
+    assert new == cache.parent / "4352892f0db6" and not uc.tree_differs(clone, new)
+    # The old copy is Claude Code's to sweep once no session marks it.
+    after = {k: v for k, v in _snapshot(cache).items() if k != ".orphaned_at"}
+    assert after == before
+    assert "sessions already running keep" in result["detail"]
 
 
-def test_plugin_cache_that_matches_the_clone_is_left_alone(cli, tmp_path):
-    _plugin_fixture(cli, tmp_path, differ=False)
+def test_claude_code_markers_do_not_make_a_matching_cache_look_stale(cli, tmp_path):
+    """The 2026-09-30 root cause: Claude Code writes `.in_use/<pid>` into the
+    cache while a session runs from it (and `.orphaned_at` on a copy no
+    record names), so a byte comparison that counted them saw a stale cache
+    whenever any session was open."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=False, in_use=True)
+    (cache / ".orphaned_at").write_text("1789969837541", encoding="utf-8")
+    (cache / ".in_use-links").mkdir()
+    (cache / ".in_use-links" / "7").write_text("x", encoding="utf-8")
     result = uc.update_plugin(ROOT)
-    assert result["state"] == "current:0.15.0"
-    assert not any("uninstall" in c or "install" in c[1:2] for c in cli.calls)
+    assert result["state"] == "current:0.15.0", result
+    assert not any(c[:2] != ["plugin", "marketplace"] for c in _claude_calls(cli))
+
+
+@pytest.mark.parametrize("in_use", [True, False], ids=["sessions-open", "sessions-closed"])
+def test_a_failed_update_leaves_the_installed_plugin_in_place(cli, tmp_path, in_use):
+    """Nothing is removed before a replacement is installed: when Claude Code
+    cannot install the new copy the record and the cache stay as they were
+    and the ladder says so."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=True, in_use=in_use)
+    before = uc._plugin_record(uc.plugins_root())
+    cli.update_result = (1, "EPERM: operation not permitted, rename")
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert "EPERM" in result["detail"] and "left installed" in result["detail"]
+    assert uc._plugin_record(uc.plugins_root()) == before and cache.is_dir()
+    assert not any(c[:2] in (["plugin", "uninstall"], ["plugin", "install"]) for c in _claude_calls(cli))
+
+
+def test_a_marketplace_that_still_offers_the_installed_version_is_named_not_uninstalled(cli, tmp_path):
+    """A clone whose manifest still pins the installed version (an older
+    clone, a fork) cannot be installed beside the copy sessions run, and
+    replacing that copy in place is what stranded the plugin. The updater
+    says so instead of uninstalling."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=True, in_use=True)
+    cli.offered_version = "0.15.0"
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert "same version" in result["detail"] and "left installed" in result["detail"]
+    assert uc._plugin_record(uc.plugins_root())["installPath"] == str(cache)
+    assert not any(c[:2] in (["plugin", "uninstall"], ["plugin", "install"]) for c in _claude_calls(cli))
 
 
 def test_plugin_refresh_survives_a_failed_marketplace_update(cli, tmp_path):
@@ -751,15 +864,30 @@ def test_plugin_refresh_survives_a_failed_marketplace_update(cli, tmp_path):
     cli.marketplace_update = (1, "fatal: unable to access")
     result = uc.update_plugin(ROOT)
     assert result["marketplace_update"] == "failed"
-    assert result["state"] == "refreshed:0.15.0"
+    assert result["state"] == "refreshed:4352892f0db6"
 
 
-def test_plugin_refresh_that_leaves_the_cache_different_is_a_failure(cli, tmp_path):
-    _plugin_fixture(cli, tmp_path, differ=True)
-    cli.install_records = False
+def test_a_project_scoped_install_is_updated_in_its_project(cli, tmp_path):
+    """`claude plugin update` finds a project or local install from the
+    project's directory, at that scope."""
+    _, cache = _plugin_fixture(cli, tmp_path, differ=True)
+    project = tmp_path / "proj"
+    project.mkdir()
+    _record_plugin(cli.home, cache, scope="local", project=str(project))
     result = uc.update_plugin(ROOT)
-    assert result["state"] == "failed"
-    assert "plugin install" in result["detail"]
+    assert result["state"] == "refreshed:4352892f0db6", result
+    args, kw = cli.update_calls[-1]
+    assert args == [PLUGIN_ID, "--scope", "local"] and kw.get("cwd") == str(project)
+
+
+def test_the_plugins_directory_follows_claude_codes_override(cli, tmp_path, monkeypatch):
+    """`CLAUDE_CODE_PLUGIN_CACHE_DIR` moves Claude Code's whole plugins
+    directory (the records, the marketplaces, the cache); the updater reads
+    the same one Claude Code writes."""
+    monkeypatch.setenv("CLAUDE_CODE_PLUGIN_CACHE_DIR", str(tmp_path / "elsewhere"))
+    _plugin_fixture(cli, tmp_path, differ=True)
+    assert uc.plugins_root() == tmp_path / "elsewhere"
+    assert uc.update_plugin(ROOT)["state"] == "refreshed:4352892f0db6"
 
 
 def test_plugin_not_installed_points_at_the_installer(cli, tmp_path):
@@ -767,6 +895,16 @@ def test_plugin_not_installed_points_at_the_installer(cli, tmp_path):
     result = uc.update_plugin(ROOT)
     assert result["state"] == "not-installed"
     assert "install" in result["detail"]
+
+
+def test_main_exits_zero_when_the_plugin_updates_beside_a_running_session(cli, tmp_path, capsys):
+    """The acceptance bar: sessions open, one command, exit 0, nothing to
+    rerun."""
+    _plugin_fixture(cli, tmp_path, differ=True, in_use=True)
+    assert uc.main(["--repo", str(ROOT), "--only", "plugin"]) == 0
+    out = capsys.readouterr().out
+    assert "[x] Plugin" in out and "refreshed:4352892f0db6" in out
+    assert "close" not in out.lower() and "rerun" not in out.lower()
 
 
 def test_tree_differs_ignores_line_endings_and_git_metadata(tmp_path):
@@ -777,6 +915,17 @@ def test_tree_differs_ignores_line_endings_and_git_metadata(tmp_path):
     (b / ".git").mkdir()
     (b / ".git" / "HEAD").write_text("ref: refs/heads/master\n", encoding="utf-8")
     assert uc.tree_differs(a, b) is False
+    # Claude Code's own bookkeeping in a cache folder: its top-level dot
+    # entries (.in_use/<pid>, .orphaned_at, and whatever a later release
+    # adds). The plugin ships none besides .claude-plugin
+    # (tests/test_plugin_packaging.py), so skipping them hides no change.
+    (b / ".in_use").mkdir()
+    (b / ".in_use" / "42652").write_text('{"pid":42652}', encoding="utf-8")
+    (b / ".orphaned_at").write_text("1789969837541", encoding="utf-8")
+    assert uc.tree_differs(a, b) is False
+    (b / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    assert uc.tree_differs(a, b) is True
+    shutil.copyfile(a / ".claude-plugin" / "plugin.json", b / ".claude-plugin" / "plugin.json")
     (b / "commands" / "dream.md").write_text("changed", encoding="utf-8")
     assert uc.tree_differs(a, b) is True
 

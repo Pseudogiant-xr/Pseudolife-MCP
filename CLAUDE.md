@@ -72,10 +72,11 @@ exactly; they exist because each one was violated at least once.
    volumes are external precisely so that this is survivable, but don't test it.
    **A change under `plugin/` or to the shim needs `-All`** (or
    `ops/update_clients.py` afterwards): the plugin cache and the shim are
-   separate installs that a daemon deploy never touches, and the plugin's
-   version string cannot move between releases, so `/plugin update` says
-   "already latest" — the 2026-09-21 deploy ran an hour on the old hooks.
-   Then restart the clients.
+   separate installs that a daemon deploy never touches — the 2026-09-21
+   deploy ran an hour on the old hooks. Both install beside what running
+   sessions use (the plugin's cache is keyed by marketplace commit since
+   2026-09-30, its manifest carrying no version), so no client closes; new
+   sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
 

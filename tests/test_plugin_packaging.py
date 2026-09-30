@@ -56,13 +56,38 @@ def test_marketplace_manifest_points_at_plugin_dir():
     assert len(entry.get("description", "")) <= 200
 
 
-def test_plugin_manifest_version_matches_pyproject():
-    """The release version-cut touches this file too (CLAUDE.md checklist)."""
+def test_plugin_manifest_carries_no_version():
+    """Claude Code keys its plugin cache folder by the manifest version, and
+    with none it uses the marketplace commit instead. A pinned version made
+    every plugin change on master land on the SAME folder the running
+    sessions use: `claude plugin update` answered "already at the latest
+    version", and replacing the folder in place failed with EPERM while a
+    session ran its hooks, after the updater had already uninstalled the
+    plugin (2026-09-30). Without a version each commit installs beside the
+    last, so an update never touches what a session loaded."""
     manifest = json.loads(_read("plugin/.claude-plugin/plugin.json"))
     assert manifest["name"] == "pseudolife-memory"
+    assert "version" not in manifest
+    mp = json.loads(_read(".claude-plugin/marketplace.json"))
+    assert all("version" not in p for p in mp["plugins"])
+
+
+def test_plugin_release_matches_pyproject():
+    """The release the hooks report to the daemon (the version handshake)
+    lives beside the manifest, not in it. The release version-cut touches
+    this file (CLAUDE.md checklist)."""
+    release = json.loads(_read("plugin/release.json"))
     version = re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"),
                         re.M).group(1)
-    assert manifest["version"] == version
+    assert release == {"version": version}
+
+
+def test_plugin_tree_ships_no_top_level_dot_entry_but_its_manifest():
+    """Claude Code keeps its bookkeeping in a cache folder's top-level dot
+    entries (.in_use, .orphaned_at, ...), and the updater skips them when it
+    compares the cache with the marketplace clone. That hides nothing only
+    while the plugin itself ships no other top-level dot entry."""
+    assert sorted(p.name for p in (ROOT / "plugin").iterdir() if p.name.startswith(".")) == [".claude-plugin"]
 
 
 def test_package_version_matches_pyproject():
