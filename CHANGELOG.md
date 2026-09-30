@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-09-29 — forget cascade for derived state)
+- Bulk source forget retains matching digests as retired history and excludes them from deleted-entry counts. Explicit digest-only deletion still removes the selected digest entries.
 - Revalidate captured relation evidence in the pinned edge transaction: a forget or supersession during extraction cannot publish an unsupported edge.
 - Exhausted digest retries release regeneration requests without rewinding the cursor; changing contexts rotate behind other eligible sessions and remain queued until a stable extraction can publish.
 - Pin the forget transaction to one connection so a disconnect cannot commit source deletion without its derived-state retirement.

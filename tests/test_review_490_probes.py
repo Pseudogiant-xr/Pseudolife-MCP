@@ -1,15 +1,7 @@
 """Forget-cascade failure-path regressions; synthetic fixture databases only."""
-
-
 import pytest
-
-
 from tests.test_forget_cascade import svc, _stored_id
-
-
 from tests.pg_fixtures import pg_conn, pg_url
-
-
 from tests.test_session_digest import _FakeDigestExtractor
 
 
@@ -156,6 +148,21 @@ def test_schema_49_50_51_upgrade(pg_conn):
     assert pg_conn.execute("SELECT parent_thread, parent_agent_id FROM coordination_agents LIMIT 0").description
 
 
+@pytest.mark.parametrize("selector", ["episode", "substring"])
+def test_episode_forget_preserves_retired_digest_history(svc, selector):
+    root, _ = _session(svc, "history", "Beacon Azure stays", "Beacon Black stays")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Beacon Azure and Beacon Black."]))["written"] == 1
+    digest_id = svc._storage.conn.execute("SELECT id FROM entries WHERE source='digest'").fetchone()[0]
+    result = svc.delete(**({"episode": root} if selector == "episode" else {"substring": "Beacon"}))
+    row = svc._storage.get_entry(digest_id)
+    assert row is not None and row["superseded_at"] is not None
+    assert result["deleted_count"] == 2
+    assert svc._episode_digest_body(root) is None
+    assert any(e.db_id == digest_id and e.superseded_at is not None
+               for band in svc._cms.bands for e in band.entries)
+    assert svc._storage.conn.execute("SELECT count(*) FROM entries WHERE source <> 'digest'").fetchone()[0] == 0
+
+
 def test_legacy_edges_survive_and_fact_history_survives_hydration(svc):
     from pseudolife_memory.memory.cortex import _norm_key
     from pseudolife_memory.service import MemoryService
@@ -230,3 +237,12 @@ def test_edge_keeps_surviving_captured_evidence(svc):
     assert svc._storage.conn.execute(
         "SELECT entry_id FROM edge_evidence WHERE edge_id=%s", (row["id"],)
     ).fetchall() == [(kept,)]
+
+
+def test_explicit_digest_only_forget_still_removes_the_selected_digest(svc):
+    root, _ = _session(svc, "direct-digest", "Beacon Quartz stays", "Beacon Ruby stays")
+    assert svc.generate_digests_stage(_FakeDigestExtractor(["Quartz and Ruby."]))["written"] == 1
+    digest_id = svc._storage.conn.execute("SELECT id FROM entries WHERE source='digest'").fetchone()[0]
+    assert svc.delete(source="digest")["deleted_count"] == 1
+    assert svc._storage.get_entry(digest_id) is None
+    assert svc._storage.conn.execute("SELECT count(*) FROM entries").fetchone()[0] == 2

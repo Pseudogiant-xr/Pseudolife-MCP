@@ -2682,12 +2682,15 @@ class ContinuumMemorySystem:
             )
 
         matches = [entry for _, hits in doomed for entry in hits]
+        retained = set()
         if matches and before_delete is not None:
-            before_delete(matches)
+            # The synchronous cascade may retain matched derived history.
+            retained = {id(e) for e in (before_delete(matches) or [])}
 
         removed: list[str] = []
         removed_ids: list[int] = []
         for band, hits in doomed:
+            hits = [e for e in hits if id(e) not in retained]
             gone = set(map(id, hits))
             for entry in hits:
                 removed.append(entry.text)

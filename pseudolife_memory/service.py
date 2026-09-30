@@ -3250,7 +3250,13 @@ class MemoryService(DreamOps):
         if self._storage is None:
             return
         import time as _time
-        ids = [int(e.db_id) for e in matches if e.db_id is not None]
+        # A source/bulk forget retires matching digests as history too.
+        # A digest-only selection remains an explicit entry deletion.
+        retained = [e for e in matches if e.source == "digest"] if any(
+            e.source != "digest" for e in matches) else []
+        retained_objects = {id(e) for e in retained}
+        ids = [int(e.db_id) for e in matches
+               if e.db_id is not None and id(e) not in retained_objects]
         if not ids:
             return
         slots = self._storage.slots_for_entries(ids)
@@ -3276,7 +3282,7 @@ class MemoryService(DreamOps):
         digests = [e for band in self._cms.bands for e in band.entries
                    if e.source == "digest" and e.episode_id in roots
                    and e.superseded_at is None and e.db_id is not None
-                   and id(e) not in match_objects]
+                   and (id(e) not in match_objects or id(e) in retained_objects)]
         cur = self._load_digest_cursor()
         cur["regenerate"] = sorted(
             set(cur.get("regenerate", [])) | (roots & surviving_roots))
@@ -3291,6 +3297,7 @@ class MemoryService(DreamOps):
         for entry in digests:
             entry.superseded_at = now
             entry.superseded_by_text = f"forgotten source entry {ids[0]}"
+        return retained
 
     def delete(
         self,
@@ -3318,6 +3325,11 @@ class MemoryService(DreamOps):
         "would_delete": M, "threshold": N, "sample_texts": [...]}``. The
         guard counts matches whatever the filters are: a broad substring
         is as dangerous as a bare source.
+
+        With PostgreSQL, when sources and digests match together, digests
+        are retained as
+        retired history. A digest-only selection still deletes those entries.
+        Retained history is excluded from the deleted count and text list.
 
         Returns ``{"deleted_count": N, "deleted_texts": [...]}``. The
         sample of deleted texts is capped at 20 so MCP responses stay
