@@ -234,7 +234,8 @@ class FixtureService:
         return {"count": len(_LESSONS), "entries": [_lesson_dict(t) for t in _LESSONS][:limit]}
 
     def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3, *,
-                         include_coordination=True, include_dream_stall=True):
+                         include_coordination=True, include_dream_stall=True,
+                         include_review_queue=True):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
 
     def memory_changes_since(self, since, *, session_key=None, limit=1):

@@ -1102,13 +1102,19 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                         # Real traffic, as opposed to the lease heartbeat.
                         coordination_adapter.note_turn()
                 if codex_metadata:
-                    from pseudolife_memory.codex_coordination import thread_id_from_meta
+                    from pseudolife_memory.codex_coordination import (
+                        parent_thread_from_meta, thread_id_from_meta,
+                    )
                     thread_id = thread_id_from_meta(params.meta)
                     if thread_id is not None:
                         call_headers["X-PL-Session"] = thread_id
                         if coordination_registry is not None:
+                            # A native subagent's parent (v50), registered
+                            # with the thread's address on its first call.
+                            parent = parent_thread_from_meta(params.meta, thread_id)
                             adapter = await coordination_registry.get(
-                                thread_id, snapshot=snapshot)
+                                thread_id, snapshot=snapshot,
+                                **({"parent_thread": parent} if parent else {}))
                             if adapter is not None:
                                 call_headers.update({
                                     name: adapter.instance_headers[name]

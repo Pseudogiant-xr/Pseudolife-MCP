@@ -256,3 +256,23 @@ def test_judge_second_model_knob():
     assert knob["restart"] is False and knob["group"] == "Deep dream"
     assert "claude-fable-5" in knob["suggestions"]
     assert "different" in knob["help"].lower()   # says why it exists
+
+
+def test_judge_endpoint_knobs():
+    # 2026-09-30: pointing the judges at another endpoint needed a hand edit
+    # of config.yaml and a daemon restart, and the merge judge's second
+    # opinion could not leave the first opinion's endpoint at all. Every
+    # judge builds its endpoint from service.config per call, so all three
+    # are live URL/string knobs beside judge_second_model.
+    for path in ("memory.deep_dream.judge_url",
+                 "memory.deep_dream.judge_second_url"):
+        knob = _knob(path)
+        assert knob["type"] == "string" and knob["format"] == "url", path
+        assert knob["default"] is None and knob["restart"] is False, path
+        assert knob["group"] == "Deep dream", path
+    model = _knob("memory.deep_dream.judge_model")
+    assert model["type"] == "string" and model["default"] is None
+    assert model["restart"] is False and model["group"] == "Deep dream"
+    second = _knob("memory.deep_dream.judge_second_url")
+    assert "PSEUDOLIFE_JUDGE_SECOND_API_KEY" in second["help"]
+    assert "PSEUDOLIFE_JUDGE_API_KEY" in _knob("memory.deep_dream.judge_url")["help"]

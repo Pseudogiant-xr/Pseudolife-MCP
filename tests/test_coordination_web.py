@@ -420,6 +420,91 @@ def test_woke_route_records_the_marker_for_a_board_bearer_only(monkeypatch):
     assert status == 403
 
 
+# --- the SubagentStart / SubagentStop liveness route (v50) -------------------
+
+def test_subagent_route_passes_the_hook_payload_for_a_board_bearer_only(monkeypatch):
+    """``POST /api/hook/subagent?agent=<id>&event=start|stop&child=<agent_id>
+    &type=<agent_type>``: the plugin's subagent hooks' one call. ``ok`` when
+    recorded; an empty body for a bearer that cannot use the board."""
+    from pseudolife_memory import coordination
+    seen = []
+
+    def subagent(service, headers, *, agent, event, child, kind, token_map=None, token=None):
+        seen.append((agent, event, child, kind, headers.get("authorization")))
+        return "ok\n"
+    monkeypatch.setattr(coordination, "subagent", subagent)
+    app = build_console_app(stub_mcp, "fixture-secret", lambda: {}, _board_service())
+    bearer = [(b"authorization", b"Bearer fixture-secret")]
+    query = "agent=" + "a" * 32 + "&event=start&child=a698026ca4ba524e9&type=general-purpose"
+    status, body = call(app, "POST", "/api/hook/subagent", headers=bearer, query=query)
+    assert (status, body) == (200, b"ok\n")
+    assert seen == [("a" * 32, "start", "a698026ca4ba524e9", "general-purpose",
+                     "Bearer fixture-secret")]
+    status, body = call(app, "POST", "/api/hook/subagent", query=query)
+    assert (status, body) == (200, b"") and len(seen) == 1
+    # A write: POST only, and browser-gated like the other hook routes.
+    status, _ = call(app, "GET", "/api/hook/subagent", headers=bearer, query=query)
+    assert status == 405
+    open_app = build_console_app(stub_mcp, None, lambda: {}, _board_service())
+    status, _ = call(open_app, "POST", "/api/hook/subagent",
+                     headers=[(b"origin", b"http://evil.example")])
+    assert status == 403
+
+
+def test_subagent_records_nothing_where_the_board_is_not(monkeypatch):
+    from pseudolife_memory import coordination
+    from pseudolife_memory.coordination import subagent
+    monkeypatch.setattr(coordination, "_store",
+                        lambda service: pytest.fail("no store for a refused call"))
+    headers = {"authorization": "Bearer fixture-secret"}
+    args = {"child": "c1", "kind": "t", "token": "fixture-secret"}
+    assert subagent(_board_service(enabled=False), headers, agent="a" * 32, event="start",
+                    **args) == ""
+    assert subagent(_board_service(), {}, agent="a" * 32, event="start", **args) == ""
+    assert subagent(_board_service(), headers, agent="not-an-id", event="start", **args) == ""
+    assert subagent(_board_service(), headers, agent="a" * 32, event="restart", **args) == ""
+
+
+def test_subagent_reaches_the_store_and_fails_open(monkeypatch):
+    """Start and stop reach the store as the bearer's principal; any error
+    (a malformed child, a down database) is an empty answer, never raised."""
+    import threading
+    from pseudolife_memory import coordination
+    from pseudolife_memory.coordination import subagent
+    from pseudolife_memory.storage.coordination import CoordinationError
+    calls = []
+
+    class Store:
+        def subagent_started(self, agent, principal, *, child, kind):
+            calls.append(("start", agent, principal, child, kind))
+            if child == "bad":
+                raise CoordinationError("invalid_children")
+            return {"recorded": True}
+
+        def subagent_stopped(self, agent, principal, *, child):
+            calls.append(("stop", agent, principal, child))
+            return {"recorded": False, "reason": "not_listed"}
+
+    service = _board_service()
+    service._storage = object()
+    service._coordination_lock = threading.Lock()
+    monkeypatch.setattr(coordination, "_store", lambda s: Store())
+    headers = {"authorization": "Bearer fixture-secret"}
+    agent = "a" * 32
+    assert subagent(service, headers, agent=agent, event="start", child="c1", kind="Explore",
+                    token_map={}, token="fixture-secret") == "ok\n"
+    assert subagent(service, headers, agent=agent, event="start", child="c2", kind=None,
+                    token_map={}, token="fixture-secret") == "ok\n"
+    assert subagent(service, headers, agent=agent, event="stop", child="c1", kind=None,
+                    token_map={}, token="fixture-secret") == ""
+    assert subagent(service, headers, agent=agent, event="start", child="bad", kind="t",
+                    token_map={}, token="fixture-secret") == ""
+    assert calls == [("start", agent, "default", "c1", "Explore"),
+                     ("start", agent, "default", "c2", ""),
+                     ("stop", agent, "default", "c1"),
+                     ("start", agent, "default", "bad", "t")]
+
+
 def test_woke_records_nothing_where_the_board_is_not(monkeypatch):
     from pseudolife_memory.coordination import woke
     headers = {"authorization": "Bearer fixture-secret"}
