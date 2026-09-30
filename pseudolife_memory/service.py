@@ -8626,10 +8626,17 @@ class MemoryService(DreamOps):
             return self._graph_propose_links_locked(proposals, source=source, _review_guard=_review_guard)
 
     def _graph_propose_links_locked(self, proposals: list[dict], *,
-                            source: str = "deep-dream", _review_guard=None) -> dict[str, Any]:
+                            source: str = "deep-dream", _review_guard=None,
+                            _by_id: bool = False) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
         production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
-        type-violations) and inserted into edge_proposals — never into edges."""
+        type-violations) and inserted into edge_proposals — never into edges.
+
+        ``_by_id`` (internal; the merge judge's relate, 2026-09-30): each
+        proposal also names its endpoints by ``src_id`` / ``dst_id``, which
+        are linked exactly, while ``src`` / ``dst`` (their displays) feed
+        the gate — a display name need not resolve back to its own entity,
+        and a miss would mint a new one. Public callers always file by name."""
         from pseudolife_memory import graph as G
         from pseudolife_memory.memory.relation_quality import (
             edge_confidence, is_hard_type_violation)
@@ -8650,8 +8657,11 @@ class MemoryService(DreamOps):
                     or is_hard_type_violation(src, relation, dst):
                 skipped += 1
                 continue
-            se = self._resolve_or_create_entity(src)
-            de = self._resolve_or_create_entity(dst)
+            if _by_id:
+                se, de = {"id": p["src_id"]}, {"id": p["dst_id"]}
+            else:
+                se = self._resolve_or_create_entity(src)
+                de = self._resolve_or_create_entity(dst)
             conf = edge_confidence(src, relation, dst)
             pid = self._storage.insert_proposal(
                 se["id"], relation, de["id"], conf,
