@@ -377,6 +377,101 @@ already current, 1 a write failed and was rolled back, 2 usage or not
 confirmed, 3 no registration it can write (none found, or only `manual`
 ones), 4 verification refused, 5 applied but the post-apply check failed.
 
+## Moving a bank
+
+`pseudolife-mcp move` moves a Docker-tier bank to another host where the
+installer has already run from a checkout (its daemon and Postgres
+containers exist), with no lost writes. Run it on the bank's current host:
+
+```bash
+pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
+pseudolife-mcp move --to root@box             # asks once, then moves
+```
+
+`--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
+Key-based ssh is required: every remote command runs as `ssh -o
+BatchMode=yes`, and nothing ever types a password. The target's checkout is
+`~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
+clients will use is `--target-url`, else the target's `pseudolife-mcp
+expose status`; when the target is not exposed yet, the move runs `expose
+tailscale --yes` there first.
+
+The order:
+
+1. **Preflight, nothing changed.** The source is healthy and reports its
+   bank fingerprint; ssh works; the target checkout exists; the target
+   daemon is healthy, at the source's schema or newer, serving a different
+   bank, and its bank is empty (no entries, facts or invited principals).
+   `move` never merges into or overwrites a used bank. A target that is not
+   ready is refused with the install line to run there.
+2. **Plan and confirm.** Every step, with sizes and the target URL.
+   `--dry-run` stops here; a run that is not interactive needs `--yes`.
+3. **Expose the target** if needed, and check this host reaches
+   `<target-url>/health`.
+4. **Stop the source daemon** (`docker stop`, never `rm` or `down`), after
+   pausing its unattended update if one is scheduled. Postgres stays up.
+5. **Final backup, then fence.** `pg_dump` from the Postgres container, then
+   at once `ALTER DATABASE <db> WITH ALLOW_CONNECTIONS false` on the source
+   database, which stops every other writer (an older daemon image,
+   `lease break`, `board-audit`); then the daemon's `/data` and a manifest
+   with per-table row counts. The files stay under
+   `~/.pseudolife-mcp/moves/<move id>/` on the source.
+6. **Copy** the three files to the target over ssh and check their SHA-256
+   there.
+7. **Restore on the target without starting it**: `ops/restore.sh --apply
+   --no-start --backup-file <the dump> --state-archive <the archive>` (it
+   takes the target's own safety dump first), then compare the restored row
+   counts with the manifest and write a move marker, `/data/move.json`.
+8. **Carry the identities.** The source container's
+   `PSEUDOLIFE_MCP_TOKEN`, `PSEUDOLIFE_MCP_TOKENS`,
+   `PSEUDOLIFE_MCP_TIER_MAP` and `PSEUDOLIFE_MCP_TOOLSET` are written into
+   the target's `ops/.env` (backed up beside itself first), over ssh stdin,
+   never on a command line, so no client anywhere needs a new token.
+   Invited machines need nothing: they are in the bank. The target's own
+   installer-minted token is replaced. `--no-keep-tokens` skips this step,
+   and the report lists every environment principal to invite again.
+9. **Start the target once** with `ops/update.sh`, wait for health, and
+   check its `/health` `bank` fingerprint now equals the source's. Then the
+   marker is removed, and `/data/moved.json` is written into the stopped
+   source container: a daemon new enough to read it refuses to start and
+   names the new location.
+10. **Re-point this machine's clients** with `pseudolife-mcp connect
+    <target-url> --yes`.
+11. **Report**: the manual rollback, the `connect <target-url>` line for
+    every other machine's principal, board leases still held (each with its
+    `lease break` line), undelivered mail per old board address, the source
+    leftovers to retire (the backup task or cron, extractor shims, saved
+    tunnel profiles, the daemon's autostart, the tailnet serve, the
+    unattended update), and what the state archive replaced on the target
+    (`config.yaml`, and `last-backup.json` until the target's first backup).
+
+**Rollback.** A failure in steps 4 to 9 undoes, in this order: the target
+daemon is stopped if it was started, the target's `ops/.env` is restored,
+the database fence is lifted, the source's `moved.json` is removed, the
+paused schedule is resumed, and the source daemon is started again. The
+target is never left running beside a running source: if it cannot be
+stopped, the source stays down and the report says what to finish by hand.
+The target keeps its move marker, so `pseudolife-mcp move --to <target>
+--resume` may overwrite that half-restored bank on the next attempt;
+`--resume` refuses any bank whose marker names another move.
+
+**Afterwards** the source is stopped and fenced, never deleted. To roll the
+move back by hand: `docker stop pseudolife-mcp-daemon` on the target; on the
+source, `ALTER DATABASE <db> WITH ALLOW_CONNECTIONS true` through its
+Postgres container, `docker run --rm --entrypoint rm --volumes-from
+pseudolife-mcp-daemon <image> -f /data/moved.json` (`docker cp` cannot
+delete), `docker start pseudolife-mcp-daemon`, and `connect` back. The
+report prints these with the real names filled in.
+
+Sessions get new board addresses on the new URL; see
+[the move exemption](coordination-recovery.md#a-move-is-not-a-restore) for
+what that means for pending mail.
+
+Exit codes: 0 moved; 1 failed and rolled back (the source runs again);
+2 usage, declined, or no TTY without `--yes`; 4 preflight refused, nothing
+changed; 5 the bank moved but re-pointing this machine's clients failed
+(rerun the `connect` line it prints). `--json` prints one report object.
+
 ## Troubleshooting
 
 **"unhandled errors in a TaskGroup" on every `tools/list`, while `curl` with

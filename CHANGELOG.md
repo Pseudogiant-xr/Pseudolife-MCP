@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-02 — `pseudolife-mcp move`)
+- `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
+  Docker-tier checkout host over key-based ssh with no lost writes: it stops
+  the source daemon, takes the final backup from the stopped container (dump,
+  `/data` archive, manifest with per-table row counts), fences the source
+  database (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), copies the
+  files with a SHA-256 check, restores on the target without starting it,
+  compares the row counts, carries the environment identities into the
+  target's `ops/.env` over ssh stdin, starts the target once, checks its
+  `/health` bank fingerprint, and re-points this machine's clients. A failure
+  rolls back in a fixed order that never leaves the target running beside
+  the source; `--resume` takes over only this move's half-restored bank. The
+  report lists the manual rollback, every other machine's `connect` line,
+  held leases, undelivered mail and the source leftovers to retire. The
+  source is stopped and fenced, never deleted.
+- `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
+  that leaves the daemon stopped (refused without `--apply` / `-Apply`).
+- The daemon refuses to start when its data dir holds `moved.json`, naming
+  the bank's new location.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender

@@ -364,9 +364,54 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     return payload
 
 
+MOVED_MARKER = "moved.json"
+
+
+def moved_refusal(environ) -> str | None:
+    """Why this daemon must not start, when its bank has moved: the
+    message naming the new location, else ``None``.
+
+    ``pseudolife-mcp move`` fences the old host's database (``ALLOW_CONNECTIONS
+    false``) and writes ``moved.json`` into the stopped daemon's data dir.
+    The fence is what stops the old host; the file is the readable reason, so
+    an operator who starts the old container hears where the bank went
+    instead of a refused database connection. Presence is the refusal: a
+    file that cannot be read still refuses."""
+    data_dir = environ.get("PSEUDOLIFE_MCP_DATA_DIR")
+    if not data_dir:
+        return None
+    import json
+    from pathlib import Path
+
+    marker = Path(data_dir) / MOVED_MARKER
+    if not marker.exists():
+        return None
+    try:
+        record = json.loads(marker.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        record = None
+    where = record.get("moved_to") if isinstance(record, dict) else None
+    when = record.get("moved_at") if isinstance(record, dict) else None
+    if isinstance(where, str) and where:
+        head = f"this bank moved to {where}" + (f" on {when}" if isinstance(when, str) and when else "")
+    else:
+        head = "this bank moved to another host"
+    return (f"{head} ({marker}); refusing to start. Point clients at the new daemon "
+            f"(pseudolife-mcp connect <its url>). To roll the move back instead, stop the new "
+            f"daemon first, lift the database fence (ALTER DATABASE <db> WITH ALLOW_CONNECTIONS "
+            f"true) and remove {marker}.")
+
+
 def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
+
+    # Before storage, the model and the bind: a moved bank's old daemon
+    # never starts (see moved_refusal).
+    moved = moved_refusal(os.environ)
+    if moved is not None:
+        print(f"pseudolife-mcp serve: {moved}", file=sys.stderr, flush=True)
+        sys.exit(2)
 
     # Logging must be configured BEFORE storage resolution: mcp_server's
     # basicConfig (the process's usual configurer) is only imported

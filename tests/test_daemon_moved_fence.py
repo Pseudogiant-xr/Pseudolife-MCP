@@ -1,0 +1,58 @@
+"""A daemon whose bank has moved refuses to start (``pseudolife-mcp move``).
+
+``move`` stops the source daemon, fences its database (``ALLOW_CONNECTIONS
+false``) and writes ``/data/moved.json`` into the stopped container. The
+fence is what stops the old host; the file is the readable reason: a daemon
+new enough to know it exits at startup naming the new location, instead of
+failing later on a refused database connection.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+
+from pseudolife_memory import daemon
+from tests.helpers import free_port
+
+
+def test_no_marker_means_no_refusal(tmp_path):
+    assert daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)}) is None
+    assert daemon.moved_refusal({}) is None
+
+
+def test_the_marker_names_the_new_location(tmp_path):
+    (tmp_path / "moved.json").write_text(json.dumps({
+        "moved_to": "http://100.64.0.7:8765", "move_id": "20261002-120000-0a1b2c3d",
+        "moved_at": "2026-10-02T12:00:00Z"}), encoding="utf-8")
+    message = daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)})
+    assert message is not None
+    assert "http://100.64.0.7:8765" in message
+    assert "moved.json" in message
+
+
+def test_an_unreadable_marker_still_refuses(tmp_path):
+    """Presence is the fence: a damaged file must not let the old daemon
+    start against a bank that now lives elsewhere."""
+    (tmp_path / "moved.json").write_text("{not json", encoding="utf-8")
+    message = daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)})
+    assert message is not None and "moved.json" in message
+
+
+def test_serve_exits_nonzero_before_touching_storage(tmp_path):
+    """The real entry point: ``serve`` with the marker in its data dir exits
+    with a clear message and a nonzero code, before storage resolution (the
+    DSN here points at a port nothing listens on, so reaching storage would
+    hang on retries or fail with a different message)."""
+    (tmp_path / "moved.json").write_text(json.dumps({"moved_to": "http://100.64.0.7:8765"}),
+                                         encoding="utf-8")
+    env = {**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+           "PSEUDOLIFE_MCP_PORT": str(free_port()),
+           "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://nobody@127.0.0.1:1/none"}
+    proc = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", "serve"], env=env,
+                          capture_output=True, text=True, timeout=90)
+    assert proc.returncode != 0, proc.stderr
+    assert "http://100.64.0.7:8765" in proc.stderr, proc.stderr
+    assert "storage" not in proc.stderr.lower(), proc.stderr

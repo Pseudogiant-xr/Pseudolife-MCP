@@ -17,6 +17,11 @@
 #                                         # backup.sh state tar. Opt-in: a
 #                                         # DB-only restore must not clobber
 #                                         # current state.
+#   ops/restore.sh --apply --no-start ... # REAL RESTORE, but leave the
+#                                         # daemon stopped afterwards
+#                                         # (pseudolife-mcp move checks the
+#                                         # restored bank before its first
+#                                         # start).
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope.
@@ -29,6 +34,7 @@ DAEMON_CONTAINER="pseudolife-mcp-daemon"
 DB="pseudolife_memory"
 DB_USER="pseudolife"
 APPLY=0
+NO_START=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -39,9 +45,15 @@ while [ $# -gt 0 ]; do
         --db)               DB="$2"; shift 2 ;;
         --user)             DB_USER="$2"; shift 2 ;;
         --apply)            APPLY=1; shift ;;
+        --no-start)         NO_START=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+if [ "$NO_START" -eq 1 ] && [ "$APPLY" -eq 0 ]; then
+    echo "--no-start applies to a real restore (--apply); a rehearsal never starts or stops the daemon" >&2
+    exit 2
+fi
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -209,6 +221,11 @@ else
             echo "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data/backups." >&2
             exit 1
         fi
+    fi
+
+    if [ "$NO_START" -eq 1 ]; then
+        echo "==> Restore complete; the daemon was left stopped (--no-start). Start it with 'docker start $DAEMON_CONTAINER' (or ops/update.sh) once the restored bank has been checked."
+        exit 0
     fi
 
     echo "==> Restarting the daemon..."

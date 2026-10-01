@@ -16,6 +16,11 @@
 #                                            # backup.ps1 state tar. Opt-in:
 #                                            # a DB-only restore must not
 #                                            # clobber current state.
+#   ops\restore.ps1 -Apply -NoStart ...      # REAL RESTORE, but leave the
+#                                            # daemon stopped afterwards
+#                                            # (pseudolife-mcp move checks
+#                                            # the restored bank before its
+#                                            # first start).
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope (2026-07-02 review P2: the only
@@ -27,10 +32,14 @@ param(
     [string]$DaemonContainer = "pseudolife-mcp-daemon",
     [string]$Db = "pseudolife_memory",
     [string]$User = "pseudolife",
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
+if ($NoStart -and -not $Apply) {
+    throw "-NoStart applies to a real restore (-Apply); a rehearsal never starts or stops the daemon"
+}
 $repo = Split-Path -Parent $PSScriptRoot
 
 # 1. Resolve + validate the backup artifact. With no file named, take the
@@ -216,6 +225,11 @@ try {
                 -v "${dir}:/pl_backup:ro" $img `
                 -c "find /data -mindepth 1 -delete && tar xzf /pl_backup/$name -C /data"
             if ($LASTEXITCODE -ne 0) { throw "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data\backups." }
+        }
+
+        if ($NoStart) {
+            Write-Host "==> Restore complete; the daemon was left stopped (-NoStart). Start it with 'docker start $DaemonContainer' (or ops\update.ps1) once the restored bank has been checked."
+            return
         }
 
         Write-Host "==> Restarting the daemon..."
