@@ -30,9 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gone. A clustered lesson survives while any entry of its batch survives.
   The retirement and its audit row commit in the forget's transaction;
   lessons without lineage are untouched.
-- A signal whose credited entry no longer exists (forgotten or evicted) stays
-  pending and is skipped before extraction, so current inputs in the same
-  clustered batch still land; a superseded entry does not hold its signal
+- A signal stays pending, and is skipped before extraction, only when every
+  entry it credits has been deleted (forgotten or evicted), so current inputs
+  in the same clustered batch still land. One surviving credited entry is
+  enough, as for retirement; a superseded entry does not hold its signal
   back. Failed and empty signals stay pending too, and capped sweeps rotate
   through eligible batches so the oldest invalid signal cannot monopolise
   them (a restart begins with the oldest eligible signal again).

@@ -268,3 +268,31 @@ def test_correction_commits_and_publishes_despite_lesson_reload_failure(
     assert not getattr(svc._storage, "_lesson_source_refresh", False)
     assert rows(svc)["backed"]["status"] == "current"
     assert svc._lessons.records[0].status == "current"
+
+
+@pytest.mark.parametrize("when", ["before_selection", "during_extraction"])
+def test_signal_with_a_surviving_credited_source_still_lands(svc, when):
+    # Same last-source rule as retirement: forgetting one of a signal's
+    # credited entries leaves it about something that still exists.
+    kept = _seed(svc)
+    gone = _seed(svc, "Retired deployment note", cosine=0.0)
+    sid = backed_signal(svc, kept, "partly-forgotten")
+    svc._storage.set_signal_used_ids(sid, {
+        "credited": [kept.db_id, gone.db_id], "unmatched": [], "served_elsewhere": []})
+    if when == "before_selection":
+        svc.delete(text=gone.text)
+    offered = []
+
+    class Racing(Rules):
+        def extract_rules(self, signals):
+            offered.extend(s["id"] for s in signals)
+            if when == "during_extraction":
+                svc.delete(text=gone.text)
+            return super().extract_rules(signals)
+
+    result = svc.synthesize_lessons(Racing())
+    assert svc._storage.get_entry(gone.db_id) is None
+    assert result["lessons"] == 1, result
+    assert offered == [sid]
+    assert rows(svc)["partly-forgotten"]["status"] == "current"
+    assert svc._storage.pending_signals() == []

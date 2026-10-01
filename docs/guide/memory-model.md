@@ -633,9 +633,12 @@ deleted (forgotten or evicted earlier) counts as gone, so a clustered lesson
 survives while any entry of its batch survives. The retirement commits in the
 forget's transaction with a `retire` row in `store_decisions`
 (`decided_by='source_cascade'`, `reason='source_forgotten'`); lessons without
-lineage are never retired this way. A signal whose credited entry no longer
-exists stays pending and is not offered to the extractor; a superseded one is
-still offered.
+lineage are never retired this way. A signal stays pending, and is not
+offered to the extractor, only when every entry it credits has been deleted;
+one surviving credited entry is enough, and a superseded entry still counts.
+A signal whose credited entries were all evicted therefore waits until it
+ages out, because a deleted row cannot say whether it was forgotten or
+evicted.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or

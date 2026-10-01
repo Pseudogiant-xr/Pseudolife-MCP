@@ -167,6 +167,13 @@ _SIGNAL_COLS = (
 )
 
 
+def signal_sources_survive(sources: set[int], existing: set[int]) -> bool:
+    """Whether a signal is still about something in the bank: it credits no
+    entry, or at least one credited entry still exists (superseded entries
+    exist as history). The same last-source rule retires lessons."""
+    return not sources or bool(sources & existing)
+
+
 def signal_source_ids(signal: dict) -> set[int]:
     """Only server-credited entry uses establish a source dependency.
 
@@ -2051,10 +2058,11 @@ class PostgresStorage:
         ``source_status`` requests per-signal contributor checks for its keys;
         values are filled under the source locks. This lets the caller omit
         rejected inputs and preserve independent valid derivations. Without
-        it, every selected source must still exist. A superseded source
-        exists as history and still counts; only a deleted (forgotten or
-        evicted) one blocks. Signal snapshots are always revalidated for the
-        entire selected batch.
+        it, every selected signal must still have a credited source that
+        exists (:func:`signal_sources_survive`). A superseded source exists as
+        history and still counts; a signal is blocked only when every entry
+        it credits has been deleted. Signal snapshots are always revalidated
+        for the entire selected batch.
         """
         if self._lesson_transaction_connection is not None:
             raise RuntimeError("lesson synthesis transaction is already active")
@@ -2067,10 +2075,11 @@ class PostgresStorage:
                 existing = {r[0] for r in self.conn.execute(
                     "SELECT id FROM entries WHERE id = ANY(%s) "
                     "ORDER BY id FOR UPDATE", (ids,)).fetchall()} if ids else set()
+                supported = {s["id"]: signal_sources_survive(signal_source_ids(s), existing)
+                             for s in contributors}
                 if source_status is not None:
-                    source_status.update({s["id"]: signal_source_ids(s) <= existing
-                                          for s in contributors})
-                yield ((source_status is not None or len(existing) == len(ids))
+                    source_status.update(supported)
+                yield ((source_status is not None or all(supported.values()))
                        and self.lesson_batch_status(signals, [], lock=True) == "pending")
         finally:
             self._lesson_transaction_connection = None

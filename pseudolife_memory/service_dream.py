@@ -642,16 +642,19 @@ class DreamOps:
             # including any wrap. A small backlog still gets one full batch.
             last = selected[-1]
             self._lesson_selected_cursor = (last["created_at"], last["id"])
-        # A credited source that no longer exists (forgotten or evicted) must
-        # not poison a clustered route. Keep its signal pending, and rotate
-        # past it without paying for extraction. A superseded source is kept
-        # history and stays eligible. The commit transaction still rechecks
-        # sources for later races.
-        from pseudolife_memory.storage.postgres import signal_source_ids
+        # A signal whose credited entries are all gone (forgotten or evicted)
+        # must not poison a clustered route. Keep it pending, and rotate past
+        # it without paying for extraction. One surviving credited entry is
+        # enough, as for lesson retirement; a superseded entry is kept
+        # history and still counts. The commit transaction rechecks sources
+        # for later races.
+        from pseudolife_memory.storage.postgres import (
+            signal_source_ids, signal_sources_survive)
         dependencies = {s["id"]: signal_source_ids(s) for s in selected}
         existing_ids = {i for i in set().union(*dependencies.values())
                         if self._storage.get_entry(i) is not None}
-        eligible = [s for s in selected if dependencies[s["id"]] <= existing_ids]
+        eligible = [s for s in selected
+                    if signal_sources_survive(dependencies[s["id"]], existing_ids)]
         return sorted(eligible, key=lambda s: (s["created_at"], s["id"]))
 
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
