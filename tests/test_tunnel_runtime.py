@@ -7,6 +7,13 @@ from pathlib import Path
 import pytest
 from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, private_write
 from pseudolife_memory import tunnel_runtime as runtime
+import sys
+
+# Stand-in tunnel children run the interpreter's own binary. On macOS a
+# framework build's bin/python is a stub that re-execs Python.app, so a child
+# started through it changes its exe and argv after its identity is recorded,
+# and the supervisor stops recognising its own child.
+CHILD_PYTHON = runtime.psutil.Process().exe() if sys.platform == 'darwin' else sys.executable
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +36,7 @@ def test_refresh_cancellation_reaps_actual_children_and_private_launch(tmp_path,
 from pathlib import Path
 from pseudolife_memory import tunnel_runtime as runtime
 from pseudolife_memory.tunnel_profiles import ProfileStore, private_write
+CHILD_PYTHON = runtime.psutil.Process().exe() if sys.platform == 'darwin' else sys.executable
 store = ProfileStore(Path(sys.argv[1]))
 profile = store.load('personal')
 phase, cancellation, boundary = sys.argv[2:]
@@ -39,7 +47,7 @@ runtime._bridge_sources = lambda: {'shim.py': b'def run_shim(): pass\\n', 'tunne
 runtime._root_linux = lambda: False
 real_popen = subprocess.Popen
 def launch_fixture(args, **kwargs):
-    child = real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kwargs)
+    child = real_popen([CHILD_PYTHON, '-c', 'import time; time.sleep(60)'], **kwargs)
     children.append(child)
     return child
 def ready(child, config, timeout):
@@ -83,7 +91,7 @@ previous_handlers = [signal.getsignal(number) for number in (signal.SIGINT, sign
 if boundary != 'readiness':
     sys.settrace(trace)
 try:
-    runtime.run_profile(profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(sys.executable))
+    runtime.run_profile(profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(CHILD_PYTHON))
 except KeyboardInterrupt:
     cancelled = True
 finally:
@@ -129,7 +137,7 @@ def test_launch_registration_failure_reaps_handle_and_restores_handlers(tmp_path
     children = []
     real_popen = subprocess.Popen
     def launch_fixture(args, **kwargs):
-        child = real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kwargs)
+        child = real_popen([CHILD_PYTHON, '-c', 'import time; time.sleep(60)'], **kwargs)
         children.append(child)
         return child
     monkeypatch.setattr(runtime.subprocess, 'Popen', launch_fixture)
@@ -157,7 +165,7 @@ def test_launch_registration_failure_reaps_handle_and_restores_handlers(tmp_path
     with runtime.runtime_profile(profile, store, ['synthetic-shim']) as config:
         try:
             with pytest.raises(KeyboardInterrupt):
-                runtime._launch_child(profile, Path(sys.executable), config, store, owned_children=ledger)
+                runtime._launch_child(profile, Path(CHILD_PYTHON), config, store, owned_children=ledger)
             assert len(children) == 1 and children[0].poll() is not None
             assert handlers == [signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)]
         finally:
@@ -182,7 +190,7 @@ def test_unregistered_launch_reaps_inspectable_descendant(tmp_path, monkeypatch)
     children = []
     descendant_records = []
     def launch_fixture(args, **kwargs):
-        child = real_popen([sys.executable, '-c', script, str(marker)], **kwargs)
+        child = real_popen([CHILD_PYTHON, '-c', script, str(marker)], **kwargs)
         children.append(child)
         deadline = time.monotonic() + 10
         while not marker.exists() and time.monotonic() < deadline:
@@ -197,7 +205,7 @@ def test_unregistered_launch_reaps_inspectable_descendant(tmp_path, monkeypatch)
     with runtime.runtime_profile(profile, store, ['synthetic-shim']) as config:
         try:
             with pytest.raises(KeyboardInterrupt):
-                runtime._launch_child(profile, Path(sys.executable), config, store, owned_children=[])
+                runtime._launch_child(profile, Path(CHILD_PYTHON), config, store, owned_children=[])
             assert children[0].poll() is not None
             descendant = runtime._owned_process(descendant_records[0])
             assert descendant is None or descendant.status() == runtime.psutil.STATUS_ZOMBIE
@@ -292,10 +300,10 @@ def test_lifecycle_readiness_failure_preserves_key_and_cleans(tmp_path, monkeypa
     profile = Profile(name='personal', daemon_url='http://127.0.0.1:8765', token_file=str(tmp_path/'daemon.token'), tunnel_id='tunnel_0123', consent=True, state='ready')
     store.save(profile)
     store.set_key(profile.name, 'synthetic-private-key')
-    monkeypatch.setattr(runtime.subprocess, 'Popen', lambda argv, **kwargs: real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kwargs))
+    monkeypatch.setattr(runtime.subprocess, 'Popen', lambda argv, **kwargs: real_popen([CHILD_PYTHON, '-c', 'import time; time.sleep(60)'], **kwargs))
     monkeypatch.setattr(runtime, '_ready', lambda config: False)
     with pytest.raises(TunnelError, match='readiness'):
-        runtime.run_profile(profile, store, ['pseudolife-mcp'], binary=Path(sys.executable), ready_timeout=0.05)
+        runtime.run_profile(profile, store, ['pseudolife-mcp'], binary=Path(CHILD_PYTHON), ready_timeout=0.05)
     assert store.read_key(profile.name) == 'synthetic-private-key'
     assert not list(store.root.glob('.launch-*'))
     assert runtime.status_profile(profile.name, store)['running'] is False
@@ -589,7 +597,7 @@ def test_failed_refresh_restarts_frozen_old_command(tmp_path,monkeypatch):
     proof_before=proof.read_bytes()
     def launch(profile,binary,config,store,*,owned_children=None):
         launches.append(json.loads(config.read_text())['mcp']['commands'][0]['command'])
-        child=real_popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        child=real_popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         identity=runtime._process_identity(child.pid)
         if owned_children is not None:
             owned_children.append((child,identity))
@@ -597,7 +605,7 @@ def test_failed_refresh_restarts_frozen_old_command(tmp_path,monkeypatch):
     monkeypatch.setattr(runtime,'_launch_child',launch)
     monkeypatch.setattr(runtime,'_wait_ready',lambda process,config,timeout:len(launches)!=1)
     with runtime.runtime_profile(profile,store,old['command']) as config:
-        original=real_popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        original=real_popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         record=runtime._process_identity(original.pid)
         record.update(snapshot=old,ready=True,config=str(config),binary='unused')
         child=None
@@ -654,12 +662,12 @@ def test_managed_supervisor_refresh_handshake_preserves_supervisor(tmp_path,monk
     store,profile=_ready_profile(tmp_path)
     sources={'shim.py':b"def run_shim(): pass\n",'tunnel_bridge.py':b'# old disposable bridge\n'}
     monkeypatch.setattr(runtime,'_bridge_sources',lambda:dict(sources))
-    monkeypatch.setattr(runtime,'ensure_runtime',lambda *a:Path(sys.executable))
+    monkeypatch.setattr(runtime,'ensure_runtime',lambda *a:Path(CHILD_PYTHON))
     monkeypatch.setattr(runtime,'_wait_ready',lambda *a:True)
     real_popen=subprocess.Popen
     ledgers=[]
     def launch(profile,binary,config,store,*,owned_children=None):
-        process=real_popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        process=real_popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         identity=runtime._process_identity(process.pid)
         if owned_children is not None:
             owned_children.append((process,identity))
@@ -669,7 +677,7 @@ def test_managed_supervisor_refresh_handshake_preserves_supervisor(tmp_path,monk
     failures=[]
     def supervise():
         try:
-            runtime.run_profile(profile,store,['pseudolife-mcp','tunnel','shim'],binary=Path(sys.executable))
+            runtime.run_profile(profile,store,['pseudolife-mcp','tunnel','shim'],binary=Path(CHILD_PYTHON))
         except Exception as error:
             failures.append(type(error).__name__)
     thread=threading.Thread(target=supervise)
@@ -714,7 +722,7 @@ def test_requested_stop_ends_the_supervisor_with_success(tmp_path, monkeypatch, 
     child = 'import time;time.sleep(60)' if ending == 'stop' else 'import sys,time;time.sleep(1);sys.exit(3)'
     real_popen = subprocess.Popen
     def launch(profile, binary, config, store, *, owned_children=None):
-        process = real_popen([sys.executable, '-c', child], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process = real_popen([CHILD_PYTHON, '-c', child], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         identity = runtime._process_identity(process.pid)
         if owned_children is not None:
             owned_children.append((process, identity))
@@ -724,7 +732,7 @@ def test_requested_stop_ends_the_supervisor_with_success(tmp_path, monkeypatch, 
     private_write(store.root / 'personal.stop.json', b'{"pid": 1, "created": 0}')
     exits = []
     thread = threading.Thread(target=lambda: exits.append(runtime.run_profile(
-        profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(sys.executable))))
+        profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(CHILD_PYTHON))))
     thread.start()
     try:
         if ending == 'stop':
@@ -743,7 +751,7 @@ def test_refresh_rechecks_owned_identity_before_stopping(tmp_path,monkeypatch):
     import sys
     store,profile=_ready_profile(tmp_path)
     snapshot=runtime.snapshot_bridge(profile,store,['pseudolife-mcp','tunnel','shim'])
-    child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    child=subprocess.Popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
         record=runtime._process_identity(child.pid)
         record.update(snapshot=snapshot,binary='unused')
@@ -805,7 +813,7 @@ def test_refresh_adopts_saved_key_and_connection_then_rollback_restores_old(tmp_
     launches=[]
     def launch(profile,binary,config,store,*,owned_children=None):
         launches.append(profile)
-        child=real_popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        child=real_popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         identity=runtime._process_identity(child.pid)
         if owned_children is not None:
             owned_children.append((child,identity))
@@ -813,7 +821,7 @@ def test_refresh_adopts_saved_key_and_connection_then_rollback_restores_old(tmp_
     monkeypatch.setattr(runtime,'_launch_child',launch)
     monkeypatch.setattr(runtime,'_wait_ready',lambda process,config,timeout:len(launches)>1)
     with runtime.runtime_profile(profile,store,snapshot['command']) as config:
-        original=real_popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        original=real_popen([CHILD_PYTHON,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         record=runtime._process_identity(original.pid)
         identity=runtime.capture_launch_identity(profile,store,snapshot,config)
         record.update(snapshot=snapshot,ready=True,config=str(config),binary='unused',launch_identity=identity,config_digest=runtime._config_digest(config))
