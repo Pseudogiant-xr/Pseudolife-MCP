@@ -5,7 +5,7 @@ import { hostname, userInfo } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const out = fileURLToPath(new URL("../../pseudolife_memory/web/static/next/", import.meta.url));
+const out = fileURLToPath(new URL("../../pseudolife_memory/web/static/", import.meta.url));
 const TEXT = /\.(html|js|css|json|svg|txt|map)$/i;
 
 const patterns = [

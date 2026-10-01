@@ -22,7 +22,6 @@
     shortId,
     words,
   } from "../lib/format";
-  import { classicHref } from "../lib/nav";
   import { loadBoard, refresh, store, ui } from "../lib/state.svelte";
 
   // ---- data ----------------------------------------------------------------
@@ -202,7 +201,7 @@
         value: counts?.entries,
         sub: dream?.error ? "backlog unknown" : dream?.backlog !== undefined ? `${fmtNum(dream.backlog)} since the last dream` : "",
         subTone: "",
-        href: classicHref("stream"),
+        href: "#/stream",
       },
       {
         label: "Facts",
@@ -210,7 +209,7 @@
         value: counts?.facts,
         sub: counts?.facts_contested ? `${fmtNum(counts.facts_contested)} contested` : counts ? "none contested" : "",
         subTone: counts?.facts_contested ? "contested" : "",
-        href: classicHref("cortex"),
+        href: "#/cortex",
       },
       {
         label: "World",
@@ -218,7 +217,7 @@
         value: counts?.world,
         sub: counts?.world_stale ? `${fmtNum(counts.world_stale)} stale` : counts ? "none stale" : "",
         subTone: counts?.world_stale ? "warn" : "",
-        href: classicHref("world"),
+        href: "#/world",
       },
       {
         label: "Lessons",
@@ -226,7 +225,7 @@
         value: counts?.lessons,
         sub: loop?.last_lesson_at ? `last distilled ${fmtRelative(loop.last_lesson_at, now)}` : "",
         subTone: "",
-        href: classicHref("lessons"),
+        href: "#/lessons",
       },
       {
         label: "Episodes",
@@ -234,7 +233,7 @@
         value: counts?.episodes,
         sub: loop?.sessions !== undefined && window ? `${plural(loop.sessions, "session")} in ${window} days` : "",
         subTone: "",
-        href: classicHref("episodes"),
+        href: "#/episodes",
       },
       {
         label: "Peers",
@@ -339,7 +338,7 @@
           <button type="button" class="btn btn-primary" onclick={runDream} disabled={dreaming} aria-busy={dreaming}>
             {dreaming ? "Dreaming" : "Run a dream now"}
           </button>
-          <a class="btn btn-secondary" href={classicHref("graph")}>Open the review queue</a>
+          <a class="btn btn-secondary" href="#/review">Open the review queue</a>
         </div>
         <p class="dream-msg {dreamTone}" role="status" aria-live="polite">{dreamMsg}</p>
       </div>
@@ -573,7 +572,7 @@
       <div class="col">
         <div class="panel-head">
           <h3 class="panel-title">Recent writes</h3>
-          <a class="head-link" href={classicHref("stream")}>Open the stream</a>
+          <a class="head-link" href="#/stream">Open the stream</a>
         </div>
         {#if recentError}
           <p class="unavailable">{explainError(recentError, "Recent writes").title}.</p>

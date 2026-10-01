@@ -53,18 +53,16 @@
       <ul aria-labelledby="{uid}-{group}">
         {#each NAV.filter((n) => n.group === group) as item (item.id)}
           {@const count = countFor(item)}
-          {@const current = item.native && ui.route === item.id}
+          {@const current = ui.route === item.id}
           <li>
             <a
               class="nav-link"
               class:current
               href={hrefFor(item)}
               aria-current={current ? "page" : undefined}
-              title={item.native ? undefined : "Opens in the classic console"}
             >
               <Icon name={item.icon} />
               <span class="nav-label">{item.label}</span>
-              {#if !item.native}<span class="sr-only">, opens the classic console</span>{/if}
               {#if count !== undefined}
                 {#if item.id === "review"}
                   <span class="badge mono num">{fmtNum(count)}<span class="sr-only"> pending</span></span>
@@ -72,7 +70,6 @@
                   <span class="count mono num">{fmtNum(count)}</span>
                 {/if}
               {/if}
-              {#if !item.native}<span class="classic"><Icon name="external" size={12} /></span>{/if}
             </a>
           </li>
         {/each}
@@ -96,9 +93,6 @@
         Token<span class="sr-only">{ui.hasToken ? ", one is stored" : ", none stored"}</span>
       </button>
     </div>
-    <p class="classic-note">
-      <Icon name="external" size={12} /> Opens in the classic console.
-    </p>
   </div>
 </nav>
 
@@ -210,10 +204,6 @@
     line-height: 18px;
     text-align: center;
   }
-  .classic {
-    display: inline-flex;
-    color: var(--ink-4);
-  }
   .foot {
     margin-top: auto;
     display: flex;
@@ -265,13 +255,5 @@
   }
   .foot-btn:hover {
     color: var(--ink);
-  }
-  .classic-note {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 4px;
-    font-size: 11px;
-    color: var(--ink-4);
   }
 </style>

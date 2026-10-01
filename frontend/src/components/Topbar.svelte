@@ -8,6 +8,9 @@
   let query = $state("");
   let miss = $state("");
   const writer = $derived(store.overview.data?.health?.writer_id);
+  // The fixture devserver serves canned data; say so on every view, so a demo
+  // is never mistaken for a real bank.
+  const fixtures = $derived(store.health.data?.fixtures === true || store.overview.data?.health?.fixtures === true);
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
@@ -33,6 +36,9 @@
 <header class="topbar">
   <h1 class="title">{title}</h1>
   {#if subtitle}<span class="subtitle">{subtitle}</span>{/if}
+  {#if fixtures}
+    <span class="chip warn demo" title="Served by the fixture devserver, not a real bank">Demo data, not a real bank</span>
+  {/if}
   <div class="search">
     <label for="jump" class="sr-only">Jump to a view</label>
     <input
@@ -84,6 +90,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .demo {
+    flex: none;
   }
   .search {
     position: relative;

@@ -12,11 +12,10 @@
 
 <nav class="tabbar" aria-label="Tabs">
   {#each tabs as item (item.id)}
-    {@const current = item.native && ui.route === item.id}
+    {@const current = ui.route === item.id}
     <a class="tab" class:current href={hrefFor(item)} aria-current={current ? "page" : undefined}>
       <Icon name={item.icon} size={22} />
       <span>{item.label}</span>
-      {#if !item.native}<span class="sr-only">, opens the classic console</span>{/if}
     </a>
   {/each}
   <button

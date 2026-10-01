@@ -1,6 +1,6 @@
-// Fetch client for the daemon's REST surface. Same conventions as the classic
-// console (static/js/api.js): bearer token from localStorage "pl_token",
-// JSON in and out, the daemon's {"error": code} bodies surfaced as ApiError.
+// Fetch client for the daemon's REST surface: bearer token from localStorage
+// "pl_token", JSON in and out, the daemon's {"error": code} bodies surfaced
+// as ApiError. Views add their own typed calls on top of get() and post().
 
 import { readKey, TOKEN_KEY } from "../storage";
 import type {
@@ -28,12 +28,16 @@ export class ApiError extends Error {
   }
 }
 
-type Params = Record<string, string | number | boolean | null | undefined>;
+export type Params = Record<string, string | number | boolean | string[] | null | undefined>;
 
 function buildUrl(path: string, params?: Params): string {
   const url = new URL(path, location.origin);
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v === null || v === undefined || v === "") continue;
+    if (Array.isArray(v)) {
+      if (v.length) url.searchParams.set(k, v.join(","));
+      continue;
+    }
     url.searchParams.set(k, String(v));
   }
   return url.pathname + url.search;
@@ -68,7 +72,12 @@ async function request<T>(
       cache: "no-store",
       credentials: "same-origin",
     });
-  } catch {
+  } catch (e) {
+    // fetch() rejects a header value outside Latin-1 before sending anything:
+    // that is a token pasted with a stray character, not a down daemon.
+    if (e instanceof TypeError && token && /[^\u0000-ÿ]/.test(token)) {
+      throw new ApiError(0, "token_not_latin1", null);
+    }
     throw new ApiError(0, "network", null);
   }
   const data = await parse(res);
@@ -80,14 +89,37 @@ async function request<T>(
   return (data ?? {}) as T;
 }
 
+/** GET a JSON route. Empty and null params are dropped; arrays join with commas. */
+export function get<T>(path: string, params?: Params): Promise<T> {
+  return request<T>("GET", path, { params });
+}
+
+/** POST a JSON object. The daemon requires an object body on every POST. */
+export function post<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
+  return request<T>("POST", path, { body });
+}
+
+/**
+ * Several write routes answer HTTP 200 with {"error": "..."} (a refusal the
+ * daemon considers normal, such as bulk_confirm_required). Returns that code,
+ * or null when the answer carries none. Callers must check it before
+ * reporting success.
+ */
+export function softError(r: unknown): string | null {
+  if (r && typeof r === "object" && "error" in r) {
+    const e = (r as { error: unknown }).error;
+    if (typeof e === "string" && e) return e;
+  }
+  return null;
+}
+
 export const api = {
   /** /health answers 503 with the same JSON when degraded; that is data, not an error. */
   health: () => request<Health>("GET", "/health", { acceptStatus: [503] }),
-  overview: () => request<Overview>("GET", "/api/overview"),
-  recent: (n: number) => request<RecentResponse>("GET", "/api/recent", { params: { n } }),
+  overview: () => get<Overview>("/api/overview"),
+  recent: (n: number, source?: string) => get<RecentResponse>("/api/recent", { n, source }),
   /** Read-only board metadata. Never sends, receives or acknowledges mail. */
-  board: (limit = 50) =>
-    request<BoardSnapshot>("GET", "/api/agents", { params: { view: "coordination", limit } }),
+  board: (limit = 50) => get<BoardSnapshot>("/api/agents", { view: "coordination", limit }),
   // An empty body lets the daemon use its configured memory.dream.max_batch.
-  dreamRun: () => request<DreamRunResult>("POST", "/api/dream/run", { body: {} }),
+  dreamRun: () => post<DreamRunResult>("/api/dream/run", {}),
 };

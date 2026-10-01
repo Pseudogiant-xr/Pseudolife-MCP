@@ -241,6 +241,31 @@ p {
   padding: 0 14px;
   font-size: 12px;
 }
+.btn-danger {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+.btn-danger:hover {
+  color: var(--danger-ink);
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+/* Quiet text-weight action inside rows ("history", "forget"). */
+.btn-ghost {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  padding: 0 10px;
+}
+.btn-ghost:hover {
+  color: var(--ink);
+  background: var(--fill);
+}
+.btn-ghost.danger:hover {
+  color: var(--danger-ink);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
 .btn[disabled],
 .btn[aria-disabled="true"] {
   opacity: 0.6;
@@ -365,6 +390,162 @@ p {
   height: 100%;
   border-radius: 999px;
   background: var(--assoc);
+}
+
+/* ---- form controls ---- */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.select {
+  appearance: none;
+  padding-right: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+    linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.select option {
+  background: var(--ground);
+  color: var(--ink);
+}
+.textarea {
+  height: auto;
+  min-height: 96px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-4);
+}
+.input.mono,
+.textarea.mono {
+  font-family: "Geist Mono", ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.field-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.field-help {
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+/* ---- tables ---- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-4);
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.table tr:last-child td {
+  border-bottom: 0;
+}
+.table tbody tr.clickable {
+  cursor: pointer;
+}
+.table tbody tr.clickable:hover td,
+.table tbody tr.selected td {
+  background: var(--fill);
+}
+.table-wrap {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* ---- empty and loading ---- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 28px 26px;
+}
+.empty-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.empty-body {
+  color: var(--ink-3);
+  max-width: 62ch;
+}
+.skeleton {
+  border-radius: 10px;
+  background: var(--fill);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+/* ---- view layout ---- */
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.toolbar .grow {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.toolbar .note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-4);
 }
 
 /* ---- states ---- */

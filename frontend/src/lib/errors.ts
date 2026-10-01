@@ -19,6 +19,12 @@ export function explainError(e: ApiError, what = "This view"): Explained {
         body: "Check that the daemon is running and reachable from this browser, then refresh.",
         token: false,
       };
+    case "token_not_latin1":
+      return {
+        title: "The stored token has a character a browser cannot send",
+        body: "Bearer tokens must be plain ASCII. Paste the token again, without quotes, spaces or smart punctuation.",
+        token: true,
+      };
     case "unauthorized":
       return {
         title: "The daemon did not accept this console's token",
@@ -57,6 +63,19 @@ export function explainError(e: ApiError, what = "This view"): Explained {
         token: false,
       };
   }
+}
+
+/**
+ * One line for a toast after a failed action: the daemon's own detail when it
+ * gave one (a 400's ValueError text), else the explained title.
+ */
+export function actionError(e: unknown, action: string): string {
+  if (e instanceof Error && e.name === "ApiError") {
+    const err = e as ApiError;
+    const detail = err.body?.detail ?? (err.status === 400 ? err.code : "");
+    return detail ? `${action} failed: ${detail}` : `${action} failed: ${explainError(err).title.toLowerCase()}`;
+  }
+  return `${action} failed.`;
 }
 
 /** A board answer that is well formed but has nothing to show. */
