@@ -106,3 +106,51 @@ def test_profile_listing_ignores_lifecycle_and_runtime_metadata(tmp_path):
     private_write(store.root/'runtime.json',b'{"version":"0.0.15"}')
     private_write(store.root/'personal.process.json',b'{"pid":0}')
     assert store.list() == ['personal']
+
+
+def _busy(real, counter, winerror, times=2):
+    def call(*args, **kwargs):
+        counter.append(1)
+        if len(counter) <= times:
+            exc = PermissionError(13, 'sharing violation')
+            exc.winerror = winerror
+            raise exc
+        return real(*args, **kwargs)
+    return call
+
+
+@pytest.mark.parametrize('winerror', [5, 32])
+def test_private_files_ride_out_a_windows_sharing_violation(tmp_path, monkeypatch, winerror):
+    # On Windows a reader without delete sharing blocks the supervisor's
+    # os.replace, and a pending replace blocks a status read's open. Both
+    # clear within milliseconds; neither may surface as a broken record.
+    import os
+    from pseudolife_memory import tunnel_profiles
+    store = ProfileStore(tmp_path / 'profiles')
+    store._prepare()
+    record = store.root / 'personal.process.json'
+    replaced, opened = [], []
+    monkeypatch.setattr(tunnel_profiles.os, 'replace', _busy(os.replace, replaced, winerror))
+    tunnel_profiles.private_write(record, b'{"pid":0}')
+    monkeypatch.undo()
+    monkeypatch.setattr(tunnel_profiles.os, 'open', _busy(os.open, opened, winerror))
+    assert tunnel_profiles.private_read(record) == b'{"pid":0}'
+    assert len(replaced) == 3 and len(opened) == 3
+
+
+def test_a_real_permission_error_still_fails_at_once(tmp_path, monkeypatch):
+    import os
+    from pseudolife_memory import tunnel_profiles
+    store = ProfileStore(tmp_path / 'profiles')
+    store._prepare()
+    record = store.root / 'personal.process.json'
+    tunnel_profiles.private_write(record, b'{"pid":0}')
+    opened = []
+
+    def denied(*args, **kwargs):
+        opened.append(1)
+        raise PermissionError(13, 'denied')
+    monkeypatch.setattr(tunnel_profiles.os, 'open', denied)
+    with pytest.raises(TunnelError):
+        tunnel_profiles.private_read(record)
+    assert opened == [1]

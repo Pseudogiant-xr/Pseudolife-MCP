@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 from pseudolife_memory import credentials
@@ -61,6 +62,22 @@ def checked_path(path: str | Path) -> Path:
     return target
 
 
+def _sharing_retry(call, *args):
+    """Run ``call``, riding out a transient Windows sharing violation.
+
+    A reader opened without delete sharing blocks ``os.replace`` of the
+    record it reads, and a pending replace blocks a new open; either clears
+    within milliseconds. Any other error, and the last attempt, propagate.
+    """
+    for attempt in range(20):
+        try:
+            return call(*args)
+        except PermissionError as exc:
+            if getattr(exc, 'winerror', None) not in (5, 32) or attempt == 19:
+                raise
+            time.sleep(0.01)
+
+
 def private_write(path: Path, data: bytes) -> None:
     target = checked_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +98,7 @@ def private_write(path: Path, data: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         checked_path(target)
-        os.replace(staged, target)
+        _sharing_retry(os.replace, staged, target)
         if os.name != 'nt':
             parent_fd = os.open(target.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
             try:
@@ -100,7 +117,7 @@ def private_validate(path: Path) -> None:
     target = checked_path(path)
     descriptor = -1
     try:
-        descriptor = os.open(target, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0))
+        descriptor = _sharing_retry(os.open, target, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0))
         credentials._validate_file(descriptor)
     except (OSError, credentials.CredentialError):
         raise TunnelError('private tunnel file is unavailable or not owner-only') from None
@@ -136,7 +153,7 @@ def private_read(path: Path, limit: int = 65536) -> bytes:
     target = checked_path(path)
     descriptor = -1
     try:
-        descriptor = os.open(target, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0))
+        descriptor = _sharing_retry(os.open, target, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0))
         credentials._validate_file(descriptor)
         data = os.read(descriptor, limit + 1)
         if len(data) > limit:

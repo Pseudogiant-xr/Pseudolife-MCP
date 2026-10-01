@@ -49,6 +49,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   status, so systemd (`Restart=on-failure`) and launchd (`KeepAlive`) started
   it again. A runtime that exits by itself still fails, so the service restarts
   it.
+- On Windows, reading a tunnel's status while its supervisor replaces the
+  process record no longer reports the record as unavailable: the read and
+  the replace each retry briefly on a sharing violation.
 
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
