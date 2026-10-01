@@ -14,7 +14,8 @@ Runs on the daemon host and drives the ``tailscale`` CLI. ``tailscale``:
    ``BackendState: Running``.
 3. ``tailscale serve status --json`` is read. A TCP forward on the port to
    ``127.0.0.1:<port>`` is "already exposed" (exit 0, nothing run); any
-   other serve on the port is someone else's and is never replaced.
+   other serve on the port, and Funnel (public internet) on it, is someone
+   else's and is never replaced.
 4. The plan (the exact command and the client URL,
    ``http://<tailscale ip -4>:<port>``) is shown and confirmed (``--yes``
    skips the question; a non-interactive run without it exits 2), then
@@ -31,10 +32,10 @@ there is none.
 
 Exit codes: 0 done or already in that state; 2 usage, declined, or no TTY
 without ``--yes``; 4 refused before any change; 5 changed but the serve did
-not take (undone).
+not take (undone), or its result could not be read back to verify.
 
 Standard library only, so it runs from a shim runtime: the daemon probe is
-a plain ``urllib`` GET with proxies disabled.
+a plain ``urllib`` GET with proxies and redirects disabled.
 """
 
 from __future__ import annotations
@@ -65,21 +66,29 @@ TAILSCALE_TIMEOUT_S = 30.0
 
 OPERATOR_FIX = "sudo tailscale set --operator=$USER"
 INSTALL_FIX = "install Tailscale (https://tailscale.com/download), then run `tailscale up`"
-# How the tailscale CLI words a refusal for this user (Linux without root or
-# an operator grant: "Access denied: serve config denied", or a hint naming
-# sudo or --operator).
-_PERMISSION = re.compile(r"access denied|permission denied|not permitted|operator|"
+# How the tailscale CLI words a refusal for this user ("Access denied: serve
+# config denied" on Linux without root or an operator grant, and on Windows
+# for a user other than the one logged in to Tailscale; or a hint naming
+# `--operator`). The bare word "operator" is not enough.
+_PERMISSION = re.compile(r"access denied|permission denied|not permitted|--operator\b|"
                          r"unauthori[sz]ed|must be (?:root|admin)", re.IGNORECASE)
 
 
 # ── seams (the tests replace these) ──────────────────────────────────────────
 
+def platform() -> str:
+    return sys.platform
+
+
 def default_locations() -> list[Path]:
-    """Where the Tailscale installers put the CLI when it is not on PATH."""
+    """Where the Tailscale installers put the CLI when it is not on PATH.
+    On Windows the 64-bit Program Files (``ProgramW6432``) first: under a
+    32-bit Python, ``ProgramFiles`` names the x86 folder instead."""
     if os.name == "nt":
-        base = os.environ.get("ProgramFiles") or r"C:\Program Files"
+        base = (os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles")
+                or r"C:\Program Files")
         return [Path(base) / "Tailscale" / "tailscale.exe"]
-    if sys.platform == "darwin":
+    if platform() == "darwin":
         return [Path("/Applications/Tailscale.app/Contents/MacOS/Tailscale")]
     return []
 
@@ -96,26 +105,45 @@ def _ask(question: str) -> bool:
     return sys.stdin.readline().strip().lower() in ("y", "yes")
 
 
-def probe_health(url: str, timeout: float) -> dict | None:
-    """``<url>/health`` as a dict, or ``None`` when nothing usable answers.
-    A non-2xx answer with a JSON body is still the daemon's (``/health``
-    serves a degraded payload as 503)."""
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """The daemon's ``/health`` never redirects: a 3xx surfaces as an
+    ``HTTPError`` instead of being followed somewhere else."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch_health(url: str, timeout: float) -> tuple[str, dict | None]:
+    """``(kind, payload)`` for ``<url>/health``: ``("ok", dict)`` when a
+    JSON object answers, ``("none", None)`` when nothing answers, and
+    ``("other", None)`` when something answers that is not the daemon (a
+    redirect, or a body that is not a JSON object). A non-2xx answer with a
+    JSON body is still the daemon's (``/health`` serves a degraded payload
+    as 503). No proxies, no redirects."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     try:
         with opener.open(url + "/health", timeout=timeout) as response:
             body = response.read()
     except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            return "other", None
         try:
             body = exc.read()
         except Exception:  # noqa: BLE001
-            return None
+            return "other", None
     except Exception:  # noqa: BLE001 — refused, reset, timed out, unreadable
-        return None
+        return "none", None
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
+        return "other", None
+    return ("ok", payload) if isinstance(payload, dict) else ("other", None)
+
+
+def probe_health(url: str, timeout: float) -> dict | None:
+    """``<url>/health`` as a dict, or ``None`` when the daemon does not
+    answer it (see :func:`fetch_health`)."""
+    return fetch_health(url, timeout)[1]
 
 
 def find_tailscale() -> str | None:
@@ -230,20 +258,31 @@ def _describe(handler) -> str:
     return ", ".join(parts) or "a handler of an unknown kind"
 
 
+def _funnelled(config, port: int) -> bool:
+    """A truthy ``AllowFunnel`` entry (keyed ``host:port``) for the port."""
+    funnel = config.get("AllowFunnel") if isinstance(config, dict) else None
+    return isinstance(funnel, dict) and any(
+        on and str(key).endswith(f":{port}") for key, on in funnel.items())
+
+
 def _port_state(config: dict, port: int) -> tuple[str, str | None]:
     """``("ours" | "foreign" | "none", detail)`` for the port. A foreground
-    serve (one a terminal holds open) is never ours to keep or remove."""
+    serve (one a terminal holds open) is never ours to keep or remove, and a
+    port open to Funnel is on the public internet, never "exposed on the
+    tailnet", whatever forwards it."""
+    foreground = config.get("Foreground")
+    sessions = list(foreground.values()) if isinstance(foreground, dict) else []
+    if _funnelled(config, port) or any(_funnelled(s, port) for s in sessions):
+        return "foreign", f"Funnel (public internet) on port {port}"
     background = _handler(config, port)
     if background is not None and _is_ours(background, port):
         return "ours", None
     if background is not None:
         return "foreign", _describe(background)
-    foreground = config.get("Foreground")
-    if isinstance(foreground, dict):
-        for session in foreground.values():
-            held = _handler(session, port)
-            if held is not None:
-                return "foreign", f"a foreground serve ({_describe(held)})"
+    for session in sessions:
+        held = _handler(session, port)
+        if held is not None:
+            return "foreign", f"a foreground serve ({_describe(held)})"
     return "none", None
 
 
@@ -297,9 +336,20 @@ def _permission_refusal(proc: subprocess.CompletedProcess) -> bool:
     return proc.returncode != 0 and bool(_PERMISSION.search(proc.stderr or ""))
 
 
+def _permission_fix() -> str:
+    """What lets this user change the serve config, per OS."""
+    system = platform()
+    if system == "win32":
+        return ("run it as the Windows user logged in to Tailscale, or from an elevated "
+                "(administrator) shell")
+    if system == "darwin":
+        return "run it as the macOS user logged in to the Tailscale app"
+    return f"grant your user operator rights once with `{OPERATOR_FIX}`, or run this as root"
+
+
 def _permission_message(proc: subprocess.CompletedProcess) -> str:
-    return (f"tailscale refused the change for this user ({_first_line(proc.stderr)}). On Linux, "
-            f"grant your user operator rights once with `{OPERATOR_FIX}`, or run this as root")
+    return (f"tailscale refused the change for this user ({_first_line(proc.stderr)}): "
+            f"{_permission_fix()}")
 
 
 # ── the actions ──────────────────────────────────────────────────────────────
@@ -307,7 +357,11 @@ def _permission_message(proc: subprocess.CompletedProcess) -> str:
 def _expose(args, report: _Report) -> int:
     port = args.port
     local = f"http://127.0.0.1:{port}"
-    health = probe_health(local, LOCAL_HEALTH_TIMEOUT_S)
+    kind, health = fetch_health(local, LOCAL_HEALTH_TIMEOUT_S)
+    if kind == "other":
+        return report.fail(EXIT_REFUSED, "something that is not the Pseudolife daemon answers on "
+                                         f"127.0.0.1:{port} (a redirect or a body that is not its "
+                                         "/health JSON); pass --port for the daemon's port")
     if health is None:
         return report.fail(EXIT_REFUSED, f"no daemon answers at {local}/health: start it first "
                                          "(or pass --port)")
@@ -360,7 +414,15 @@ def _expose(args, report: _Report) -> int:
     try:
         after, _detail = _port_state(_serve_config(binary), port)
     except _Refused as exc:
-        after, _detail = "unknown", str(exc)
+        # Nothing to judge an undo by: removing a serve that may have taken,
+        # or reporting an undo that may not have been needed, would both
+        # mislead. Say what is known and where to look.
+        ran = f"exit {proc.returncode}" + (
+            f", {_first_line(proc.stderr)}" if _first_line(proc.stderr) else "")
+        return report.fail(EXIT_UNDONE, f"the serve command ran ({ran}) but could not verify its "
+                                        f"result: {exc}. Check `tailscale serve status`; if port "
+                                        f"{port} forwards to 127.0.0.1:{port} and you do not want "
+                                        f"it, run `pseudolife-mcp expose off --port {port}`")
     if proc.returncode != 0 and after == "none":
         return report.fail(EXIT_REFUSED, "tailscale refused the serve "
                                          f"({_first_line(proc.stderr) or f'exit {proc.returncode}'})")

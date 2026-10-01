@@ -176,8 +176,9 @@ def _bank_fingerprint(svc) -> str | None:
     """The first 16 hex characters of the SHA-256 of the coordination bank
     id, or ``None`` while it is unknown: before storage has started (this
     never starts it), on file-mode storage, or before the board has created
-    the id. Not secret; it tells two daemons' banks apart, which
-    ``version`` and ``schema`` cannot. Never raises."""
+    the id. Called only after the storage ping succeeded. Not secret; it
+    tells two daemons' banks apart, which ``version`` and ``schema``
+    cannot. Never raises."""
     read = getattr(getattr(svc, "_storage", None), "cached_bank_id", None)
     if read is None:
         return None
@@ -231,7 +232,8 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
         "auth": token_present,
         # Which bank this is (see _bank_fingerprint); null means unknown.
-        "bank": _bank_fingerprint(svc),
+        # Filled in after the storage ping below succeeds.
+        "bank": None,
         # Durable-save failures since start (see service.PersistenceError);
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
@@ -373,6 +375,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         try:
             storage.ping()
             payload["db"] = "ok"
+            # Only after a successful ping: a stalled database has already
+            # cost this probe one connect timeout, never a second.
+            payload["bank"] = _bank_fingerprint(svc)
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"
