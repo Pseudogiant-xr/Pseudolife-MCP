@@ -60,6 +60,50 @@ In order of preference. An installer run on the daemon host that answers
 connect to it") is a local install that ends by printing a short version of
 these steps and the two sections after them.
 
+### Expose the daemon with one command
+
+On the daemon host, with Tailscale installed and logged in:
+
+```bash
+pseudolife-mcp expose tailscale
+```
+
+It runs the Tailscale Serve TCP forward described in the next section, with
+the checks around it:
+
+- It refuses unless `http://127.0.0.1:8765/health` answers `status: ok`
+  with `"auth": true`, so an unauthenticated bank is never exposed.
+- It refuses when Tailscale is not installed or not running (`tailscale
+  up`), and when the tailnet port already serves anything other than a TCP
+  forward to `127.0.0.1:8765`: it never replaces another serve. If that
+  forward is already there it reports "already exposed" and changes nothing.
+- It shows the command and the client URL (`http://<tailnet-ip>:8765`) and
+  asks before running it; `--yes` skips the question, and a run with no
+  terminal and no `--yes` exits 2 without changing anything.
+- On Linux, a user who is not root and has no operator grant is refused
+  with the fix: `sudo tailscale set --operator=$USER`.
+- Afterwards it checks that the serve status shows the forward (if not, it
+  removes it again and exits 5), then fetches `<url>/health` through the
+  tailnet and compares its `bank` fingerprint with the local one. That probe
+  is advisory: a host cannot always reach its own tailnet address, so a
+  failed probe says to check from another machine with
+  `curl <url>/health` and leaves the forward in place.
+
+`pseudolife-mcp expose status` prints the client URL, or why there is none;
+`pseudolife-mcp expose off` removes the forward, and only a forward to
+`127.0.0.1:8765`. All three take `--port` for a daemon on another port and
+`--json` for a machine-readable report. Exit codes: 0 done or already in
+that state; 2 usage, declined, or no terminal without `--yes`; 4 refused
+before any change; 5 the serve did not take and was undone.
+
+`/health` reports the bank fingerprint as `bank`: the first 16 hex
+characters of the SHA-256 of the bank's coordination identity. It is not a
+secret; it tells two daemons' banks apart, which `version` and `schema`
+cannot. It is `null` until the daemon's storage has started and the bank
+identity exists (a freshly started daemon that has not served a call yet,
+a bank whose agent board has never been used, or a file-mode daemon), and
+callers treat `null` as unknown.
+
 ### 1. Tailscale Serve, TCP mode
 
 No certificate needed; the link is WireGuard-encrypted end to end. On the

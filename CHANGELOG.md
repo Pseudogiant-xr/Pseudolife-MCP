@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
+- `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
+  Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
+  tcp://127.0.0.1:<port>`). It refuses a daemon whose `/health` does not
+  report `"auth": true`, a Tailscale that is not installed or not running,
+  and a tailnet port that already serves anything else; it shows the
+  command and client URL and asks first (`--yes` skips the question, no
+  terminal without it exits 2). A Linux permission refusal names
+  `sudo tailscale set --operator=$USER`. A serve the status does not show
+  afterwards is removed again (exit 5); the probe of `<url>/health` through
+  the tailnet is advisory and never rolls back. `expose off` removes only a
+  forward to `127.0.0.1:<port>`, and `expose status` prints the client URL.
+  Standard library only, so it runs from a shim runtime. Guide:
+  `docs/guide/remote-bank.md`.
+- `/health` reports `bank`: the first 16 hex characters of the SHA-256 of
+  the coordination bank id, so two daemons' banks can be told apart. It is
+  `null` until storage has started and the id exists; `/health` never
+  starts storage for it, reads the meta row on its own short-lived
+  connection (never the service lock), at most once a minute while it is
+  absent, and caches it once found.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender
