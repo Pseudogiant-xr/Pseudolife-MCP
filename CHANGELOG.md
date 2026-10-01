@@ -81,6 +81,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   only its newly minted bank. Physical restarts, real retrieval load, host
   delivery and model acknowledgment remain outside this instrument.
 
+### Fixed (2026-10-01 — non-ASCII bearer tokens keep their principal everywhere)
+- A bearer token with non-ASCII characters now authenticates the same way on
+  every route. The auth gate read the header as UTF-8, while the coordination
+  routes, the `/mcp` identity binding and MCP tool calls read it as latin-1.
+  So `/api/coordination/*` answered 401 to a caller the gate had accepted,
+  and `/mcp` tool calls recorded that caller as `default` instead of its
+  named principal. Token comparison now uses the bytes the client sent,
+  whichever way the header was decoded. Only spaces and tabs are trimmed
+  from the presented token, so a token ending in a character such as `à`
+  or `ą` keeps its last byte.
+- Authorization header bytes that are not valid UTF-8 get a 401 instead of
+  an unhandled decode error (a 500).
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived

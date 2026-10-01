@@ -123,3 +123,16 @@ def test_current_principal_fail_open_outside_request(monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "tokA:hermes-box")
     # No live request bound at all -> default, never an exception.
     assert wc.current_principal() == "default"
+
+
+def test_non_ascii_named_bearer_from_mcp_transport_names_principal(monkeypatch):
+    # The MCP transport binds Starlette's headers, which decode the bearer
+    # as latin-1; the caller authenticated at the gate, so the named
+    # principal must survive rather than fall back to "default".
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "café-token:hermes-box")
+    wire = "café-token".encode("utf-8").decode("latin-1")
+    binding = wc.bind_request_headers({"authorization": "Bearer " + wire})
+    try:
+        assert wc.current_principal() == "hermes-box"
+    finally:
+        wc.unbind_request_headers(binding)

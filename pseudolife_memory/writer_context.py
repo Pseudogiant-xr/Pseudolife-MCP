@@ -157,7 +157,7 @@ def current_principal() -> str:
     tokens, so an unmatched bearer here (the singular token, or open loopback
     mode) is simply the default principal. Fail-open: any error resolves to
     ``"default"``; identity resolution must never fail a request."""
-    from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+    from pseudolife_memory.principals import DEFAULT_PRINCIPAL, resolve_principal
 
     principal = _REQUEST_PRINCIPAL.get()
     if principal is not None:
@@ -168,10 +168,10 @@ def current_principal() -> str:
         raw = os.environ.get("PSEUDOLIFE_MCP_TOKENS")
         if not auth or not raw:
             return DEFAULT_PRINCIPAL
-        scheme, _, presented = auth.partition(" ")
-        if scheme.lower() != "bearer":
-            return DEFAULT_PRINCIPAL
-        return _parsed_token_map(raw).get(presented.strip(), DEFAULT_PRINCIPAL)
+        # resolve_principal compares the bytes the client sent, so a
+        # non-ASCII bearer in latin-1-decoded transport headers still names
+        # its principal.
+        return resolve_principal(auth, _parsed_token_map(raw), None) or DEFAULT_PRINCIPAL
     except Exception:  # noqa: BLE001
         return DEFAULT_PRINCIPAL
 

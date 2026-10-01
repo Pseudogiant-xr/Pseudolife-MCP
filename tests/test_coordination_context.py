@@ -69,6 +69,18 @@ def test_context_route_gates_before_initialization(token, service, status, paylo
         assert result == payload
 
 
+def test_context_route_accepts_non_ascii_bearer():
+    # The /api gate authenticates the UTF-8 bytes; the coordination routes
+    # must agree rather than 401 the same caller.
+    app = build_console_app(stub_mcp, None, lambda: {}, _guard_service(enabled=False),
+                            token_map={"café-allowed": "agent-user"})
+    status, body = call(app, "POST", "/api/coordination/context", body=b"{}",
+                        headers=[(b"authorization", "Bearer café-allowed".encode("utf-8")),
+                                 (b"content-type", b"application/json")])
+    assert status == 200, body
+    assert json.loads(body) == {"enabled": False}
+
+
 def test_context_uses_preconnected_storage_without_full_service_init(monkeypatch):
     from pseudolife_memory import coordination
 
