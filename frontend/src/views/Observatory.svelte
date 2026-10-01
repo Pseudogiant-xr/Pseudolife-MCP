@@ -1,8 +1,19 @@
 <script lang="ts">
   import HeroArt from "../components/HeroArt.svelte";
   import ErrorState from "../components/ErrorState.svelte";
+  import ConsolidationDrawer from "../components/observatory/ConsolidationDrawer.svelte";
+  import ObservatoryDetails from "../components/observatory/ObservatoryDetails.svelte";
   import { api, ApiError } from "../lib/api/client";
+  import { streamApi, type ConfigResponse, type SourceCount } from "../lib/api/stream";
   import type { RecentEntry } from "../lib/api/types";
+  import {
+    extractorChip,
+    gaugePct,
+    IDLE_SECONDS_KNOB,
+    knobNumber,
+    MIN_BATCH_KNOB,
+    type ExtractorStatus,
+  } from "../lib/consolidation";
   import {
     agentName,
     agentTone,
@@ -22,6 +33,7 @@
     shortId,
     words,
   } from "../lib/format";
+  import { confirm } from "../lib/overlay.svelte";
   import { loadBoard, refresh, store, ui } from "../lib/state.svelte";
 
   // ---- data ----------------------------------------------------------------
@@ -47,11 +59,39 @@
     }
   }
 
+  // Top sources and the dream thresholds: a failure costs only their panel.
+  let sources = $state<SourceCount[] | null>(null);
+  let sourcesFailed = $state(false);
+  let config = $state<ConfigResponse | null>(null);
+
+  async function loadSources() {
+    try {
+      sources = (await streamApi.sources()).sources ?? [];
+      sourcesFailed = false;
+    } catch {
+      sourcesFailed = true;
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      config = await streamApi.config();
+    } catch {
+      config = null;
+    }
+  }
+
   $effect(() => {
     void ui.tick;
     void loadBoard();
     void loadRecent();
+    void loadSources();
+    void loadConfig();
   });
+
+  const minBatch = $derived(knobNumber(config, MIN_BATCH_KNOB));
+  const idleThreshold = $derived(knobNumber(config, IDLE_SECONDS_KNOB));
+  let reviewOpen = $state(false);
 
   // A clock for relative times; ages re-render once a minute.
   let now = $state(Date.now());
@@ -118,10 +158,11 @@
   });
 
   const chips = $derived.by(() => {
-    const c: { text: string; tone: string }[] = [];
+    const c: { text: string; tone: string; title?: string }[] = [];
     if (health?.storage) c.push({ text: health.storage, tone: "" });
     if (stats?.preset) c.push({ text: `preset ${stats.preset}`, tone: "" });
-    if (dream?.extractor_mode) c.push({ text: `extractor ${dream.extractor_mode}`, tone: "" });
+    const ex = extractorChip(dream as ExtractorStatus | undefined);
+    if (ex) c.push(ex);
     if (reasons.length) c.push({ text: `review attention ${reasons.length}`, tone: "warn" });
     if (health?.fixtures) c.push({ text: "fixture data", tone: "warn" });
     return c;
@@ -134,6 +175,13 @@
 
   async function runDream() {
     if (dreaming) return;
+    const ok = await confirm({
+      title: "Run a dream now?",
+      message:
+        "Consolidates the unconsolidated backlog into canonical facts with the configured extractor. It may take a while on CPU.",
+      confirmLabel: "Run the dream",
+    });
+    if (!ok || dreaming) return;
     dreaming = true;
     dreamMsg = "";
     try {
@@ -296,6 +344,26 @@
     return c;
   });
 
+  // Ratios the daemon's loop_health serves beyond the shared LoopHealth type.
+  const perSession = $derived.by(() => {
+    const l = loop as
+      | (typeof loop & { stores_per_session?: number | null; outcomes_per_session?: number | null; root_episodes?: number | null })
+      | undefined;
+    if (!l?.available) return "";
+    const s = l.stores_per_session;
+    const o = l.outcomes_per_session;
+    if ((s === null || s === undefined) && (o === null || o === undefined)) return "";
+    const parts = [
+      s !== null && s !== undefined ? `${fmtDecimal(s, 1)} stores` : "",
+      o !== null && o !== undefined ? `${fmtDecimal(o, 1)} outcomes` : "",
+    ].filter(Boolean);
+    const roots =
+      l.sessions !== undefined && l.root_episodes !== null && l.root_episodes !== undefined
+        ? ` ${plural(l.sessions, "session")} of ${plural(l.root_episodes, "root episode")}; idle shim roots are not sessions.`
+        : "";
+    return `${parts.join(" and ")} per session.${roots}`;
+  });
+
   // ---- board and recent -----------------------------------------------------
   const boardProblem = $derived.by(() => {
     if (store.board.error) return explainError(store.board.error, "The board");
@@ -330,7 +398,7 @@
         {#if chips.length}
           <div class="chips">
             {#each chips as c (c.text)}
-              <span class="chip chip-lg {c.tone}">{#if c.tone}<span class="dot {c.tone}" aria-hidden="true"></span>{/if}{c.text}</span>
+              <span class="chip chip-lg {c.tone}" title={c.title}>{#if c.tone}<span class="dot {c.tone}" aria-hidden="true"></span>{/if}{c.text}</span>
             {/each}
           </div>
         {/if}
@@ -426,10 +494,20 @@
             <div class="tile">
               <span class="tile-label">Backlog</span>
               <span class="tile-value num">{dream.backlog !== undefined ? fmtNum(dream.backlog) : ""}</span>
+              {#if minBatch !== null}
+                {@const g = gaugePct(dream.backlog, minBatch)}
+                {#if g !== null}<span class="track gauge" aria-hidden="true"><span style:width="{g}%"></span></span>{/if}
+                <span class="tile-sub">due at {fmtNum(minBatch)}</span>
+              {/if}
             </div>
             <div class="tile">
               <span class="tile-label">Idle</span>
               <span class="tile-value">{dream.idle_seconds !== undefined ? fmtDuration(dream.idle_seconds) : ""}</span>
+              {#if idleThreshold !== null}
+                {@const g = gaugePct(dream.idle_seconds, idleThreshold)}
+                {#if g !== null}<span class="track gauge" aria-hidden="true"><span style:width="{g}%"></span></span>{/if}
+                <span class="tile-sub">or after {fmtDuration(idleThreshold)}</span>
+              {/if}
             </div>
             <div class="tile">
               <span class="tile-label">Digests pending</span>
@@ -475,6 +553,9 @@
         {:else}
           <p class="unavailable">Dream status is unavailable.</p>
         {/if}
+        <div class="dream-actions">
+          <button type="button" class="btn btn-secondary btn-sm" onclick={() => (reviewOpen = true)}>Review consolidation</button>
+        </div>
       </div>
 
       <div class="col">
@@ -519,11 +600,14 @@
               {#each outcomeChips as c (c)}<span class="chip">{c}</span>{/each}
             </div>
           {/if}
+          {#if perSession}<p class="caption">{perSession}</p>{/if}
         {:else}
           <p class="unavailable">The learning loop is unavailable on this daemon.</p>
         {/if}
       </div>
     </section>
+
+    <ObservatoryDetails {counts} {stats} {health} {sources} {sourcesFailed} />
 
     <!-- board and recent writes -->
     <section class="panel cols" aria-label="Activity">
@@ -595,6 +679,8 @@
     </section>
   {/if}
 </div>
+
+<ConsolidationDrawer bind:open={reviewOpen} />
 
 <style>
   .page {
@@ -874,6 +960,19 @@
     font-weight: 600;
     letter-spacing: -0.02em;
     line-height: 1.1;
+  }
+  .tile .gauge {
+    height: 4px;
+    margin-top: 6px;
+  }
+  .tile-sub {
+    font-size: 11px;
+    color: var(--ink-4);
+  }
+  .dream-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .tile-value.na {
     font-size: 13px;
