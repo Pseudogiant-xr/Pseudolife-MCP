@@ -37,7 +37,9 @@
   <h1 class="title">{title}</h1>
   {#if subtitle}<span class="subtitle">{subtitle}</span>{/if}
   {#if fixtures}
-    <span class="chip warn demo" title="Served by the fixture devserver, not a real bank">Demo data, not a real bank</span>
+    <span class="chip warn demo" title="Served by the fixture devserver, not a real bank"
+      >Demo data<span class="demo-tail">, not a real bank</span></span
+    >
   {/if}
   <div class="search">
     <label for="jump" class="sr-only">Jump to a view</label>
@@ -162,6 +164,9 @@
       max-width: none;
       flex: 1 1 auto;
       min-width: 0;
+    }
+    .demo-tail {
+      display: none;
     }
   }
 </style>

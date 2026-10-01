@@ -54,7 +54,8 @@
 <article class="finding" class:gated={auto?.tone === "warn"}>
   <header class="f-head">
     <span class="chip">{typeLabel(finding.type)}</span>
-    {#if finding.label}<span class="f-label">{finding.label}</span>{/if}
+    <!-- A duplicate's label is just "a ↔ b", which the body shows as links. -->
+    {#if finding.label && finding.type !== "duplicate"}<span class="f-label">{finding.label}</span>{/if}
     {#if auto}
       <span class="auto">
         <span class="chip {auto.tone}" title={auto.needsPerson ? "Needs a person" : undefined}>{auto.label}</span>

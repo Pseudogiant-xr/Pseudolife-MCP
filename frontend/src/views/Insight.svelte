@@ -107,10 +107,9 @@
         {#if questions.length}<span class="meta">{fmtNum(questions.length)}</span>{/if}
       </div>
       {#if questions.length}
-        <ol class="q-list">
+        <ul class="q-list">
           {#each questions as q, i (i)}
             <li class="q">
-              <span class="q-n num" aria-hidden="true">{i + 1}</span>
               <div class="q-body">
                 <p class="q-text"><InlineCode text={q.question} /></p>
                 <p class="q-meta">
@@ -120,7 +119,7 @@
               </div>
             </li>
           {/each}
-        </ol>
+        </ul>
       {:else}
         <div class="empty inner">
           <p class="empty-title">No open questions</p>
@@ -281,19 +280,10 @@
     padding: 0;
   }
   .q {
-    display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
-    gap: 12px;
     padding: 16px 0;
   }
   .q + .q {
     border-top: 1px solid var(--hairline);
-  }
-  .q-n {
-    font-size: 20px;
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--ink-4);
   }
   .q-body {
     display: flex;

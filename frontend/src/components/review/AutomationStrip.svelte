@@ -9,6 +9,11 @@
   let { counts }: { counts: Record<AutomationState, number> | null } = $props();
 </script>
 
+{#if counts === null}
+  <!-- An older daemon, or one without Postgres, serves no automation counts:
+       one quiet line instead of five empty tiles. -->
+  <p class="caption none">This daemon does not report which findings automation will handle, so each one is shown as needing a decision.</p>
+{:else}
 <section class="panel strip" aria-label="Automation state of the findings">
   {#each AUTOMATION_STATES as s (s)}
     {@const w = stateWords(s)}
@@ -24,8 +29,12 @@
     </div>
   {/each}
 </section>
+{/if}
 
 <style>
+  .none {
+    padding: 0 4px;
+  }
   .strip {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));

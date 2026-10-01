@@ -230,7 +230,8 @@
           </p>
         {/if}
 
-        {#if result.searching && result.lowConfidence}
+        <!-- With nothing to show, "No matches" below already says it all. -->
+        {#if result.searching && result.lowConfidence && (result.entries.length || result.cortex.length)}
           <p class="notice" role="status">
             <span class="dot warn" aria-hidden="true"></span>
             Low confidence: nothing cleared the score floor, so treat these as loose matches.
