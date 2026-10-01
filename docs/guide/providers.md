@@ -273,7 +273,8 @@ script does, in Codex context, through the managed connection file. The
 wake itself is Claude Code's. Codex's own wake path is the
 [doorbell](configuration.md#codex-doorbell), also on by default when a
 `codex` CLI is found; a woken task needs `memory_message` approved, or it
-stalls on a prompt. Setup approves it with the other three, and disabling it in
+stalls on a prompt (hook setup approves that tool with your consent). Setup
+approves the Stop hook with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.
@@ -326,6 +327,12 @@ PowerShell uses `-CodexHooks`, `-CodexHookTrust`, and `-Instructions` with
 the same values. For unattended setup, explicit `yes` authorizes scoped
 trust and the fallback; `ask` without an interactive terminal does not grant
 approval. The helper also accepts `--non-interactive` to disable prompting.
+The same approval, `yes` or a yes at the prompt (which names it), also sets
+`approval_mode = "approve"` for the `memory_message` tool, so a task the
+doorbell wakes can read its board mail without stalling on a prompt. It keeps
+any value you set yourself and approves no other tool; Codex approves per
+tool, so this also covers sending board mail
+([details](configuration.md#codex-cli-and-desktop)).
 
 ```bash
 # Full unattended setup with automatic memory approved:
@@ -508,8 +515,10 @@ replacing canonical facts through `memory_store` when auto-promotion is enabled.
 Hints inform a client's `default_tools_approval_mode = "writes"`; they are not
 authorization and do not override per-tool approval settings or managed policy.
 An allow-once prompt does not guarantee durable approval. Inspect any existing
-`tools.<tool>.approval_mode` override if prompts differ from the server default;
-the installer and doctor do not change approval policy.
+`tools.<tool>.approval_mode` override if prompts differ from the server default.
+The installer and doctor do not change approval policy, with one exception:
+Codex hook setup, when you approve the hooks, sets `memory_message` to
+`"approve"` unless you already chose a value for it.
 
 Codex can also filter tools **client-side, per project**: a project-scoped
 `.codex/config.toml` (loaded for trusted projects only) may register the
