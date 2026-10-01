@@ -2057,8 +2057,10 @@ lineage row; re-deriving one that has none (an explicit write, or a lesson
 from before lineage existed) never attaches any.
 
 A lesson retires only when an explicit forget (`memory_forget(scope="memory")`)
-removes the **last** entry of its lineage, the same rule the v51 forget
-cascade applies to facts and dream edges. Superseding a source (a
+removes the **last** entry of its lineage. This follows the v51 forget
+cascade for facts and dream edges with one difference: that cascade counts
+only current sources, while a superseded entry still supports a lesson,
+because a correction is often what the lesson is about. Superseding a source (a
 correction), consolidating it into a merged note and capacity eviction never
 retire a lesson: a superseded entry is kept as history and still counts as
 support, and a digest the forget retires is superseded too. An entry already

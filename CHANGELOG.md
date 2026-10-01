@@ -23,8 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   entries; re-deriving one without lineage (an explicit or older lesson)
   never attaches any.
 - A lesson retires only when an explicit forget removes the last entry of its
-  lineage, the rule the 2026-09-29 forget cascade applies to facts and dream
-  edges. Corrections, consolidation and capacity eviction never retire a
+  lineage. This follows the 2026-09-29 forget cascade for facts and dream
+  edges, except that a superseded entry still supports a lesson. Corrections, consolidation and capacity eviction never retire a
   lesson: a superseded entry is kept as history and still supports it (so do
   digests the forget itself retires), and an entry deleted earlier counts as
   gone. A clustered lesson survives while any entry of its batch survives.

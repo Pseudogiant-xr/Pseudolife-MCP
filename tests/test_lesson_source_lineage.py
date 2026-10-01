@@ -323,9 +323,10 @@ def test_source_cascade_connection_loss_rolls_back_source_lesson_and_audit(
     assert rows(svc)["backed"]["status"] == "current"
 
 
-# Retirement rule, as the v51 forget cascade applies to facts and edges: a
-# lesson retires only when an explicit forget removes the LAST of its trusted
-# sources. Supersession, consolidation and capacity eviction keep it.
+# Retirement rule, like the v51 forget cascade for facts and edges except that
+# a superseded source still supports: a lesson retires only when an explicit
+# forget removes the LAST of its trusted sources. Supersession, consolidation
+# and capacity eviction keep it.
 
 
 class TwoClusters:
@@ -364,6 +365,23 @@ def test_clustered_lessons_retire_only_when_last_batch_source_is_forgotten(
                    if d["action"] == "retire"]
     assert sorted((d["entity_norm"], d["reason"]) for d in retirements) == [
         ("first-cluster", "source_forgotten"), ("second-cluster", "source_forgotten")]
+
+
+def test_superseded_surviving_source_still_supports_at_the_forget(svc):
+    # Unlike the v51 fact cascade, a superseded co-source keeps the lesson:
+    # the correction is kept history and may be what the lesson is about.
+    first = _seed(svc, "Clustered evidence A")
+    second = _seed(svc, "Clustered evidence B")
+    clustered_signal(svc, first, "a")
+    clustered_signal(svc, second, "b")
+    assert svc.synthesize_lessons(TwoClusters())["lessons"] == 2
+    svc.supersede(entry_id=second.db_id, new_text="Corrected clustered evidence B")
+    svc.delete(text=first.text)
+    assert statuses(svc)["first-cluster"] == "current"
+    assert statuses(svc)["second-cluster"] == "current"
+    svc.delete(text=second.text)
+    assert statuses(svc)["first-cluster"] == "retired"
+    assert statuses(svc)["second-cluster"] == "retired"
 
 
 def test_already_evicted_batch_source_counts_as_gone_at_the_last_forget(svc):
