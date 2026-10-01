@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — plain mail never wakes an unparked session)
+- Plain mail to an idle session that has not parked no longer wakes it.
+  Before, such a session was rung at most once an hour (`nudged`) and
+  asked to record a park. Now only a parked session rings, and only for
+  mail that plausibly clears its need: the sender is its clearer (or just
+  released the lease it waits on), it accepts `anyone`, the message's
+  `clears` names the need, or `urgent`, each within the existing caps.
+  Mail to an unparked session, `urgent` and `clears` included, answers
+  `not_needed` with reason `no_park` and waits for its next turn
+  (maintainer decision 2026-10-02).
+- A `nudged` ring decided before the update is never served to an adapter
+  and its mail is never delivered through a live channel; `history` and
+  `board-audit stats` still show it. The shim ignores a `nudged` wake from
+  an older daemon, and the Stop hook fires only on a `rung` marker. The
+  Codex doorbell and the Stop hook no longer append a park request.
+- `coordination.wake.nudge_interval_seconds` is retired. A config.yaml
+  that still sets it loads as before and the key does nothing; `/health`
+  and `pseudolife-mcp doctor` no longer report it. The change is under
+  `plugin/` and in the shim, so a deploy needs the client step.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender
