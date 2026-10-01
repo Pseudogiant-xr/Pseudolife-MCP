@@ -5,7 +5,7 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path
 import pytest
-from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError
+from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, private_write
 from pseudolife_memory import tunnel_runtime as runtime
 
 
@@ -419,6 +419,65 @@ def test_root_chain_covers_launcher_runtime_interpreter_dependencies_and_store(t
         assert path in chain
 
 
+def test_root_chain_covers_the_bridge_interpreters_own_import_path_and_pth_files(monkeypatch):
+    """The frozen bridge runs the base interpreter without -I/-S/-s, so as
+    root it imports from that interpreter's own sys.path and user site, and
+    runs every .pth file in its site directories at startup."""
+    from types import SimpleNamespace
+    dist = '/usr/local/lib/python3.11/dist-packages'
+    pth = '/usr/lib/python3/dist-packages/distutils-precedence.pth'
+    entries = {'/': (0, DIR), '/opt': (0, DIR), '/opt/pl': (0, DIR), '/opt/pl/bin': (0, DIR),
+               '/opt/pl/bin/pseudolife-mcp': (0, FILE), '/usr': (0, DIR), '/usr/lib': (0, DIR),
+               '/usr/lib/python3.11': (0, DIR), '/usr/local': (0, DIR), '/usr/local/lib': (0, DIR),
+               '/usr/local/lib/python3.11': (0, DIR), dist: (0, DIR), '/usr/lib/python3': (0, DIR),
+               '/usr/lib/python3/dist-packages': (0, DIR), pth: (0, stat.S_IFREG | 0o644),
+               '/root': (0, stat.S_IFDIR | 0o700), '/srv': (0, DIR), '/srv/tunnel': (0, stat.S_IFDIR | 0o700)}
+    _tree(monkeypatch, entries)
+    listing = {'/usr/lib/python3/dist-packages': ['distutils-precedence.pth', 'six.py']}
+    def listdir(directory):
+        if directory not in listing:
+            raise FileNotFoundError(directory)
+        return listing[directory]
+    monkeypatch.setattr(runtime, '_listdir', listdir)
+    monkeypatch.setattr(runtime, '_process_chain', lambda: [])
+    monkeypatch.setattr(runtime, '_interpreter_paths', lambda interpreter: {
+        'path': ['/usr/lib/python3.11', dist, '/usr/lib/python3/dist-packages'],
+        'site': [dist, '/usr/lib/python3/dist-packages', '/root/.local/lib/python3.11/site-packages']})
+    store, command = SimpleNamespace(root='/srv/tunnel'), ['/opt/pl/bin/pseudolife-mcp', 'tunnel', 'run']
+    runtime.require_root_chain(command, store)
+    entries[dist] = (0, stat.S_IFDIR | 0o2775)      # Debian's historical root:staff dist-packages
+    with pytest.raises(TunnelError, match=f'{dist} must be owned by root'):
+        runtime.require_root_chain(command, store)
+    entries[dist] = (0, DIR)
+    entries[pth] = (0, stat.S_IFREG | 0o664)
+    with pytest.raises(TunnelError, match=f'{pth} must be owned by root'):
+        runtime.require_root_chain(command, store)
+    entries[pth] = (0, stat.S_IFREG | 0o644)
+    listing[dist] = PermissionError(13, 'denied')     # a site directory whose .pth files cannot be listed
+    def unlistable(directory):
+        if isinstance(listing.get(directory), Exception):
+            raise listing[directory]
+        return listdir(directory)
+    monkeypatch.setattr(runtime, '_listdir', unlistable)
+    with pytest.raises(TunnelError, match=f'{dist} cannot be listed'):
+        runtime.require_root_chain(command, store)
+
+
+def test_the_bridge_interpreter_query_reads_a_real_path_and_refuses_when_it_cannot(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    reported = runtime._interpreter_paths(sys.executable)
+    assert '' not in reported['path'] and any(Path(path).is_dir() for path in reported['path'])
+    assert reported['site'] and all(isinstance(path, str) for path in reported['site'])
+    with pytest.raises(TunnelError, match='import path'):
+        runtime._interpreter_paths(str(tmp_path / 'no-such-python'))
+    def hung(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs.get('timeout'))
+    monkeypatch.setattr(runtime.subprocess, 'run', hung)
+    with pytest.raises(TunnelError, match='import path'):
+        runtime._interpreter_paths(sys.executable)
+
+
 def test_root_run_refuses_a_chain_a_user_could_change_before_anything_starts(tmp_path, monkeypatch):
     store, profile = _ready_profile(tmp_path)
     launcher = '/opt/pl/bin/pseudolife-mcp'
@@ -661,6 +720,8 @@ def test_requested_stop_ends_the_supervisor_with_success(tmp_path, monkeypatch, 
             owned_children.append((process, identity))
         return process, identity
     monkeypatch.setattr(runtime, '_launch_child', launch)
+    # A marker no supervisor consumed (a stop of a tunnel that then crashed).
+    private_write(store.root / 'personal.stop.json', b'{"pid": 1, "created": 0}')
     exits = []
     thread = threading.Thread(target=lambda: exits.append(runtime.run_profile(
         profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(sys.executable))))

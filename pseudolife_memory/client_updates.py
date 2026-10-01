@@ -88,16 +88,23 @@ def home() -> Path:
     return Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
 
 
-def run_cli(argv, *, timeout: int = 600, cwd: str | None = None) -> tuple[int, str]:
-    """Run a CLI and return ``(returncode, combined output)``; a missing or
-    hung executable reads as a non-zero code with the reason as output."""
+# run_cli's code for a command it stopped at its timeout (GNU timeout's).
+TIMED_OUT = 124
+
+
+def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
+    """Run a CLI and return ``(returncode, combined output)``; a missing
+    executable reads as code 1 and a hung one as ``TIMED_OUT``, with the
+    reason as output."""
     try:
         # No stdin: a CLI that decides to prompt fails fast instead of holding
         # a captured-output deploy for the whole timeout with nothing shown.
         proc = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
                               timeout=timeout, check=False, errors="replace",
-                              stdin=subprocess.DEVNULL, cwd=cwd)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+                              stdin=subprocess.DEVNULL, cwd=cwd, env=env)
+    except subprocess.TimeoutExpired as exc:
+        return TIMED_OUT, f"{type(exc).__name__}: {exc}"
+    except OSError as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
@@ -1038,10 +1045,18 @@ def update_tunnels(shim: dict | None) -> dict | None:
         return {"state": "skipped",
                 "detail": f"running tunnels ({which}) stay on their current release because the shim step failed; "
                           f"once it passes, run {command}"}
-    code, out = run_cli([layout.launcher, "tunnel", "update"], timeout=60 + _TUNNEL_REFRESH_TIMEOUT_S * len(running))
+    timeout = 60 + _TUNNEL_REFRESH_TIMEOUT_S * len(running)
+    # No PYTHON* variable: an exported PYTHONPATH (a checkout) would be what
+    # the refresh freezes into the bridge.
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
+    code, out = run_cli([layout.launcher, "tunnel", "update"], timeout=timeout, env=env)
     result = _tunnel_report(out)
     if result is not None and (code == 0) == (result["state"] == "current"):
         return result
+    if code == TIMED_OUT:
+        return {"state": "failed",
+                "detail": f"running tunnels ({which}) were not refreshed: {command} timed out after {timeout} s; "
+                          "check `pseudolife-mcp tunnel status`, then run it again"}
     # Its output is not repeated: a crash's text can carry private file data.
     return {"state": "failed",
             "detail": f"running tunnels ({which}) were not refreshed: {command} ended with exit {code}; run it "

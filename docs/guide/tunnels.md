@@ -111,9 +111,12 @@ packages of the process that runs it, so this moves running tunnels onto the
 release just installed and never onto a checkout's code. Without an installed
 launcher (pip or lite installs) the step is skipped and names
 `pseudolife-mcp tunnel update`; when the shim step fails it is skipped and names
-the launcher command to run once the shim is fixed. Removing old shim runtimes
-keeps any runtime a running tunnel's bridge still imports from, and removes
-nothing when saved tunnel records cannot be read.
+the launcher command to run once the shim is fixed. The refresh runs without
+`PYTHON*` environment variables, so an exported `PYTHONPATH` cannot reach the
+bridge; a refresh that times out is reported as timed out, with the command to
+run again after `tunnel status`. Removing old shim runtimes keeps any runtime a
+running tunnel's bridge still imports from while that tunnel's processes are
+alive, and removes nothing when saved tunnel records cannot be read.
 `pseudolife-mcp tunnel update` updates only saved tunnels. Running managed tunnels
 refresh their bridge and shim, even when the vendor version stays the same, and
 must become locally ready before the update succeeds. A failed candidate attempts
@@ -162,9 +165,13 @@ commands; it uses the existing root privilege and should be reviewed as such.
 It installs, and a root tunnel starts or refreshes, only when every path root
 would run is owned by root and not writable by its group or others: the
 launcher, the runtime it starts, the interpreter, the site-packages the bridge
-imports from, the package, the tunnel profile directory, and each of their
-parent directories up to `/`. Otherwise it refuses and names the path; install
-Pseudolife as root, or fix that path's owner and mode, then retry.
+imports from, the bridge interpreter's own import path and user site, the `.pth`
+files in those site directories (they run at interpreter start), the package,
+the tunnel profile directory, and each of their parent directories up to `/`.
+Otherwise it refuses and names the path; install Pseudolife as root, or fix that
+path's owner and mode, then retry. A group-writable
+`/usr/local/lib/python3.X/dist-packages` (Debian's historical root:staff 2775)
+is refused this way.
 No root service or login policy is changed implicitly. An autostart service cannot keep
 a sleeping or powered-off host available.
 

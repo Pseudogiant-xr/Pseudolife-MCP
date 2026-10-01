@@ -404,6 +404,7 @@ def test_a_runtime_a_running_tunnels_frozen_bridge_imports_from_is_kept(cli, mon
         snapshot = tunnel_runtime.snapshot_bridge(profile, store, ["pseudolife-mcp", "tunnel", "shim"])
     record = store.root / "dot.process.json"
     private_write(record, json.dumps({"pid": 4100, "snapshot": snapshot}).encode())
+    cli.processes = [(4100, 10, str(cli.home / "elsewhere" / "tunnel-client.exe"))]   # the tunnel runs
     result = uc.update_shim(ROOT)
     assert _runtime_dirs(cli) == ["000001", "000002"], result
     record.write_bytes(b"not a record")

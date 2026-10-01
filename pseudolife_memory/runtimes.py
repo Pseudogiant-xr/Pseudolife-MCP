@@ -1069,11 +1069,21 @@ def default_tunnel_root(env: dict | None = None) -> Path:
     return home(env) / ".pseudolife-mcp" / "tunnel"
 
 
-def tunnel_runtimes(layout: Layout, tunnel_root: Path) -> set[Path]:
+def _record_pids(record: dict) -> set:
+    """The processes a tunnel record names: a process record's runtime child
+    (``pid``) and supervisor, a refresh request's target child."""
+    named = [record.get("pid")] + [record[key].get("pid") for key in ("supervisor", "target")
+                                   if isinstance(record.get(key), dict)]
+    return {pid for pid in named if isinstance(pid, int) and not isinstance(pid, bool)}
+
+
+def tunnel_runtimes(layout: Layout, tunnel_root: Path, alive: set | None = None) -> set[Path]:
     """The runtimes a running tunnel's frozen bridge (``<name>.process.json``)
-    or a pending refresh (``<name>.reload.json``) imports from. Raises
-    ``OSError`` or ``ValueError`` when a record or its snapshot cannot be
-    read."""
+    or a pending refresh (``<name>.reload.json``) imports from. With
+    ``alive`` (the pids of the process table), a record none of whose
+    processes is alive pins nothing: it outlived a reboot, a kill or its
+    refresh's timeout. Raises ``OSError`` or ``ValueError`` when a record or
+    its snapshot cannot be read."""
     if not os.path.lexists(tunnel_root):
         return set()
     paths: list[str] = []
@@ -1085,6 +1095,8 @@ def tunnel_runtimes(layout: Layout, tunnel_root: Path) -> set[Path]:
             raise ValueError(f"{name} is not a tunnel record")
         snapshot = record.get("snapshot")
         if snapshot is None:      # started without a frozen bridge
+            continue
+        if alive is not None and not _record_pids(record) & alive:
             continue
         digest = snapshot.get("digest") if isinstance(snapshot, dict) else None
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -1122,13 +1134,6 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     current = current_runtime(layout)
     complete = {os.path.normcase(str(r.path)) for r in list_runtimes(layout)}
     keep = {os.path.normcase(str(p)) for p in pinned}
-    if tunnels is not None:
-        try:
-            keep |= {os.path.normcase(str(p)) for p in tunnel_runtimes(layout, tunnels)}
-        except (OSError, ValueError, SyntaxError, TypeError) as exc:
-            result["error"] = (f"saved tunnel records under {tunnels} could not be read ({exc}); "
-                               f"no runtime was removed")
-            return result
     if current is not None:
         keep.add(os.path.normcase(str(current.path)))
     try:
@@ -1136,6 +1141,14 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     except OSError as exc:
         result["error"] = f"could not read the process table: {exc}"
         return result
+    if tunnels is not None:
+        alive = None if rows is None else {pid for pid, _ppid, _image in rows}
+        try:
+            keep |= {os.path.normcase(str(p)) for p in tunnel_runtimes(layout, tunnels, alive)}
+        except (OSError, ValueError, SyntaxError, TypeError, RecursionError) as exc:
+            result["error"] = (f"saved tunnel records under {tunnels} could not be read "
+                               f"({type(exc).__name__}: {exc}); no runtime was removed")
+            return result
     candidates: list[Path] = []
     try:
         for name in sorted(os.listdir(layout.root)):

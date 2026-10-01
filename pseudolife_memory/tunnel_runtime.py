@@ -525,6 +525,8 @@ def run_profile(profile: Profile, store: ProfileStore, command: list[str], *, bi
         raise TunnelError('tunnel runtime key is expired; renew it before starting')
     if status_profile(profile.name, store)['running']:
         raise TunnelError('this tunnel profile is already running')
+    # A stop marker no supervisor consumed belongs to no running child.
+    _stop_path(profile.name, store).unlink(missing_ok=True)
     if _root_linux():
         require_root_chain(command, store)
     binary = binary or ensure_runtime(store, profile.runtime_version or VERSION)
@@ -788,6 +790,10 @@ def _readlink(path: str) -> str:
     return os.readlink(path)
 
 
+def _listdir(path: str) -> list[str]:
+    return os.listdir(path)
+
+
 def _root_linux() -> bool:
     """A root run on Linux: the system service, or a hand-started root run."""
     return sys.platform.startswith('linux') and os.geteuid() == 0
@@ -795,9 +801,34 @@ def _root_linux() -> bool:
 
 def _process_chain() -> list[str]:
     """What this process runs and imports, and so what a bridge frozen from
-    it runs (see snapshot_bridge): interpreter, site-packages, this package."""
-    return [sys.executable, getattr(sys, '_base_executable', sys.executable),
+    it runs (see snapshot_bridge): interpreter, import path, site-packages,
+    this package."""
+    return [sys.executable, getattr(sys, '_base_executable', sys.executable), *filter(None, sys.path),
             *site.getsitepackages(), str(Path(__file__).parent)]
+
+
+_IMPORT_PATH_QUERY = ('import json, site, sys; print(json.dumps({"path": sys.path, '
+                      '"site": [*site.getsitepackages(), site.getusersitepackages()]}))')
+
+
+def _interpreter_paths(interpreter: str) -> dict:
+    """The frozen bridge interpreter's own import path, asked of it: its
+    sys.path, and its site directories including the user site. The bridge
+    runs it without -I, -S or -s and with no PYTHON* variable
+    (child_environment), which -E reproduces here."""
+    try:
+        result = subprocess.run([interpreter, '-E', '-c', _IMPORT_PATH_QUERY], stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=30,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        data = json.loads(result.stdout)
+        if result.returncode or not all(isinstance(data[key], list) for key in ('path', 'site')):
+            raise ValueError
+        paths = {key: [entry for entry in data[key] if entry] for key in ('path', 'site')}
+        if not all(isinstance(entry, str) for entries in paths.values() for entry in entries):
+            raise ValueError
+        return paths
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError):
+        raise TunnelError('root tunnel refused: the bridge interpreter did not report its import path') from None
 
 
 def _shebang(path: str) -> str | None:
@@ -813,10 +844,21 @@ def _shebang(path: str) -> str | None:
 def root_command_chain(command: list[str], store: ProfileStore) -> list[str]:
     """Every path a root tunnel executes or imports from: the launcher and
     the newest runtime it starts, script interpreters, this process's
-    interpreter and site-packages (frozen into the bridge), this package,
-    and the profile store holding the vendor runtime and frozen bridges."""
+    interpreter and site-packages (frozen into the bridge), the bridge
+    interpreter's own import path and user site, the .pth files their site
+    directories run at startup, this package, and the profile store holding
+    the vendor runtime and frozen bridges."""
     from pseudolife_memory import runtimes
-    paths = [*command[:1], *_process_chain(), str(store.root)]
+    bridge = _interpreter_paths(str(Path(getattr(sys, '_base_executable', sys.executable)).resolve()))
+    paths = [*command[:1], *_process_chain(), *bridge['path'], *bridge['site'], str(store.root)]
+    for directory in dict.fromkeys([*site.getsitepackages(), *bridge['site']]):
+        try:
+            names = _listdir(directory)
+        except (FileNotFoundError, NotADirectoryError):      # nothing in it runs
+            continue
+        except OSError:
+            raise TunnelError(f'root tunnel refused: {directory} cannot be listed for the .pth files it runs') from None
+        paths += [posixpath.join(directory, name) for name in sorted(names) if name.endswith('.pth')]
     try:
         layout = runtimes.default_layout()
     except ValueError:

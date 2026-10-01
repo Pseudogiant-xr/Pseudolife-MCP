@@ -67,6 +67,7 @@ def test_expiry_only_metadata_preserves_proof_and_frozen_observer_without_refres
     store.save(updated)
     monkeypatch.setattr(runtime, 'update_profile', lambda *args: pytest.fail('expiry-only edit must not refresh'))
     monkeypatch.setattr(runtime, 'status_profile', lambda *args: {'running': True, 'ready': True})
+    monkeypatch.setattr(runtime, '_root_linux', lambda: False)   # fixture paths are not root's
     assert runtime.start_profile(updated, store, ['fixture', 'tunnel', 'shim'])['ready']
     assert bridge.verification_status(store, updated)['verified']
     challenge = bridge.begin_challenge(store, updated)

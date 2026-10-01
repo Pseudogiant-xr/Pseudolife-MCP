@@ -1,6 +1,7 @@
 """Guided setup is resumable and leaves installed client registrations alone."""
 from dataclasses import replace
 import json
+import os
 
 import pytest
 
@@ -176,6 +177,34 @@ def test_client_update_refreshes_running_tunnels_through_the_new_launcher_after_
     assert store.profile_path('dot').read_bytes() == before
 
 
+def test_the_launcher_refresh_runs_without_python_import_overrides(isolated, tmp_path, monkeypatch):
+    # An exported checkout path would otherwise be frozen into the bridge.
+    _saved_tunnel(isolated, monkeypatch)
+    _launcher(tmp_path, monkeypatch)
+    for key in ('PYTHONPATH', 'PYTHONHOME', 'PYTHONUSERBASE', 'PYTHONSTARTUP', 'PYTHONSAFEPATH'):
+        monkeypatch.setenv(key, str(tmp_path / 'checkout'))
+    from pseudolife_memory import client_updates
+    calls = _cli_calls(monkeypatch)
+    client_updates.run_steps((), repo=None, source='fixture')
+    env = calls[0][1]['env']
+    assert not [key for key in env if key.upper().startswith('PYTHON')]
+    assert env.get('PATH') == os.environ.get('PATH')
+
+
+def test_a_launcher_refresh_that_times_out_says_so(isolated, tmp_path, monkeypatch):
+    import subprocess
+    _saved_tunnel(isolated, monkeypatch)
+    launcher = _launcher(tmp_path, monkeypatch)
+    from pseudolife_memory import client_updates
+    def hung(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+    monkeypatch.setattr(client_updates.subprocess, 'run', hung)
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    detail = report['tunnel']['detail']
+    assert report['tunnel']['state'] == 'failed' and report['ok'] is False
+    assert 'timed out after 150 s' in detail and f'"{launcher}" tunnel update' in detail and 'exit' not in detail
+
+
 @pytest.mark.parametrize('checkout', [False, True])
 def test_client_update_without_an_installed_launcher_never_refreshes_in_process(isolated, tmp_path, monkeypatch, checkout):
     _saved_tunnel(isolated, monkeypatch)
@@ -214,7 +243,7 @@ def test_idle_saved_tunnels_need_no_refresh(isolated, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('code, output', [
     (2, 'SECRET private launcher output\n'),
-    (1, 'TimeoutExpired: SECRET command timed out'),
+    (1, 'SECRET traceback text'),
     (1, json.dumps({'state': 'failed', 'needs_attention': True, 'detail': '1 saved tunnel profiles checked',
                     'profiles': [{'profile': 'dot', 'state': 'rolled-back', 'needs_attention': True}]})),
 ])

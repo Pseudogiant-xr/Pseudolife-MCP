@@ -67,7 +67,9 @@ def _sharing_retry(call, *args):
 
     A reader opened without delete sharing blocks ``os.replace`` of the
     record it reads, and a pending replace blocks a new open; either clears
-    within milliseconds. Any other error, and the last attempt, propagate.
+    within milliseconds. Windows reports both as winerror 32 or 5, and 5 is
+    also a genuine ACL denial, which is therefore retried for about 200 ms
+    before it propagates. Any other error, and the last attempt, propagate.
     """
     for attempt in range(20):
         try:
