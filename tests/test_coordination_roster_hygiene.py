@@ -794,6 +794,8 @@ def test_a_claude_code_session_shim_still_binds_its_own_identity(monkeypatch, tm
     ("cloud-fixture", "1", False),
     ("codex", " TRUE ", False),
     ("cloud-fixture", "on", True),
+    # An unrecognised marker fails closed rather than silently open.
+    ("cloud-fixture", "enabled", False),
 ])
 def test_shared_cloud_conversations_cannot_act_as_one_mailbox(
         monkeypatch, tmp_path, writer, shared, channel):
@@ -804,9 +806,12 @@ def test_shared_cloud_conversations_cannot_act_as_one_mailbox(
 
     seen = {"calls": []}
     Server, types = _proxy_fixture(monkeypatch, seen)
-    _desktop_env(monkeypatch, {"PSEUDOLIFE_WRITER_ID": writer,
-                               "PSEUDOLIFE_AGENT_STATE": str(tmp_path / "shared.json"),
-                               "PSEUDOLIFE_AGENT_WAKE": "1"})
+    env = {"PSEUDOLIFE_WRITER_ID": writer, "PSEUDOLIFE_AGENT_WAKE": "1"}
+    if writer != "codex":
+        # A fixed state file disables the Codex thread registry by itself,
+        # which would leave the Registry stub below unable to fire.
+        env["PSEUDOLIFE_AGENT_STATE"] = str(tmp_path / "shared.json")
+    _desktop_env(monkeypatch, env)
     if shared is not None:
         monkeypatch.setenv("PSEUDOLIFE_MCP_SHARED_HOST", shared)
 
@@ -887,7 +892,7 @@ def test_shared_cloud_default_skips_registration_probe(monkeypatch):
     assert "board_checkin" not in seen
 
 
-@pytest.mark.parametrize("shared", ["0", "false", "off", ""])
+@pytest.mark.parametrize("shared", ["0", "false", "off", "no", ""])
 def test_disabled_shared_host_marker_preserves_session_adapter(monkeypatch, shared):
     from pseudolife_memory import shim
 

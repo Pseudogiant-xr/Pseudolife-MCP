@@ -955,7 +955,9 @@ def _serves_many_conversations() -> bool:
     ``PSEUDOLIFE_AGENT_STATE`` names one address and so changes nothing."""
     writer = os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
     shared = os.environ.get("PSEUDOLIFE_MCP_SHARED_HOST", "").strip().lower()
-    return writer in {"claude-desktop", "tunnel"} or shared in {"1", "true", "yes", "on"}
+    # Fail closed: any value except an explicit off keeps the guard on.
+    return (writer in {"claude-desktop", "tunnel"}
+            or shared not in {"", "0", "false", "no", "off"})
 
 
 def _report_coordination_unavailable(state_path) -> None:

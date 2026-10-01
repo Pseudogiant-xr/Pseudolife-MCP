@@ -8,7 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed (2026-09-30 — shared cloud conversations cannot act as one mailbox)
 - Shared stdio cloud hosts can declare `PSEUDOLIFE_MCP_SHARED_HOST=1`; the
-  known `tunnel` writer uses the guard automatically. Like Claude Desktop's
+  known `tunnel` writer uses the guard automatically. Any value other than
+  empty, `0`, `false`, `no` or `off` turns the guard on. Like Claude Desktop's
   app-level server, they register no coordination address and refuse status,
   lease and mail operations before dispatch, while memory and awareness
   calls remain available under the configured bearer principal.

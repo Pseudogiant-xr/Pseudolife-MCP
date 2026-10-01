@@ -1359,7 +1359,8 @@ For a custom cloud/ChatGPT/Dot launcher that shares one stdio shim among
 conversations, set `PSEUDOLIFE_MCP_SHARED_HOST=1` in that launcher's environment
 and restart its shim. The known `tunnel` writer uses the same guard automatically;
 setting the marker to `0` does not disable it for `tunnel` or `claude-desktop`.
-Truthy values are `1`, `true`, `yes` and `on`, trimmed and case-insensitive.
+Any value except empty, `0`, `false`, `no` or `off` (trimmed and
+case-insensitive) turns the guard on, so a mistyped marker fails closed.
 The shared shim refuses all `memory_message` actions and `memory_agents`
 `update`, `claim` and `release` before sending them upstream, even when
 coordination or channel delivery is explicitly enabled. It serves no board
