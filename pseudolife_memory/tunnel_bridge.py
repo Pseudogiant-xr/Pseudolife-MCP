@@ -190,7 +190,8 @@ class Observer:
         payloads = [result.get('structuredContent')]
         payloads.extend(_message(item.get('text', '')) for item in result['content'] if isinstance(item, dict))
         if any(isinstance(payload, dict) and (payload.get('error') or payload.get('errors')
-               or payload.get('ok') is False or payload.get('success') is False) for payload in payloads):
+               or payload.get('ok') is False or payload.get('success') is False
+               or payload.get('available') is False) for payload in payloads):
             return
         try:
             profile = self.store.load(self.name)

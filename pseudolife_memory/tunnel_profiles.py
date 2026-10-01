@@ -215,9 +215,13 @@ class Profile:
             checked_path(self.cloud_verification_file)
 
 
+def default_root() -> Path:
+    return Path.home() / '.pseudolife-mcp' / 'tunnel'
+
+
 class ProfileStore:
     def __init__(self, root: str | Path | None = None):
-        self.root = checked_path(root or Path.home() / '.pseudolife-mcp' / 'tunnel')
+        self.root = checked_path(root or default_root())
 
     def _prepare(self) -> None:
         existed = self.root.exists()

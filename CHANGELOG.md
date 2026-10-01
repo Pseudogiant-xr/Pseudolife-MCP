@@ -15,6 +15,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the tunnel; private receipts retain no memory or agent-board contents. Local
   readiness remains distinct from cloud access. Full tool discovery across daemon
   restart or tier expiry requires an explicit catalog choice.
+- A `memory_agents` reply that says the agent board is unavailable does not
+  count as a successful verification call.
+- `pseudolife-mcp doctor` and the client update say nothing about tunnels when
+  no tunnel profile directory exists, so a redirected home folder cannot crash
+  doctor or fail the update for someone who never set up a tunnel.
+- Updating an idle saved tunnel no longer downloads the tunnel runtime.
+- A client update run from a source checkout (`ops/update_clients.py`) does not
+  refresh running tunnels with the checkout's code. It reports the tunnel step
+  as skipped; run `pseudolife-mcp tunnel update` from the installed launcher.
 
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt

@@ -9842,9 +9842,12 @@ a sleeping or powered-off host available.
 
 Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
 POSIX stores it in an owner-only file, with disk encryption left to the host.
-Private launch files exist only while the supervisor owns the process. The CLI
-passes file references, never the API key in command arguments or the environment.
-Do not copy private profile storage into a repository or share runtime logs.
+Private launch files exist only while the supervisor owns the process. While a
+tunnel runs, one of them holds the decrypted runtime key for the vendor runtime
+to read, so DPAPI and other at-rest protection apply only while it is stopped.
+The CLI passes file references, never the API key in command arguments or the
+environment. Do not copy private profile storage into a repository or share
+runtime logs.
 
 The upstream [Secure MCP Tunnels runtime](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 provides the account transport. Reusing it avoids a second custom tunnel protocol;

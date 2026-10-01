@@ -120,7 +120,10 @@ def test_global_client_update_checks_saved_tunnel_without_registration_mutation(
     before = store.profile_path('dot').read_bytes()
     from pseudolife_memory import client_updates, tunnel_profiles, tunnel_runtime
     monkeypatch.setattr(tunnel_profiles, 'ProfileStore', lambda: store)
+    monkeypatch.setattr(tunnel_profiles, 'default_root', lambda: store.root)
     monkeypatch.setattr(cli, 'ProfileStore', lambda: store)
+    # An installed package: this test itself runs from a checkout.
+    monkeypatch.setattr(client_updates, 'checkout_root', lambda: None)
     monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
     observed = []
     monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *args: observed.append(args[0].name) or {'changed': False})
@@ -160,6 +163,63 @@ def test_combined_doctor_tunnel_report_is_readonly_and_absent_is_unchanged(isola
     assert report[0]['key_expiry']['known'] is False
     assert store.profile_path('dot').read_bytes() == before
     assert 'fixture-tunnel-key' not in json.dumps(report)
+
+
+def _redirected_home(tmp_path, monkeypatch):
+    from pathlib import Path
+    from pseudolife_memory import credentials
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
+    def redirected(path):
+        raise credentials.CredentialError('credential path must not contain redirects')
+    monkeypatch.setattr(credentials, '_reject_ancestor_redirects', redirected)
+
+
+def test_redirected_home_without_tunnel_profiles_leaves_doctor_and_update_alone(tmp_path, monkeypatch):
+    from pseudolife_memory import client_updates
+    _redirected_home(tmp_path, monkeypatch)
+    assert cli.saved_tunnel_diagnostics() == []
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert 'tunnel' not in report
+    assert report['ok'] is True
+
+
+@pytest.mark.parametrize('present', ['directory', 'dangling-link'])
+def test_redirected_tunnel_directory_is_reported_not_raised(tmp_path, monkeypatch, present):
+    from pseudolife_memory import client_updates
+    root = tmp_path / 'home' / '.pseudolife-mcp' / 'tunnel'
+    root.parent.mkdir(parents=True)
+    if present == 'directory':
+        root.mkdir()
+    else:
+        try:
+            root.symlink_to(tmp_path / 'missing', target_is_directory=True)
+        except OSError:
+            pytest.skip('this host does not permit disposable symlinks')
+    _redirected_home(tmp_path, monkeypatch)
+    assert cli.saved_tunnel_diagnostics()[0]['state'] == 'unavailable'
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert report['tunnel']['state'] == 'failed'
+    assert report['ok'] is False
+
+
+def test_client_update_from_a_checkout_does_not_refresh_running_tunnels(isolated, tmp_path, monkeypatch):
+    from pathlib import Path
+    _, token = isolated
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
+    store = ProfileStore()
+    store.save(Profile('dot', 'http://127.0.0.1:8765', str(token), consent=True,
+                       tunnel_id='tunnel_0123', state='ready'))
+    store.set_key('dot', 'fixture-tunnel-key')
+    from pseudolife_memory import client_updates, tunnel_runtime
+    monkeypatch.setattr(client_updates, 'checkout_root', lambda: tmp_path / 'checkout')
+    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
+    observed = []
+    monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *args: observed.append(args[0].name) or {'changed': False})
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert observed == []
+    assert report['tunnel']['state'] == 'skipped'
+    assert 'pseudolife-mcp tunnel update' in report['tunnel']['detail']
+    assert report['ok'] is True
 
 
 @pytest.mark.parametrize('state', ['rolled-back', 'rollback-incomplete', 'failed'])

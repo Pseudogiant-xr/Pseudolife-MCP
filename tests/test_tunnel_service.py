@@ -14,7 +14,9 @@ def test_service_install_requires_explicit_consent(tmp_path):
 
 
 @pytest.mark.parametrize('system', ['windows', 'linux', 'darwin'])
-def test_service_private_reference_and_stable_command(tmp_path, system):
+def test_service_private_reference_and_stable_command(tmp_path, monkeypatch, system):
+    from pseudolife_memory import tunnel_service
+    monkeypatch.setattr(tunnel_service, '_identity', lambda system: 'S-1-5-21-123')
     output = render_service(profile(tmp_path), ProfileStore(tmp_path/'profiles'), [str(tmp_path/'bin'/'pseudolife-mcp'), 'tunnel', 'run', '--profile', 'personal'], platform=system)
     assert 'pseudolife-mcp' in output
     assert 'synthetic-private-key' not in output

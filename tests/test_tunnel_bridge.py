@@ -344,6 +344,27 @@ def test_domain_error_is_not_cloud_success(store):
     assert not bridge.verification_status(store, store.load('dot'))['verified']
 
 
+@pytest.mark.parametrize('awareness, verified', [
+    ({'enabled': False, 'available': False, 'peers': [], 'truncated': False}, False),
+    ({'enabled': True, 'available': False, 'peers': [], 'truncated': False, 'reason': 'principal_not_allowed'}, False),
+    ({'enabled': True, 'available': False, 'peers': [], 'truncated': False, 'reason': 'not_initialized'}, False),
+    ({'enabled': True, 'available': True, 'peers': [], 'truncated': False}, True)])
+@pytest.mark.parametrize('channel', ['text', 'structured'])
+def test_unavailable_board_awareness_is_not_cloud_success(store, awareness, verified, channel):
+    challenge = bridge.begin_challenge(store, store.load('dot'))
+    observer = bridge.Observer(store, 'dot')
+    observer.request(request(1, 'memory_search', challenge['nonce']))
+    observer.response(response(1, content=[{'type': 'text', 'text': 'fixture result'}]))
+    observer.request(request(2, 'memory_agents', challenge['nonce']))
+    if channel == 'text':
+        observer.response(response(2, content=[{'type': 'text', 'text': json.dumps(awareness)}]))
+    else:
+        observer.response(response(2, content=[{'type': 'text', 'text': 'fixture result'}], structuredContent=awareness))
+    status = bridge.verification_status(store, store.load('dot'))
+    assert status['verified'] is verified
+    assert status['successful_calls'] == (2 if verified else 1)
+
+
 def test_malformed_catalog_payload_fails_closed():
     outgoing, incoming = [], []
     gate = bridge.CatalogGate('full', outgoing.append, incoming.append)

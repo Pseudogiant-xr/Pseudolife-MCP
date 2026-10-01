@@ -14,7 +14,7 @@ import webbrowser
 
 from pseudolife_memory.connect_cli import handshake
 from pseudolife_memory.doctor_cli import _registration_env_blocks as registration_blocks
-from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, private_read, validate_url, parse_expiry
+from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError, default_root, private_read, validate_url, parse_expiry
 from pseudolife_memory.tunnel_bridge import begin_challenge, run_bridge, verification_status
 
 TUNNELS_URL = 'https://platform.openai.com/settings/organization/tunnels'
@@ -235,9 +235,13 @@ def _refresh_status(store, name):
 
 def saved_tunnel_diagnostics(store=None):
     """Read-only optional section for the ordinary combined doctor command."""
-    store = store or ProfileStore()
+    # No tunnel directory means tunnels were never set up: say nothing, even
+    # when a redirected home ancestor would make the store refuse to open.
+    if store is None and not os.path.lexists(default_root()):
+        return []
     reports = []
     try:
+        store = store or ProfileStore()
         names = store.list()
     except TunnelError:
         return [{'state': 'unavailable', 'recovery': 'run tunnel doctor to repair private profile access'}]

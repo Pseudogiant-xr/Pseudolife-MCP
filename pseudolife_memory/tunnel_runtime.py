@@ -888,9 +888,9 @@ def update_profile(profile: Profile, store: ProfileStore, command: list[str]) ->
     Idle profiles stay idle. Runtime selection remains checksum-pinned; no
     upstream latest version or credential rotation occurs during client updates.
     """
-    ensure_runtime(store, profile.runtime_version or VERSION)
     if not status_profile(profile.name, store)['running']:
         return {'profile': profile.name, 'version': VERSION, 'changed': False, 'running': False, 'state': 'unchanged'}
+    ensure_runtime(store, profile.runtime_version or VERSION)
     with profile_lock(profile.name, store, purpose='update'):
         record = json.loads(private_read(_record_path(profile.name, store)))
         if not isinstance(record, dict) or not record.get('snapshot') or not record.get('launch_identity') or record.get('refresh_protocol') != 1:

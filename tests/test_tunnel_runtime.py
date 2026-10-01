@@ -369,6 +369,18 @@ def test_idle_update_does_not_start(tmp_path,monkeypatch):
     assert runtime.update_profile(profile,store,['pseudolife-mcp'])['running'] is False
 
 
+def test_idle_update_does_not_fetch_runtime(tmp_path,monkeypatch):
+    store,profile=_ready_profile(tmp_path)
+    fetched=[]
+    def fetch(*a,**k):
+        fetched.append(a)
+        raise TunnelError('verified vendor runtime download failed')
+    monkeypatch.setattr(runtime,'ensure_runtime',fetch)
+    result=runtime.update_profile(profile,store,['pseudolife-mcp'])
+    assert result=={'profile':'personal','version':runtime.VERSION,'changed':False,'running':False,'state':'unchanged'}
+    assert fetched==[]
+
+
 def test_frozen_bridge_command_retains_source_after_alias_change(tmp_path):
     import json
     store,profile=_ready_profile(tmp_path)

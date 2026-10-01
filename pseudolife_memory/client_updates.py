@@ -994,13 +994,22 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
         # Informational, after the client steps: never "failed", so never
         # fails the run.
         report["autostart"] = check_autostart(repo)
-    from pseudolife_memory.tunnel_profiles import ProfileStore
-    try:
-        if ProfileStore().list():
-            from pseudolife_memory.tunnel_cli import update_existing_profiles
-            report["tunnel"] = update_existing_profiles()
-    except Exception:
-        report["tunnel"] = {"state": "failed", "detail": "private tunnel profiles could not be checked; run tunnel doctor"}
+    from pseudolife_memory.tunnel_profiles import ProfileStore, default_root
+    # No tunnel directory: tunnels were never set up, so no step at all.
+    if os.path.lexists(default_root()):
+        try:
+            if ProfileStore().list():
+                if checkout_root() is not None:
+                    # A refresh freezes this process's bridge and packages
+                    # into the running tunnel: never a source checkout's.
+                    report["tunnel"] = {"state": "skipped",
+                                        "detail": "saved tunnels were not refreshed from a source checkout; "
+                                                  "run `pseudolife-mcp tunnel update` from the installed launcher"}
+                else:
+                    from pseudolife_memory.tunnel_cli import update_existing_profiles
+                    report["tunnel"] = update_existing_profiles()
+        except Exception:
+            report["tunnel"] = {"state": "failed", "detail": "private tunnel profiles could not be checked; run tunnel doctor"}
     # A shim left un-upgraded because sessions run it still needs the rerun.
     report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
     return report
