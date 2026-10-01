@@ -4117,6 +4117,35 @@ A/A floor narrows roughly with the square root of the number of pairs).
 
 ---
 
+# Coordination recovery replay (`coordination_bench.py`)
+
+The local coordination instrument uses actual adapters and authenticated ASGI
+routes with synthetic Console responses. `--recovery` adds a persisted adapter
+reopen, pending-mail replay, idempotent send retry, and renewal of an owned
+resource lease with the same fence. It concurrently calls fixture memory search
+and pending-mail receive before the harness acknowledges the message. These
+checks run outside the latency sample; they do not measure embedding, durable
+memory writes, host wake, or model acknowledgment.
+
+```sh
+python -m evals.coordination_bench --recovery --samples 3 \
+    --admin-url <isolated-admin-url> --out <new-private-directory>
+```
+
+Coordinate access to the selected PG server before running. The explicit admin
+URL selects a separately provisioned server; the harness creates and removes
+only its uniquely named disposable database. Without it, the existing local
+bench-server default applies. Results use a new directory outside a repository
+or inside a gitignored directory and are never overwritten.
+
+`tests/test_coordination_bench.py` checks the replay oracle with scripted HTTP,
+including changed receipts, missing mail, and changed lease fences. The combined
+`test_reopen_replay_preserves_mail_and_fences_takeover_expiry_and_redaction` in
+`tests/test_coordination_storage.py` requires disposable PG and covers a new
+connection, attachment and lease takeover, expiry, and operator redaction. A
+connection reopen or scripted outage does not prove a PostgreSQL server restart
+or production load behavior; report unexecuted checks separately.
+
 # Coordination check-in bench (`coordination_checkin_bench.py`)
 
 Does the served coordination check-in (`CHECKIN_TEXT` in

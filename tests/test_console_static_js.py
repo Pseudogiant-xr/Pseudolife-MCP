@@ -209,3 +209,10 @@ def test_cortex_view_renders_one_contender_block_per_slot():
     assert '.toLowerCase().replace(/[\\s._\\-\\/]+/g, "-")' in src
     assert "shown.has(slotKey(f.attribute))" in src
     assert "map((f) => slotKey(f.attribute))).size" in src
+
+
+def test_coordination_holder_chips_wrap_long_labels():
+    styles = (GALAXY_JS.parent.parent / "css" / "styles.css").read_text(encoding="utf-8")
+    rule = styles.split(".coordination-chips .chip {", 1)[1].split("}", 1)[0]
+    assert "white-space:normal" in rule and "overflow-wrap:anywhere" in rule
+    assert "max-width:100%" in rule and "min-width:0" in rule

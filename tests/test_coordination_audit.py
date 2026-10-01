@@ -1028,6 +1028,32 @@ def _redact_row(*, names, payload_message_id, audit_copy="removed", **fields):
             "body": None, "body_salt": None, **fields}
 
 
+@pytest.mark.parametrize("damage", [None, "missing_redaction", "wrong_actor", "restored_body"])
+def test_disposable_redaction_history_verifies_after_reopen_without_pg(damage):
+    """Replay exported synthetic rows through the real verifier, without SQL."""
+    from pseudolife_memory.storage.coordination import body_commitment, verify_audit_chain
+    text, salt, message_id = "synthetic audit note", "a" * 32, "b" * 32
+    send = {**_redact_row(names=1, payload_message_id=message_id),
+            "event": "send", "actor": "agent", "body": text, "body_salt": salt,
+            "payload": json.dumps({"text_commitment": body_commitment(salt, text)})}
+    original = _rechained([send])
+    assert verify_audit_chain(original)["ok"]
+    absent = {**original[0], "body": None, "body_salt": None}
+    redact = _redact_row(names=1, payload_message_id=message_id)
+    if damage == "wrong_actor":
+        redact["actor"] = "agent"
+    rows = _rechained([absent] if damage == "missing_redaction" else [absent, redact])
+    if damage == "restored_body":
+        rows[0].update(body=text, body_salt=salt)
+    # JSON round-trip represents a reopened export; no secret or live row participates.
+    reopened = json.loads(json.dumps(rows))
+    result = verify_audit_chain(reopened, expect_head=(1, original[0]["hash"]))
+    if damage is None:
+        assert result["ok"]
+    else:
+        assert result["reason"] == ("body_mismatch" if damage == "restored_body" else "body_missing")
+
+
 @pytest.mark.parametrize("forgery,ok", [
     ("genuine", True),
     ("names_another_seq", False),

@@ -445,6 +445,14 @@ upgrade the client or configure that entry manually before using the shim.
    endpoint alone does not establish a working stdio handshake. Its `board`
    line says whether the agent board is on for that environment's token, or
    the daemon's reason it is off.
+   Its `coordination` snapshot separates daemon reachability, authenticated
+   bearer admission, saved-instance registration and transport inventory.
+   Select `--host codex` or `--host claude-code` to report that host's
+   configured wake path; the default `generic` host reports unsupported idle
+   wake. `--host claude-desktop` reports no session mailbox because its MCP
+   process is shared across conversations. Wake configuration is never a
+   delivery receipt. See the [coordination diagnostic quickstart](configuration.md#coordination-diagnostic-quickstart)
+   for an optional saved-instance check and an isolated fixture proof.
    An unreachable daemon report tells you to start it; a handshake timeout
    suggests checking MCP access and increasing `doctor --timeout` if needed.
    If the shim cannot fetch startup instructions within five seconds, it logs

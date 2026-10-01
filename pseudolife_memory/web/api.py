@@ -206,7 +206,9 @@ def build_console_app(
     def _principal(scope) -> str | None:
         if not auth_configured:
             return DEFAULT_PRINCIPAL
-        headers = {k.decode().lower(): v.decode()
+        # latin-1 like every other header read here: it cannot fail, and
+        # resolve_principal compares the bytes the client sent.
+        headers = {k.decode().lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         return resolve_principal(
             headers.get("authorization"), token_map, token)
@@ -559,6 +561,8 @@ def build_console_app(
             params = _parse_query(scope)
             body: dict = {}
             coordination_path = path.startswith("/api/coordination/")
+            coordination_errors = coordination_path or (
+                path == "/api/agents" and params.get("view") == "coordination")
             if coordination_path and method != "POST":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
@@ -616,8 +620,13 @@ def build_console_app(
                         bind_request_headers, unbind_request_headers)
                     headers = {k.decode().lower(): v.decode("latin-1")
                                for k, v in scope.get("headers", [])}
-                    # Carry the identity already accepted by the gate; never
-                    # re-decode/re-authenticate Authorization in the worker.
+                    if coordination_errors:
+                        # The board requires a configured bearer even on an
+                        # otherwise open loopback Console installation.
+                        from pseudolife_memory.coordination import authenticated_principal
+                        authenticated_principal(headers, token_map=token_map, token=token)
+                    # Bind the transport-validated principal, restoring the
+                    # prior worker context after every handler result.
                     binding = bind_request_headers(headers, principal=principal)
                     try:
                         return routes.dispatch(method, path, params, body)
@@ -636,12 +645,12 @@ def build_console_app(
                     "error": "not_found" if status == 404 else "method_not_allowed",
                     "path": path})
             except ValueError as exc:
-                if coordination_path:
+                if coordination_errors:
                     await _send_coordination_error(send, exc)
                 else:
                     await _send_json(send, 400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001
-                if coordination_path:
+                if coordination_errors:
                     await _send_coordination_error(send, exc)
                 else:
                     logger.exception("api handler error: %s %s", method, path)

@@ -435,6 +435,7 @@ def _proxy_fixture(monkeypatch, seen):
 
     @asynccontextmanager
     async def http_client(**kwargs):
+        seen.setdefault("headers", []).append(dict(kwargs.get("headers") or {}))
         yield object()
 
     @asynccontextmanager
@@ -665,13 +666,18 @@ class _RecordingAdapter:
     async def validate_snapshot(self, snapshot): pass
     def note_turn(self): pass
     def deliver_hint(self): return None
+    async def inbox(self):
+        from pseudolife_memory.channel import idle_inbox
+        async for event in idle_inbox():
+            yield event
 
 
 def _desktop_env(monkeypatch, extra=None):
     from pseudolife_memory import coordination_adapter
     _RecordingAdapter.constructed = []
     monkeypatch.setattr(coordination_adapter, "CoordinationAdapter", _RecordingAdapter)
-    for name in ("PSEUDOLIFE_AGENT_STATE", "PSEUDOLIFE_AGENT_STATE_DIR", "CLAUDE_CODE_SESSION_ID"):
+    for name in ("PSEUDOLIFE_AGENT_STATE", "PSEUDOLIFE_AGENT_STATE_DIR", "CLAUDE_CODE_SESSION_ID",
+                 "PSEUDOLIFE_MCP_SHARED_HOST"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PSEUDOLIFE_AGENT_COORDINATION", "1")
     monkeypatch.setenv("PSEUDOLIFE_WRITER_ID", "claude-desktop")
@@ -780,3 +786,125 @@ def test_a_claude_code_session_shim_still_binds_its_own_identity(monkeypatch, tm
     assert len(_RecordingAdapter.constructed) == 1
     assert seen["agent_headers"]["X-PL-Agent"] == "shared-agent"
     assert "coordination_refusal" not in seen
+
+
+@pytest.mark.parametrize("writer,shared,channel", [
+    ("tunnel", None, False),
+    (" Tunnel ", "0", False),
+    ("cloud-fixture", "1", False),
+    ("codex", " TRUE ", False),
+    ("cloud-fixture", "on", True),
+    # An unrecognised marker fails closed rather than silently open.
+    ("cloud-fixture", "enabled", False),
+])
+def test_shared_cloud_conversations_cannot_act_as_one_mailbox(
+        monkeypatch, tmp_path, writer, shared, channel):
+    """Two conversations with one bearer and scope must not register or use
+    a shared address. Client metadata cannot override the operator's host mode;
+    retrying the same conversation remains refused before upstream dispatch."""
+    from pseudolife_memory import channel as channel_module, codex_coordination, shim
+
+    seen = {"calls": []}
+    Server, types = _proxy_fixture(monkeypatch, seen)
+    env = {"PSEUDOLIFE_WRITER_ID": writer, "PSEUDOLIFE_AGENT_WAKE": "1"}
+    if writer != "codex":
+        # A fixed state file disables the Codex thread registry by itself,
+        # which would leave the Registry stub below unable to fire.
+        env["PSEUDOLIFE_AGENT_STATE"] = str(tmp_path / "shared.json")
+    _desktop_env(monkeypatch, env)
+    if shared is not None:
+        monkeypatch.setenv("PSEUDOLIFE_MCP_SHARED_HOST", shared)
+
+    class Registry:
+        def __init__(self, *args, **kwargs):
+            pytest.fail("shared host must not build a thread registry")
+
+    monkeypatch.setattr(codex_coordination, "CodexCoordinationRegistry", Registry)
+    refused = [
+        ("memory_agents", {"action": "update", "project": "same-project",
+                           "task": "same-task", "status": "working"}),
+        ("memory_agents", {"action": "claim", "lease": "claim:fixture"}),
+        ("memory_agents", {"action": "release", "lease": "claim:fixture"}),
+        ("memory_message", {"action": "send", "to": "fixture-peer", "text": "hello",
+                            "request_id": "fixture-request"}),
+        ("memory_message", {"action": "receive"}),
+        ("memory_message", {"action": "ack", "message_id": "fixture-message"}),
+    ]
+    # A bearer principal called codex must not choose the Codex host path.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-token:codex")
+    meta_first = {"openai/session": "fixture-conversation-a",
+                  "threadId": "aaaaaaaa-1111-4111-8111-111111111111"}
+    meta_second = {"openai/session": "fixture-conversation-b",
+                   "threadId": "bbbbbbbb-2222-4222-8222-222222222222"}
+
+    async def serve(server, *args, **kwargs):
+        handler = server.get_request_handler("tools/call")
+        for meta in (meta_first, meta_first, meta_second):
+            for name, arguments in refused:
+                with pytest.raises(Exception) as caught:
+                    await handler.handler(None, types.CallToolRequestParams(
+                        name=name, arguments=arguments, _meta=meta))
+                assert caught.value.data["classification"] == "coordination_unavailable"
+                assert caught.value.data["operation_outcome"] == "not_dispatched"
+                assert "per-conversation" in caught.value.message
+            for name in ("memory_agents", "memory_search"):
+                arguments = {"action": "list"} if name == "memory_agents" else {"query": "fixture"}
+                result = await handler.handler(None, types.CallToolRequestParams(
+                    name=name, arguments=arguments, _meta=meta))
+                assert result.is_error is False
+
+    monkeypatch.setattr(Server, "run", serve)
+    if channel:
+        async def serve_channel(server, read, write, inbox_factory, **kwargs):
+            assert inbox_factory is channel_module.idle_inbox
+            await serve(server)
+
+        monkeypatch.setattr(channel_module, "serve_channel", serve_channel)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token",
+                                        "process-session", channel=channel))
+    assert _RecordingAdapter.constructed == []
+    assert seen["calls"] == ["memory_agents", "memory_search"] * 3
+    assert not any(name in headers for headers in seen["headers"]
+                   for name in shim._COORDINATION_HEADERS)
+    assert all(headers["Authorization"] == "Bearer fixture-token" for headers in seen["headers"])
+    assert not (tmp_path / "shared.json").exists()
+
+
+def test_shared_cloud_default_skips_registration_probe(monkeypatch):
+    from pseudolife_memory import shim
+
+    _desktop_env(monkeypatch, {"PSEUDOLIFE_WRITER_ID": "cloud-fixture",
+                               "PSEUDOLIFE_MCP_SHARED_HOST": "yes"})
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_COORDINATION")
+    asked = []
+    monkeypatch.setattr(shim, "_board_available", lambda *args: asked.append(args) or True)
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "process-session"))
+    assert asked == []
+    assert _RecordingAdapter.constructed == []
+    assert "coordination_registry" not in seen and "coordination_adapter" not in seen
+    assert "skip memory_agents update and memory_message" in seen["instructions_note"]
+    assert "board_checkin" not in seen
+
+
+@pytest.mark.parametrize("shared", ["0", "false", "off", "no", ""])
+def test_disabled_shared_host_marker_preserves_session_adapter(monkeypatch, shared):
+    from pseudolife_memory import shim
+
+    _desktop_env(monkeypatch, {"PSEUDOLIFE_WRITER_ID": "claude-code",
+                               "PSEUDOLIFE_MCP_SHARED_HOST": shared,
+                               "CLAUDE_CODE_SESSION_ID": "aaaaaaaa-1111-4111-8111-111111111111"})
+    seen = {}
+
+    async def proxy(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(shim, "_proxy", proxy)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "fixture-session"))
+    assert len(_RecordingAdapter.constructed) == 1
+    assert "coordination_adapter" in seen and "coordination_refusal" not in seen

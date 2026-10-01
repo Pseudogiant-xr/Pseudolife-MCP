@@ -144,6 +144,8 @@ Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
+The rebuilt console (phase 1: Observatory and the agent Board) is at
+<http://127.0.0.1:8765/ui/next/>; the rest of its views still open the classic one.
 
 The first session auto-starts the daemon, which provisions an **embedded
 PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
@@ -282,6 +284,12 @@ The installer also turns the agent board on: it mints a bearer token in
 owner-only token file. Re-running it on an existing install adds that file to
 the Claude Code registration in place. The ladder's last line, and
 `pseudolife-mcp doctor`, say whether the board is on or why it is off.
+Use `doctor --host codex` or `--host claude-code` for a compact coordination
+snapshot: reachability, bearer admission, registration evidence, tool inventory
+and configured wake are separate. Default doctor is read-only; health and a
+configured wake path do not prove delivery. The [coordination diagnostic
+quickstart](docs/guide/configuration.md#coordination-diagnostic-quickstart)
+covers saved-instance checks and an explicitly disposable mail proof.
 `--no-token` / `-NoToken` keeps an open-loopback install with the board
 dormant ([Turning the board on](docs/guide/configuration.md#turning-the-board-on)).
 Linux (Docker Engine): your user must be in the `docker` group —
@@ -1222,6 +1230,20 @@ verdict chip — accept/reject/leave with confidence, the model's reason in
 the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
 badges, diff-preview, and atomic save).
 
+**Coordination** is a read-only board view: active roster/status age, reported
+children, park needs/resume, resource holders and FIFO queues. Pending mail
+counts are visible only for the caller's principal; the latest 100 retained
+send/read/ack/wake/expiry events omit all message bodies. This view requires
+a configured bearer on `coordination.allowed_principals`, even on an otherwise
+open loopback installation. Refresh neither receives/acknowledges mail nor
+settles expired leases. Snapshots are marked stale after a minute; use Refresh
+for current state. The API is `GET /api/agents?view=coordination&limit=50`
+(roster limit 1–50); the default `/api/agents` awareness response is unchanged.
+Incoming audit visibility uses current recipient ownership, so incoming events
+may no longer appear after the recipient address is pruned; audit retention
+also bounds the timeline. A cold durable tier reports unavailable rather than
+initializing the bank through this read.
+
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
 prompts for it and stores it locally). No build step, no CDN, fully offline —
@@ -1255,7 +1277,7 @@ bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v51 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v52 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 

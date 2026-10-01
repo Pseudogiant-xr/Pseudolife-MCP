@@ -14,6 +14,7 @@ import json
 import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
+from tests.test_repository_claims import repositories  # noqa: F401
 from pseudolife_memory.storage.coordination import (
     COORDINATION_SCHEMA_SQL, LEASE_GRANT_WINDOW, LEASE_QUEUE_MAX, CoordinationError,
     CoordinationStore, audit_events, verify_audit_chain,
@@ -76,6 +77,33 @@ def test_free_lease_is_granted_with_fence_and_expiry(store):
     assert row["agent_id"] == a["agent_id"]
     assert payload(row) == {"name": "full-suite", "fence": base, "ttl": 120, "expect": 1200,
                             "purpose": "pytest tests/"}
+
+
+def test_exact_file_claims_share_fifo_expiry_and_fencing(store, repositories):
+    from pseudolife_memory.repository_claims import prepare_file_claim, file_claim_name
+    main, linked, other = repositories
+    name = file_claim_name(**prepare_file_claim(str(main), "src/file.py"))
+    same = file_claim_name(**prepare_file_claim(str(linked), "src\\file.py"))
+    unrelated = file_claim_name(**prepare_file_claim(str(other), "src/file.py"))
+    a, b, c = [store.register("alice", label=label) for label in ("editor", "next", "last")]
+    held = store.acquire_lease(*creds(a), name=name, ttl=120)
+    first = store.acquire_lease(*creds(b), name=same, ttl=120)
+    second = store.acquire_lease(*creds(c), name=same, ttl=120)
+    assert first["position"] == 1 and second["position"] == 2
+    assert first["holder"]["agent_id"] == a["agent_id"]
+    assert first["holder"]["fence"] == held["fence"]
+    assert first["holder"]["expires_at"] == held["expires_at"]
+    assert store.acquire_lease(*creds(b), name=unrelated, ttl=120)["state"] == "held"
+    store.test_time[0] = held["expires_at"]
+    taken = store.acquire_lease(*creds(b), name=same, ttl=120)
+    assert taken["state"] == "held" and taken["fence"] > held["fence"]
+    # The former holder cannot release another session's new generation.
+    with pytest.raises(CoordinationError, match="lease_not_held"):
+        store.release_lease(*creds(a), name=name)
+    released = store.release_lease(*creds(b), name=same)
+    assert released["released"]
+    last = store.acquire_lease(*creds(c), name=name, ttl=120)
+    assert last["state"] == "held" and last["fence"] > taken["fence"]
 
 
 def test_second_agent_queues_once_and_sees_the_holder(store):

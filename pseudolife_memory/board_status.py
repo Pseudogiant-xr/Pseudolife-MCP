@@ -8,7 +8,7 @@ installers can run it from a checkout before the shim is installed.
 """
 from __future__ import annotations
 
-import re
+import urllib.error
 import urllib.request
 
 from pseudolife_memory.daemon_url import _NoRedirectHandler
@@ -30,24 +30,33 @@ def board_status(url: str, token: str | None, *, timeout: float = 2.0) -> tuple[
     """``(on, line)`` for ``token`` against the daemon at ``url``.
 
     The line never carries the token or the daemon's transport errors."""
+    result = board_probe(url, token, timeout=timeout)
+    return result["state"] == "on", result["line"]
+
+
+def board_probe(url: str, token: str | None, *, timeout: float = 2.0) -> dict:
+    """Read-only admission probe with a bounded, credential-free state code."""
     if not token:
-        return False, ("off - no bearer token, so the daemon has no principal to "
-                       "admit (open-loopback install)")
+        return {"state": "missing_bearer", "line":
+                "off - no bearer token, so the daemon has no principal to admit (open-loopback install)"}
     request = urllib.request.Request(url.rstrip("/") + "/api/hook/coordination-start")
     request.add_header("Authorization", f"Bearer {token}")
     try:
         opener = urllib.request.build_opener(_NoRedirectHandler)
         with opener.open(request, timeout=timeout) as response:
             header = (response.headers.get("X-PL-Board") or "").strip()
-            served = bool(response.read().strip())
+            served = bool(response.read(65536).strip())
+    except urllib.error.HTTPError as exc:
+        state = "unauthorized" if exc.code == 401 else "unsupported_capability" if exc.code in (404, 405) else "transport_refused"
+        return {"state": state, "line": f"off - board probe refused (HTTP {exc.code})"}
     except Exception:  # noqa: BLE001 - any failure means no board, reported plainly
-        return False, "off - daemon unreachable"
+        return {"state": "unreachable", "line": "off - daemon unreachable"}
     if header == "on" or (not header and served):
-        return True, "on - token present, principal allowed"
+        return {"state": "on", "line": "on - token present, principal allowed"}
     reason = header.partition("reason=")[2].strip()
     if reason in _REASONS:
-        return False, f"off - {_REASONS[reason]}"
-    if re.fullmatch(r"[a-z_]{1,64}", reason):  # never echo arbitrary header text
-        return False, f"off - the daemon refused the board ({reason})"
-    return False, ("off - the daemon does not serve the board to this token; "
-                   "update the daemon to see why")
+        return {"state": reason, "line": f"off - {_REASONS[reason]}"}
+    if reason:
+        return {"state": "refused", "line": "off - the daemon refused the board (unrecognized reason)"}
+    return {"state": "unsupported_capability", "line":
+            "off - the daemon does not serve the board to this token; update the daemon to see why"}

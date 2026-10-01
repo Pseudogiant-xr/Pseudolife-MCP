@@ -920,16 +920,18 @@ def _requires_coordination_identity(name: str, arguments: dict | None) -> bool:
 # may be no other server to name.
 _SHARED_PROCESS_REFUSAL = (
     "This Pseudolife server is one process shared by every conversation in the "
-    "Claude desktop app, so it has no board identity of its own: posting, "
+    "host, and this shared shim has no authenticated per-conversation board "
+    "binding: posting, "
     "status updates and mail here would act as every conversation at once, "
-    "and are refused. A Claude Code session can make this call through its own "
-    "per-session Pseudolife server where the app lists one under a separate "
-    "name. memory_agents list here shows open sessions only, not the board.")
+    "and are refused. Use a per-session Pseudolife server with a supported "
+    "host session binding; in Claude Desktop its entry needs a separate name. "
+    "memory_agents list here shows open sessions only, not the board.")
 # Prepended to this process's MCP instructions, which may otherwise ask for
 # the board check-in it refuses.
 _SHARED_PROCESS_NOTE = (
-    "Agent board: this server is shared by every conversation in the Claude "
-    "desktop app and has no board identity, so skip memory_agents update and "
+    "Agent board: this server is shared by every conversation in its "
+    "host and this shared shim has no authenticated per-conversation binding, "
+    "so skip memory_agents update and "
     "memory_message here; memory tools work as usual.")
 
 
@@ -943,12 +945,19 @@ def _serves_many_conversations() -> bool:
     calls it. This is a guard for honestly configured clients, keyed on
     configuration rather than authentication: the daemon still refuses board
     writes that arrive without an instance credential, and this process never
-    holds one.
+    holds one. The Secure MCP Tunnel writer ``tunnel`` is shared too;
+    custom shared/cloud launchers declare ``PSEUDOLIFE_MCP_SHARED_HOST=1``.
+    This operator setting takes precedence over host-specific adapters;
+    client metadata cannot override it or establish trusted host origin.
     Codex threads share a process too, but each call names its thread (the
     per-thread registry); no Desktop request in its MCP log (45 tools/call,
     June to August 2026) carried any per-conversation metadata. A fixed
     ``PSEUDOLIFE_AGENT_STATE`` names one address and so changes nothing."""
-    return os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower() == "claude-desktop"
+    writer = os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
+    shared = os.environ.get("PSEUDOLIFE_MCP_SHARED_HOST", "").strip().lower()
+    # Fail closed: any value except an explicit off keeps the guard on.
+    return (writer in {"claude-desktop", "tunnel"}
+            or shared not in {"", "0", "false", "no", "off"})
 
 
 def _report_coordination_unavailable(state_path) -> None:
@@ -1276,9 +1285,23 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
+                from pseudolife_memory.repository_claims import FileClaimError, prepare_claim_arguments
+                # Refuse first: a shared process serves remote conversations,
+                # and preparing a claim runs git and reads host paths.
                 if coordination_refusal and _requires_coordination_identity(
                         params.name, params.arguments):
                     raise _CoordinationUnavailableError(message=coordination_refusal)
+                arguments = params.arguments or {}
+                try:
+                    if params.name == "memory_agents" and arguments.get("worktree") is not None:
+                        # Local preparation is read-only. Abandon its worker on
+                        # timeout/cancellation; it cannot dispatch a late claim.
+                        arguments = await anyio.to_thread.run_sync(
+                            prepare_claim_arguments, params.name, arguments,
+                            abandon_on_cancel=True)
+                except FileClaimError as exc:
+                    from mcp.types import CallToolResult, TextContent
+                    return CallToolResult(content=[TextContent(type="text", text=str(exc))], is_error=True)
                 snapshot = provider.snapshot()
                 if coordination_adapter is not None:
                     try:
@@ -1342,7 +1365,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                     # DAEMON is the validating authority, exactly as on v1.
                     remote._tool_output_schemas[params.name] = None
                     attempt.dispatched = True
-                    result = await remote.call_tool(params.name, params.arguments or {})
+                    result = await remote.call_tool(params.name, arguments)
                     _require_current_credential(provider, snapshot)
                 _require_current_credential(provider, snapshot)
         except asyncio.CancelledError:
@@ -1567,9 +1590,10 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     explicit = setting in {"1", "true", "yes", "on"}
     enabled = explicit
     unanswered = False
+    shared_host = _serves_many_conversations()
     # A process serving many conversations binds no board identity whatever
     # the daemon says, so it does not wait on the question.
-    if not setting and _holds_bearer(provider) and not _serves_many_conversations():
+    if not setting and _holds_bearer(provider) and not shared_host:
         try:
             answer = await asyncio.wait_for(
                 asyncio.to_thread(_board_available, url, provider),
@@ -1578,7 +1602,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             answer = None
         enabled = answer is True
         unanswered = answer is None
-    codex_pull = (not channel
+    codex_pull = (not shared_host and not channel
                   and os.environ.get("PSEUDOLIFE_WRITER_ID", "").strip().lower()
                   == "codex")
     async with AsyncExitStack() as stack:
@@ -1664,7 +1688,7 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
 
         adapter = None
         late = None
-        if _serves_many_conversations():
+        if shared_host:
             # No adapter: an address here would be every conversation's, and
             # one conversation's status would overwrite another's (seen
             # 2026-09-25). Board writes are refused with the way out.
@@ -1673,7 +1697,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                 filter(None, (instructions_note, _SHARED_PROCESS_NOTE)))
             if enabled:
                 print("pseudolife-mcp: this process serves every conversation in the "
-                      "Claude app, so it registers no coordination address; board "
+                      "host without a supported per-conversation binding, so it "
+                      "registers no coordination address; board "
                       "writes are refused here.", file=sys.stderr)
         elif enabled or unanswered:
             from pseudolife_memory.coordination_adapter import CoordinationAdapter, AdapterError

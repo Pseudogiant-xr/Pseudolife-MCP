@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v51). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v52). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -21,6 +21,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
+| `PSEUDOLIFE_MCP_SHARED_HOST` | _(unset)_ | Set `1` on a stdio shim launcher serving multiple cloud/ChatGPT/Dot conversations without a supported per-conversation binding. It registers no board address and refuses mailbox operations, while memory and awareness calls remain available. Writer IDs `claude-desktop` and `tunnel` always use this guard. The operator setting takes precedence over Codex metadata and channel mode; it does not authenticate a caller. See [Delivery and recovery](#delivery-and-recovery). |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | `60` | Daemon on Linux/glibc only (the Docker tier): how often a background thread calls `malloc_trim(0)` to hand back heap memory glibc keeps after embedder encode bursts. Measured 2026-09-23 with four persistent worker threads, 1,007-1,433 MiB of it was still resident at idle with the fp32 embedder (897-1,476 MiB bf16), and a trim took a median 7 ms with no measurable slowdown of the next encode (`evals/results/allocator-trim-pool-20260923.json`, `allocator-trim-probe-20260923.json`, `allocator-trim-latency-20260923.json`). It lowers what the daemon holds after a burst, not the peak of the burst itself. `0` disables. |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
@@ -333,6 +334,43 @@ cannot install the shim (no Python >= 3.10 that can make a virtualenv, and no
 pipx), since its registrations fall back to HTTP. None of these removes a
 token that is already configured.
 
+### Coordination diagnostic quickstart
+
+Run `pseudolife-mcp doctor --host codex` (or `--host claude-code`) from the
+registered command's environment. The `coordination` snapshot separates
+daemon reachability, bearer admission, saved-instance registration, advertised
+tools and configured wake. `ok` remains the runtime/MCP check; selecting
+`--agent-state` additionally requires successful registration verification.
+`generic` reports unsupported idle wake and next-turn pull; `claude-desktop`
+reports no per-conversation mailbox. A healthy endpoint or configured doorbell
+does not establish enqueue, host wake, receive or ack.
+
+To verify an existing mailbox without attaching or modifying it, pass
+`--agent-state <private-saved-instance.json>`. Doctor uses a nonce proof through
+the context endpoint's `read_only` mode, checks a version-2 file's bank/principal
+binding and never transmits its instance credential. A missing or invalid file,
+rejected bearer, changed binding, unavailable bank or older daemon without this
+capability remains a separate diagnostic. Cold storage is not initialized by
+this check. Saved state and client settings are preserved; default doctor never
+registers, receives, acknowledges or starts a daemon.
+
+For a complete **fixture** proof, explicitly select a disposable PostgreSQL
+server with pgvector and CREATE/DROP DATABASE permission, then run:
+
+```sh
+PSEUDOLIFE_TEST_DATABASE_URL='postgresql://fixture@127.0.0.1:6543/postgres' pseudolife-mcp doctor --disposable-proof
+```
+
+In PowerShell set `$env:PSEUDOLIFE_TEST_DATABASE_URL` to that disposable fixture
+DSN before running the same command. There is no configured-bank or bench-server
+fallback. The command creates a fresh tagged bank, uses the real authenticated
+ASGI API and adapters to enqueue, observe a hint or synthetic listener ring,
+receive and acknowledge, then drops only the bank it created. It never reads
+saved client settings or uses production agents. The JSON reports individual
+stages and successful fixture removal. `harness_ack` is acknowledgment by the
+test harness; `host_delivery` and `model_ack` remain `unverified`. Console fixture state lives in the proof's temporary directory. `--timeout` bounds the async proof, excluding synchronous bank/schema setup and cleanup; shutdown can extend that budget. Cleanup uses fresh admin connections to the explicitly selected fixture server, with a separate 30-second DROP statement budget per attempt (two attempts); if both attempts fail, the report includes `fixture_removed: false`, the exact generated `fixture_bank` and a `DROP DATABASE` instruction for that owned bank only. Actual host
+acceptance still needs a separately isolated supported-client session.
+
 ### Waking an idle session: `pseudolife-mcp wait-mail`
 
 Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
@@ -578,6 +616,51 @@ status an expected duration: past it the peer list marks the row
 `status_overdue`. Over REST these are the coordination actions `lease`
 (acquire, renew, or queue once), `release`, and `leases`, a listing that needs
 only the bearer.
+
+#### Exact repository file claims
+
+Through the stdio shim, use `memory_agents(action="claim",
+worktree="/absolute/checkout", path="src/file.py", status="editing")`.
+On Windows the worktree can be `C:/workspace/project`. Release with the same
+`worktree` and `path` and `action="release"`. These inputs replace `lease`.
+The shim resolves the Git common directory locally and hashes its canonical
+directory path and filesystem device/file IDs, so linked worktrees use one repository
+identity while separate clones, even of the same remote, do not. Filesystems
+without a nonzero file ID are unsupported. IDs are local to the filesystem
+view: cross-host or Windows/WSL identity equivalence is not guaranteed.
+The daemon receives a hashed `repository_id` and a relative path; it
+never opens the checkout. Direct HTTP tool clients must call
+`pseudolife_memory.repository_claims.prepare_file_claim(worktree, path)` on
+their own host and pass its `repository_id`/`path` fields. Raw `worktree`
+inputs sent directly to the daemon return `file_claim_requires_local_client`.
+
+Paths accept `/` or `\`, repeated separators and `.` components, and use
+Unicode NFC. They reject absolute/drive paths, any `..` component, Git
+metadata, control characters, globs, Windows devices/streams and trailing
+dots/spaces. Windows uses conservative case folding, including case-sensitive
+NTFS directories; POSIX preserves case unless the common Git config sets
+`core.ignorecase=true`. Worktree-local overrides do not change that shared
+policy. Keep the common case policy unchanged while claims are held.
+Windows DOS short-name syntax (`~` followed by a digit) is unsupported.
+Existing directories, special files, symlinks and Windows reparse points (including
+junctions) are refused; aliases are refused even when their target is inside
+the checkout. Missing paths are accepted, so a deletion keeps its claim.
+For a rename, claim both the old and new names separately; moving or deleting
+a file does not release either claim. Hard links are separate path names.
+If a path becomes unsupported after acquisition, release using the returned
+`repository_id`/`path` or lease key without repeating local file validation.
+
+The result includes `file_claim` with the prepared identity/path. Its opaque
+`claim:file:<hash>` lease key uses the same FIFO queue, day-long renewal TTL
+and five-minute acceptance window as other claims. A queued response reports
+the conflicting `holder`'s `agent_id`, `principal`, `fence` and `expires_at`;
+the caller's top-level `fence` remains null until it holds the lease. Listings
+show the opaque key, holder and queue, not a persisted path mapping. Exact
+claims cover only that normalized path, not a directory's descendants.
+Filesystem validation is a snapshot, and later edits can change the path's
+type or target. Claims remain advisory: no edit, commit or push guard consumes
+the fence. Existing literal `claim:<text>` and generic resource leases keep
+their semantics and do not overlap repository file claims.
 
 ### Codex CLI and desktop
 
@@ -1299,10 +1382,46 @@ decision explicitly as ordinary memory if it should become durable knowledge.
 Initial limits are 8192 UTF-8 bytes per message, 256 pending messages per recipient,
 60 new sends per sender per minute (a send to a project or to `all` counts as
 one, so a sender can reach at most 60 × 50 mailboxes a minute) and 50 messages
-per receive page. Bodies stop
-being served after 24 hours; request-key metadata is retained for seven days.
+per receive page. Live receive stops serving bodies after 24 hours;
+request-key metadata is retained for seven days.
 The [audit log](#audit-log) keeps its own copy of every body for
 `audit_retention_days`, unless the operator [redacts](#redacting-a-body) it.
+Receive adds `continuity`: `status` is `messages`, `empty`,
+`expired_unacknowledged`, or `retention_gap`; `expired_unacknowledged` counts
+unacknowledged expired messages after the supplied cursor that remain inside
+the metadata window. `metadata_gap` means sequence metadata after that cursor
+has left the window, so the API cannot establish whether those messages were
+acknowledged. `high_water` is the mailbox's latest allocated sequence, and
+`metadata_retention_seconds` states the bound. Expired bodies are never included.
+These fields do not advance the receive cursor or acknowledge mail. A cursor
+ahead of the mailbox still returns `invalid_cursor`, with `cursor_ahead` detail;
+malformed and foreign-mailbox cursors remain `invalid_cursor`.
+
+`memory_message(action="history")` and `POST /api/coordination/history` read a
+bounded slice of this authenticated instance's sent and received audit mail.
+They require the same bearer, bank binding and instance credentials as receive;
+another instance, even under the same principal, cannot inspect this mailbox.
+An addressed recipient can read mail sent by another principal. Optional
+`peer` is an exact agent ID, including an address already pruned from the board;
+prefixes are not resolved. `limit` is 1–50 (default 50). Results contain
+`messages`, `has_more`, a separate `after` cursor, `retention_days`, and the
+UTC-day `retained_since` bound (`null` when configured retention is unlimited).
+Pass the history cursor only to history, and omit it when changing the peer
+filter. Audit retention applies even before the next prune pass; an already
+pruned send event cannot be reconstructed, and pre-audit mail has no history.
+
+Each historical message carries its sender, recipient, sorted `participants`
+pair, `reply_to`, original recipient sequence, timestamps and acknowledgment
+state. A reply ID may reference mail outside the retained slice; no thread root
+is inferred. `body_state` is `retained`, `redacted`, or `unavailable`; a redacted
+body is `null`, including legacy bodies that remain in an operator-only hashed
+audit payload. `state` is `pending`, `expired`, or `acknowledged`, reflecting
+recorded delivery state, with acknowledgment taking precedence over expiry.
+Operator redaction also expires the live message; history reflects that expiry.
+History is context: reading it does not stamp first-read telemetry, acknowledge,
+retry, requeue, wake an agent, or add anything to dream input. It never returns
+audit salts, commitments or request fingerprints.
+
 Text shaped like a credential (a body, request id, status, scope field, or
 lease name or purpose) is refused with `secret_like_body`
 ([secret-shaped text](#secret-shaped-text)).
@@ -1352,8 +1471,33 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. An
-adapter with saved state registers a fresh address on its next start only when the authenticated
+write that carries no instance credential.
+
+For a custom cloud/ChatGPT/Dot launcher that shares one stdio shim among
+conversations, set `PSEUDOLIFE_MCP_SHARED_HOST=1` in that launcher's environment
+and restart its shim. The known `tunnel` writer uses the same guard automatically;
+setting the marker to `0` does not disable it for `tunnel` or `claude-desktop`.
+Any value except empty, `0`, `false`, `no` or `off` (trimmed and
+case-insensitive) turns the guard on, so a mistyped marker fails closed.
+The shared shim refuses all `memory_message` actions and `memory_agents`
+`update`, `claim` and `release` before sending them upstream, even when
+coordination or channel delivery is explicitly enabled. It serves no board
+check-in and binds no adapter or Codex thread registry. Memory calls and
+`memory_agents(action="list")` continue with the configured bearer principal.
+
+The [OpenAI Plugin reference](https://developers.openai.com/plugins/reference)
+documents `_meta["openai/session"]` for correlating calls within a ChatGPT
+conversation. This shared shim does not establish a trusted conversation
+binding from that field: metadata, tool arguments, project/task labels and
+the bearer principal's name cannot select another mailbox. A principal named
+`codex` does not make a cloud launcher a session-aware Codex host. The supported
+Codex transport still binds threads through its own host path. Distinct cloud
+conversation mailboxes remain unsupported through this shared shim; ordinary
+memory access is available. Existing custom cloud deployments need the marker
+and a restart separately from installing this code. No launch registration or
+live cloud configuration is changed by this guard.
+
+An adapter with saved state registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists (pruned
 after seven idle days with no retained mail, or absent from a restored
 database, where `rebind` cannot restore it either). A bank-bound client first
@@ -3160,7 +3304,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v50**; migrations are additive
+The current Postgres meta version is **v52**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3217,6 +3361,7 @@ The milestones:
 | v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
+| v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

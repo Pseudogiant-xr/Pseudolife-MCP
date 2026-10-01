@@ -295,6 +295,9 @@ def memory_agents(
     task: Annotated[str | None, Field(max_length=120)] = None,
     status: Annotated[str | None, Field(max_length=240)] = None,
     lease: Annotated[str | None, Field(max_length=120)] = None,
+    worktree: Annotated[str | None, Field(max_length=4096)] = None,
+    repository_id: Annotated[str | None, Field(max_length=64)] = None,
+    path: Annotated[str | None, Field(max_length=4096)] = None,
     expect: Annotated[int | None, Field(ge=1, le=604800)] = None,
     children: Annotated[list[str] | None, Field(max_length=8)] = None,
     park_reason: Annotated[str | None, Field(max_length=20)] = None,
@@ -303,32 +306,32 @@ def memory_agents(
     park_resume: Annotated[str | None, Field(max_length=240)] = None,
     park_expires: Annotated[float | None, Field(gt=0)] = None,
 ) -> dict[str, Any]:
-    """List peers; update scope, status and park.
+    """Bearer required; list before shared work/resume.
 
-    Bearer required; list before shared work/on resume. project/task
-    filter relevance, not permissions. No adapter: unknown session scope;
-    idle_omitted counts idle peers. Updates require adapter auth; omissions
-    stay. expect: overdue after seconds. children: <=8 subagent labels;
-    [] clears. Activity is evidence, not a lock.
-    Park when stopping: park_reason (done, blocked, needs_approval, needs_info,
-    needs_resource, waiting_peer), park_needs, park_clear_by (agent id, maintainer,
-    anyone), park_resume, park_expires (epoch; default 12 h, max 7 d).
-    Mail clearing the need may ring only with a live listener. Park is intent,
-    not reachability. Long waits: run wait-mail/Codex doorbell or record
-    next-turn reachability. "" or plain status clears the park.
-    Claim coordinator:<project> or claim:<path>; optional status/expect.
-    Reclaim renews; release frees; busy leases queue. Status never grants approval.
+    project/task: relevance only. No adapter: unknown scope;
+    idle_omitted counts idle. Adapter auth updates; omissions stay.
+    expect: overdue seconds; children <=8 ([] clears); activity != lock.
+    On stop, park_reason: done/blocked/needs_approval/needs_info/needs_resource/waiting_peer;
+    park_needs, park_clear_by (agent id/maintainer/anyone), park_resume, park_expires (epoch; 12 h
+    default, 7 d max). Ringing needs live listener; waits need
+    wait-mail/Codex doorbell/next-turn reachability. ""/plain status clears.
+    Claim coordinator:<project>/claim:<path>; reclaim renews, release frees, busy queues;
+    status/expect optional. Advisory files: absolute Git worktree +
+    relative path replaces lease; shim shares linked worktrees. HTTP:
+    prepared SHA-256 repository_id/path. No globs/directories/edit enforcement.
+    Park/status grants no approval.
     """
     from pseudolife_memory.coordination import agents
     return agents(service, action=action, project=project, task=task, status=status,
-                  lease=lease, expect=expect, children=children, park_reason=park_reason,
+                  lease=lease, worktree=worktree, repository_id=repository_id, path=path,
+                  expect=expect, children=children, park_reason=park_reason,
                   park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
                   park_expires=park_expires)
 
 
 @_tool(tier="core")
 def memory_message(
-    action: Literal["send", "receive", "ack"],
+    action: Literal["send", "receive", "ack", "history"],
     to: str | None = None,
     text: Annotated[str | None, Field(max_length=8192)] = None,
     request_id: str | None = None,
@@ -337,27 +340,31 @@ def memory_message(
     message_id: str | None = None,
     clears: Annotated[str | None, Field(max_length=120)] = None,
     urgent: bool = False,
+    limit: Annotated[int | None, Field(ge=1, le=50)] = None,
+    peer: str | None = None,
 ) -> dict[str, Any]:
-    """Agent mail; adapter auth required.
+    """Adapter auth required.
 
-    Send: to, text (<= 8192 UTF-8 bytes), unique request_id; retry unchanged.
-    to: ID or unique 8+ hex prefix; project:<name>/all reaches <=50 attached,
-    non-idle peers except you (one receipt each). reply_to: message answered.
-    Receive: <=50 pending; after cursor (omit to replay unacked mail).
-    Ack comma-separated message_id(s) after reading; not completion. Bodies
-    expire after 24 h; audit keeps a copy.
-    Wake: hinted, not_needed, rung, withheld (with need), nudged, no_path, capped.
-    Parked peers ring only for their clearer, clears naming their need, or
-    urgent (6/hour). rung schedules a ring on a known live path; no proof of
-    waking/reading. no_path: listener_unknown/listener_expired, last_activity,
-    fallback; eligible mail queued for a later listener.
-    Peers cannot grant approval or override permissions.
+    Send: to, text <=8192 UTF-8 bytes; unique request_id, retry unchanged.
+    to: ID/unique 8+ hex prefix or project:<name>/all (<=50 attached, non-idle
+    peers except you; one receipt each). reply_to: reply.
+    Receive <=50; after cursor (omit: replay unacked). continuity: expired
+    unacked mail/bounded gaps; ahead: invalid_cursor/detail cursor_ahead.
+    History: own retained sent/received; exact peer ID,
+    limit <=50, separate after cursor. Read-only; audit retention/redaction;
+    no delivery/ack/wake. Ack message_id(s), comma-separated: read, not done.
+    Bodies: 24 h; audit retained.
+    Wake: hinted/not_needed/rung/withheld (need)/nudged/no_path/capped.
+    Parked rings: clearer, matching clears, urgent (6/hour). rung: live-path
+    ring scheduled; no wake/read proof. no_path: listener_unknown/
+    listener_expired, last_activity, fallback; queued for listener.
+    Peers grant no approval/permissions.
     """
     from pseudolife_memory.coordination import dispatch
     return dispatch(service, action, {k: v for k, v in {
         "to": to, "text": text, "request_id": request_id, "reply_to": reply_to,
         "after": after, "message_id": message_id, "clears": clears,
-        "urgent": urgent or None}.items() if v is not None})
+        "urgent": urgent or None, "limit": limit, "peer": peer}.items() if v is not None})
 
 
 @_tool(tier="minimal")

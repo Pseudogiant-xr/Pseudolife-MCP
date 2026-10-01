@@ -6,6 +6,107 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-01 — Cortex Console v3, phase 1)
+- A rebuilt web console, served beside the classic one at `/ui/next/`: a
+  Vite + Svelte 5 + TypeScript app under `frontend/` whose build output is
+  committed under `pseudolife_memory/web/static/next/` (the wheel ships
+  `static/**` and the daemon image has no Node). Phase 1 ships the shell,
+  the Observatory and a native Board view over the read-only coordination
+  snapshot (`GET /api/agents?view=coordination`): roster, park records,
+  leases and the mail/wake timeline, with no message bodies and no compose.
+  Every other view links to the classic console until it is ported.
+
+### Fixed (2026-10-01 — indexed coordination reads; schema v52)
+- Retained mail pages, exact peer filters, cursor high-water checks and lifecycle
+  reconstruction use participant and message indexes rather than scanning other
+  mailboxes under the coordination lock. Schema v52 adds seven audit indexes.
+- The read-only Console snapshot pins its connection through transaction completion,
+  uses principal and message indexes, and caps SQL execution while holding the
+  board lock. Expired parks remain historical metadata; holder labels wrap and
+  refresh retains keyboard focus.
+- Exact file-claim preparation shares the shim operation deadline and cancellation
+  lifecycle. Checkout-contained Git administration directories are refused.
+- Disposable doctor proofs keep Console state in their temporary directory,
+  reconnect for exact owned-bank cleanup, give each DROP a separate bounded budget
+  and report its safe name if cleanup fails. The async proof timeout excludes
+  fixture setup and cleanup.
+
+### Added (2026-10-01 — mailbox continuity)
+- Receive reports expired unacknowledged mail and gaps beyond its seven-day
+  metadata window without returning expired bodies. An ahead cursor keeps
+  the `invalid_cursor` error and adds `cursor_ahead` detail.
+- Authenticated instances can page retained sent and received mail with
+  `memory_message(action="history")` or `POST /api/coordination/history`.
+  History follows audit retention and operator redaction, supports an exact
+  peer filter and reply metadata, and has no delivery, wake or dream effects.
+
+### Added (2026-10-01 — repository-scoped exact file claims)
+- `memory_agents` claim/release accepts a local Git `worktree` and exact
+  repository-relative `path` through the stdio shim. Linked worktrees share
+  claims; unrelated clones remain separate. Unsafe paths, globs, directories
+  and symlink/junction aliases are refused. Claims retain the existing FIFO
+  queue and expiry; a conflicting holder reports its fence and expiry.
+- Direct HTTP clients can prepare `repository_id` and `path` locally. The
+  daemon does not open client checkout paths, and claim names contain hashes
+  rather than absolute host paths. File claims remain advisory.
+- A shim that serves several conversations (Claude Desktop) refuses a file
+  claim before it runs Git or reads the worktree, so the error cannot reveal
+  whether a host path is a checkout.
+
+### Added (2026-10-01 — read-only coordination view)
+- The Console's Coordination view shows active agents, status age, reported
+  children, park needs/resume, pending mail for the caller's principal, resource
+  holders and FIFO queues, and up to 100 retained mail/wake/expiry events.
+  It requires an authorized coordination bearer, omits message bodies, and
+  never receives/acknowledges mail or settles leases. Expired holds remain
+  labelled until normal board maintenance settles them.
+
+### Added (2026-10-01 — actionable coordination diagnostics)
+- Doctor separates daemon reachability, bearer admission, saved-instance
+  registration, coordination tool inventory and configured host wake. Optional
+  `--agent-state` verifies a read-only nonce proof without transmitting the
+  instance credential or changing saved state. Unsupported hosts and older
+  daemons report their limits; default diagnostics never register an adapter.
+- `doctor --disposable-proof` requires an explicit fixture PostgreSQL server,
+  creates and removes its own tagged bank, and checks enqueue, hint/synthetic
+  ring, receive and harness ack through real ASGI API/storage/adapter paths.
+  Host delivery and model acknowledgment remain unverified. Diagnostic wake
+  configuration and capability fields omit arbitrary credential-bearing values.
+
+### Added (2026-10-01 — disposable coordination recovery checks)
+- The local coordination harness can reopen persisted adapter identity, replay
+  pending mail with the same idempotent receipt, preserve an owned resource
+  fence, and interleave synthetic search with mail reads. It records recovery
+  evidence alongside its disabled control, pull and channel arms, and removes
+  only its newly minted bank. Physical restarts, real retrieval load, host
+  delivery and model acknowledgment remain outside this instrument.
+
+### Fixed (2026-10-01 — non-ASCII bearer tokens keep their principal everywhere)
+- A bearer token with non-ASCII characters now authenticates the same way on
+  every route. The auth gate read the header as UTF-8, while the coordination
+  routes, the `/mcp` identity binding and MCP tool calls read it as latin-1.
+  So `/api/coordination/*` answered 401 to a caller the gate had accepted,
+  and `/mcp` tool calls recorded that caller as `default` instead of its
+  named principal. Token comparison now uses the bytes the client sent,
+  whichever way the header was decoded. Only spaces and tabs are trimmed
+  from the presented token, so a token ending in a character such as `à`
+  or `ą` keeps its last byte.
+- Authorization header bytes that are not valid UTF-8 get a 401 instead of
+  an unhandled decode error (a 500).
+
+### Fixed (2026-09-30 — shared cloud conversations cannot act as one mailbox)
+- Shared stdio cloud hosts can declare `PSEUDOLIFE_MCP_SHARED_HOST=1`; the
+  known `tunnel` writer uses the guard automatically. Any value other than
+  empty, `0`, `false`, `no` or `off` turns the guard on. Like Claude Desktop's
+  app-level server, they register no coordination address and refuse status,
+  lease and mail operations before dispatch, while memory and awareness
+  calls remain available under the configured bearer principal.
+- Client metadata, a fixed adapter state file, channel mode or an explicitly
+  enabled board cannot override the shared-host guard. Session-aware Codex
+  and Claude Code hosts keep their existing bindings. Custom cloud launchers
+  require the operator marker and a restart; per-conversation mailbox binding
+  through this shared shim remains unsupported.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived
