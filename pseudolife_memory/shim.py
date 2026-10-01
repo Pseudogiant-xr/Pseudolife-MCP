@@ -1276,9 +1276,23 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         attempt = _UpstreamAttempt(phase="initialize")
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
+                from pseudolife_memory.repository_claims import FileClaimError, prepare_claim_arguments
+                # Refuse first: a shared process serves remote conversations,
+                # and preparing a claim runs git and reads host paths.
                 if coordination_refusal and _requires_coordination_identity(
                         params.name, params.arguments):
                     raise _CoordinationUnavailableError(message=coordination_refusal)
+                arguments = params.arguments or {}
+                try:
+                    if params.name == "memory_agents" and arguments.get("worktree") is not None:
+                        # Local preparation is read-only. Abandon its worker on
+                        # timeout/cancellation; it cannot dispatch a late claim.
+                        arguments = await anyio.to_thread.run_sync(
+                            prepare_claim_arguments, params.name, arguments,
+                            abandon_on_cancel=True)
+                except FileClaimError as exc:
+                    from mcp.types import CallToolResult, TextContent
+                    return CallToolResult(content=[TextContent(type="text", text=str(exc))], is_error=True)
                 snapshot = provider.snapshot()
                 if coordination_adapter is not None:
                     try:
@@ -1342,7 +1356,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                     # DAEMON is the validating authority, exactly as on v1.
                     remote._tool_output_schemas[params.name] = None
                     attempt.dispatched = True
-                    result = await remote.call_tool(params.name, params.arguments or {})
+                    result = await remote.call_tool(params.name, arguments)
                     _require_current_credential(provider, snapshot)
                 _require_current_credential(provider, snapshot)
         except asyncio.CancelledError:

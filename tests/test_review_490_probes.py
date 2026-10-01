@@ -150,7 +150,7 @@ def test_schema_49_50_51_upgrade(pg_conn):
         assert pg_conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == expected
         assert pg_conn.execute("SELECT to_regclass('public.edge_evidence')").fetchone()[0] is None
     schema.ensure_schema(pg_conn)
-    assert pg_conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == 51
+    assert pg_conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == schema.SCHEMA_META_VERSION
     assert pg_conn.execute("SELECT to_regclass('public.edge_evidence')").fetchone()[0] == "edge_evidence"
     assert pg_conn.execute("SELECT parent_thread, parent_agent_id FROM coordination_agents LIMIT 0").description
 

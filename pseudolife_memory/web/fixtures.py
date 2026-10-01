@@ -138,10 +138,10 @@ def _stream_dict(t, idx):
 class FixtureService:
     """Implements the subset of MemoryService the console routes call."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, data_dir: Path | None = None) -> None:
         self.config = AppConfig()
         self.config.memory.recency_base_half_life_s = 86400.0
-        self.data_dir = Path(__file__).parent / ".devdata"
+        self.data_dir = data_dir if data_dir is not None else Path(__file__).parent / ".devdata"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._db_url = "postgresql://pseudolife@localhost/pseudolife_memory"
         self._writer_id = "cortex-console-dev"

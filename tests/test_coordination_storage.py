@@ -225,6 +225,62 @@ def test_reconnect_keeps_mail_and_credentials_and_lease(store, pg_url):
             resumed.attach(*creds(b), attachment_id="different")
 
 
+def test_reopen_replay_preserves_mail_and_fences_takeover_expiry_and_redaction(store, pg_url):
+    """One disposable history across a new connection, not a server restart."""
+    import uuid
+    from pseudolife_memory.storage.coordination import (
+        CoordinationConnection, audit_events, verify_audit_chain,
+    )
+
+    tag = uuid.uuid4().hex
+    name = "recovery:" + tag
+    a, b = pair(store)
+    first = store.attach(*creds(b), attachment_id="first")
+    held = store.acquire_lease(*creds(a), name=name, ttl=60)
+    assert store.acquire_lease(*creds(b), name=name, ttl=60)["state"] == "queued"
+    kept = store.send(*creds(a), to=b["agent_id"], text="synthetic retained note", request_id=tag)
+    removed = store.send(*creds(a), to=b["agent_id"], text="synthetic removed note", request_id=tag + "-redact")
+    connection = CoordinationConnection(pg_url)
+    try:
+        reopened = CoordinationStore(connection, clock=lambda: store.test_time[0])
+        # A fresh connection authenticates the same durable addresses.
+        assert [m["message_id"] for m in reopened.receive(*creds(b))["messages"]] == [
+            kept["message_id"], removed["message_id"]]
+        assert reopened.send(*creds(a), to=b["agent_id"], text="synthetic retained note",
+                             request_id=tag)["message_id"] == kept["message_id"]
+        store.test_time[0] += 61
+        replacement = reopened.attach(*creds(b), attachment_id="replacement")
+        assert replacement["generation"] > first["generation"]
+        with pytest.raises(CoordinationError, match="^stale_attachment$"):
+            reopened.heartbeat(*creds(b), attachment_id="first", generation=first["generation"])
+        taken = reopened.acquire_lease(*creds(b), name=name, ttl=60)
+        assert taken["state"] == "held" and taken["fence"] > held["fence"]
+        with pytest.raises(CoordinationError, match="^lease_not_held$"):
+            reopened.release_lease(*creds(a), name=name)
+        assert reopened.release_lease(*creds(b), name=name)["released"]
+        redaction = reopened.redact(removed["message_id"], "synthetic removal")
+        assert redaction["live_body_cleared"] and redaction["audit_copy"] == "removed"
+        assert [m["message_id"] for m in reopened.receive(*creds(b))["messages"]] == [kept["message_id"]]
+        reopened.ack(*creds(b), message_id=kept["message_id"])
+        expired = reopened.send(*creds(a), to=b["agent_id"], text="synthetic expiring note",
+                                request_id=tag + "-expire")
+        store.test_time[0] += 86401
+        assert reopened.receive(*creds(b))["messages"] == []
+        reopened.prune()
+        assert connection.conn.execute(
+            "SELECT text FROM coordination_messages WHERE message_id=%s",
+            (expired["message_id"],)).fetchone() == (None,)
+        assert reopened.send(*creds(a), to=b["agent_id"], text="synthetic expiring note",
+                             request_id=tag + "-expire")["message_id"] == expired["message_id"]
+        rows = list(audit_events(connection.conn))
+        assert verify_audit_chain(rows)["ok"]
+        sent = next(row for row in rows if row["event"] == "send"
+                    and row["message_id"] == removed["message_id"])
+        assert sent["body"] is None and sent["body_salt"] is None
+    finally:
+        connection.close()
+
+
 def test_two_connections_cannot_attach_simultaneously(store, pg_url):
     a = store.register("alice")
     barrier = threading.Barrier(2)

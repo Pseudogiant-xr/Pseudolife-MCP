@@ -1,4 +1,4 @@
-"""Read-only runtime diagnostics: never spawn a daemon or call a bank tool."""
+"""Runtime diagnostics; read-only unless --disposable-proof is explicitly selected."""
 from __future__ import annotations
 
 import argparse
@@ -107,7 +107,8 @@ async def _handshake() -> dict:
 
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "pseudolife_memory.cli"],
-        env={**os.environ, "PSEUDOLIFE_MCP_NO_SPAWN": "1"},
+        env={**os.environ, "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+             "PSEUDOLIFE_AGENT_COORDINATION": "0"},
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
@@ -117,6 +118,8 @@ async def _handshake() -> dict:
                 "instructions_present": bool(result.instructions),
                 "tool_count": len(manifest),
                 "tools_missing_annotations": [t.name for t in manifest if t.annotations is None],
+                "coordination_tools_present": all(name in {t.name for t in manifest}
+                                                  for name in ("memory_agents", "memory_message")),
             }
 
 
@@ -286,10 +289,12 @@ def _wake_state(health_enabled: bool | None, effective, flag: str) -> str:
         return "off (coordination disabled on the daemon)"
     master = effective("PSEUDOLIFE_AGENT_COORDINATION")
     if master and master.lower() not in _YES:
-        return f"off (PSEUDOLIFE_AGENT_COORDINATION={master})"
+        value = master.lower() if master.lower() in _OFF else "invalid"
+        return f"off (PSEUDOLIFE_AGENT_COORDINATION={value})"
     value = effective(flag)
     if value and value.lower() not in _YES and (
             flag != "PSEUDOLIFE_AGENT_WAKE_HOOK" or value.lower() in _OFF):
+        value = value.lower() if value.lower() in _OFF else "invalid"
         return f"off ({flag}={value})"
     return "on"
 
@@ -304,7 +309,10 @@ def _wake_report(health: dict | None) -> dict:
     elif not isinstance(coordination, dict) or not isinstance(coordination.get("wake"), dict):
         caps = "unknown (the daemon does not report them; update it)"
     else:
-        caps = coordination["wake"]
+        caps = {key: value for key, value in coordination["wake"].items()
+                if key in {"per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
+                           "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"}
+                and type(value) is int and value >= 0}
     report = {}
     for name, probe in (("claude_code", _claude_code_wake), ("codex", _codex_wake)):
         try:
@@ -328,21 +336,123 @@ def _codex_hooks_line(health: dict) -> str:
     return result["state"] + (f" (changed: {', '.join(changed)})" if changed else "")
 
 
-def _board_line(timeout: float) -> str:
+def _board_probe(timeout: float) -> dict:
     """The agent board's status for the credential this shim would send."""
-    from pseudolife_memory.board_status import board_status
+    from pseudolife_memory.board_status import board_probe
     from pseudolife_memory.credentials import CredentialProvider
     from pseudolife_memory.daemon_url import _daemon_url
 
     try:
         token = CredentialProvider.from_environment().snapshot().token
     except Exception:  # noqa: BLE001 - never serialize credential errors
-        return "off - the configured token file is missing, unsafe or malformed"
+        return {"state": "invalid_credential_file", "line": "off - the configured token file is missing, unsafe or malformed"}
     try:
         url = _daemon_url()
     except (Exception, SystemExit):  # noqa: BLE001 - an invalid URL is reported elsewhere
-        return "off - PSEUDOLIFE_MCP_DAEMON_URL is not a usable daemon URL"
-    return board_status(url, token, timeout=timeout)[1]
+        return {"state": "invalid_url", "line": "off - PSEUDOLIFE_MCP_DAEMON_URL is not a usable daemon URL"}
+    return board_probe(url, token, timeout=timeout)
+
+
+def _board_line(timeout: float) -> str:
+    return _board_probe(timeout)["line"]
+
+
+async def probe_registration(url, token, state_path, timeout, *, client=None) -> str:
+    """Verify a saved instance by nonce proof without sending its credential.
+
+    Context's explicit read-only mode never initializes identity or storage.
+    Never receive, attach, renew, recover or rewrite saved state.
+    """
+    import httpx
+    import hashlib
+    import hmac
+    import uuid
+    from pseudolife_memory.coordination_identity import read_legacy
+
+    if not state_path.exists():
+        return "missing_registration"
+    try:
+        state = read_legacy(state_path, url)
+    except Exception:  # noqa: BLE001 - state errors can carry credentials
+        return "invalid_state"
+    if not token:
+        return "missing_bearer"
+    if client is None:
+        async with httpx.AsyncClient(follow_redirects=False, trust_env=False) as owned:
+            return await probe_registration(url, token, state_path, timeout, client=owned)
+    try:
+        nonce = uuid.uuid4().hex
+        response = await client.post(url + "/api/coordination/context",
+            json={"agent_id": state["agent_id"], "nonce": nonce, "read_only": True},
+            headers={"Authorization": "Bearer " + token}, timeout=timeout, follow_redirects=False)
+        if response.status_code == 200:
+            value = response.json()
+            if not isinstance(value, dict) or not all(isinstance(value.get(key), str)
+                                                      for key in ("bank_id", "principal", "proof")):
+                return "unsupported_capability"
+            if state.get("version") == 2 and any(state.get(key) != value[key]
+                                                  for key in ("bank_id", "principal")):
+                return "bank_identity_mismatch"
+            if state.get("version") not in (None, 2):
+                return "invalid_state"
+            message = json.dumps(["pseudolife-context-v1", value["bank_id"], value["principal"],
+                state["agent_id"], nonce], separators=(",", ":"), ensure_ascii=True).encode("ascii")
+            expected = hmac.new(hashlib.sha256(state["credential"].encode()).digest(), message, hashlib.sha256).hexdigest()
+            return "authenticated" if hmac.compare_digest(value["proof"], expected) else "invalid_credential"
+        if response.status_code == 401:
+            return "unauthorized"
+        if response.status_code in (404, 405):
+            return "unsupported_capability"
+        if response.status_code in (400, 403):
+            value = response.json()
+            code = value.get("error") if isinstance(value, dict) else None
+            return {"instance_not_found": "missing_registration", "invalid_credential": "invalid_credential",
+                    "principal_not_allowed": "principal_not_allowed",
+                    "unexpected_parameter": "unsupported_capability"}.get(code, "refused")
+        return "unavailable" if response.status_code >= 500 else "refused"
+    except httpx.TransportError:
+        return "unavailable"
+    except (ValueError, TypeError):
+        return "unsupported_capability"
+
+
+def coordination_snapshot(health, board, wake, host, registration, *, tools_present=None) -> dict:
+    reachable = isinstance(health, dict) or board.get("state") in {
+        "on", "unauthorized", "disabled", "authentication_required", "principal_not_allowed",
+        "coordination_requires_postgres", "unsupported_capability", "transport_refused", "refused"}
+    auth = "admitted" if board.get("state") == "on" else board.get("state", "unknown")
+    if not reachable:
+        auth = "offline"
+    selected = wake.get("codex" if host == "codex" else "claude_code", {})
+    configured = selected.get("doorbell" if host == "codex" else "stop_hook")
+    wake_state = "unsupported" if host in ("generic", "claude-desktop") else (
+        "configured" if configured == "on" else "unavailable")
+    result = {"daemon": "reachable" if reachable else "offline",
+              "health": "ok" if isinstance(health, dict) and health.get("status") == "ok" else "not_verified",
+              "authentication": auth,
+              "registration": "unsupported_host" if host == "claude-desktop" else registration or "not_checked",
+              "transport": {"coordination_tools": "advertised" if tools_present is True else
+                            "unsupported_capability" if tools_present is False else "not_checked"},
+              "host": host, "wake": {"state": wake_state, "evidence": "configuration_only"},
+              "delivery": "unverified", "next": []}
+    if not reachable:
+        result["next"].append("Start the intended daemon and retry; HTTP health does not prove mail delivery.")
+    elif auth != "admitted":
+        result["next"].append("Check the board reason and credential source; repair authentication or daemon coordination settings.")
+    elif registration in ("invalid_state", "invalid_credential", "bank_identity_mismatch"):
+        result["next"].append("Preserve the saved instance file; verify its bank and principal and the client's credentials before explicit recovery.")
+    elif registration == "unsupported_capability" or tools_present is False:
+        result["next"].append("Update the daemon and shim together; this diagnostic requires coordination tools and read-only context support.")
+    elif registration != "authenticated" and host != "claude-desktop":
+        result["next"].append("Start or reconnect the client, make a memory call, then use --agent-state with its private saved instance file to check registration.")
+    if host == "claude-desktop":
+        result["next"].append("Claude Desktop shares its MCP process across conversations; use a supported session host for a mailbox.")
+    elif wake_state == "unsupported":
+        result["next"].append("This host has no verified idle wake path; pull mail on the next turn.")
+    else:
+        result["next"].append("Configured wake is not delivery evidence; verify enqueue, hint/ring, receive and explicit ack in a disposable bank.")
+    result["transport"]["mailbox_pull"] = "authenticated" if registration == "authenticated" else "not_verified"
+    return result
 
 
 def run_doctor() -> None:
@@ -350,10 +460,36 @@ def run_doctor() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=float, default=20,
-                        help="total MCP handshake budget in seconds (default: 20)")
+                        help="MCP handshake or async fixture-proof budget in seconds (default: 20); excludes fixture setup and cleanup")
+    parser.add_argument("--host", choices=("codex", "claude-code", "claude-desktop", "generic"),
+                        default="generic", help="host whose configured wake path to report (default: generic)")
+    parser.add_argument("--agent-state", type=Path,
+                        help="explicit private saved instance file for a read-only registration check; never repaired")
+    parser.add_argument("--disposable-proof", action="store_true",
+                        help="write a tagged mail proof in a newly created disposable fixture bank; requires explicit PSEUDOLIFE_TEST_DATABASE_URL, never saved client settings")
     args = parser.parse_args(sys.argv[2:])
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if args.disposable_proof:
+        if args.agent_state is not None:
+            parser.error("--disposable-proof cannot use a saved --agent-state")
+        dsn = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
+        if not dsn:
+            print(json.dumps({"ok": False, "error": "ExplicitDisposableDatabaseRequired",
+                              "recovery": "Set PSEUDOLIFE_TEST_DATABASE_URL to an explicitly disposable fixture server; no configured bank or bench default is used."}))
+            raise SystemExit(2)
+        from pseudolife_memory.coordination_proof import FixtureCleanupError, run_disposable_proof
+        try:
+            proof = run_disposable_proof(dsn, timeout=args.timeout)
+        except FixtureCleanupError as exc:
+            print(json.dumps(exc.report()))
+            raise SystemExit(1) from None
+        except Exception as exc:  # noqa: BLE001 - database errors can contain credentials
+            print(json.dumps({"ok": False, "error": type(exc).__name__,
+                              "recovery": "Check the disposable fixture server and CREATE/DROP DATABASE permission; no host delivery has been verified."}))
+            raise SystemExit(1) from None
+        print(json.dumps(proof, indent=2))
+        raise SystemExit(0)
     report = {"ok": False, "interpreter": sys.executable,
               "source": str(Path(__file__).resolve().parent)}
     for package in ("pseudolife-mcp", "mcp"):
@@ -366,17 +502,21 @@ def run_doctor() -> None:
     overrides, credential_source = registration_credentials(os.environ)
     os.environ.update(overrides)
     report["credential_source"] = credential_source or "none"
-    report["board"] = _board_line(min(args.timeout, 2))
+    board = _board_probe(min(args.timeout, 2))
+    report["board"] = board["line"]
     health = None
     if _windows():
         report.update(git_bash_report(os.environ))
     try:
-        _require_mcp_sdk_v2()
         health = probe_health(_daemon_url(), timeout=min(args.timeout, 2))
         report["daemon_status"] = health.get("status") if health else "unreachable"
         if not health or health.get("status") != "ok":
-            report["error"] = "DaemonUnavailable"
-            report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
+            if board["state"] == "unauthorized":
+                report["error"] = "BearerRejected"
+                report["recovery"] = "The endpoint is reachable but rejects this bearer; verify the credential source and daemon authentication configuration, then reconnect."
+            else:
+                report["error"] = "DaemonUnavailable"
+                report["recovery"] = "Start the intended daemon, then retry; doctor never starts one."
         elif health.get("auth") and credential_source is None:
             # The handshake's shim would exit on its own missing-credential
             # line, which reaches doctor as an opaque ExceptionGroup.
@@ -385,6 +525,7 @@ def run_doctor() -> None:
         else:
             report["daemon_version"] = health.get("version") or "unknown"
             report["codex_hooks"] = _codex_hooks_line(health)
+            _require_mcp_sdk_v2()
             report.update(asyncio.run(asyncio.wait_for(_handshake(), timeout=args.timeout)))
             report["ok"] = bool(report["instructions_present"] and report["tool_count"]
                                 and not report["tools_missing_annotations"])
@@ -413,6 +554,19 @@ def run_doctor() -> None:
         report["error"] = type(exc).__name__
         report["recovery"] = "Check daemon health and the exact registered interpreter. Run that interpreter with -m pip check and -m pip show pseudolife-mcp mcp; reinstall there if stale, then retry."
     report["wake"] = _wake_report(health if isinstance(health, dict) else None)
+    registration = None
+    if args.agent_state is not None and args.host != "claude-desktop" and board["state"] == "on":
+        from pseudolife_memory.credentials import CredentialProvider
+        try:
+            token = CredentialProvider.from_environment().snapshot().token
+            registration = asyncio.run(probe_registration(
+                _daemon_url(), token, args.agent_state, min(args.timeout, 2)))
+        except (Exception, SystemExit):  # noqa: BLE001 - never expose credential diagnostics
+            registration = "unavailable"
+    report["coordination"] = coordination_snapshot(health, board, report["wake"], args.host,
+        registration, tools_present=report.get("coordination_tools_present"))
+    if args.agent_state is not None and report["coordination"]["registration"] != "authenticated":
+        report["ok"] = False
     # No Git Bash fails the report whatever the daemon said: the shim works,
     # the Claude Code plugin hooks do not. An earlier error keeps its name
     # and recovery; the Git Bash advice is in git_bash_recovery either way.

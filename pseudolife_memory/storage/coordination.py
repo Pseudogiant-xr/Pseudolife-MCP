@@ -1037,8 +1037,10 @@ class CoordinationStore:
             raise CoordinationError("invalid_bank_identity")
         return value
 
-    def context(self, principal, *, agent_id=None, nonce=None):
+    def context(self, principal, *, agent_id=None, nonce=None, read_only=False):
         """Return this logical bank's durable identity and optional mailbox proof."""
+        if type(read_only) is not bool:
+            raise CoordinationError("unexpected_parameter")
         if (agent_id is None) != (nonce is None):
             raise CoordinationError("missing_parameter")
         for value, field in ((agent_id, "agent_id"), (nonce, "nonce")):
@@ -1049,12 +1051,16 @@ class CoordinationStore:
                 raise CoordinationError(f"invalid_{field}")
         candidate = str(uuid.uuid4())
         with self.storage._txn():
-            created = self.storage.conn.execute(
-                "INSERT INTO meta (key,value) VALUES (%s,%s) "
-                "ON CONFLICT (key) DO NOTHING",
-                (BANK_ID_META_KEY, Jsonb(candidate))).rowcount
-            bank_id = self._bank_id(self._one(
-                "SELECT value FROM meta WHERE key=%s", (BANK_ID_META_KEY,))["value"])
+            created = False
+            if not read_only:
+                created = self.storage.conn.execute(
+                    "INSERT INTO meta (key,value) VALUES (%s,%s) "
+                    "ON CONFLICT (key) DO NOTHING",
+                    (BANK_ID_META_KEY, Jsonb(candidate))).rowcount
+            bank = self._one("SELECT value FROM meta WHERE key=%s", (BANK_ID_META_KEY,))
+            if bank is None:
+                raise CoordinationError("invalid_bank_identity")
+            bank_id = self._bank_id(bank["value"])
             if created:
                 self._append([self._event("bank_identity", {"bank_id": bank_id},
                                           principal=principal)], self.clock())
@@ -1430,6 +1436,9 @@ class CoordinationStore:
 
     def list_agents(self, principal, agent_id, credential, *, project=None, task=None, limit=50):
         self._auth(principal, agent_id, credential)
+        return self._roster(agent_id, project=project, task=task, limit=limit)
+
+    def _roster(self, agent_id, *, project=None, task=None, limit=50, settle_leases=True):
         self._limit(limit)
         clauses, values = ["agent_id<>%s", "credential_hash IS NOT NULL"], [agent_id]
         for key, value in (("project", project), ("task", task)):
@@ -1461,9 +1470,77 @@ class CoordinationStore:
                                        and now > row["status_expires_at"])
             agents.append(agent)
         self._stamp_status_age(agents, now)
-        leases = self.list_leases(limit=MAX_PAGE)
+        leases = self.list_leases(limit=MAX_PAGE, settle=settle_leases)
         return {"agents": agents, "truncated": len(rows) > limit, "idle_omitted": idle,
                 "leases": leases["leases"], "leases_truncated": leases["truncated"]}
+
+    def console_snapshot(self, principal, *, limit=50):
+        """One consistent read-only snapshot of board metadata."""
+        with self.storage._txn():
+            self.storage.conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
+            return self._console_snapshot(principal, limit=limit)
+
+    def _console_snapshot(self, principal, *, limit=50):
+        """Read board metadata without receiving mail or settling leases.
+
+        Roster/lease visibility matches the board. Mail counts and retained
+        events are limited to the caller's principal or its visible mail.
+        Payloads (including pre-v46 text), bodies, salts and credentials never
+        leave this projection. This is a reading slice, not a chain export.
+        """
+        result = self._roster("", limit=limit, settle_leases=False)
+        now = self.clock()
+        counts = {r["recipient_agent_id"]: r["n"] for r in self._all(
+            "SELECT m.recipient_agent_id,count(*) AS n FROM coordination_messages m "
+            "JOIN coordination_agents a ON a.agent_id=m.recipient_agent_id "
+            "WHERE a.principal=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
+            "AND m.recipient_agent_id=ANY(%s) GROUP BY m.recipient_agent_id",
+            (principal, now, [a["agent_id"] for a in result["agents"]]))}
+        for agent in result["agents"]:
+            agent["pending_count"] = (counts.get(agent["agent_id"], 0)
+                                      if agent["principal"] == principal else None)
+        for lease in result["leases"]:
+            lease["expired"] = lease["expires_at"] is not None and lease["expires_at"] <= now
+        # Participant/message indexes avoid unrelated retained sends. Each
+        # branch caps returned rows; the transaction-local timeout also bounds
+        # large caller-owned histories and expiry payloads before releasing the
+        # shared board lock. No participant list or payload leaves this query.
+        rows = self._all(
+            "WITH visible_mail AS MATERIALIZED ("
+            "SELECT message_id FROM coordination_events WHERE event='send' "
+            "AND principal>=%s AND principal<=%s UNION "
+            "SELECT e.message_id FROM coordination_agents a CROSS JOIN LATERAL "
+            "(SELECT message_id FROM coordination_events WHERE event='send' "
+            "AND recipient_agent_id>=a.agent_id AND recipient_agent_id<=a.agent_id "
+            "ORDER BY recipient_agent_id,seq) e WHERE a.principal=%s), "
+            "candidates AS ("
+            "(SELECT e.* FROM coordination_events e WHERE principal>=%s AND principal<=%s "
+            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
+            "ORDER BY principal DESC,seq DESC LIMIT 101) UNION "
+            "(SELECT e.* FROM visible_mail v CROSS JOIN LATERAL "
+            "(SELECT * FROM coordination_events WHERE message_id>=v.message_id AND message_id<=v.message_id "
+            "AND event IN ('send','read','ack','attempt','served','woke','lease_expire') "
+            "ORDER BY message_id,event,created_at OFFSET 0) e "
+            "ORDER BY e.seq DESC LIMIT 101) UNION "
+            "(SELECT e.* FROM coordination_events e WHERE e.event='expire' AND EXISTS "
+            "(SELECT 1 FROM jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+            "JOIN visible_mail v ON v.message_id=ids.id) ORDER BY e.seq DESC LIMIT 101)), "
+            "timeline AS (SELECT e.seq,e.event,e.created_at,e.agent_id,e.recipient_agent_id,"
+            "e.message_id,e.project,e.task, "
+            "CASE e.event WHEN 'send' THEN e.payload::jsonb->>'wake' "
+            "WHEN 'read' THEN e.payload::jsonb->>'path' END AS detail, "
+            "CASE WHEN e.event='expire' THEN (SELECT count(*) FROM "
+            "jsonb_array_elements_text(e.payload::jsonb->'message_ids') AS ids(id) "
+            "JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count "
+            "FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT 101",
+            (principal, principal, principal, principal, principal))
+        details = {"hinted", "not_needed", "rung", "withheld", "nudged", "no_path", "capped",
+                   "pull", "delivery"}
+        result["events"] = [{**dict(r), "detail": r["detail"] if r["detail"] in details else None}
+                            for r in rows[:100]]
+        result["events_truncated"] = len(rows) > 100
+        return {"enabled": True, "available": True, "snapshot_at": now, **result}
 
     def _stamp_status_age(self, agents, now):
         """Say when each listed peer's status was set, and mark it stale past
@@ -1617,10 +1694,13 @@ class CoordinationStore:
     def _holder(row):
         if row["holder_agent_id"] is None:
             return None
-        return {"agent_id": row["holder_agent_id"], "label": row.get("label") or "",
+        holder = {"agent_id": row["holder_agent_id"], "label": row.get("label") or "",
                 "principal": row["holder_principal"], "purpose": row["purpose"],
                 "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
                 "expected_end": row["expected_end"]}
+        if row["name"].startswith("claim:file:"):
+            holder["fence"] = row["fence"]
+        return holder
 
     def _lease_row(self, name):
         return self._one(
@@ -1738,19 +1818,21 @@ class CoordinationStore:
             self._append(events, now)
         return result
 
-    def list_leases(self, *, name=None, limit=MAX_PAGE):
+    def list_leases(self, *, name=None, limit=MAX_PAGE, settle=True):
         """Held and queued leases, name order, each with its first
         LEASE_LIST_QUEUE waiters and an exact count. Free leases are omitted.
         ``stale`` means past the holder's expected end. Due leases are settled
-        first, so a listing never shows a hold that has already lapsed."""
+        first by default. ``settle=False`` is the Console's read-only view,
+        which labels a lapsed hold rather than changing the durable board."""
         if name is not None:
             self._lease_args(name)
         self._limit(limit)
         now = self.clock()
-        with self.storage._txn():
-            events = []
-            self._settle_due(now, events, name=name)
-            self._append(events, now)
+        if settle:
+            with self.storage._txn():
+                events = []
+                self._settle_due(now, events, name=name)
+                self._append(events, now)
         busy = ("(l.holder_agent_id IS NOT NULL OR EXISTS (SELECT 1 FROM "
                 "coordination_lease_waiters w WHERE w.name=l.name))")
         rows = self._all(
@@ -2520,10 +2602,12 @@ class CoordinationStore:
             try:
                 mailbox, raw = after.split(":", 1)
                 seq = int(raw)
-                if mailbox != agent_id or not 0 <= seq <= row["next_sequence"]:
+                if mailbox != agent_id or seq < 0:
                     raise ValueError
             except (AttributeError, ValueError):
                 raise CoordinationError("invalid_cursor") from None
+            if seq > row["next_sequence"]:
+                raise CoordinationError("invalid_cursor", "cursor_ahead")
         attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
                           "wake->>'decision' IN ('rung','nudged','hinted') OR "
                           "wake->>'queued'='true')" if for_delivery else "")
@@ -2533,9 +2617,24 @@ class CoordinationStore:
         rows = self._all("SELECT * FROM coordination_messages WHERE recipient_agent_id=%s "
                          "AND recipient_sequence>%s AND acknowledged_at IS NULL AND expires_at>%s"
                          + attempt_clause + " ORDER BY recipient_sequence LIMIT %s", params)
+        # Metadata has a separate seven-day bound. Explain what is still
+        # known without retrieving expired bodies or guessing what pruned
+        # messages contained. A cursor never acknowledges those messages.
+        continuity = self._one(
+            "SELECT count(*) FILTER (WHERE recipient_sequence>%s) AS retained_after,"
+            "count(*) FILTER (WHERE recipient_sequence>%s AND acknowledged_at IS NULL "
+            "AND expires_at<=%s) AS expired_unacknowledged,"
+            "(SELECT next_sequence FROM coordination_agents WHERE agent_id=%s) AS high_water "
+            "FROM coordination_messages WHERE recipient_agent_id=%s "
+            "AND (created_at>%s OR expires_at>%s)",
+            (seq, seq, now, agent_id, agent_id, now - DEDUPE_RETENTION, now))
+        gap = continuity["retained_after"] < continuity["high_water"] - seq
+        expired = continuity["expired_unacknowledged"]
+        status = ("messages" if rows else "expired_unacknowledged" if expired else
+                  "retention_gap" if gap else "empty")
         unread = [r["message_id"] for r in rows if r["first_read_at"] is None]
-        # Only a first read writes, so an empty poll or a replay stays one
-        # autocommit read. The IS NULL guard stamps and logs each message
+        # Only a first read writes, so an empty poll or a replay stays
+        # read-only. The IS NULL guard stamps and logs each message
         # once even when two receives race on the same page.
         if unread:
             with self.storage._txn():
@@ -2556,7 +2655,146 @@ class CoordinationStore:
         keys = ("message_id", "sender_agent_id", "sender_principal", "recipient_agent_id",
                 "project", "task", "text", "reply_to", "recipient_sequence", "hlc", "created_at", "expires_at")
         return {"messages": [{**{k: r[k] for k in keys}, "origin": MESSAGE_ORIGIN} for r in rows],
-                "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}"}
+                "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}",
+                "continuity": {"status": status, "expired_unacknowledged": expired,
+                               "metadata_gap": gap, "high_water": continuity["high_water"],
+                               "metadata_retention_seconds": DEDUPE_RETENTION}}
+
+    def history(self, principal, agent_id, credential, *, after=None, limit=50,
+                peer=None, audit_retention_days=90):
+        with self.storage._txn():
+            # Match the mailbox connection's existing five-second lock budget.
+            # Retention and a LIMIT do not bound work under planner skew.
+            self.storage.conn.execute("SET LOCAL statement_timeout = '5s'")
+            return self._history(principal, agent_id, credential, after=after, limit=limit,
+                                 peer=peer, audit_retention_days=audit_retention_days)
+
+    def _history(self, principal, agent_id, credential, *, after=None, limit=50,
+                 peer=None, audit_retention_days=90):
+        """Read this instance's retained send events, without delivery effects.
+
+        Only the authenticated sender or recipient sees a message. Bodies
+        follow audit retention and operator redaction, independently of the
+        live TTL. The cursor is an audit sequence scoped to this instance;
+        changing a peer filter starts a different slice, so restart without
+        a cursor to read the newly selected pair from its beginning.
+        """
+        self._auth(principal, agent_id, credential)
+        self._limit(limit)
+        if type(audit_retention_days) is not int or audit_retention_days < 0:
+            raise ValueError("audit_retention_days must be a whole number of days, 0 or more")
+        seq = 0
+        if after is not None:
+            try:
+                mailbox, kind, raw = after.split(":", 2)
+                seq = int(raw)
+                if mailbox != agent_id or kind != "history" or seq < 0:
+                    raise ValueError
+            except (AttributeError, ValueError):
+                raise CoordinationError("invalid_cursor") from None
+            head = self._one(
+                "SELECT max(seq) AS seq FROM ("
+                "(SELECT seq FROM coordination_events WHERE event='send' "
+                "AND (agent_id,principal)>=(%s,%s) AND (agent_id,principal)<=(%s,%s) "
+                "ORDER BY agent_id DESC,principal DESC,seq DESC LIMIT 1) UNION ALL "
+                "(SELECT seq FROM coordination_events WHERE event='send' "
+                "AND recipient_agent_id>=%s AND recipient_agent_id<=%s "
+                "ORDER BY recipient_agent_id DESC,seq DESC LIMIT 1)) heads",
+                (agent_id, principal, agent_id, principal, agent_id, agent_id))["seq"]
+            # Do not turn cursor validation into a probe of other agents'
+            # audit activity. When retention has cut the whole slice, its
+            # former high-water mark is unknown; a saved cursor stays usable.
+            if head is not None and seq > head:
+                raise CoordinationError("invalid_cursor", "cursor_ahead")
+        if peer is not None:
+            # Exact IDs also work after an address has been pruned. Do not
+            # resolve prefixes across another mailbox's retained events.
+            if (not isinstance(peer, str) or not peer or len(peer) > 120
+                    or any(c not in _ID_CHARS for c in peer)):
+                raise CoordinationError("invalid_recipient")
+        now = self.clock()
+        cutoff = audit_cutoff(now, audit_retention_days) if audit_retention_days else None
+        # Equal range bounds retain the participant prefix in ORDER BY.
+        # Equality predicates would let the planner discard that prefix and
+        # choose an audit-wide primary-key walk for a sparse mailbox instead.
+        def direction(columns, values):
+            prefix = "(" + ",".join("s." + col for col in columns) + ")"
+            placeholders = "(" + ",".join("%s" for _ in columns) + ")"
+            return (["s.event='send'", prefix + ">=" + placeholders,
+                     prefix + "<=" + placeholders, "s.seq>%s"],
+                    list(values) * 2 + [seq], ",".join("s." + col for col in columns) + ",s.seq")
+        if peer is None:
+            outgoing, outgoing_params, outgoing_order = direction(
+                ("agent_id", "principal"), (agent_id, principal))
+            incoming, incoming_params, incoming_order = direction(("recipient_agent_id",), (agent_id,))
+        else:
+            outgoing, outgoing_params, outgoing_order = direction(
+                ("agent_id", "recipient_agent_id"), (agent_id, peer))
+            incoming, incoming_params, incoming_order = direction(
+                ("agent_id", "recipient_agent_id"), (peer, agent_id))
+            outgoing.append("s.principal=%s")
+            outgoing_params.append(principal)
+        if cutoff is not None:
+            outgoing.append("s.created_at>=%s")
+            incoming.append("s.created_at>=%s")
+            outgoing_params.append(cutoff)
+            incoming_params.append(cutoff)
+        # Each direction uses its participant/pair index and stops at a page.
+        # UNION deduplicates self-addressed mail before the combined page cap.
+        # Lateral lifecycle reads seek only those message IDs. One statement
+        # keeps bodies and operator redaction in the same database snapshot.
+        rows = self._all(
+            "WITH page AS (SELECT seq FROM ((SELECT s.seq FROM coordination_events s WHERE "
+            + " AND ".join(outgoing) + " ORDER BY " + outgoing_order + " LIMIT %s) UNION "
+            "(SELECT s.seq FROM coordination_events s WHERE " + " AND ".join(incoming)
+            + " ORDER BY " + incoming_order + " LIMIT %s)) sends ORDER BY seq LIMIT %s) "
+            "SELECT p.*,COALESCE(m.acknowledged_at,l.acknowledged_at) AS acknowledged_at,"
+            "COALESCE(m.first_read_at,l.first_read_at) AS first_read_at,l.redacted_at "
+            "FROM page ids JOIN coordination_events p ON p.seq=ids.seq "
+            "LEFT JOIN coordination_messages m ON m.message_id=p.message_id "
+            "LEFT JOIN LATERAL (SELECT "
+            "min(e.created_at) FILTER (WHERE e.event='ack' AND "
+            "e.agent_id=p.recipient_agent_id) AS acknowledged_at,"
+            "min(e.created_at) FILTER (WHERE e.event='read' AND "
+            "e.agent_id=p.recipient_agent_id) AS first_read_at,"
+            "min(e.created_at) FILTER (WHERE e.event='redact') AS redacted_at "
+            "FROM coordination_events e WHERE e.message_id=p.message_id "
+            "AND e.event IN ('ack','read','redact')) l ON true ORDER BY p.seq",
+            outgoing_params + [limit + 1] + incoming_params + [limit + 1, limit + 1])
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        messages = []
+        for sent in rows:
+            payload = json.loads(sent["payload"])
+            # Pre-v46 bodies are in the hashed payload. A legacy operator
+            # redaction can only clear the live copy; agents still must not
+            # receive that retained audit body.
+            redacted = sent["redacted_at"] is not None
+            text = None if redacted else sent["body"]
+            if text is None and not redacted:
+                text = payload.get("text")
+            expires_at = payload.get("expires_at")
+            if redacted:
+                expires_at = (sent["redacted_at"] if expires_at is None else
+                              min(expires_at, sent["redacted_at"]))
+            state = ("acknowledged" if sent["acknowledged_at"] is not None else
+                     "expired" if expires_at is not None and expires_at <= now else "pending")
+            messages.append({
+                "message_id": sent["message_id"], "sender_agent_id": sent["agent_id"],
+                "sender_principal": sent["principal"],
+                "recipient_agent_id": sent["recipient_agent_id"],
+                "participants": sorted({sent["agent_id"], sent["recipient_agent_id"]}),
+                "project": sent["project"], "task": sent["task"], "text": text,
+                "body_state": ("redacted" if redacted else
+                               "retained" if text is not None else "unavailable"),
+                "reply_to": payload.get("reply_to"),
+                "recipient_sequence": payload.get("recipient_sequence"), "hlc": sent["hlc"],
+                "created_at": sent["created_at"], "expires_at": expires_at,
+                "acknowledged_at": sent["acknowledged_at"], "first_read_at": sent["first_read_at"],
+                "state": state, "origin": MESSAGE_ORIGIN})
+        return {"messages": messages, "after": f"{agent_id}:history:{rows[-1]['seq'] if rows else seq}",
+                "has_more": has_more, "retention_days": audit_retention_days,
+                "retained_since": cutoff}
 
     def ack(self, principal, agent_id, credential, *, message_id):
         """Acknowledge one message, or several comma-separated (at most

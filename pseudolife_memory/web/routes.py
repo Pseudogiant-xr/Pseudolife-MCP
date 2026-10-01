@@ -95,6 +95,12 @@ class ConsoleRoutes:
 
     # -- registration --------------------------------------------------------
 
+    def _agents(self, params):
+        if params.get("view") == "coordination":
+            from pseudolife_memory.coordination import console_snapshot
+            return console_snapshot(self.svc, limit=_i(params, "limit", 50))
+        return self.svc.coordination_awareness(limit=_i(params, "limit", 5))
+
     def _register(self) -> None:
         g = lambda p, h: self.table.__setitem__(("GET", p), h)   # noqa: E731
         p = lambda p_, h: self.table.__setitem__(("POST", p_), h)  # noqa: E731
@@ -138,8 +144,7 @@ class ConsoleRoutes:
         g("/api/briefing", lambda q, b: svc.session_briefing(
             max_unsure=_i(q, "max_unsure", 3), max_lessons=_i(q, "max_lessons", 3),
             max_world=_i(q, "max_world", 3)))
-        g("/api/agents", lambda q, b: svc.coordination_awareness(
-            limit=_i(q, "limit", 5)))
+        g("/api/agents", lambda q, b: self._agents(q))
 
         # ---- episodes ----
         # The write endpoints (start/end/prune/rename/merge) are deliberately
