@@ -118,7 +118,7 @@
    "p": "",
    "d": [
     "Talks only to /ui/* and /api/*",
-    "Bearer token kept in localStorage (pl_token); 401 → token modal"
+    "Bearer token kept in localStorage (pl_token); a 401 shows the refusal with a token prompt"
    ]
   },
   {
@@ -457,11 +457,12 @@
    "x": 660,
    "y": 380,
    "t": "Cortex Console SPA",
-   "s": "vanilla JS · /ui/",
+   "s": "Svelte 5 build · /ui/",
    "p": "pseudolife_memory/web/static/",
    "d": [
-    "Panels: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Insight · Episodes · Console",
-    "Hash-routed, REST-only; 401 anywhere → token modal",
+    "Views: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Review · Insight · Board · Episodes · Settings",
+    "Source in frontend/ (Vite + Svelte 5 + TypeScript); the committed build is what the wheel ships, and CI rebuilds and diffs it",
+    "Hash-routed, REST-only; pre-v3 hash ids (#/console, #/atlas, #/coordination) alias onto the new views",
     "Dev harness: web/devserver.py on :8770 against FixtureService"
    ]
   },

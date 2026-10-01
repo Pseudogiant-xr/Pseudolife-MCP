@@ -319,3 +319,40 @@ jobs:
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
         run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -rs
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check (warnings fail)
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Rebuild the committed console
+        run: npm run build
+
+      - name: The committed build matches the source
+        # A source change without its rebuilt output (or the reverse) would
+        # ship a console that differs from the reviewed code.
+        working-directory: .
+        run: |
+          git status --porcelain -- pseudolife_memory/web/static
+          test -z "$(git status --porcelain -- pseudolife_memory/web/static)"
