@@ -264,18 +264,26 @@ def test_pg_lost_response_reconciles_authoritative_state(
         old = _seed(svc)
         storage.add_trace("gateway", "deployment", old.db_id, 1.0)
         original_transaction = storage.transaction
+        injected = []
 
         @contextmanager
         def uncertain_transaction():
+            # Inject response loss at the outer correction transaction boundary.
+            if storage._transaction_connection is not None:
+                with original_transaction():
+                    yield
+                return
             if committed:
                 with original_transaction():
                     yield
+                injected.append("commit")
                 raise RuntimeError("injected lost commit response")
             try:
                 with original_transaction():
                     yield
                     raise RuntimeError("injected rollback before commit")
             except RuntimeError as exc:
+                injected.append("rollback")
                 raise RuntimeError("injected lost rollback response") from exc
 
         monkeypatch.setattr(storage, "transaction", uncertain_transaction)
@@ -299,6 +307,7 @@ def test_pg_lost_response_reconciles_authoritative_state(
                 "WHERE source_entry_id = %s AND cause = 'source_superseded'",
                 (old.db_id,),
             ).fetchone()[0] == 0
+        assert injected == ["commit" if committed else "rollback"]
         assert svc._correction_recovery is None
     finally:
         storage.close()
@@ -316,6 +325,10 @@ def test_pg_unreadable_recovery_blocks_save_until_retry(
 
         @contextmanager
         def committed_but_lost():
+            if storage._transaction_connection is not None:
+                with original_transaction():
+                    yield
+                return
             with original_transaction():
                 yield
             raise RuntimeError("injected lost commit response")

@@ -107,6 +107,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   require the operator marker and a restart; per-conversation mailbox binding
   through this shared shim remains unsupported.
 
+### Fixed (2026-10-01 - incomplete learned rules stay pending)
+- Rule synthesis validates decision-critical values after its single retry;
+  empty or incomplete retries cannot restore an invalid initial rule or
+  acknowledge its source signal. Other valid rules in the batch still land.
+- Malformed or contradictory rule verdicts and polarities fail closed instead
+  of becoming success guidance. Ordinary clustered lesson parsing is unchanged.
+
+### Fixed (2026-10-01 — learned lessons keep their sources; only a forget retires them)
+- A synthesised lesson now records where it came from: the signal and episode
+  ids in its provenance, and the entries those signals credited through
+  `used_ids` in a `store_decisions` lineage row committed with it. A rule
+  carries its own signal's lineage and event time; a clustered lesson carries
+  its whole batch's and is tagged `lineage:batch`. Source ids proposed by the
+  model are ignored. Re-deriving a lesson that has lineage adds the new
+  entries; re-deriving one without lineage (an explicit or older lesson)
+  never attaches any.
+- A lesson retires only when an explicit forget removes the last entry of its
+  lineage. This follows the 2026-09-29 forget cascade for facts and dream
+  edges, except that a superseded entry still supports a lesson. Corrections, consolidation and capacity eviction never retire a
+  lesson: a superseded entry is kept as history and still supports it (so do
+  digests the forget itself retires), and an entry deleted earlier counts as
+  gone. A clustered lesson survives while any entry of its batch survives.
+  The retirement and its audit row commit in the forget's transaction;
+  lessons without lineage are untouched.
+- A signal stays pending, and is skipped before extraction, only when every
+  entry it credits has been deleted (forgotten or evicted), so current inputs
+  in the same clustered batch still land. One surviving credited entry is
+  enough, as for retirement; a superseded entry does not hold its signal
+  back. Failed and empty signals stay pending too, and capped sweeps rotate
+  through eligible batches so the oldest invalid signal cannot monopolise
+  them (a restart begins with the oldest eligible signal again).
+- A lesson reload never fails or reverts a committed forget or correction.
+  The resident lessons reload only after a forget actually retired one; until
+  that reload succeeds, lesson reads retry it and saves skip only the lesson
+  snapshot.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived

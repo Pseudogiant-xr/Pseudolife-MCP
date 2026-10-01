@@ -2701,7 +2701,9 @@ class ContinuumMemorySystem:
         if removed:
             self._slot_index_dirty = True
         if self.storage is not None and removed_ids and before_delete is None:
-            self.storage.delete_entry_ids(removed_ids)
+            # An explicit forget: storage retires lessons whose last source
+            # this removes (capacity eviction below never does).
+            self.storage.delete_entry_ids(removed_ids, forgotten=True)
         return removed
 
     def _on_band_evict(self, entry: MemoryEntry, band_idx: int | None = None) -> None:
@@ -2756,6 +2758,7 @@ class ContinuumMemorySystem:
                         entry.db_id, source=entry.source,
                         superseded=superseded)
                 elif entry.db_id is not None:
+                    # A plain delete: eviction is capacity, not a forget.
                     self.storage.delete_entry_ids([entry.db_id])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_storage:

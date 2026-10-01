@@ -63,6 +63,8 @@ SERVICE_PY = SERVICE_FILES[0]
 # test_allowlisted_helpers_only_called_under_lock, seeded by the
 # 2026-08-21 caller-by-caller audit).
 CALLER_HOLDS_LOCK = {
+    "_pending_lesson_signals",
+    "_refresh_source_retired_lessons_locked",
     "_assert_public_search_path",
     "_ensure_init",
     # HLC startup seeding is reached only through _ensure_init; the fixpoint

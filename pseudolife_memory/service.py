@@ -1273,6 +1273,7 @@ class MemoryService(DreamOps):
         from pseudolife_memory.curation_safety import recover_slot_curation
         recover_slot_curation(self, locked=True)
         self._recover_lesson_synthesis()
+        self._refresh_source_retired_lessons_locked()
         if self._cms is not None:
             if self._hlc_reseed_pending:
                 self._reseed_hlc()
@@ -2491,6 +2492,13 @@ class MemoryService(DreamOps):
                 entry.__dict__.update(attributes)
             self._cms = previous
             raise
+        try:
+            self._refresh_source_retired_lessons_locked()
+        except Exception as exc:  # noqa: BLE001 — the source mutation already committed
+            # A lesson reload never fails or reverts a published source
+            # mutation. The refresh flag stays a read/save barrier until a
+            # retry reloads the authoritative lesson retirements.
+            logger.warning("source mutation published; lesson refresh pending (%s)", exc)
 
     def _recover_correction_locked(self) -> str | None:
         pending = self._correction_recovery
@@ -3369,6 +3377,13 @@ class MemoryService(DreamOps):
                     "sample_texts": refused.texts[:20],
                     "hint": "pass confirm_bulk=true to remove them",
                 }
+            try:
+                self._refresh_source_retired_lessons_locked()
+            except Exception as exc:  # noqa: BLE001 — durable forget already committed
+                # CMS, cortex and digest publication must finish after commit.
+                # The refresh flag remains a read/save barrier until a retry
+                # reloads the authoritative lesson retirements.
+                logger.warning("forget committed; lesson refresh pending (%s)", exc)
             return {
                 "deleted_count": len(removed),
                 "deleted_texts": removed[:20],
@@ -3746,6 +3761,7 @@ class MemoryService(DreamOps):
 
     def _save_lessons(self) -> None:
         self._recover_lesson_synthesis()
+        self._refresh_source_retired_lessons_locked()
         if getattr(self, "_lessons", None) is None or self._storage is None:
             return
         try:
@@ -3796,6 +3812,7 @@ class MemoryService(DreamOps):
         if not curation_blocks_lessons:
             try:
                 self._recover_lesson_synthesis()
+                self._refresh_source_retired_lessons_locked()
             except Exception as exc:  # noqa: BLE001 — re-raised after the rest
                 lesson_block = exc
                 logger.error("%s save: lesson snapshot skipped, lesson "
@@ -5113,6 +5130,37 @@ class MemoryService(DreamOps):
             hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
         self._link_lesson_graph(task, rec.about, rec.polarity)
         return action, rec
+
+    def _refresh_source_retired_lessons_locked(self) -> None:
+        """Mirror committed forget retirements before reads or autosaves.
+
+        Storage raises the flag only when a forget actually retires a lesson,
+        before its commit, so a rollback or uncertain commit leaves a
+        retryable read barrier and nothing else forces a reload. Match stable
+        record identity rather than lesson row IDs (slot sync rewrites them);
+        retain unrelated dirty RAM.
+        """
+        if not getattr(self._storage, "_lesson_source_refresh", False):
+            return
+        if self._lessons is None:
+            # Nothing resident yet: the next hydration reads durable state.
+            self._storage._lesson_source_refresh = False
+            return
+        rows = self._storage.load_lessons()
+        retired = {
+            (r["entity_norm"], r["attribute_norm"], r["value"], r["asserted_at"]): r
+            for r in rows if r["status"] == "retired"
+            and r.get("superseded_by_value") == "source_forgotten"}
+        for rec in self._lessons.records:
+            row = retired.get((*rec.key, rec.value, rec.asserted_at))
+            if row is not None and rec.status == "current":
+                rec.status = "retired"
+                rec.superseded_at = row["superseded_at"]
+                rec.superseded_by_value = row["superseded_by_value"]
+        self._lessons._current = {
+            rec.key: i for i, rec in enumerate(self._lessons.records)
+            if rec.status == "current"}
+        self._storage._lesson_source_refresh = False
 
     def _recover_lesson_synthesis(self) -> str | None:
         """Resolve an uncertain commit before reads or snapshots use lesson RAM.
