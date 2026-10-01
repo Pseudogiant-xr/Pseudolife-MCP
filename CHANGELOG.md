@@ -13,7 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   So `/api/coordination/*` answered 401 to a caller the gate had accepted,
   and `/mcp` tool calls recorded that caller as `default` instead of its
   named principal. Token comparison now uses the bytes the client sent,
-  whichever way the header was decoded.
+  whichever way the header was decoded. Only spaces and tabs are trimmed
+  from the presented token, so a token ending in a character such as `à`
+  or `ą` keeps its last byte.
 - Authorization header bytes that are not valid UTF-8 get a 401 instead of
   an unhandled decode error (a 500).
 

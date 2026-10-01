@@ -97,7 +97,9 @@ def resolve_principal(auth_header: str | None,
     if not auth_header:
         return None
     scheme, _, presented = auth_header.partition(" ")
-    presented = presented.strip()
+    # HTTP whitespace only: str.strip() would also drop NBSP/NEL, which is
+    # how latin-1 text renders the last byte of UTF-8 "à" (C3 A0) or "ą" (C4 85).
+    presented = presented.strip(" \t")
     if scheme.lower() != "bearer" or not presented:
         return None
     # Compare bytes: compare_digest raises TypeError on non-ASCII str, which

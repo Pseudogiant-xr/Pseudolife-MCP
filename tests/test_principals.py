@@ -111,3 +111,14 @@ def test_resolve_principal_matches_non_ascii_token_from_latin1_header():
     assert resolve_principal("Bearer " + wire, {}, "café-token") == DEFAULT_PRINCIPAL
     assert resolve_principal("Bearer " + "café-tok2".encode().decode("latin-1"),
                              m, None) is None
+
+
+def test_resolve_principal_keeps_trailing_utf8_byte_that_latin1_reads_as_space():
+    # UTF-8 "à" is C3 A0 and "ą" is C4 85; decoded as latin-1 the final
+    # byte becomes NBSP / NEL, which str.strip() treats as whitespace. Only
+    # HTTP whitespace (SP, HTAB) may be trimmed from the presented token.
+    for token in ("tok-voilà", "tok-ą"):
+        wire = token.encode("utf-8").decode("latin-1")
+        assert resolve_principal("Bearer " + wire, {token: "named"}, None) == "named"
+        assert resolve_principal("Bearer " + wire + " \t", {token: "named"},
+                                 None) == "named"
