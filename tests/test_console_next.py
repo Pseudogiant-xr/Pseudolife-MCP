@@ -3,8 +3,10 @@
 The Vite/Svelte source lives in ``frontend/``; its build output is committed
 under ``pseudolife_memory/web/static/next/`` because the Python wheel ships
 ``static/**`` and neither the daemon image nor a pip install has Node. These
-tests pin the parts of that output the daemon relies on, so a stale or
+tests pin the parts of that output the daemon relies on, so a missing or
 mis-based build fails here rather than as a blank page at ``/ui/next/``.
+They do not compare the build with ``frontend/src``: a source edit needs
+``npm run build`` and the regenerated output committed alongside it.
 """
 
 from __future__ import annotations
