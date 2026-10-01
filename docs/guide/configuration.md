@@ -21,6 +21,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `claude-desktop` / `codex` / `gemini` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
+| `PSEUDOLIFE_MCP_SHARED_HOST` | _(unset)_ | Set `1` on a stdio shim launcher serving multiple cloud/ChatGPT/Dot conversations without a supported per-conversation binding. It registers no board address and refuses mailbox operations, while memory and awareness calls remain available. Writer IDs `claude-desktop` and `tunnel` always use this guard. The operator setting takes precedence over Codex metadata and channel mode; it does not authenticate a caller. See [Delivery and recovery](#delivery-and-recovery). |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | `60` | Daemon on Linux/glibc only (the Docker tier): how often a background thread calls `malloc_trim(0)` to hand back heap memory glibc keeps after embedder encode bursts. Measured 2026-09-23 with four persistent worker threads, 1,007-1,433 MiB of it was still resident at idle with the fp32 embedder (897-1,476 MiB bf16), and a trim took a median 7 ms with no measurable slowdown of the next encode (`evals/results/allocator-trim-pool-20260923.json`, `allocator-trim-probe-20260923.json`, `allocator-trim-latency-20260923.json`). It lowers what the daemon holds after a burst, not the peak of the burst itself. `0` disables. |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
@@ -1470,8 +1471,33 @@ different names: the installer registers both as `pseudolife-memory`, and
 where the names match, Desktop serves the Code tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
-write that carries no instance credential. An
-adapter with saved state registers a fresh address on its next start only when the authenticated
+write that carries no instance credential.
+
+For a custom cloud/ChatGPT/Dot launcher that shares one stdio shim among
+conversations, set `PSEUDOLIFE_MCP_SHARED_HOST=1` in that launcher's environment
+and restart its shim. The known `tunnel` writer uses the same guard automatically;
+setting the marker to `0` does not disable it for `tunnel` or `claude-desktop`.
+Any value except empty, `0`, `false`, `no` or `off` (trimmed and
+case-insensitive) turns the guard on, so a mistyped marker fails closed.
+The shared shim refuses all `memory_message` actions and `memory_agents`
+`update`, `claim` and `release` before sending them upstream, even when
+coordination or channel delivery is explicitly enabled. It serves no board
+check-in and binds no adapter or Codex thread registry. Memory calls and
+`memory_agents(action="list")` continue with the configured bearer principal.
+
+The [OpenAI Plugin reference](https://developers.openai.com/plugins/reference)
+documents `_meta["openai/session"]` for correlating calls within a ChatGPT
+conversation. This shared shim does not establish a trusted conversation
+binding from that field: metadata, tool arguments, project/task labels and
+the bearer principal's name cannot select another mailbox. A principal named
+`codex` does not make a cloud launcher a session-aware Codex host. The supported
+Codex transport still binds threads through its own host path. Distinct cloud
+conversation mailboxes remain unsupported through this shared shim; ordinary
+memory access is available. Existing custom cloud deployments need the marker
+and a restart separately from installing this code. No launch registration or
+live cloud configuration is changed by this guard.
+
+An adapter with saved state registers a fresh address on its next start only when the authenticated
 daemon explicitly confirms that the saved address no longer exists (pruned
 after seven idle days with no retained mail, or absent from a restored
 database, where `rebind` cannot restore it either). A bank-bound client first
