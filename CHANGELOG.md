@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-01 — Cortex Console v3, phase 1)
+- A rebuilt web console, served beside the classic one at `/ui/next/`: a
+  Vite + Svelte 5 + TypeScript app under `frontend/` whose build output is
+  committed under `pseudolife_memory/web/static/next/` (the wheel ships
+  `static/**` and the daemon image has no Node). Phase 1 ships the shell,
+  the Observatory and a native Board view over the read-only coordination
+  snapshot (`GET /api/agents?view=coordination`): roster, park records,
+  leases and the mail/wake timeline, with no message bodies and no compose.
+  Every other view links to the classic console until it is ported.
+
 ### Fixed (2026-10-01 — indexed coordination reads; schema v52)
 - Retained mail pages, exact peer filters, cursor high-water checks and lifecycle
   reconstruction use participant and message indexes rather than scanning other
