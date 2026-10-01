@@ -16,6 +16,20 @@ def test_message_surface_cannot_override_identity(monkeypatch):
         mod.memory_message(action="send", sender_id="peer")
 
 
+def test_message_history_surface_is_additive_and_instance_scoped(monkeypatch):
+    from pseudolife_memory import mcp_server as mod, coordination
+    seen = []
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, args: seen.append(
+        (action, args)) or {"messages": [], "has_more": False})
+    mod.memory_message(action="history", peer="peer-id", limit=2, after="own:history:1")
+    assert seen == [("history", {"peer": "peer-id", "limit": 2, "after": "own:history:1"})]
+    tool = mod.mcp._tool_manager.get_tool("memory_message")
+    parsed = tool.fn_metadata.arg_model.model_validate({"action": "history", "limit": 2})
+    assert parsed.action == "history" and parsed.limit == 2
+    with pytest.raises(TypeError):
+        mod.memory_message(action="history", agent_id="other")
+
+
 def test_agents_tool_uses_awareness_when_no_adapter_identity(monkeypatch):
     from pseudolife_memory import mcp_server as mod
     from pseudolife_memory.writer_context import bind_request_headers, unbind_request_headers

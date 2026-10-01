@@ -338,7 +338,8 @@ def _replace_token(path: Path, token: str) -> None:
 
 @asynccontextmanager
 async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
-                        *, operation_timeout: float = 1.0):
+                        *, operation_timeout: float = 1.0, agent_headers: dict | None = None,
+                        prepare_delay: float = 0):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -349,19 +350,108 @@ async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)
     code = (
-        "import asyncio,sys; "
+        "import asyncio,json,sys; "
         "from pseudolife_memory.credentials import CredentialProvider; "
         "from pseudolife_memory.shim import _proxy; "
+        + ("import time; from pseudolife_memory import repository_claims; "
+           "repository_claims.prepare_claim_arguments=lambda name,args: "
+           f"(time.sleep({prepare_delay}),{{'action':'claim','repository_id':'a'*64,'path':'file.py'}})[1]; "
+           if prepare_delay else "") +
         "asyncio.run(_proxy(sys.argv[1],None,'fixture-session',"
-        "provider=CredentialProvider.from_environment()))"
+        "provider=CredentialProvider.from_environment(),agent_headers=json.loads(sys.argv[2])))"
     )
     params = StdioServerParameters(
-        command=sys.executable, args=["-c", code, upstream.url], env=env)
+        command=sys.executable, args=["-c", code, upstream.url, json.dumps(agent_headers)], env=env)
     with stderr.open("w", encoding="utf-8") as errlog:
         async with stdio_client(params, errlog=errlog) as streams:
             async with ClientSession(*streams[:2]) as client:
                 await client.initialize()
                 yield client
+
+
+def test_file_claim_is_prepared_locally_before_remote_call(tmp_path, upstream):
+    from tests.test_repository_claims import git
+    root = tmp_path / "checkout"
+    root.mkdir()
+    git(root, "init")
+    token_file = tmp_path / "token"
+    _replace_token(token_file, OLD_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=5, agent_headers={
+                                     "X-PL-Agent": "fixture-agent",
+                                     "X-PL-Agent-Key": "fixture-key"}) as client:
+            claimed = await client.call_tool("memory_agents", {
+                "action": "claim", "worktree": str(root), "path": "src\\file.py"})
+            assert not claimed.is_error
+            prepared = [params["arguments"] for method, _auth, params in upstream.requests
+                        if method == "tools/call"][-1]
+            assert "worktree" not in prepared
+            assert len(prepared["repository_id"]) == 64
+            assert prepared["path"] == "src/file.py"
+            released = await client.call_tool("memory_agents", {
+                "action": "release", "worktree": str(root), "path": "src/file.py"})
+            assert not released.is_error
+            sent = [params["arguments"] for method, _auth, params in upstream.requests
+                    if method == "tools/call"][-1]
+            assert sent["repository_id"] == prepared["repository_id"]
+            bad = await client.call_tool("memory_agents", {
+                "action": "claim", "worktree": str(root), "path": "../outside.py"})
+            assert bad.is_error and bad.content[0].text == "invalid_claim_path"
+            generic = await client.call_tool("memory_agents", {"action": "claim", "lease": "gpu"})
+            assert not generic.is_error
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=15))
+    calls = [params["arguments"] for method, _auth, params in upstream.requests
+             if method == "tools/call"]
+    assert len(calls) == 3
+    assert str(root) not in json.dumps(calls)
+
+
+def test_file_claim_preparation_uses_total_deadline_and_next_call_recovers(tmp_path, upstream):
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=0.15, prepare_delay=1) as client:
+            started = time.monotonic()
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("memory_agents", {
+                    "action": "claim", "worktree": str(tmp_path), "path": "file.py"})
+            assert time.monotonic() - started < 0.7
+            assert _error_data(caught.value) == {
+                "classification": "timeout", "phase": "initialize",
+                "operation_outcome": "not_dispatched"}
+            recovered = await client.call_tool("read", {})
+            assert not recovered.is_error
+            await asyncio.sleep(1.1)
+            assert not any(params.get("name") == "memory_agents" for method, _, params
+                           in upstream.requests if method == "tools/call")
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_cancelled_file_claim_preparation_cannot_dispatch_later(tmp_path, upstream):
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=5, prepare_delay=1) as client:
+            task = asyncio.create_task(client.call_tool("memory_agents", {
+                "action": "claim", "worktree": str(tmp_path), "path": "file.py"}))
+            await asyncio.sleep(0.2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.sleep(1.1)
+            assert not any(params.get("name") == "memory_agents" for method, _, params
+                           in upstream.requests if method == "tools/call")
+            assert not (await client.call_tool("read", {})).is_error
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
 
 
 def _error_data(exc: BaseException) -> dict:

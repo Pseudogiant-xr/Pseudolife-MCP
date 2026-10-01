@@ -243,6 +243,29 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
 .panel-head .spacer { margin-left:auto; }
 .panel-body { padding:20px; }
 
+/* Read-only coordination board */
+.coordination-body { display:grid; gap:20px; }
+.coordination .panel-head { flex-wrap:wrap; }
+.coordination-roster { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:16px; }
+.coordination-agent, .coordination-lease { border:1px solid var(--line); border-radius:var(--radius); padding:16px; min-width:0; overflow-wrap:anywhere; }
+.coordination-lease + .coordination-lease { margin-top:16px; }
+.coordination h3 { font-size:.92rem; margin:0 0 10px; }
+.coordination-chips { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.coordination-chips .chip { max-width:100%; min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.coordination-status { white-space:pre-wrap; }
+.coordination summary { cursor:pointer; padding:8px 0; color:var(--ink-2); }
+.coordination summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:4px; }
+.coordination-fields { display:grid; grid-template-columns:90px minmax(0,1fr); gap:6px 12px; font-size:.8rem; }
+.coordination-fields dt { color:var(--ink-3); }
+.coordination-fields dd { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.coordination-children { padding-left:20px; font-size:.8rem; }
+.coordination-events { list-style:none; margin:0; padding:0; }
+.coordination-events li { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 12px; padding:12px 0; border-bottom:1px solid var(--line); font-size:.8rem; overflow-wrap:anywhere; }
+.coordination-events li:last-child { border-bottom:0; }
+.coordination-events li > span:last-child { min-width:0; flex-basis:100%; }
+.coordination-stale { color:var(--c-warn); }
+.coordination .count-note { white-space:normal; overflow-wrap:anywhere; }
+
 .eyebrow { font-family:var(--font-mono); font-size:.68rem; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3); }
 
 /* Section heading */

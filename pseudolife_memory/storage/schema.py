@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 51
+SCHEMA_META_VERSION = 52
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -561,6 +561,22 @@ CREATE TABLE IF NOT EXISTS coordination_events (
 );
 CREATE INDEX IF NOT EXISTS coordination_events_time_idx
     ON coordination_events (created_at);
+-- v52: participant pages, exact peer filters and per-message lifecycle reads.
+-- Pages seek each direction independently before combining their bounded rows.
+CREATE INDEX IF NOT EXISTS coordination_events_send_sender_idx
+    ON coordination_events (agent_id, principal, seq) WHERE event='send';
+CREATE INDEX IF NOT EXISTS coordination_events_send_recipient_idx
+    ON coordination_events (recipient_agent_id, seq) WHERE event='send';
+CREATE INDEX IF NOT EXISTS coordination_events_send_pair_idx
+    ON coordination_events (agent_id, recipient_agent_id, seq) WHERE event='send';
+CREATE INDEX IF NOT EXISTS coordination_events_send_principal_idx
+    ON coordination_events (principal, seq) WHERE event='send';
+CREATE INDEX IF NOT EXISTS coordination_events_principal_idx
+    ON coordination_events (principal, seq);
+CREATE INDEX IF NOT EXISTS coordination_events_expire_idx
+    ON coordination_events (seq) WHERE event='expire';
+CREATE INDEX IF NOT EXISTS coordination_events_message_idx
+    ON coordination_events (message_id, event, created_at);
 -- v45: named leases on shared resources, one row per name. The row outlives
 -- each hold so the fence keeps rising across grants. No foreign keys, like
 -- the audit log: prune drops a departed waiter's row itself and never

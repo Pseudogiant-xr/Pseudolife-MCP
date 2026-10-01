@@ -86,6 +86,42 @@ def test_context_uses_preconnected_storage_without_full_service_init(monkeypatch
     assert result["principal"] == "default"
 
 
+def test_read_only_context_never_initializes_storage():
+    with pytest.raises(ValueError, match="coordination_unavailable"):
+        dispatch(_guard_service(allowed=("default",)), "context", {"read_only": True},
+                 principal="default", headers={})
+
+
+def test_read_only_context_does_not_create_bank_identity_or_audit(pg_conn):
+    store = CoordinationStore(Storage(pg_conn))
+    pg_conn.execute("DELETE FROM meta WHERE key='coordination_bank_id'")
+    before = pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0]
+    with pytest.raises(CoordinationError, match="invalid_bank_identity"):
+        store.context("default", read_only=True)
+    assert pg_conn.execute("SELECT value FROM meta WHERE key='coordination_bank_id'").fetchone() is None
+    assert pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0] == before
+
+
+def test_read_only_context_dispatch_returns_proof_without_writes(pg_conn, monkeypatch):
+    from pseudolife_memory import coordination
+    pg_conn.autocommit = True
+    store = CoordinationStore(Storage(pg_conn))
+    bank = store.context("default")
+    agent = store.register("default")
+    service = _guard_service(allowed=("default",))
+    service._storage = object()
+    monkeypatch.setattr(coordination, "_store", lambda unused: store)
+    before = pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0]
+    result = dispatch(service, "context", {"agent_id": agent["agent_id"], "nonce": "0" * 32,
+        "read_only": True}, principal="default", headers={})
+    assert result["bank_id"] == bank["bank_id"] and result["proof"]
+    assert pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0] == before
+    context = store.context("default")
+    before = pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0]
+    assert store.context("default", read_only=True) == context
+    assert pg_conn.execute("SELECT COUNT(*) FROM coordination_events").fetchone()[0] == before
+
+
 def test_context_route_needs_no_instance_headers_and_persists_identity(pg_service):
     pg_service.config.coordination.enabled = True
     pg_service.config.coordination.allowed_principals = ["agent-user"]

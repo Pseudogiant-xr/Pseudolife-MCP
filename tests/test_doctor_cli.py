@@ -187,7 +187,7 @@ def _claude_registration(config_dir: Path, env: dict) -> Path:
 def _doctor_with_auth(monkeypatch, handshake):
     monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "doctor"])
     monkeypatch.setattr(doctor_cli, "_windows", lambda: False)
-    monkeypatch.setattr(doctor_cli, "_board_line", lambda timeout: "off")
+    monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "disabled", "line": "off"})
     monkeypatch.setattr(doctor_cli, "_codex_hooks_line", lambda health: "current")
     monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
     monkeypatch.setattr(shim, "probe_health", lambda *a, **kw: {

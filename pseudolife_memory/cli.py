@@ -35,7 +35,8 @@ modes:
   prompt-hook    per-turn UserPromptSubmit hook: prints a note only when new
                  lessons or other sessions' status notes landed since this
                  session's last one (installs without the plugin)
-  doctor         check this runtime, daemon health and MCP handshake (no writes)
+  doctor         check runtime, health, MCP and coordination (read-only by default;
+                 --disposable-proof writes only to an explicit fixture server)
   connect        point this machine's client registrations at a daemon URL
                  (`connect <url>`): replaces the old URL and, with
                  --token-file, the token file; verifies the daemon accepts

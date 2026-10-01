@@ -6,6 +6,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-01 — indexed coordination reads; schema v52)
+- Retained mail pages, exact peer filters, cursor high-water checks and lifecycle
+  reconstruction use participant and message indexes rather than scanning other
+  mailboxes under the coordination lock. Schema v52 adds seven audit indexes.
+- The read-only Console snapshot pins its connection through transaction completion,
+  uses principal and message indexes, and caps SQL execution while holding the
+  board lock. Expired parks remain historical metadata; holder labels wrap and
+  refresh retains keyboard focus.
+- Exact file-claim preparation shares the shim operation deadline and cancellation
+  lifecycle. Checkout-contained Git administration directories are refused.
+- Disposable doctor proofs keep Console state in their temporary directory,
+  reconnect for exact owned-bank cleanup, give each DROP a separate bounded budget
+  and report its safe name if cleanup fails. The async proof timeout excludes
+  fixture setup and cleanup.
+
+### Added (2026-10-01 — mailbox continuity)
+- Receive reports expired unacknowledged mail and gaps beyond its seven-day
+  metadata window without returning expired bodies. An ahead cursor keeps
+  the `invalid_cursor` error and adds `cursor_ahead` detail.
+- Authenticated instances can page retained sent and received mail with
+  `memory_message(action="history")` or `POST /api/coordination/history`.
+  History follows audit retention and operator redaction, supports an exact
+  peer filter and reply metadata, and has no delivery, wake or dream effects.
+### Added (2026-10-01 — repository-scoped exact file claims)
+- `memory_agents` claim/release accepts a local Git `worktree` and exact
+  repository-relative `path` through the stdio shim. Linked worktrees share
+  claims; unrelated clones remain separate. Unsafe paths, globs, directories
+  and symlink/junction aliases are refused. Claims retain the existing FIFO
+  queue and expiry; a conflicting holder reports its fence and expiry.
+- Direct HTTP clients can prepare `repository_id` and `path` locally. The
+  daemon does not open client checkout paths, and claim names contain hashes
+  rather than absolute host paths. File claims remain advisory.
+### Added (2026-10-01 — read-only coordination view)
+- The Console's Coordination view shows active agents, status age, reported
+  children, park needs/resume, pending mail for the caller's principal, resource
+  holders and FIFO queues, and up to 100 retained mail/wake/expiry events.
+  It requires an authorized coordination bearer, omits message bodies, and
+  never receives/acknowledges mail or settles leases. Expired holds remain
+  labelled until normal board maintenance settles them.
+### Added (2026-10-01 — actionable coordination diagnostics)
+- Doctor separates daemon reachability, bearer admission, saved-instance
+  registration, coordination tool inventory and configured host wake. Optional
+  `--agent-state` verifies a read-only nonce proof without transmitting the
+  instance credential or changing saved state. Unsupported hosts and older
+  daemons report their limits; default diagnostics never register an adapter.
+- `doctor --disposable-proof` requires an explicit fixture PostgreSQL server,
+  creates and removes its own tagged bank, and checks enqueue, hint/synthetic
+  ring, receive and harness ack through real ASGI API/storage/adapter paths.
+  Host delivery and model acknowledgment remain unverified. Diagnostic wake
+  configuration and capability fields omit arbitrary credential-bearing values.
+
+### Added (2026-10-01 — disposable coordination recovery checks)
+- The local coordination harness can reopen persisted adapter identity, replay
+  pending mail with the same idempotent receipt, preserve an owned resource
+  fence, and interleave synthetic search with mail reads. It records recovery
+  evidence alongside its disabled control, pull and channel arms, and removes
+  only its newly minted bank. Physical restarts, real retrieval load, host
+  delivery and model acknowledgment remain outside this instrument.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived
