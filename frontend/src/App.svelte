@@ -6,6 +6,7 @@
   import TokenDialog from "./components/TokenDialog.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import Toasts from "./components/Toasts.svelte";
+  import ReviewAsk from "./components/ReviewAsk.svelte";
   import Icon from "./components/Icon.svelte";
   import Observatory from "./views/Observatory.svelte";
   import Cortex from "./views/Cortex.svelte";
@@ -130,6 +131,7 @@
 
 <TokenDialog />
 <ConfirmDialog />
+<ReviewAsk />
 <Toasts />
 
 <style>
