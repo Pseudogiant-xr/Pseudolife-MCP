@@ -55,21 +55,30 @@ export function hslCss(c: Hsl, alpha = 1): string {
   return alpha >= 1 ? `hsl(${body})` : `hsla(${body}, ${Math.round(alpha * 1000) / 1000})`;
 }
 
+/**
+ * Project and community hues come from the brand's own range, the lavender
+ * of the brain and the gold of the circuitry with their neighbours, not the
+ * whole colour wheel: a spectrum hash painted the classic galaxy green and
+ * red, which reads as a different product. Ordered so neighbouring ids
+ * alternate between the two families and stay easy to tell apart.
+ */
+export const GALAXY_HUES: readonly number[] = [275, 43, 318, 30, 252, 52, 340, 290];
+
 /** Deterministic hue from the entity's first project; null when unattributed. */
 export function projectHue(sources: readonly string[] | null | undefined): number | null {
   const s = sources?.[0] ?? "";
   if (!s) return null;
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
+  return GALAXY_HUES[h % GALAXY_HUES.length];
 }
 
-/** Hue from a community id (47 degrees apart); null when there is none. */
+/** Hue from a community id; null when there is none. */
 export function communityHue(community: number | string | null | undefined): number | null {
   if (community === null || community === undefined || community === "") return null;
   const n = Number(community);
   if (!Number.isFinite(n)) return null;
-  return (Math.abs(n) * 47) % 360;
+  return GALAXY_HUES[Math.abs(Math.trunc(n)) % GALAXY_HUES.length];
 }
 
 /** Lightness 38%..62%: the newest activity is the brightest. */
@@ -229,7 +238,7 @@ interface FG {
   zoomToFit: Chain;
   cameraPosition: Chain;
   pauseAnimation: Chain;
-  camera(): { position: V3 };
+  camera(): { position: V3; fov?: number; aspect?: number };
   scene(): Obj3D;
   renderer(): Renderer;
   controls(): { dispose?: () => void } | null | undefined;
@@ -375,9 +384,10 @@ function nebulaSprite(T: ThreeNS, hue: number): Sprite {
   const c = cv.getContext("2d");
   if (c) {
     const g = c.createRadialGradient(128, 128, 8, 128, 128, 128);
-    g.addColorStop(0, `hsla(${hue}, 70%, 62%, 0.16)`);
-    g.addColorStop(0.55, `hsla(${hue}, 70%, 55%, 0.07)`);
-    g.addColorStop(1, `hsla(${hue}, 70%, 50%, 0)`);
+    // Atmosphere, not fog: overlapping clouds add up, so each stays faint.
+    g.addColorStop(0, `hsla(${hue}, 60%, 60%, 0.085)`);
+    g.addColorStop(0.5, `hsla(${hue}, 60%, 55%, 0.035)`);
+    g.addColorStop(1, `hsla(${hue}, 60%, 50%, 0)`);
     c.fillStyle = g;
     c.fillRect(0, 0, 256, 256);
   }
@@ -544,7 +554,15 @@ export async function createGalaxy(host: HTMLElement, data: GraphResponse, opts:
 
   const mountPt = document.createElement("div");
   mountPt.className = "galaxy-mount";
+  // Hidden until the first fit: the engine's first frames are a close-up
+  // from inside the cluster with giant labels. One fade-in, the view's only
+  // unprompted motion; instant under reduced motion.
+  mountPt.style.opacity = "0";
+  if (!reduce) mountPt.style.transition = "opacity 0.6s ease-out";
   host.appendChild(mountPt);
+  const reveal = () => {
+    mountPt.style.opacity = "1";
+  };
   const glowTex = glowTexture(T);
   const box0 = host.getBoundingClientRect();
 
@@ -552,6 +570,8 @@ export async function createGalaxy(host: HTMLElement, data: GraphResponse, opts:
   try {
     fg = new FG(mountPt, {});
     fg.graphData({ nodes, links });
+    // Dev builds only: a handle for QA from the browser console.
+    if (import.meta.env.DEV) (host as HTMLElement & { __galaxy?: unknown }).__galaxy = fg;
   } catch (e) {
     // No WebGL (or a context the browser refused).
     console.error("galaxy WebGL init failed", e);
@@ -636,15 +656,55 @@ export async function createGalaxy(host: HTMLElement, data: GraphResponse, opts:
   };
   host.addEventListener("pointerdown", onTouch, { capture: true });
   host.addEventListener("wheel", onTouch, { capture: true, passive: true });
-  const fitCam = () => {
+  // Fit from the stars' own coordinates. The bundle's zoomToFit measures the
+  // node objects' bounding box, which with this console's custom node
+  // objects came back as one star's box at the origin (measured 2026-10-02:
+  // +-9.3 for a graph spanning +-130), parking the camera inside the cluster.
+  const fitCam = (ms = reduce ? 0 : 400) => {
+    const shown = nodes.filter((n) => n.x !== undefined && nodeVisible(n));
+    if (!shown.length) return;
+    const c = { x: 0, y: 0, z: 0 };
+    for (const n of shown) {
+      c.x += n.x ?? 0;
+      c.y += n.y ?? 0;
+      c.z += n.z ?? 0;
+    }
+    c.x /= shown.length;
+    c.y /= shown.length;
+    c.z /= shown.length;
+    let radius = 0;
+    for (const n of shown) {
+      radius = Math.max(radius, Math.hypot((n.x ?? 0) - c.x, (n.y ?? 0) - c.y, (n.z ?? 0) - c.z));
+    }
+    radius = Math.max(radius, 30) + 12; // star size and label room
+    const cam = fg.camera();
+    const half = ((cam.fov ?? 50) * Math.PI) / 360;
+    const halfW = Math.atan(Math.tan(half) * (cam.aspect || 1));
+    const dist = (radius / Math.sin(Math.min(half, halfW))) * 1.05;
+    // Keep the current viewing direction; straight on when there is none.
+    let dx = cam.position.x - c.x;
+    let dy = cam.position.y - c.y;
+    let dz = cam.position.z - c.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-6) {
+      dx = 0;
+      dy = 0;
+      dz = 1;
+    } else {
+      dx /= len;
+      dy /= len;
+      dz /= len;
+    }
     try {
-      fg.zoomToFit(reduce ? 0 : 400, 40);
+      fg.cameraPosition({ x: c.x + dx * dist, y: c.y + dy * dist, z: c.z + dz * dist }, c, ms);
     } catch {
-      /* the scene may be empty */
+      /* the scene may be torn down */
     }
   };
+  // The first fit is instant (nobody sees it) and then the stage fades in.
   later(() => {
-    if (!interacted) fitCam();
+    if (!interacted) fitCam(0);
+    later(reveal, 60);
   }, 700);
 
   // ---- nebulae and constellations ----------------------------------------------
@@ -681,7 +741,7 @@ export async function createGalaxy(host: HTMLElement, data: GraphResponse, opts:
         ) || 20;
       const cloud = nebulaSprite(T, hue);
       cloud.position.set(cx, cy, cz);
-      cloud.scale.set(spread * 3.2, spread * 3.2, 1);
+      cloud.scale.set(spread * 2.6, spread * 2.6, 1);
       const anchor = members.reduce((best, n) => ((deg.get(n.id) ?? 0) > (deg.get(best.id) ?? 0) ? n : best), members[0]);
       const label = textSprite(T, anchor.id, `hsl(${hue}, 70%, 72%)`, 34);
       label.position.set(cx, cy + spread * 1.5, cz);
@@ -789,7 +849,9 @@ export async function createGalaxy(host: HTMLElement, data: GraphResponse, opts:
     const y = n.y ?? 0;
     const z = n.z ?? 0;
     const d = Math.hypot(x, y, z) || 1;
-    const dist = 55 + nodeVal(n) * 2;
+    // Far enough to keep the star's neighbourhood and readable names in
+    // view (55 put the camera among the labels at console sizes).
+    const dist = 150 + nodeVal(n) * 2;
     const ratio = 1 + dist / d;
     fg.cameraPosition({ x: x * ratio, y: y * ratio, z: z * ratio }, { x, y, z }, reduce ? 0 : 1100);
     return true;

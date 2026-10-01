@@ -24,9 +24,35 @@ function fontLicense(): Plugin {
   };
 }
 
+// The 3D engine is a prebuilt ES module in public/vendor/, imported at
+// runtime. A production build copies it and the daemon serves it as a plain
+// file; Vite's dev server instead refuses to let source import a public
+// file, so in dev it is served verbatim here, ahead of Vite's transforms.
+function vendorPassthrough(): Plugin {
+  const dir = new URL("./public/vendor/", import.meta.url);
+  return {
+    name: "vendor-passthrough",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/ui/vendor/", (req, res, next) => {
+        const name = (req.url ?? "").split("?")[0].replace(/^\/+/, "");
+        if (!/^[\w.-]+\.js$/.test(name)) return next();
+        let body: string;
+        try {
+          body = readFileSync(new URL(name, dir), "utf8");
+        } catch {
+          return next();
+        }
+        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        res.end(body);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "/ui/",
-  plugins: [svelte(), fontLicense()],
+  plugins: [svelte(), fontLicense(), vendorPassthrough()],
   build: {
     // Emptied on every build: static/ holds nothing but this console's output.
     outDir: "../pseudolife_memory/web/static",

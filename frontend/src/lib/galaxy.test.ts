@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildColors,
   communityHue,
+  GALAXY_HUES,
   etypeHsl,
   hslCss,
   labelElement,
@@ -64,11 +65,11 @@ describe("hue selection", () => {
     expect(projectHue(undefined)).toBeNull();
   });
 
-  it("spaces communities 47 degrees apart and ignores missing or non-numeric ids", () => {
-    expect(communityHue(0)).toBe(0);
-    expect(communityHue(1)).toBe(47);
-    expect(communityHue(-2)).toBe(94);
-    expect(communityHue("8")).toBe((8 * 47) % 360);
+  it("takes community hues from the brand palette and ignores missing or non-numeric ids", () => {
+    expect(communityHue(0)).toBe(GALAXY_HUES[0]);
+    expect(communityHue(1)).toBe(GALAXY_HUES[1]);
+    expect(communityHue(-2)).toBe(GALAXY_HUES[2]);
+    expect(communityHue("8")).toBe(GALAXY_HUES[8 % GALAXY_HUES.length]);
     expect(communityHue(null)).toBeNull();
     expect(communityHue("")).toBeNull();
     expect(communityHue("x")).toBeNull();
@@ -83,7 +84,7 @@ describe("hue selection", () => {
     expect(byProject.get("a")?.h).toBe(projectHue(["p1"]));
     expect(byProject.get("b")).toEqual(UNATTRIBUTED);
     const byCommunity = buildColors(nodes, [], "community");
-    expect(byCommunity.get("a")?.h).toBe(47);
+    expect(byCommunity.get("a")?.h).toBe(GALAXY_HUES[1]);
     expect(byCommunity.get("b")).toEqual(etypeHsl("database"));
   });
 
