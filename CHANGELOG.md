@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-01 — Cortex Console v3 brand)
+- The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
+  hero and the sidebar mark, and takes its two accents from it: the lavender
+  of the brain's outline for associative memory and the gold of the traces
+  for canonical facts, on the same black glass. The light theme follows.
+
 ### Added (2026-10-01 — Cortex Console v3, phase 1)
 - A rebuilt web console, served beside the classic one at `/ui/next/`: a
   Vite + Svelte 5 + TypeScript app under `frontend/` whose build output is

@@ -126,14 +126,14 @@
     top: 10%;
     width: 720px;
     height: 520px;
-    background: #c084fc;
+    background: #a855f7;
   }
   .glow.board span {
     left: 18%;
     top: -5%;
     width: 640px;
     height: 480px;
-    background: #818cf8;
+    background: #d4a017;
     opacity: calc(var(--glow-opacity) - 0.01);
   }
   .shell {
