@@ -642,7 +642,17 @@ class DreamOps:
             # including any wrap. A small backlog still gets one full batch.
             last = selected[-1]
             self._lesson_selected_cursor = (last["created_at"], last["id"])
-        return sorted(selected, key=lambda s: (s["created_at"], s["id"]))
+        # A known stale contributor must not poison a clustered route. Keep
+        # its signal pending, and rotate past it without paying for extraction.
+        # The commit transaction still rechecks sources for later races.
+        from pseudolife_memory.storage.postgres import signal_source_ids
+        dependencies = {s["id"]: signal_source_ids(s) for s in selected}
+        sources = {i: self._storage.get_entry(i)
+                   for i in set().union(*dependencies.values())}
+        current_ids = {i for i, row in sources.items()
+                       if row is not None and row["superseded_at"] is None}
+        eligible = [s for s in selected if dependencies[s["id"]] <= current_ids]
+        return sorted(eligible, key=lambda s: (s["created_at"], s["id"]))
 
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
@@ -676,6 +686,8 @@ class DreamOps:
             self._storage.prune_signals(cutoff)
             signals = self._pending_lesson_signals(cap, since)
             selected_cursor = getattr(self, "_lesson_selected_cursor", None)
+            if not signals:
+                self._lesson_signal_cursor = selected_cursor
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(

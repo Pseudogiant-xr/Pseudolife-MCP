@@ -3304,7 +3304,6 @@ class MemoryService(DreamOps):
         changed = self._storage.forget_entry_ids(
             ids, digest_ids=[e.db_id for e in digests],
             digest_cursor=cur, now=now)
-        self._refresh_source_retired_lessons_locked()
         if self._cortex is not None:
             for key in changed["slots"]:
                 self._cortex.retire_unsupported(
@@ -3375,6 +3374,13 @@ class MemoryService(DreamOps):
                     "sample_texts": refused.texts[:20],
                     "hint": "pass confirm_bulk=true to remove them",
                 }
+            try:
+                self._refresh_source_retired_lessons_locked()
+            except Exception as exc:  # noqa: BLE001 — durable forget already committed
+                # CMS, cortex and digest publication must finish after commit.
+                # The refresh flag remains a read/save barrier until a retry
+                # reloads the authoritative lesson retirements.
+                logger.warning("forget committed; lesson refresh pending (%s)", exc)
             return {
                 "deleted_count": len(removed),
                 "deleted_texts": removed[:20],
@@ -3803,6 +3809,7 @@ class MemoryService(DreamOps):
         if not curation_blocks_lessons:
             try:
                 self._recover_lesson_synthesis()
+                self._refresh_source_retired_lessons_locked()
             except Exception as exc:  # noqa: BLE001 — re-raised after the rest
                 lesson_block = exc
                 logger.error("%s save: lesson snapshot skipped, lesson "

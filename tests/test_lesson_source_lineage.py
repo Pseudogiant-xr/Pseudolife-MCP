@@ -144,8 +144,8 @@ def test_source_retirement_refresh_failure_cannot_be_undone_by_autosave(svc, mon
         raise RuntimeError("injected retirement reload failure")
 
     monkeypatch.setattr(svc._storage, "load_lessons", unavailable)
-    with pytest.raises(RuntimeError, match="retirement reload failure"):
-        svc.delete(text=source.text)
+    assert svc.delete(text=source.text)["deleted_count"] == 1
+    assert not any(e.db_id == source.db_id for band in svc._cms.bands for e in band.entries)
     assert original()[0]["status"] == "retired"
     with pytest.raises(RuntimeError, match="retirement reload failure"):
         svc._save_lessons()
