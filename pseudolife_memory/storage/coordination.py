@@ -1843,20 +1843,32 @@ class CoordinationStore:
             # work-area claims, so a page of claims never hides them.
             + " ORDER BY l.name LIKE 'claim:%%', l.name LIMIT %s",
             ((name,) if name is not None else ()) + (limit + 1,))
+        page = rows[:limit]
+        names = [row["name"] for row in page]
+        queues = {name: [] for name in names}
+        counts = {}
+        if names:
+            # Bound each queue before joining its labels; the truncated lease
+            # page's extra row does not need a queue read.
+            waiters = self._all(
+                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
+                "FROM unnest(%s::text[]) AS wanted(name) CROSS JOIN LATERAL "
+                "(SELECT agent_id,enqueued_at,purpose,ticket FROM coordination_lease_waiters "
+                "WHERE name=wanted.name ORDER BY ticket LIMIT %s) w "
+                "LEFT JOIN coordination_agents a ON a.agent_id=w.agent_id "
+                "ORDER BY wanted.name,w.ticket", (names, LEASE_LIST_QUEUE))
+            for waiter in waiters:
+                queues[waiter.pop("name")].append(dict(waiter))
+            counts = {row["name"]: row["n"] for row in self._all(
+                "SELECT name,count(*) AS n FROM coordination_lease_waiters "
+                "WHERE name=ANY(%s::text[]) GROUP BY name", (names,))}
         leases = []
-        for row in rows[:limit]:
-            queue = self._all(
-                "SELECT w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
-                "FROM coordination_lease_waiters w LEFT JOIN coordination_agents a "
-                "ON a.agent_id=w.agent_id WHERE w.name=%s ORDER BY w.ticket LIMIT %s",
-                (row["name"], LEASE_LIST_QUEUE))
-            queued = self._one("SELECT count(*) AS n FROM coordination_lease_waiters "
-                               "WHERE name=%s", (row["name"],))["n"]
+        for row in page:
             leases.append({
                 "name": row["name"], "holder": self._holder(row), "fence": row["fence"],
                 "expires_at": row["expires_at"], "expected_end": row["expected_end"],
                 "stale": row["expected_end"] is not None and now > row["expected_end"],
-                "queued": queued, "queue": [dict(w) for w in queue]})
+                "queued": counts.get(row["name"], 0), "queue": queues[row["name"]]})
         return {"leases": leases, "truncated": len(rows) > limit}
 
     def break_lease(self, name):

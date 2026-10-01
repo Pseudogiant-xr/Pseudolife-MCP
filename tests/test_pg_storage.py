@@ -89,6 +89,19 @@ def test_entry_crud_roundtrip(storage):
     assert storage.load_entries() == []
 
 
+def test_entry_text_projection_preserves_full_load_order_and_sources(storage):
+    ids = [storage.insert_entry(_entry("duplicate alpha beta", ts=3000.0,
+                                       source="status", superseded_at=4000.0)),
+           storage.insert_entry(_entry("", ts=1000.0, source="")),
+           storage.insert_entry(_entry("duplicate alpha beta", ts=2000.0,
+                                       source="digest"))]
+
+    full = storage.load_entries()
+    assert [row["id"] for row in full] == ids
+    assert storage.load_entry_texts() == [
+        {key: row[key] for key in ("id", "text", "source")} for row in full]
+
+
 def test_episode_roundtrip(storage):
     ep = {"id": "ep1", "title": "Session", "hint": None,
           "started_at": 1.0, "ended_at": None, "closed_by_new_start": False,

@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — bounded lease-list reads)
+- Board lease listings fetch the displayed FIFO queues and exact queue counts
+  in two reads for the whole lease page, avoiding two reads per returned lease.
+  Queue display limits, resource-first ordering, settlement and stale holders
+  retain their existing behavior.
+
+### Changed (2026-10-02 — quarantine retyping reads)
+- The second pass over quarantined untyped graph links loads ordered entry
+  text without transferring or decoding embeddings, and reads the relation
+  registry once per pass. Shared-note selection and proposal settlement are
+  unchanged.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender
