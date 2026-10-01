@@ -609,6 +609,34 @@ instead of claiming a successful retry. This protocol does not repair
 historical losses or recover prior unsaved changes. It assumes the existing
 single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
 
+**Lessons keep their sources, and only a forget retires them (2026-10-01).**
+Synthesis records where each lesson came from. Its `provenance` lists the
+signal and episode ids it was distilled from (ids the model proposes are
+ignored), and the entries those signals credited through `used_ids` (the
+`credited` partition only) go into a `store_decisions` lineage row
+(`action='lineage'`, `decided_by='lesson_synthesis'`,
+`reason='verified_dependencies'`, record `{lesson, asserted_at,
+source_entry_ids}`) committed with the lesson. A rule's lineage is its own
+signal. Clustered claims do not map to single signals, so a clustered lesson
+carries every credited entry of its batch and is tagged `lineage:batch`.
+Re-deriving a lesson that already has lineage adds the new entries in another
+lineage row; re-deriving one that has none (an explicit write, or a lesson
+from before lineage existed) never attaches any.
+
+A lesson retires only when an explicit forget (`memory_forget(scope="memory")`)
+removes the **last** entry of its lineage, the same rule the v51 forget
+cascade applies to facts and dream edges. Superseding a source (a
+correction), consolidating it into a merged note and capacity eviction never
+retire a lesson: a superseded entry is kept as history and still counts as
+support, and a digest the forget retires is superseded too. An entry already
+deleted (forgotten or evicted earlier) counts as gone, so a clustered lesson
+survives while any entry of its batch survives. The retirement commits in the
+forget's transaction with a `retire` row in `store_decisions`
+(`decided_by='source_cascade'`, `reason='source_forgotten'`); lessons without
+lineage are never retired this way. A signal whose credited entry no longer
+exists stays pending and is not offered to the extractor; a superseded one is
+still offered.
+
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
 `avoids` (negative / dead-end) edge to the tool/source it concerns — so
@@ -693,7 +721,11 @@ gate, so look-alike situations with different actions coexist. The
 `detail` may carry a fixed block the prompt reads — `SITUATION:`,
 `VERDICT:`, `ACTIONS TAKEN:`, `CORRECT SOLUTION:`, `ACTION DIFF:`,
 `MUST INCLUDE: a; b` — and a rule that drops a `MUST INCLUDE` value is
-retried once before being accepted. Default off; an extractor without the
+retried once. A retry that is empty or still drops a value fails closed, as
+does a rule whose outcome or polarity is malformed or contradicts the
+signal's verdict: that signal stays pending (`rules_failed`) instead of
+becoming guidance, and the batch's other rules still land. Default off; an
+extractor without the
 rule path synthesises such signals under the shipped prompt instead and
 the dream report says so (`rules_fallback`).
 

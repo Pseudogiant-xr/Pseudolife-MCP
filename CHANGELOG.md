@@ -13,14 +13,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Malformed or contradictory rule verdicts and polarities fail closed instead
   of becoming success guidance. Ordinary clustered lesson parsing is unchanged.
 
-### Fixed (2026-10-01 — learned lessons retain their contributing sources)
-
-- Lesson synthesis records trusted signal and episode IDs and uses each rule's own event time. Clustered lessons label their lineage as batch-level; model-provided source IDs are ignored.
-- Source correction, forgetting and entry eviction retire lessons linked to server-credited entry uses in the same pinned transaction, including digests retired by source forgetting. Source changes, lesson retirement and their audits remain transactionally consistent across rollback and uncertain commit outcomes. Existing audit records establish verified dependencies; legacy source-like tokens and episode-only lessons remain unchanged.
-- Failed and empty outcome signals stay pending, while capped synthesis rotates eligible batches so the oldest invalid signal cannot monopolize successive sweeps. Rejected or stale rule contributors cannot veto independent valid rules. A restart begins with the oldest eligible signal again.
-- Signals credited to missing or superseded sources stay pending and are skipped before extraction, allowing current clustered inputs to land. Capped sweeps keep rotating when a selected page contains only ineligible sources.
-- Committed forget operations finish removing source memories and retiring unsupported facts and digests even if lesson reload is temporarily unavailable. Lesson reads and saves retry the authoritative reload before using lesson state.
-- Explicit and exit saves refresh source-dependent lesson retirements before snapshotting. A failed reload blocks the lesson snapshot while allowing unrelated state to persist.
+### Fixed (2026-10-01 — learned lessons keep their sources; only a forget retires them)
+- A synthesised lesson now records where it came from: the signal and episode
+  ids in its provenance, and the entries those signals credited through
+  `used_ids` in a `store_decisions` lineage row committed with it. A rule
+  carries its own signal's lineage and event time; a clustered lesson carries
+  its whole batch's and is tagged `lineage:batch`. Source ids proposed by the
+  model are ignored. Re-deriving a lesson that has lineage adds the new
+  entries; re-deriving one without lineage (an explicit or older lesson)
+  never attaches any.
+- A lesson retires only when an explicit forget removes the last entry of its
+  lineage, the rule the 2026-09-29 forget cascade applies to facts and dream
+  edges. Corrections, consolidation and capacity eviction never retire a
+  lesson: a superseded entry is kept as history and still supports it (so do
+  digests the forget itself retires), and an entry deleted earlier counts as
+  gone. A clustered lesson survives while any entry of its batch survives.
+  The retirement and its audit row commit in the forget's transaction;
+  lessons without lineage are untouched.
+- A signal whose credited entry no longer exists (forgotten or evicted) stays
+  pending and is skipped before extraction, so current inputs in the same
+  clustered batch still land; a superseded entry does not hold its signal
+  back. Failed and empty signals stay pending too, and capped sweeps rotate
+  through eligible batches so the oldest invalid signal cannot monopolise
+  them (a restart begins with the oldest eligible signal again).
+- A lesson reload never fails or reverts a committed forget or correction.
+  The resident lessons reload only after a forget actually retired one; until
+  that reload succeeds, lesson reads retry it and saves skip only the lesson
+  snapshot.
 
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt

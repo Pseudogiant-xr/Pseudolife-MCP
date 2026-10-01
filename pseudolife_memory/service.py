@@ -870,7 +870,6 @@ class MemoryService(DreamOps):
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
         self._lesson_synthesis_recovery = None  # uncertain commit: (inputs, handled IDs)
-        self._lesson_source_refresh = False  # source cascade may have committed
         self._slot_curation_recovery = None  # uncertain atomic lesson/world fold
         self._correction_recovery: PendingCorrectionRecovery | None = None
         self._entry_reinstatement_recovery: (
@@ -2487,13 +2486,19 @@ class MemoryService(DreamOps):
             # A successful same-session release proves the lock survived the
             # already completed publication. A pre-publication ping cannot.
             mutation_locks.close()
-            self._refresh_source_retired_lessons_locked()
         except BaseException:
             for entry, attributes in snapshots:
                 entry.__dict__.clear()
                 entry.__dict__.update(attributes)
             self._cms = previous
             raise
+        try:
+            self._refresh_source_retired_lessons_locked()
+        except Exception as exc:  # noqa: BLE001 — the source mutation already committed
+            # A lesson reload never fails or reverts a published source
+            # mutation. The refresh flag stays a read/save barrier until a
+            # retry reloads the authoritative lesson retirements.
+            logger.warning("source mutation published; lesson refresh pending (%s)", exc)
 
     def _recover_correction_locked(self) -> str | None:
         pending = self._correction_recovery
@@ -3231,7 +3236,6 @@ class MemoryService(DreamOps):
                 raise RuntimeError(
                     "cannot retire an entry without a persisted row ID")
             targets = {int(entry_id) for entry_id in entry_ids}
-            self._lesson_source_refresh = True
             persisted = self._storage.supersede_entries(
                 [int(entry_id) for entry_id in entry_ids],
                 superseded_at=superseded_at,
@@ -3300,7 +3304,6 @@ class MemoryService(DreamOps):
         cur["regenerate"] = sorted(
             set(cur.get("regenerate", [])) | (roots & surviving_roots))
         now = _time.time()
-        self._lesson_source_refresh = True
         changed = self._storage.forget_entry_ids(
             ids, digest_ids=[e.db_id for e in digests],
             digest_cursor=cur, now=now)
@@ -5129,24 +5132,25 @@ class MemoryService(DreamOps):
         return action, rec
 
     def _refresh_source_retired_lessons_locked(self) -> None:
-        """Mirror committed cascade retirements before reads or autosaves.
+        """Mirror committed forget retirements before reads or autosaves.
 
-        The flag is set before source mutation, so rollback/uncertain commit
-        leaves a retryable read barrier. Match stable record identity rather
-        than lesson row IDs (slot sync rewrites them); retain unrelated dirty
-        RAM and never publish a retirement from an uncommitted correction.
+        Storage raises the flag only when a forget actually retires a lesson,
+        before its commit, so a rollback or uncertain commit leaves a
+        retryable read barrier and nothing else forces a reload. Match stable
+        record identity rather than lesson row IDs (slot sync rewrites them);
+        retain unrelated dirty RAM.
         """
-        if not (getattr(self, "_lesson_source_refresh", False)
-                or getattr(self._storage, "_lesson_source_refresh", False)):
+        if not getattr(self._storage, "_lesson_source_refresh", False):
             return
-        if self._lessons is None or self._storage is None:
-            self._lesson_source_refresh = False
+        if self._lessons is None:
+            # Nothing resident yet: the next hydration reads durable state.
+            self._storage._lesson_source_refresh = False
             return
         rows = self._storage.load_lessons()
         retired = {
             (r["entity_norm"], r["attribute_norm"], r["value"], r["asserted_at"]): r
             for r in rows if r["status"] == "retired"
-            and r.get("superseded_by_value") in ("source_superseded", "source_forgotten")}
+            and r.get("superseded_by_value") == "source_forgotten"}
         for rec in self._lessons.records:
             row = retired.get((*rec.key, rec.value, rec.asserted_at))
             if row is not None and rec.status == "current":
@@ -5156,7 +5160,6 @@ class MemoryService(DreamOps):
         self._lessons._current = {
             rec.key: i for i, rec in enumerate(self._lessons.records)
             if rec.status == "current"}
-        self._lesson_source_refresh = False
         self._storage._lesson_source_refresh = False
 
     def _recover_lesson_synthesis(self) -> str | None:

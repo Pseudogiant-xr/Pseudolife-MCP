@@ -7,7 +7,7 @@ from tests.test_correction_identity import _seed
 from tests.test_lesson_source_lineage import Rules, backed_signal, rows, svc  # noqa: F401
 
 
-@pytest.mark.parametrize("mutation", ["supersede", "forget", "evict"])
+@pytest.mark.parametrize("mutation", ["forget", "evict"])
 @pytest.mark.parametrize("limit", [1, 2])
 def test_clustered_stale_source_stays_pending_without_vetoing_valid_neighbor(
         svc, mutation, limit):
@@ -21,11 +21,7 @@ def test_clustered_stale_source_stays_pending_without_vetoing_valid_neighbor(
     svc._storage.conn.commit()
     assert svc.config.memory.lessons.rule_mode is False
     svc.lesson_write("prior", "rule", "Previously valid guidance")
-    if mutation == "supersede":
-        svc._storage.supersede_entries(
-            [stale.db_id], superseded_at=12345.0,
-            superseded_by_text="Corrected source")
-    elif mutation == "forget":
+    if mutation == "forget":
         svc.delete(text=stale.text)
     else:
         svc._storage.delete_evicted_entry(
@@ -50,8 +46,7 @@ def test_clustered_stale_source_stays_pending_without_vetoing_valid_neighbor(
     ).fetchone()[0] is None
 
 
-@pytest.mark.parametrize("mutation", ["forget", "supersede"])
-def test_clustered_source_change_during_extraction_keeps_atomic_batch_pending(svc, mutation):
+def test_clustered_source_forget_during_extraction_keeps_atomic_batch_pending(svc):
     first = _seed(svc, "First current clustered source")
     second = _seed(svc, "Second current clustered source")
     ids = [backed_signal(svc, first, "first"), backed_signal(svc, second, "second")]
@@ -63,10 +58,7 @@ def test_clustered_source_change_during_extraction_keeps_atomic_batch_pending(sv
     class RacingCluster:
         def extract_lessons(self, signals):
             assert [s["id"] for s in signals] == ids
-            if mutation == "forget":
-                svc.delete(text=first.text)
-            else:
-                svc.supersede(entry_id=first.db_id, new_text="Corrected clustered source")
+            svc.delete(text=first.text)
             return [dict(task="clustered", lesson="Race must not publish")]
 
     result = svc.synthesize_lessons(RacingCluster())
@@ -107,27 +99,27 @@ def test_forget_reload_failure_finishes_cms_cortex_and_digest_publication(svc, m
     assert root.id in svc._load_digest_cursor()["regenerate"]
     assert next(r for r in svc._cortex.records if r.entity == "Beacon").status == "retired"
     assert {r["entity"]: r["status"] for r in original()} == {
-        "prior": "current", "backed": "retired", "digest-backed": "retired"}
-    assert svc._lesson_source_refresh
+        "prior": "current", "backed": "retired", "digest-backed": "current"}
+    assert svc._storage._lesson_source_refresh
     monkeypatch.setattr(svc, "_ensure_init", MemoryService._ensure_init.__get__(svc))
     with pytest.raises(RuntimeError, match="post-forget lesson reload failure"):
         svc.lessons_dump()
     assert len(reads) == 2
     monkeypatch.setattr(svc._storage, "load_lessons", original)
-    assert [r["task"] for r in svc.lessons_dump()["entries"]] == ["prior"]
-    assert not svc._lesson_source_refresh
+    assert sorted(r["task"] for r in svc.lessons_dump()["entries"]) == [
+        "digest-backed", "prior"]
+    assert not svc._storage._lesson_source_refresh
     assert not any(e.db_id == source.db_id for b in svc._cms.bands for e in b.entries)
 
 
 @pytest.mark.parametrize("reload_failure", [False, True])
-def test_capacity_eviction_retirement_survives_actual_flush(svc, monkeypatch, reload_failure):
-    terminal = len(svc._cms.bands) - 1
-    svc._cms.bands[terminal].max_entries = 1
-    source = _seed(svc, "Capacity victim source", band=terminal)
+def test_storage_forget_retirement_survives_actual_flush(svc, monkeypatch, reload_failure):
+    source = _seed(svc, "Forgotten source")
     backed_signal(svc, source)
     svc.lesson_write("prior", "rule", "Unrelated valid guidance")
     assert svc.synthesize_lessons(Rules())["lessons"] == 1
-    _seed(svc, "Incoming replacement at capacity", band=terminal)
+    # A forget with no service callback (CMS delete_entries without a cascade).
+    svc._storage.delete_entry_ids([source.db_id], forgotten=True)
     assert svc._storage.get_entry(source.db_id) is None
     assert svc._storage._lesson_source_refresh
     assert next(r for r in svc._lessons.records if r.entity == "backed").status == "current"
@@ -142,9 +134,9 @@ def test_capacity_eviction_retirement_survives_actual_flush(svc, monkeypatch, re
     monkeypatch.setattr(svc._storage, "replace_lessons", snapshot)
     if reload_failure:
         def unavailable():
-            raise RuntimeError("injected eviction lesson reload failure")
+            raise RuntimeError("injected forget lesson reload failure")
         monkeypatch.setattr(svc._storage, "load_lessons", unavailable)
-        with pytest.raises(RuntimeError, match="eviction lesson reload failure"):
+        with pytest.raises(RuntimeError, match="forget lesson reload failure"):
             svc.flush()
         assert snapshots == []
         assert {r["entity"]: r["status"] for r in original_load()} == {
@@ -171,3 +163,108 @@ def test_forget_database_failure_still_preserves_resident_source(svc, monkeypatc
     assert svc._storage.get_entry(source.db_id) is not None
     assert any(e.db_id == source.db_id for b in svc._cms.bands for e in b.entries)
     assert rows(svc)["backed"]["status"] == "current"
+
+
+@pytest.mark.parametrize("victim", ["source", "unrelated"])
+def test_capacity_eviction_never_retires_or_reloads_lessons(svc, monkeypatch, victim):
+    terminal = len(svc._cms.bands) - 1
+    svc._cms.bands[terminal].max_entries = 1
+    source = _seed(svc, "Lesson source", band=terminal if victim == "source" else 0)
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    doomed = source if victim == "source" else _seed(
+        svc, "Unrelated entry at capacity", band=terminal)
+    _seed(svc, "Incoming replacement at capacity", band=terminal)
+    assert svc._storage.get_entry(doomed.db_id) is None
+    assert svc._storage.get_meta("capacity_true_drops")["last_entry_id"] == doomed.db_id
+    assert not getattr(svc._storage, "_lesson_source_refresh", False)
+
+    def unavailable():
+        raise AssertionError("eviction must not force a lesson reload")
+
+    original_load = svc._storage.load_lessons
+    monkeypatch.setattr(svc._storage, "load_lessons", unavailable)
+    svc.flush()
+    monkeypatch.setattr(svc._storage, "load_lessons", original_load)
+    assert rows(svc)["backed"]["status"] == "current"
+    assert next(r for r in svc._lessons.records if r.entity == "backed").status == "current"
+    assert not [d for d in svc._storage.store_decisions("lesson") if d["action"] == "retire"]
+
+
+@pytest.mark.parametrize("mutation,lands", [
+    ("supersede_before_selection", True),
+    ("supersede_during_extraction", True),
+    ("forget_before_selection", False),
+])
+def test_only_a_forgotten_credited_source_keeps_a_signal_pending(svc, mutation, lands):
+    source = _seed(svc)
+    sid = backed_signal(svc, source, "correction-rule")
+    svc._storage.conn.execute(
+        "UPDATE outcome_signals SET outcome = 'correction' WHERE id = %s", (sid,))
+    svc._storage.conn.commit()
+    if mutation == "supersede_before_selection":
+        svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
+    elif mutation == "forget_before_selection":
+        svc.delete(text=source.text)
+    offered = []
+
+    class Racing(Rules):
+        def extract_rules(self, signals):
+            offered.extend(s["id"] for s in signals)
+            if mutation == "supersede_during_extraction":
+                svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
+            return super().extract_rules(signals)
+
+    result = svc.synthesize_lessons(Racing())
+    if lands:
+        assert result["lessons"] == 1, result
+        assert offered == [sid]
+        assert rows(svc)["correction-rule"]["status"] == "current"
+        assert f"entry:{source.db_id}" in rows(svc)["correction-rule"]["provenance"]
+        assert svc._storage.pending_signals() == []
+    else:
+        assert result["lessons"] == 0, result
+        assert offered == []
+        assert "correction-rule" not in rows(svc)
+        assert [s["id"] for s in svc._storage.pending_signals()] == [sid]
+
+
+@pytest.mark.parametrize("pending_refresh", [False, True],
+                         ids=["no-retirement", "retirement-awaiting-reload"])
+def test_correction_commits_and_publishes_despite_lesson_reload_failure(
+        svc, monkeypatch, pending_refresh):
+    source = _seed(svc)
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    original_load = svc._storage.load_lessons
+    original_supersede = svc._storage.supersede_entries
+
+    def unavailable():
+        raise RuntimeError("injected lesson reload failure")
+
+    def supersede_with_pending_reload(*args, **kwargs):
+        # Stands in for any committed retirement that still awaits a reload.
+        persisted = original_supersede(*args, **kwargs)
+        svc._storage._lesson_source_refresh = True
+        return persisted
+
+    monkeypatch.setattr(svc._storage, "load_lessons", unavailable)
+    if pending_refresh:
+        monkeypatch.setattr(svc._storage, "supersede_entries", supersede_with_pending_reload)
+    result = svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
+    assert result["superseded_ids"] == [source.db_id]
+    assert svc._correction_recovery is None
+    durable = svc._storage.get_entry(source.db_id)
+    resident = {e.db_id: e for b in svc._cms.bands for e in b.entries}
+    assert durable["superseded_at"] is not None
+    assert resident[source.db_id].superseded_at == durable["superseded_at"]
+    replacement = [e for e in resident.values() if e.text == "Corrected deployment evidence"]
+    assert len(replacement) == 1
+    assert svc._storage.get_entry(replacement[0].db_id) is not None
+    # The barrier stays up until a reload succeeds; nothing was retired.
+    assert bool(getattr(svc._storage, "_lesson_source_refresh", False)) is pending_refresh
+    monkeypatch.setattr(svc._storage, "load_lessons", original_load)
+    svc._save_lessons()
+    assert not getattr(svc._storage, "_lesson_source_refresh", False)
+    assert rows(svc)["backed"]["status"] == "current"
+    assert svc._lessons.records[0].status == "current"

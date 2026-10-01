@@ -642,16 +642,16 @@ class DreamOps:
             # including any wrap. A small backlog still gets one full batch.
             last = selected[-1]
             self._lesson_selected_cursor = (last["created_at"], last["id"])
-        # A known stale contributor must not poison a clustered route. Keep
-        # its signal pending, and rotate past it without paying for extraction.
-        # The commit transaction still rechecks sources for later races.
+        # A credited source that no longer exists (forgotten or evicted) must
+        # not poison a clustered route. Keep its signal pending, and rotate
+        # past it without paying for extraction. A superseded source is kept
+        # history and stays eligible. The commit transaction still rechecks
+        # sources for later races.
         from pseudolife_memory.storage.postgres import signal_source_ids
         dependencies = {s["id"]: signal_source_ids(s) for s in selected}
-        sources = {i: self._storage.get_entry(i)
-                   for i in set().union(*dependencies.values())}
-        current_ids = {i for i, row in sources.items()
-                       if row is not None and row["superseded_at"] is None}
-        eligible = [s for s in selected if dependencies[s["id"]] <= current_ids]
+        existing_ids = {i for i in set().union(*dependencies.values())
+                        if self._storage.get_entry(i) is not None}
+        eligible = [s for s in selected if dependencies[s["id"]] <= existing_ids]
         return sorted(eligible, key=lambda s: (s["created_at"], s["id"]))
 
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
@@ -841,7 +841,7 @@ class DreamOps:
                                 # the same signals on every later sweep.
                                 with _staged_slot(staged, c["task"], aspect), \
                                         self._storage.savepoint():
-                                    _, rec = self._write_lesson_locked(
+                                    action, rec = self._write_lesson_locked(
                                         staged, c["task"], aspect, c["lesson"],
                                         embedding=emb,
                                         about=c.get("about"),
@@ -852,8 +852,19 @@ class DreamOps:
                                         origin=c.get("origin", "agent"),
                                         provenance=provenance,
                                         valid_time=valid_time)
-                                    source_ids = [int(p.removeprefix("entry:"))
-                                                  for p in provenance if p.startswith("entry:")]
+                                    source_ids = sorted(
+                                        int(p.removeprefix("entry:"))
+                                        for p in provenance if p.startswith("entry:"))
+                                    if action == "confirmed":
+                                        # Re-deriving adds supporting sources only to
+                                        # a lesson that already has lineage. A legacy
+                                        # or explicit lesson never gains one.
+                                        known = self._storage.lesson_lineage_sources(
+                                            *rec.key, rec.value, rec.asserted_at)
+                                        source_ids = ([i for i in source_ids if i not in known]
+                                                      if known else [])
+                                    elif action not in ("inserted", "superseded"):
+                                        source_ids = []  # stale: nothing was written
                                     if source_ids:
                                         # This server-written audit is the trust boundary:
                                         # legacy/model provenance tokens alone are not

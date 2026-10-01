@@ -47,8 +47,29 @@ def rows(svc):
     return {r["entity"]: r for r in svc._storage.load_lessons()}
 
 
-@pytest.mark.parametrize("operation", ["forget", "correct"])
-def test_source_mutation_retires_only_trusted_dependent_lessons(svc, operation):
+def clustered_signal(svc, entry, task):
+    """A plain (clustering-route) signal crediting ``entry``."""
+    sid = backed_signal(svc, entry, task)
+    svc._storage.conn.execute(
+        "UPDATE outcome_signals SET about = 'git' WHERE id = %s", (sid,))
+    svc._storage.conn.commit()
+    return sid
+
+
+def statuses(svc):
+    """Durable and resident status of every lesson, which must agree."""
+    durable = {r["entity"]: r["status"] for r in svc._storage.load_lessons()}
+    resident = {r.entity: r.status for r in svc._lessons.records}
+    assert durable == resident
+    return durable
+
+
+def lineage_sources(svc, task):
+    return {i for d in svc._storage.store_decisions("lesson", entity_norm=task)
+            if d["action"] == "lineage" for i in d["record"]["source_entry_ids"]}
+
+
+def test_forget_retires_only_trusted_dependent_lessons(svc):
     source = _seed(svc)
     neighbor = _seed(svc, "Unrelated evidence", episode=source.episode_id)
     sid = backed_signal(svc, source)
@@ -58,10 +79,7 @@ def test_source_mutation_retires_only_trusted_dependent_lessons(svc, operation):
                                  f"entry:{source.db_id}", f"signal:{sid}"])
     assert svc.synthesize_lessons(Rules())["lessons"] == 2
     assert f"entry:{source.db_id}" in rows(svc)["backed"]["provenance"]
-    if operation == "forget":
-        svc.delete(text=source.text)
-    else:
-        svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
+    svc.delete(text=source.text)
     stored = rows(svc)
     assert stored["backed"]["status"] == "retired"
     assert stored["neighbor"]["status"] == "current"
@@ -72,7 +90,7 @@ def test_source_mutation_retires_only_trusted_dependent_lessons(svc, operation):
         f"signal:{sid}", f"episode:{source.episode_id}", f"entry:{source.db_id}"})
 
 
-@pytest.mark.parametrize("operation", ["forget", "correct", "dependencies"])
+@pytest.mark.parametrize("operation", ["forget", "dependencies"])
 def test_source_mutation_during_extraction_cannot_publish_or_ack(svc, operation):
     source = _seed(svc)
     sid = backed_signal(svc, source)
@@ -82,8 +100,6 @@ def test_source_mutation_during_extraction_cannot_publish_or_ack(svc, operation)
         def extract_rules(self, signals):
             if operation == "forget":
                 svc.delete(text=source.text)
-            elif operation == "correct":
-                svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
             else:
                 svc._storage.set_signal_used_ids(sid, {"credited": []})
             return super().extract_rules(signals)
@@ -156,19 +172,15 @@ def test_source_retirement_refresh_failure_cannot_be_undone_by_autosave(svc, mon
     assert original()[0]["status"] == "retired"
 
 
-@pytest.mark.parametrize("operation", ["direct", "eviction"])
-def test_storage_source_deletion_retires_lessons_before_autosave(svc, operation):
+@pytest.mark.parametrize("forgotten", [True, False], ids=["forget", "plain-delete"])
+def test_storage_source_deletion_retires_lessons_before_autosave(svc, forgotten):
     source = _seed(svc)
     backed_signal(svc, source)
     svc.lesson_write("prior", "rule", "Unrelated valid rule")
     assert svc.synthesize_lessons(Rules())["lessons"] == 1
-    if operation == "direct":
-        svc._storage.delete_entry_ids([source.db_id])
-    else:
-        svc._storage.delete_evicted_entry(source.db_id, source=source.source,
-                                          superseded=False)
+    svc._storage.delete_entry_ids([source.db_id], forgotten=forgotten)
     svc._save_lessons()
-    assert rows(svc)["backed"]["status"] == "retired"
+    assert rows(svc)["backed"]["status"] == ("retired" if forgotten else "current")
     assert rows(svc)["prior"]["status"] == "current"
 
 
@@ -225,7 +237,7 @@ def test_dependency_audit_failure_rolls_back_lesson_and_ack(svc, monkeypatch):
     assert svc._lessons.records[0].status == "current"
 
 
-def test_forgotten_episode_source_retires_digest_backed_lesson_only(svc):
+def test_forgotten_episode_source_keeps_digest_backed_lesson(svc):
     root = svc._cms.episodes.start_session(
         title="Synthetic source episode", session_key="digest-lineage")
     source = _seed(svc, "Original source evidence", episode=root.id)
@@ -239,11 +251,11 @@ def test_forgotten_episode_source_retires_digest_backed_lesson_only(svc):
 
     svc.delete(text=source.text)
     assert svc._storage.get_entry(digest.db_id)["superseded_at"] is not None
-    stored = rows(svc)
-    assert stored["neighbor"]["status"] == "current"
-    assert stored["legacy"]["status"] == "current"
-    assert stored["digest-backed"]["status"] == "retired"
-    assert {r.entity: r.status for r in svc._lessons.records} == {
+    assert statuses(svc) == {
+        "neighbor": "current", "legacy": "current", "digest-backed": "current"}
+    svc.delete(text=digest.text)
+    assert svc._storage.get_entry(digest.db_id) is None
+    assert statuses(svc) == {
         "neighbor": "current", "legacy": "current", "digest-backed": "retired"}
     svc._save_lessons()
     assert rows(svc)["digest-backed"]["status"] == "retired"
@@ -255,8 +267,7 @@ def test_stale_rule_source_cannot_veto_independent_valid_neighbor(svc, rejection
     valid = _seed(svc, "Valid neighbor source evidence")
     old_sid = backed_signal(svc, stale, "failed-old")
     new_sid = backed_signal(svc, valid, "valid-new")
-    svc._storage.supersede_entries([stale.db_id], superseded_at=12345.0,
-                                  superseded_by_text="Source corrected")
+    svc.delete(text=stale.text)
     svc.lesson_write("prior", "rule", "Previously valid rule")
 
     class PartialRules(Rules):
@@ -275,7 +286,7 @@ def test_stale_rule_source_cannot_veto_independent_valid_neighbor(svc, rejection
         f"signal:{new_sid}", f"episode:{valid.episode_id}", f"entry:{valid.db_id}"})
 
 
-@pytest.mark.parametrize("operation", ["eviction", "supersede", "direct"])
+@pytest.mark.parametrize("operation", ["direct", "forget"])
 @pytest.mark.parametrize("outer_transaction", [False, True], ids=["standalone", "nested"])
 def test_source_cascade_connection_loss_rolls_back_source_lesson_and_audit(
         svc, monkeypatch, operation, outer_transaction):
@@ -294,15 +305,12 @@ def test_source_cascade_connection_loss_rolls_back_source_lesson_and_audit(
     monkeypatch.setattr(svc._storage, "retire_lessons_for_entries", disconnect_before_cascade)
     with pytest.raises(psycopg.OperationalError):
         with svc._storage.transaction() if outer_transaction else nullcontext():
-            if operation == "eviction":
-                svc._storage.delete_evicted_entry(
-                    source.db_id, source=source.source, superseded=False)
-            elif operation == "supersede":
-                svc._storage.supersede_entries(
-                    [source.db_id], superseded_at=12345.0,
-                    superseded_by_text="Attempted correction")
+            if operation == "forget":
+                svc._storage.forget_entry_ids(
+                    [source.db_id], digest_ids=[],
+                    digest_cursor=svc._load_digest_cursor(), now=12345.0)
             else:
-                svc._storage.delete_entry_ids([source.db_id])
+                svc._storage.delete_entry_ids([source.db_id], forgotten=True)
 
     surviving_source = svc._storage.get_entry(source.db_id)
     assert surviving_source is not None
@@ -313,3 +321,124 @@ def test_source_cascade_connection_loss_rolls_back_source_lesson_and_audit(
     assert svc._storage.get_meta("capacity_true_drops") == before_drops
     svc._save_lessons()
     assert rows(svc)["backed"]["status"] == "current"
+
+
+# Retirement rule, as the v51 forget cascade applies to facts and edges: a
+# lesson retires only when an explicit forget removes the LAST of its trusted
+# sources. Supersession, consolidation and capacity eviction keep it.
+
+
+class TwoClusters:
+    def extract_lessons(self, signals):
+        return [dict(task="first-cluster", lesson="Use current evidence", about="git"),
+                dict(task="second-cluster", lesson="Check the source first", about="git")]
+
+
+def test_clustered_lessons_retire_only_when_last_batch_source_is_forgotten(
+        svc, monkeypatch):
+    first = _seed(svc, "Clustered evidence A")
+    second = _seed(svc, "Clustered evidence B")
+    clustered_signal(svc, first, "a")
+    clustered_signal(svc, second, "b")
+    svc.lesson_write("prior", "rule", "Unrelated guidance")
+    assert svc.synthesize_lessons(TwoClusters())["lessons"] == 2
+    assert lineage_sources(svc, "first-cluster") == {first.db_id, second.db_id}
+    original_load = svc._storage.load_lessons
+    reloads = []
+
+    def counted_load():
+        reloads.append(True)
+        return original_load()
+
+    monkeypatch.setattr(svc._storage, "load_lessons", counted_load)
+    svc.delete(text=first.text)
+    assert reloads == []  # nothing retired, so nothing to mirror
+    assert statuses(svc) == {
+        "prior": "current", "first-cluster": "current", "second-cluster": "current"}
+    reloads.clear()
+    svc.delete(text=second.text)
+    assert reloads == [True]
+    assert statuses(svc) == {
+        "prior": "current", "first-cluster": "retired", "second-cluster": "retired"}
+    retirements = [d for d in svc._storage.store_decisions("lesson")
+                   if d["action"] == "retire"]
+    assert sorted((d["entity_norm"], d["reason"]) for d in retirements) == [
+        ("first-cluster", "source_forgotten"), ("second-cluster", "source_forgotten")]
+
+
+def test_already_evicted_batch_source_counts_as_gone_at_the_last_forget(svc):
+    terminal = len(svc._cms.bands) - 1
+    svc._cms.bands[terminal].max_entries = 1
+    evicted = _seed(svc, "Clustered evidence later evicted", band=terminal)
+    kept = _seed(svc, "Clustered evidence later forgotten", band=0)
+    clustered_signal(svc, evicted, "a")
+    clustered_signal(svc, kept, "b")
+    assert svc.synthesize_lessons(TwoClusters())["lessons"] == 2
+    _seed(svc, "Incoming entry at capacity", band=terminal)
+    assert svc._storage.get_entry(evicted.db_id) is None
+    assert statuses(svc) == {"first-cluster": "current", "second-cluster": "current"}
+    svc.delete(text=kept.text)
+    assert statuses(svc) == {"first-cluster": "retired", "second-cluster": "retired"}
+
+
+def test_superseded_source_keeps_its_lesson_until_forgotten(svc):
+    source = _seed(svc)
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    svc.supersede(entry_id=source.db_id, new_text="Corrected deployment evidence")
+    assert svc._storage.get_entry(source.db_id)["superseded_at"] is not None
+    assert statuses(svc) == {"backed": "current"}
+    assert not [d for d in svc._storage.store_decisions("lesson") if d["action"] == "retire"]
+    # The superseded entry still exists as history and still supports the
+    # lesson; forgetting it removes the last source.
+    svc.delete(text=source.text)
+    assert statuses(svc) == {"backed": "retired"}
+
+
+def test_consolidated_duplicate_keeps_dependent_lesson(svc):
+    source = _seed(svc, "Deploys go through the blue gateway")
+    duplicate = _seed(svc, "Deploys go through the blue gateway again")
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    result = svc.consolidate(entry_ids=[source.db_id, duplicate.db_id],
+                             new_text="Deploys go through the blue gateway (merged)")
+    assert result["superseded_count"] == 2
+    assert statuses(svc) == {"backed": "current"}
+
+
+def test_rederived_legacy_lesson_never_gains_lineage(svc):
+    source = _seed(svc)
+    svc.lesson_write("backed", "rule", "Rule for backed")
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    # The confirmation merges the token into provenance, but no audit makes it
+    # a verified dependency of a lesson that never had lineage.
+    assert f"entry:{source.db_id}" in rows(svc)["backed"]["provenance"]
+    assert lineage_sources(svc, "backed") == set()
+    svc.delete(text=source.text)
+    assert statuses(svc) == {"backed": "current"}
+
+
+def test_confirmation_adds_a_supporting_source_to_existing_lineage(svc):
+    original = _seed(svc, "Original rule evidence")
+    extra = _seed(svc, "Later confirming evidence")
+    backed_signal(svc, original)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    backed_signal(svc, extra)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    assert len(svc._lessons.records) == 1  # confirmed, not superseded
+    assert lineage_sources(svc, "backed") == {original.db_id, extra.db_id}
+    svc.delete(text=original.text)
+    assert statuses(svc) == {"backed": "current"}
+    svc.delete(text=extra.text)
+    assert statuses(svc) == {"backed": "retired"}
+
+
+def test_continuum_forget_without_service_cascade_is_a_forget(svc):
+    source = _seed(svc)
+    backed_signal(svc, source)
+    assert svc.synthesize_lessons(Rules())["lessons"] == 1
+    assert svc._cms.delete_entries(text=source.text) == [source.text]
+    assert svc._storage.get_entry(source.db_id) is None
+    svc._save_lessons()
+    assert statuses(svc) == {"backed": "retired"}
