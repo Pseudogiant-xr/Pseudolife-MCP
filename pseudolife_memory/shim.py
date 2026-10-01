@@ -1277,6 +1277,11 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         try:
             with anyio.fail_after(_operation_timeout_seconds()):
                 from pseudolife_memory.repository_claims import FileClaimError, prepare_claim_arguments
+                # Refuse first: a shared process serves remote conversations,
+                # and preparing a claim runs git and reads host paths.
+                if coordination_refusal and _requires_coordination_identity(
+                        params.name, params.arguments):
+                    raise _CoordinationUnavailableError(message=coordination_refusal)
                 arguments = params.arguments or {}
                 try:
                     if params.name == "memory_agents" and arguments.get("worktree") is not None:
@@ -1288,9 +1293,6 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                 except FileClaimError as exc:
                     from mcp.types import CallToolResult, TextContent
                     return CallToolResult(content=[TextContent(type="text", text=str(exc))], is_error=True)
-                if coordination_refusal and _requires_coordination_identity(
-                        params.name, params.arguments):
-                    raise _CoordinationUnavailableError(message=coordination_refusal)
                 snapshot = provider.snapshot()
                 if coordination_adapter is not None:
                     try:

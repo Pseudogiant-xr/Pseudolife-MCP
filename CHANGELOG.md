@@ -29,6 +29,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `memory_message(action="history")` or `POST /api/coordination/history`.
   History follows audit retention and operator redaction, supports an exact
   peer filter and reply metadata, and has no delivery, wake or dream effects.
+
 ### Added (2026-10-01 — repository-scoped exact file claims)
 - `memory_agents` claim/release accepts a local Git `worktree` and exact
   repository-relative `path` through the stdio shim. Linked worktrees share
@@ -38,6 +39,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Direct HTTP clients can prepare `repository_id` and `path` locally. The
   daemon does not open client checkout paths, and claim names contain hashes
   rather than absolute host paths. File claims remain advisory.
+- A shim that serves several conversations (Claude Desktop) refuses a file
+  claim before it runs Git or reads the worktree, so the error cannot reveal
+  whether a host path is a checkout.
+
 ### Added (2026-10-01 — read-only coordination view)
 - The Console's Coordination view shows active agents, status age, reported
   children, park needs/resume, pending mail for the caller's principal, resource
@@ -45,6 +50,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   It requires an authorized coordination bearer, omits message bodies, and
   never receives/acknowledges mail or settles leases. Expired holds remain
   labelled until normal board maintenance settles them.
+
 ### Added (2026-10-01 — actionable coordination diagnostics)
 - Doctor separates daemon reachability, bearer admission, saved-instance
   registration, coordination tool inventory and configured host wake. Optional

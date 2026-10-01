@@ -339,7 +339,7 @@ def _replace_token(path: Path, token: str) -> None:
 @asynccontextmanager
 async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
                         *, operation_timeout: float = 1.0, agent_headers: dict | None = None,
-                        prepare_delay: float = 0):
+                        prepare_delay: float = 0, coordination_refusal: str = ""):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -358,10 +358,12 @@ async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
            f"(time.sleep({prepare_delay}),{{'action':'claim','repository_id':'a'*64,'path':'file.py'}})[1]; "
            if prepare_delay else "") +
         "asyncio.run(_proxy(sys.argv[1],None,'fixture-session',"
-        "provider=CredentialProvider.from_environment(),agent_headers=json.loads(sys.argv[2])))"
+        "provider=CredentialProvider.from_environment(),agent_headers=json.loads(sys.argv[2]),"
+        "coordination_refusal=sys.argv[3]))"
     )
     params = StdioServerParameters(
-        command=sys.executable, args=["-c", code, upstream.url, json.dumps(agent_headers)], env=env)
+        command=sys.executable,
+        args=["-c", code, upstream.url, json.dumps(agent_headers), coordination_refusal], env=env)
     with stderr.open("w", encoding="utf-8") as errlog:
         async with stdio_client(params, errlog=errlog) as streams:
             async with ClientSession(*streams[:2]) as client:
@@ -407,6 +409,30 @@ def test_file_claim_is_prepared_locally_before_remote_call(tmp_path, upstream):
              if method == "tools/call"]
     assert len(calls) == 3
     assert str(root) not in json.dumps(calls)
+
+
+def test_shared_process_refuses_file_claim_before_inspecting_local_paths(tmp_path, upstream):
+    # A shared shim (Claude Desktop, a tunnel) serves remote conversations: it
+    # must refuse a file claim before running git or reading the filesystem,
+    # or the error code reveals whether a host path is a checkout.
+    plain = tmp_path / "not-a-checkout"
+    plain.mkdir()
+    token_file = tmp_path / "token"
+    _replace_token(token_file, OLD_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=5,
+                                 coordination_refusal="fixture shared-process refusal") as client:
+            for path in ("file.py", "../outside.py"):
+                # The refusal is a protocol error, as for any board write here.
+                with pytest.raises(Exception) as caught:
+                    await client.call_tool("memory_agents", {
+                        "action": "claim", "worktree": str(plain), "path": path})
+                assert "fixture shared-process refusal" in str(caught.value)
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=15))
+    assert not [p for method, _auth, p in upstream.requests if method == "tools/call"]
 
 
 def test_file_claim_preparation_uses_total_deadline_and_next_call_recovers(tmp_path, upstream):
