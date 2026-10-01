@@ -1,0 +1,7 @@
+node_modules/
+.vite/
+.svelte-kit/
+*.log
+*.tsbuildinfo
+# The build goes to ../pseudolife_memory/web/static/next/ and IS committed.
+dist/

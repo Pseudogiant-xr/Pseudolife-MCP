@@ -150,6 +150,8 @@ Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
+The rebuilt console (phase 1: Observatory and the agent Board) is at
+<http://127.0.0.1:8765/ui/next/>; the rest of its views still open the classic one.
 
 The first session auto-starts the daemon, which provisions an **embedded
 PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
