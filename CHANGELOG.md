@@ -21,9 +21,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no tunnel profile directory exists, so a redirected home folder cannot crash
   doctor or fail the update for someone who never set up a tunnel.
 - Updating an idle saved tunnel no longer downloads the tunnel runtime.
-- A client update run from a source checkout (`ops/update_clients.py`) does not
-  refresh running tunnels with the checkout's code. It reports the tunnel step
-  as skipped; run `pseudolife-mcp tunnel update` from the installed launcher.
+- `pseudolife-mcp update` and `ops/update_clients.py` refresh running saved
+  tunnels after the shim step by running `tunnel update` through the newly
+  installed launcher. A tunnel freezes the bridge and packages of the process
+  that refreshes it, so an in-process refresh kept tunnels one release behind,
+  and from a checkout it would have frozen the checkout's code and virtualenv.
+  Without an installed launcher (pip or lite installs) the step is skipped and
+  names `pseudolife-mcp tunnel update`; after a failed shim step it is skipped
+  and names the launcher command. Idle saved tunnels need no refresh.
+- Tunnel services and managed starts run the side-by-side runtimes' launcher
+  (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) before whatever
+  `pseudolife-mcp` comes first on `PATH`. The previous fallback,
+  `~/.pseudolife-mcp/bin`, is not where any installer puts it.
+- Removing old shim runtimes keeps any runtime a running tunnel's frozen bridge
+  imports from. When saved tunnel records cannot be read, no runtime is removed
+  in that run and the update says why.
+- The Linux root `--system-service` installs, and a root tunnel starts or
+  refreshes, only when every path root would run is owned by root and not
+  writable by its group or others: the launcher, the runtime it starts, the
+  interpreter, the site-packages the bridge imports from, the package, the
+  tunnel profile directory, and each of their parent directories up to `/`.
+  Otherwise it refuses and names the path, since a non-root user able to change
+  one of them could run code as root.
+- `tunnel stop` now stops a service-managed tunnel for good: the supervisor
+  exits 0 for a requested stop. It exited with its stopped runtime's non-zero
+  status, so systemd (`Restart=on-failure`) and launchd (`KeepAlive`) started
+  it again. A runtime that exits by itself still fails, so the service restarts
+  it.
 
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt

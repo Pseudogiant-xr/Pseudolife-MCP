@@ -112,25 +112,124 @@ def test_failed_key_renewal_preserves_profile_key_and_proof(isolated, monkeypatc
     assert 'candidate-fixture-key' not in str(capsys.readouterr())
 
 
-def test_global_client_update_checks_saved_tunnel_without_registration_mutation(isolated, monkeypatch):
+def _saved_tunnel(isolated, monkeypatch, *, running=True):
+    """A ready saved profile under a patched default root; the in-process
+    refresh fails the test: a refresh freezes the refreshing process's code."""
     store, token = isolated
     store.save(Profile('dot', 'http://127.0.0.1:8765', str(token), consent=True,
                        tunnel_id='tunnel_0123', state='ready'))
     store.set_key('dot', 'fixture-tunnel-key')
-    before = store.profile_path('dot').read_bytes()
-    from pseudolife_memory import client_updates, tunnel_profiles, tunnel_runtime
+    from pseudolife_memory import tunnel_profiles, tunnel_runtime
     monkeypatch.setattr(tunnel_profiles, 'ProfileStore', lambda: store)
     monkeypatch.setattr(tunnel_profiles, 'default_root', lambda: store.root)
-    monkeypatch.setattr(cli, 'ProfileStore', lambda: store)
-    # An installed package: this test itself runs from a checkout.
-    monkeypatch.setattr(client_updates, 'checkout_root', lambda: None)
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
-    observed = []
-    monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *args: observed.append(args[0].name) or {'changed': False})
-    report = client_updates.run_steps((), repo=None, source='fixture')
-    assert report['ok'] and report['tunnel']['state'] == 'current'
-    assert observed == ['dot']
+    monkeypatch.setattr(tunnel_runtime, 'status_profile', lambda name, store: {'running': running, 'ready': running})
+    monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *a: pytest.fail('refreshed in this process'))
+    return store
+
+
+def _launcher(tmp_path, monkeypatch, installed=True):
+    """The runtimes launcher (overridden paths), with a complete runtime."""
+    import os
+    windows = os.name == 'nt'
+    launcher = tmp_path / 'bin' / ('pseudolife-mcp.exe' if windows else 'pseudolife-mcp')
+    monkeypatch.setenv('PSEUDOLIFE_SHIM_RUNTIMES', str(tmp_path / 'runtimes'))
+    monkeypatch.setenv('PSEUDOLIFE_SHIM_LAUNCHER', str(launcher))
+    if installed:
+        scripts = tmp_path / 'runtimes' / '000001' / ('Scripts' if windows else 'bin')
+        scripts.mkdir(parents=True)
+        (scripts.parent / 'runtime.json').write_text('{"version": "0.15.0"}', encoding='utf-8')
+        (scripts / launcher.name).write_text('console', encoding='utf-8')
+        launcher.parent.mkdir()
+        launcher.write_text('launcher', encoding='utf-8')
+    return launcher
+
+
+def _cli_calls(monkeypatch, code=0, output=None):
+    from pseudolife_memory import client_updates
+    calls = []
+    if output is None:
+        output = json.dumps({'state': 'current', 'needs_attention': False, 'detail': '1 saved tunnel profiles checked',
+                             'profiles': [{'profile': 'dot', 'state': 'refreshed', 'needs_attention': False}]})
+    def run(argv, **kwargs):
+        calls.append(([str(part) for part in argv], kwargs))
+        return code, output
+    monkeypatch.setattr(client_updates, 'run_cli', run)
+    return calls
+
+
+def test_client_update_refreshes_running_tunnels_through_the_new_launcher_after_the_shim(isolated, tmp_path, monkeypatch):
+    # This test runs from a checkout: the refresh still never runs in it.
+    store = _saved_tunnel(isolated, monkeypatch)
+    before = store.profile_path('dot').read_bytes()
+    launcher = _launcher(tmp_path, monkeypatch)
+    from pseudolife_memory import client_updates
+    order = []
+    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo: order.append('shim') or {'state': 'installed:0.15.1', 'detail': 'new runtime'})
+    calls = _cli_calls(monkeypatch)
+    real = client_updates.run_cli
+    monkeypatch.setattr(client_updates, 'run_cli', lambda argv, **kw: order.append('tunnel') or real(argv, **kw))
+    report = client_updates.run_steps(('shim',), repo=None, source='fixture')
+    assert order == ['shim', 'tunnel']
+    assert calls[0][0] == [str(launcher), 'tunnel', 'update'] and calls[0][1]['timeout'] >= 75
+    assert report['tunnel']['state'] == 'current' and report['tunnel']['profiles'][0]['state'] == 'refreshed'
+    assert report['ok'] is True
     assert store.profile_path('dot').read_bytes() == before
+
+
+@pytest.mark.parametrize('checkout', [False, True])
+def test_client_update_without_an_installed_launcher_never_refreshes_in_process(isolated, tmp_path, monkeypatch, checkout):
+    _saved_tunnel(isolated, monkeypatch)
+    _launcher(tmp_path, monkeypatch, installed=False)
+    from pseudolife_memory import client_updates
+    monkeypatch.setattr(client_updates, 'checkout_root', lambda: tmp_path / 'checkout' if checkout else None)
+    calls = _cli_calls(monkeypatch)
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert calls == []
+    assert report['tunnel']['state'] == 'skipped'
+    assert 'pseudolife-mcp tunnel update' in report['tunnel']['detail']
+    assert report['ok'] is True
+
+
+def test_a_failed_shim_step_leaves_running_tunnels_on_their_release(isolated, tmp_path, monkeypatch):
+    _saved_tunnel(isolated, monkeypatch)
+    launcher = _launcher(tmp_path, monkeypatch)
+    from pseudolife_memory import client_updates
+    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo: {'state': 'failed', 'detail': 'pip failed'})
+    calls = _cli_calls(monkeypatch)
+    report = client_updates.run_steps(('shim',), repo=None, source='fixture')
+    assert calls == []
+    assert report['tunnel']['state'] == 'skipped'
+    assert 'shim step failed' in report['tunnel']['detail'] and f'{launcher}' in report['tunnel']['detail']
+
+
+def test_idle_saved_tunnels_need_no_refresh(isolated, tmp_path, monkeypatch):
+    _saved_tunnel(isolated, monkeypatch, running=False)
+    _launcher(tmp_path, monkeypatch)
+    from pseudolife_memory import client_updates
+    calls = _cli_calls(monkeypatch)
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert calls == []
+    assert report['tunnel']['state'] == 'current' and report['ok'] is True
+
+
+@pytest.mark.parametrize('code, output', [
+    (2, 'SECRET private launcher output\n'),
+    (1, 'TimeoutExpired: SECRET command timed out'),
+    (1, json.dumps({'state': 'failed', 'needs_attention': True, 'detail': '1 saved tunnel profiles checked',
+                    'profiles': [{'profile': 'dot', 'state': 'rolled-back', 'needs_attention': True}]})),
+])
+def test_a_failed_launcher_refresh_fails_the_step_without_echoing_output(isolated, tmp_path, monkeypatch, code, output):
+    _saved_tunnel(isolated, monkeypatch)
+    launcher = _launcher(tmp_path, monkeypatch)
+    from pseudolife_memory import client_updates
+    _cli_calls(monkeypatch, code, output)
+    report = client_updates.run_steps((), repo=None, source='fixture')
+    assert report['tunnel']['state'] == 'failed' and report['ok'] is False
+    assert 'SECRET' not in json.dumps(report)
+    if output.startswith('{'):
+        assert report['tunnel']['profiles'][0]['state'] == 'rolled-back'
+    else:
+        assert f'exit {code}' in report['tunnel']['detail'] and str(launcher) in report['tunnel']['detail']
 
 
 def test_update_transport_failure_is_sanitized(isolated, monkeypatch):
@@ -200,26 +299,6 @@ def test_redirected_tunnel_directory_is_reported_not_raised(tmp_path, monkeypatc
     report = client_updates.run_steps((), repo=None, source='fixture')
     assert report['tunnel']['state'] == 'failed'
     assert report['ok'] is False
-
-
-def test_client_update_from_a_checkout_does_not_refresh_running_tunnels(isolated, tmp_path, monkeypatch):
-    from pathlib import Path
-    _, token = isolated
-    monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
-    store = ProfileStore()
-    store.save(Profile('dot', 'http://127.0.0.1:8765', str(token), consent=True,
-                       tunnel_id='tunnel_0123', state='ready'))
-    store.set_key('dot', 'fixture-tunnel-key')
-    from pseudolife_memory import client_updates, tunnel_runtime
-    monkeypatch.setattr(client_updates, 'checkout_root', lambda: tmp_path / 'checkout')
-    monkeypatch.setattr(tunnel_runtime, 'stable_command', lambda: ['fixture-shim'])
-    observed = []
-    monkeypatch.setattr(tunnel_runtime, 'update_profile', lambda *args: observed.append(args[0].name) or {'changed': False})
-    report = client_updates.run_steps((), repo=None, source='fixture')
-    assert observed == []
-    assert report['tunnel']['state'] == 'skipped'
-    assert 'pseudolife-mcp tunnel update' in report['tunnel']['detail']
-    assert report['ok'] is True
 
 
 @pytest.mark.parametrize('state', ['rolled-back', 'rollback-incomplete', 'failed'])

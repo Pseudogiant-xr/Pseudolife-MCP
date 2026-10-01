@@ -526,7 +526,7 @@ def update_shim(source, repo: Path | None = None) -> dict:
     if exposed["state"] != "skipped":
         detail.append(exposed["detail"] + (f"; {exposed['hint']}" if exposed.get("hint") else ""))
     pinned = rt.pinned_runtimes(layout, rt.find_registrations(env))
-    pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes)
+    pruned = rt.remove_unused(layout, pinned=pinned, processes=list_processes, tunnels=rt.default_tunnel_root(env))
     if pruned["error"]:
         detail.append(f"older runtimes kept: {pruned['error']}")
     for entry in pruned["held"]:
@@ -979,6 +979,75 @@ def _marker(state: str) -> str:
     return "[-]"
 
 
+# ── saved tunnels ───────────────────────────────────────────────────────────
+#
+# A refresh freezes the refreshing process's bridge and site-packages into
+# the running tunnel (tunnel_runtime.snapshot_bridge). Run in this process
+# that would be the release being replaced, or a checkout and its
+# virtualenv; run by the launcher after the shim step, it is the release
+# just installed.
+
+# Per running tunnel: tunnel_runtime._request_refresh waits up to 75 s for
+# the supervisor's answer, plus the launcher's own start.
+_TUNNEL_REFRESH_TIMEOUT_S = 90
+
+
+def _tunnel_report(out: str) -> dict | None:
+    """``tunnel update``'s JSON report (its last JSON object line)."""
+    for line in reversed(out.strip().splitlines()):
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("state") in ("current", "failed") and isinstance(data.get("detail"), str):
+            return {"state": data["state"], "needs_attention": bool(data.get("needs_attention")),
+                    "detail": data["detail"] + "; run by the installed launcher",
+                    "profiles": data["profiles"] if isinstance(data.get("profiles"), list) else []}
+    return None
+
+
+def update_tunnels(shim: dict | None) -> dict | None:
+    """Move running saved tunnels onto the release just installed: ``tunnel
+    update`` run by the installed launcher, never in this process. ``None``
+    when no tunnel profile is saved; ``shim`` is the shim step's result."""
+    from pseudolife_memory.tunnel_profiles import ProfileStore
+    from pseudolife_memory.tunnel_runtime import status_profile
+    try:
+        store = ProfileStore()
+        names = store.list()
+        running = [name for name in names if status_profile(name, store)["running"]]
+    except Exception:
+        return {"state": "failed", "detail": "private tunnel profiles could not be checked; run tunnel doctor"}
+    if not names:
+        return None
+    if not running:
+        return {"state": "current", "detail": f"{len(names)} saved tunnel profile(s), none running; nothing to refresh"}
+    which = ", ".join(running)
+    rt = runtimes_module()
+    try:
+        layout = rt.default_layout(client_env())
+    except ValueError:
+        layout = None
+    if layout is None or not layout.launcher.is_file() or rt.current_runtime(layout) is None:
+        return {"state": "skipped",
+                "detail": f"running tunnels ({which}) were not refreshed: no installed launcher to refresh them "
+                          "through, and a refresh from here would freeze this process's code into them; run "
+                          "`pseudolife-mcp tunnel update` from the installed command"}
+    command = f'"{layout.launcher}" tunnel update'
+    if shim is not None and shim.get("state") == "failed":
+        return {"state": "skipped",
+                "detail": f"running tunnels ({which}) stay on their current release because the shim step failed; "
+                          f"once it passes, run {command}"}
+    code, out = run_cli([layout.launcher, "tunnel", "update"], timeout=60 + _TUNNEL_REFRESH_TIMEOUT_S * len(running))
+    result = _tunnel_report(out)
+    if result is not None and (code == 0) == (result["state"] == "current"):
+        return result
+    # Its output is not repeated: a crash's text can carry private file data.
+    return {"state": "failed",
+            "detail": f"running tunnels ({which}) were not refreshed: {command} ended with exit {code}; run it "
+                      "again to see why, then `pseudolife-mcp tunnel doctor`"}
+
+
 def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
     (those in ``steps``), ``autostart`` when a checkout is known, and
@@ -994,22 +1063,12 @@ def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | Non
         # Informational, after the client steps: never "failed", so never
         # fails the run.
         report["autostart"] = check_autostart(repo)
-    from pseudolife_memory.tunnel_profiles import ProfileStore, default_root
+    from pseudolife_memory.tunnel_profiles import default_root
     # No tunnel directory: tunnels were never set up, so no step at all.
     if os.path.lexists(default_root()):
-        try:
-            if ProfileStore().list():
-                if checkout_root() is not None:
-                    # A refresh freezes this process's bridge and packages
-                    # into the running tunnel: never a source checkout's.
-                    report["tunnel"] = {"state": "skipped",
-                                        "detail": "saved tunnels were not refreshed from a source checkout; "
-                                                  "run `pseudolife-mcp tunnel update` from the installed launcher"}
-                else:
-                    from pseudolife_memory.tunnel_cli import update_existing_profiles
-                    report["tunnel"] = update_existing_profiles()
-        except Exception:
-            report["tunnel"] = {"state": "failed", "detail": "private tunnel profiles could not be checked; run tunnel doctor"}
+        tunnel = update_tunnels(report.get("shim"))
+        if tunnel is not None:
+            report["tunnel"] = tunnel
     # A shim left un-upgraded because sessions run it still needs the rerun.
     report["ok"] = all(r["state"] != "failed" for k, r in report.items() if k != "ok")
     return report

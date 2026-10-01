@@ -1,11 +1,19 @@
 import hashlib
 import io
+import stat
 import zipfile
 from dataclasses import replace
 from pathlib import Path
 import pytest
 from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, TunnelError
 from pseudolife_memory import tunnel_runtime as runtime
+
+
+@pytest.fixture(autouse=True)
+def not_root(monkeypatch):
+    # A root Linux run refuses paths a non-root user could change; these
+    # fixtures live in user-owned temporary directories.
+    monkeypatch.setattr(runtime, '_root_linux', lambda: False)
 
 
 @pytest.mark.parametrize('phase', ['replacement', 'rollback'])
@@ -28,6 +36,7 @@ expected_children = 1 if phase == 'initial' else (3 if phase == 'rollback' else 
 children = []
 injected = []
 runtime._bridge_sources = lambda: {'shim.py': b'def run_shim(): pass\\n', 'tunnel_bridge.py': b'# synthetic frozen bridge\\n'}
+runtime._root_linux = lambda: False
 real_popen = subprocess.Popen
 def launch_fixture(args, **kwargs):
     child = real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kwargs)
@@ -322,6 +331,115 @@ def test_stale_pid_identity_never_terminates_replacement(tmp_path, monkeypatch):
     assert runtime.stop_profile('personal',store)['stopped']
 
 
+def _installed_launcher(tmp_path, monkeypatch):
+    """The runtimes layout's launcher with one complete runtime behind it,
+    at this platform's default place under a fixture home."""
+    import os
+    from pseudolife_memory import runtimes
+    for key in ('PSEUDOLIFE_SHIM_RUNTIMES', 'PSEUDOLIFE_SHIM_LAUNCHER', 'PSEUDOLIFE_SHIM_USER_BIN'):
+        monkeypatch.delenv(key, raising=False)
+    for key in ('HOME', 'USERPROFILE'):
+        monkeypatch.setenv(key, str(tmp_path / 'home'))
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    layout = runtimes.default_layout()
+    scripts = layout.root / '000001' / ('Scripts' if os.name == 'nt' else 'bin')
+    scripts.mkdir(parents=True)
+    (scripts.parent / 'runtime.json').write_text('{"version": "0.15.0"}', encoding='utf-8')
+    (scripts / ('pseudolife-mcp.exe' if os.name == 'nt' else 'pseudolife-mcp')).write_text('console', encoding='utf-8')
+    layout.launcher.parent.mkdir(parents=True)
+    layout.launcher.write_text('launcher', encoding='utf-8')
+    return layout
+
+
+def test_stable_command_prefers_the_runtimes_launcher_over_path(tmp_path, monkeypatch):
+    layout = _installed_launcher(tmp_path, monkeypatch)
+    older = tmp_path / 'elsewhere' / 'pseudolife-mcp'
+    older.parent.mkdir()
+    older.write_text('an older install found first on PATH', encoding='utf-8')
+    monkeypatch.setattr(runtime.shutil, 'which', lambda name: str(older))
+    assert runtime.stable_command() == [str(layout.launcher)]
+    # Without a complete runtime behind it the launcher starts nothing.
+    import shutil
+    shutil.rmtree(layout.root)
+    assert runtime.stable_command() == [str(older)]
+
+
+DIR, FILE, LINK = stat.S_IFDIR | 0o755, stat.S_IFREG | 0o755, stat.S_IFLNK | 0o777
+
+
+def _tree(monkeypatch, entries, links=()):
+    """A fake POSIX tree: ``path -> (owner uid, st_mode)`` and symlink targets."""
+    from types import SimpleNamespace
+    links = dict(links)
+    def lstat(path):
+        if path not in entries:
+            raise FileNotFoundError(path)
+        uid, mode = entries[path]
+        return SimpleNamespace(st_uid=uid, st_mode=mode)
+    monkeypatch.setattr(runtime, '_lstat', lstat)
+    monkeypatch.setattr(runtime, '_readlink', lambda path: links[path])
+    return links
+
+
+def test_root_chain_names_the_first_path_a_non_root_user_could_change(monkeypatch):
+    entries = {'/': (0, DIR), '/opt': (0, DIR), '/opt/pl': (0, DIR), '/opt/pl/bin': (0, DIR),
+               '/opt/pl/bin/pseudolife-mcp': (0, FILE), '/usr': (0, DIR), '/usr/bin': (0, DIR),
+               '/usr/bin/python3': (0, LINK), '/usr/bin/python3.11': (0, FILE)}
+    links = _tree(monkeypatch, entries, {'/usr/bin/python3': 'python3.11'})
+    # A path not created yet is safe while only root can create it.
+    chain = ['/opt/pl/bin/pseudolife-mcp', '/usr/bin/python3', '/opt/pl/lib/not-created-yet']
+    assert runtime.root_chain_problem(chain) is None
+    entries['/opt/pl'] = (0, stat.S_IFDIR | 0o775)
+    assert runtime.root_chain_problem(chain) == '/opt/pl'
+    entries['/opt/pl'] = (1000, DIR)
+    assert runtime.root_chain_problem(chain) == '/opt/pl'
+    entries['/opt/pl'] = (0, DIR)
+    entries['/opt/pl/bin/pseudolife-mcp'] = (0, stat.S_IFREG | 0o757)
+    assert runtime.root_chain_problem(chain) == '/opt/pl/bin/pseudolife-mcp'
+    entries['/opt/pl/bin/pseudolife-mcp'] = (0, FILE)
+    entries.update({'/home': (0, DIR), '/home/user': (1000, DIR), '/home/user/python': (1000, FILE)})
+    links['/usr/bin/python3'] = '/home/user/python'
+    assert runtime.root_chain_problem(chain) == '/home/user/python'
+    assert runtime.root_chain_problem(['pseudolife-mcp']) == 'pseudolife-mcp'
+
+
+def test_root_chain_covers_launcher_runtime_interpreter_dependencies_and_store(tmp_path, monkeypatch):
+    import os
+    layout = _installed_launcher(tmp_path, monkeypatch)
+    layout.launcher.write_text('#!/bin/sh\nexec newest runtime\n', encoding='utf-8')
+    console = layout.root / '000001' / ('Scripts' if os.name == 'nt' else 'bin') / ('pseudolife-mcp.exe' if os.name == 'nt' else 'pseudolife-mcp')
+    console.write_text('#!/opt/runtime/bin/python\nfrom pseudolife_memory.cli import main\n', encoding='utf-8')
+    monkeypatch.setattr(runtime, '_process_chain', lambda: ['/usr/bin/python3.11', '/opt/runtime/lib/site-packages', '/opt/runtime/lib/site-packages/pseudolife_memory'])
+    store = ProfileStore(tmp_path / 'profiles')
+    chain = runtime.root_command_chain([str(layout.launcher), 'tunnel', 'run'], store)
+    for path in (str(layout.launcher), '/bin/sh', str(layout.root), str(console), '/opt/runtime/bin/python',
+                 '/usr/bin/python3.11', '/opt/runtime/lib/site-packages', '/opt/runtime/lib/site-packages/pseudolife_memory',
+                 str(store.root)):
+        assert path in chain
+
+
+def test_root_run_refuses_a_chain_a_user_could_change_before_anything_starts(tmp_path, monkeypatch):
+    store, profile = _ready_profile(tmp_path)
+    launcher = '/opt/pl/bin/pseudolife-mcp'
+    monkeypatch.setattr(runtime, '_root_linux', lambda: True)
+    monkeypatch.setattr(runtime, 'root_command_chain', lambda command, store: [launcher])
+    _tree(monkeypatch, {'/': (0, DIR), '/opt': (0, DIR), '/opt/pl': (1000, DIR), '/opt/pl/bin': (0, DIR), launcher: (0, FILE)})
+    monkeypatch.setattr(runtime, 'stable_command', lambda: [launcher])
+    monkeypatch.setattr(runtime, 'ensure_runtime', lambda *a, **k: pytest.fail('runtime prepared'))
+    monkeypatch.setattr(runtime, 'snapshot_bridge', lambda *a, **k: pytest.fail('bridge frozen'))
+    monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *a, **k: pytest.fail('process started'))
+    command = [launcher, 'tunnel', 'shim']
+    for start in (lambda: runtime.run_profile(profile, store, command, binary=Path('unused')),
+                  lambda: runtime.start_profile(profile, store, command)):
+        with pytest.raises(TunnelError, match='/opt/pl must be owned by root'):
+            start()
+    monkeypatch.setattr(runtime, 'status_profile', lambda *a: {'running': True, 'ready': True})
+    with pytest.raises(TunnelError, match='/opt/pl must be owned by root'):
+        runtime.update_profile(profile, store, command)
+    assert not (store.root / 'personal.process.json').exists()
+
+
 def test_stale_launch_key_is_cleaned_before_retry(tmp_path):
     store = ProfileStore(tmp_path/'profiles')
     store._prepare()
@@ -521,6 +639,43 @@ def test_managed_supervisor_refresh_handshake_preserves_supervisor(tmp_path,monk
         thread.join(timeout=10)
     assert not thread.is_alive()
     assert not failures
+
+@pytest.mark.parametrize('ending', ['stop', 'crash'])
+def test_requested_stop_ends_the_supervisor_with_success(tmp_path, monkeypatch, ending):
+    """systemd's Restart=on-failure and launchd's KeepAlive restart a
+    supervisor that exits non-zero: `tunnel stop` must end it with 0, while
+    a runtime that dies by itself still fails so the service restarts it."""
+    import subprocess
+    import sys
+    import threading
+    import time
+    store, profile = _ready_profile(tmp_path)
+    monkeypatch.setattr(runtime, '_bridge_sources', lambda: {'shim.py': b'def run_shim(): pass\n', 'tunnel_bridge.py': b'# disposable bridge\n'})
+    monkeypatch.setattr(runtime, '_wait_ready', lambda *a: True)
+    child = 'import time;time.sleep(60)' if ending == 'stop' else 'import sys,time;time.sleep(1);sys.exit(3)'
+    real_popen = subprocess.Popen
+    def launch(profile, binary, config, store, *, owned_children=None):
+        process = real_popen([sys.executable, '-c', child], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        identity = runtime._process_identity(process.pid)
+        if owned_children is not None:
+            owned_children.append((process, identity))
+        return process, identity
+    monkeypatch.setattr(runtime, '_launch_child', launch)
+    exits = []
+    thread = threading.Thread(target=lambda: exits.append(runtime.run_profile(
+        profile, store, ['pseudolife-mcp', 'tunnel', 'shim'], binary=Path(sys.executable))))
+    thread.start()
+    try:
+        if ending == 'stop':
+            deadline = time.monotonic() + 10
+            while not runtime.status_profile(profile.name, store)['ready'] and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert runtime.stop_profile(profile.name, store)['stopped']
+    finally:
+        thread.join(timeout=20)
+    assert exits == ([0] if ending == 'stop' else [3])
+    assert not list(store.root.glob('*.stop.json'))
+
 
 def test_refresh_rechecks_owned_identity_before_stopping(tmp_path,monkeypatch):
     import subprocess

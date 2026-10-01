@@ -273,6 +273,10 @@ def install_service(profile: Profile, store: ProfileStore, command: list[str], *
     if 'shim' in command:
         from pseudolife_memory.tunnel_runtime import stable_command
         command = stable_command() + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
+    if system == 'linux-system':
+        # Root runs every path in this chain at each boot.
+        from pseudolife_memory import tunnel_runtime
+        tunnel_runtime.require_root_chain(command, store)
     content = render_service(profile, store, command, system_service=system_service)
     payload = content.encode('utf-16' if system == 'windows' else 'utf-8')
     snapshot = _snapshot(system, name, identity, target)

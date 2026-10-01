@@ -9,10 +9,12 @@ import json
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import shlex
 import shutil
 import signal
+import stat
 import threading
 from functools import wraps
 import sys
@@ -523,6 +525,8 @@ def run_profile(profile: Profile, store: ProfileStore, command: list[str], *, bi
         raise TunnelError('tunnel runtime key is expired; renew it before starting')
     if status_profile(profile.name, store)['running']:
         raise TunnelError('this tunnel profile is already running')
+    if _root_linux():
+        require_root_chain(command, store)
     binary = binary or ensure_runtime(store, profile.runtime_version or VERSION)
     snapshot = snapshot_bridge(profile, store, command) if 'tunnel' in command and 'shim' in command else None
     if snapshot:
@@ -563,7 +567,10 @@ def run_profile(profile: Profile, store: ProfileStore, command: list[str], *, bi
                     private_write(store.root / (profile.name + '.reload.result.json'), json.dumps(dict(result, id=request.get('id') if isinstance(request, dict) else None)).encode())
                     request_path.unlink(missing_ok=True)
                 time.sleep(0.1)
-            return process.wait()
+            code = process.wait()
+            # A requested stop is a success: systemd's Restart=on-failure and
+            # launchd's KeepAlive restart a supervisor that exits non-zero.
+            return 0 if _stop_requested(profile.name, store, record) else code
         except (OSError, psutil.Error):
             raise TunnelError('tunnel process could not be started') from None
         finally:
@@ -729,6 +736,26 @@ def _refresh_child(profile, store, config, process, record, candidate, *, owned_
                     child.wait(timeout=10)
 
 
+def _stop_path(name: str, store: ProfileStore) -> Path:
+    from pseudolife_memory.tunnel_profiles import validate_name
+    return checked_path(store.root / (validate_name(name) + '.stop.json'))
+
+
+def _stop_requested(name: str, store: ProfileStore, record: dict) -> bool:
+    """Whether `tunnel stop` ended this exact child, not a crash."""
+    path = _stop_path(name, store)
+    if not path.exists():
+        return False
+    try:
+        request = json.loads(private_read(path))
+    except (TunnelError, ValueError, TypeError, UnicodeError):
+        return False
+    if request != {'pid': record.get('pid'), 'created': record.get('created')}:
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
 def stop_profile(name: str, store: ProfileStore) -> dict:
     path = _record_path(name, store)
     if not path.exists():
@@ -741,16 +768,125 @@ def stop_profile(name: str, store: ProfileStore) -> dict:
         raise TunnelError('tunnel process record is invalid')
     process = _owned_process(record)
     if process:
+        # Named before the stop, so the supervisor ends with success and a
+        # service manager does not restart what was stopped on purpose.
+        stop = _stop_path(name, store)
+        private_write(stop, json.dumps({'pid': record['pid'], 'created': record['created']}).encode())
         try:
             _terminate_owned_tree(process)
         except psutil.Error:
+            stop.unlink(missing_ok=True)
             raise TunnelError('owned tunnel process could not be stopped') from None
     return {'stopped': True, 'profile': name}
 
 
+def _lstat(path: str):
+    return os.lstat(path)
+
+
+def _readlink(path: str) -> str:
+    return os.readlink(path)
+
+
+def _root_linux() -> bool:
+    """A root run on Linux: the system service, or a hand-started root run."""
+    return sys.platform.startswith('linux') and os.geteuid() == 0
+
+
+def _process_chain() -> list[str]:
+    """What this process runs and imports, and so what a bridge frozen from
+    it runs (see snapshot_bridge): interpreter, site-packages, this package."""
+    return [sys.executable, getattr(sys, '_base_executable', sys.executable),
+            *site.getsitepackages(), str(Path(__file__).parent)]
+
+
+def _shebang(path: str) -> str | None:
+    try:
+        with open(path, 'rb') as handle:
+            first = handle.readline(4096)
+    except OSError:
+        return None
+    words = first[2:].decode('utf-8', 'replace').split() if first.startswith(b'#!') else []
+    return words[0] if words else None
+
+
+def root_command_chain(command: list[str], store: ProfileStore) -> list[str]:
+    """Every path a root tunnel executes or imports from: the launcher and
+    the newest runtime it starts, script interpreters, this process's
+    interpreter and site-packages (frozen into the bridge), this package,
+    and the profile store holding the vendor runtime and frozen bridges."""
+    from pseudolife_memory import runtimes
+    paths = [*command[:1], *_process_chain(), str(store.root)]
+    try:
+        layout = runtimes.default_layout()
+    except ValueError:
+        layout = None
+    if layout is not None and command and os.path.normcase(command[0]) == os.path.normcase(str(layout.launcher)):
+        # The launcher starts the newest complete runtime under its root.
+        paths.append(str(layout.root))
+        current = runtimes.current_runtime(layout)
+        if current is not None:
+            paths.append(str(runtimes._console(current.path, runtimes._windows(layout))))
+    return paths + [found for found in map(_shebang, list(paths)) if found]
+
+
+def root_chain_problem(paths) -> str | None:
+    """The first path, or parent directory up to /, that root would run
+    although a non-root user could change it: not owned by root, or
+    writable by its group or others. A symlink is followed to its target; a
+    path not created yet is safe while only root can create it."""
+    pending = [posixpath.normpath(str(path)) for path in paths]
+    seen = set()
+    for path in pending:      # grows with symlink targets
+        if not path.startswith('/'):
+            return path
+        part = path
+        while part not in seen:
+            seen.add(part)
+            try:
+                info = _lstat(part)
+            except FileNotFoundError:
+                info = None
+            except OSError:
+                return part
+            if info is not None:
+                if info.st_uid != 0:
+                    return part
+                if stat.S_ISLNK(info.st_mode):
+                    try:
+                        pending.append(posixpath.normpath(posixpath.join(posixpath.dirname(part), _readlink(part))))
+                    except OSError:
+                        return part
+                elif info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                    return part
+            part = posixpath.dirname(part)
+    return None
+
+
+def require_root_chain(command: list[str], store: ProfileStore) -> None:
+    problem = root_chain_problem(root_command_chain(command, store))
+    if problem is not None:
+        raise TunnelError(f'root tunnel refused: {problem} must be owned by root and not writable by its group '
+                          'or others, or a non-root user could change what root runs')
+
+
+def installed_launcher() -> str | None:
+    """The side-by-side runtimes' launcher, when a complete runtime stands
+    behind it (``pseudolife_memory/runtimes.py``); ``None`` for a pip or
+    lite install, or a layout override that is only half set."""
+    from pseudolife_memory import runtimes
+    try:
+        layout = runtimes.default_layout()
+    except ValueError:
+        return None
+    if layout.launcher.is_file() and runtimes.current_runtime(layout) is not None:
+        return str(layout.launcher)
+    return None
+
+
 def stable_command() -> list[str]:
     """Find the installed launcher rather than binding persistence to a venv."""
-    candidates = [shutil.which('pseudolife-mcp'), str(Path.home() / '.pseudolife-mcp' / 'bin' / ('pseudolife-mcp.exe' if os.name == 'nt' else 'pseudolife-mcp'))]
+    candidates = [installed_launcher(), shutil.which('pseudolife-mcp')]
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and not ({p.lower() for p in Path(candidate).parts} & {'.venv', 'venv', 'site-packages'}):
             return [str(checked_path(candidate))]
@@ -783,8 +919,10 @@ def start_profile(profile: Profile, store: ProfileStore, command: list[str], *, 
             return status_profile(profile.name, store)
         return existing
     store._prepare()
-    ensure_runtime(store, profile.runtime_version or VERSION)
     launch = stable_command() + ['tunnel', 'run', '--profile', profile.name, '--profile-dir', str(store.root)]
+    if _root_linux():
+        require_root_chain(launch, store)
+    ensure_runtime(store, profile.runtime_version or VERSION)
     path = store.root / (profile.name + '.supervisor.log')
     private_write(path, b'')
     supervisor = None
@@ -890,6 +1028,9 @@ def update_profile(profile: Profile, store: ProfileStore, command: list[str]) ->
     """
     if not status_profile(profile.name, store)['running']:
         return {'profile': profile.name, 'version': VERSION, 'changed': False, 'running': False, 'state': 'unchanged'}
+    if _root_linux():
+        # The candidate bridge runs from this process's interpreter and packages.
+        require_root_chain(command, store)
     ensure_runtime(store, profile.runtime_version or VERSION)
     with profile_lock(profile.name, store, purpose='update'):
         record = json.loads(private_read(_record_path(profile.name, store)))

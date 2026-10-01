@@ -263,10 +263,19 @@ def test_existing_linger_is_preserved_on_failure(tmp_path, manager):
     assert manager.linger
 
 
+def _root_chain_checked(monkeypatch):
+    """Records the root chain check instead of reading this host's paths."""
+    from pseudolife_memory import tunnel_runtime
+    seen = []
+    monkeypatch.setattr(tunnel_runtime, 'require_root_chain', lambda command, store: seen.append(command[0]))
+    return seen
+
+
 def test_root_system_service_requires_separate_opt_in(tmp_path, manager, monkeypatch):
     from pseudolife_memory import tunnel_service as service
     monkeypatch.setattr(service, '_identity', lambda system: '0')
     monkeypatch.setattr(service, '_system_directory', lambda: tmp_path/'system')
+    checked = _root_chain_checked(monkeypatch)
     selected, store = profile(tmp_path, consent=True), ProfileStore(tmp_path/'profiles')
     command = [str(tmp_path/'bin'/'pseudolife-mcp')]
     with pytest.raises(TunnelError, match='root.*unsupported'):
@@ -275,6 +284,23 @@ def test_root_system_service_requires_separate_opt_in(tmp_path, manager, monkeyp
     assert 'root privilege' in result['availability']
     assert any('--system' in call for call in manager.calls)
     assert not any('loginctl' in call for call in manager.calls)
+    assert checked == [command[0]]
+
+
+def test_root_system_service_refuses_a_chain_a_user_could_change(tmp_path, manager, monkeypatch):
+    import stat
+    from types import SimpleNamespace
+    from pseudolife_memory import tunnel_service as service, tunnel_runtime
+    monkeypatch.setattr(service, '_identity', lambda system: '0')
+    monkeypatch.setattr(service, '_system_directory', lambda: tmp_path/'system')
+    launcher = '/opt/pl/bin/pseudolife-mcp'
+    owners = {'/': 0, '/opt': 0, '/opt/pl': 0, '/opt/pl/bin': 1000, launcher: 0}
+    monkeypatch.setattr(tunnel_runtime, 'root_command_chain', lambda command, store: [launcher])
+    monkeypatch.setattr(tunnel_runtime, '_lstat', lambda path: SimpleNamespace(st_uid=owners[path], st_mode=stat.S_IFDIR | 0o755))
+    with pytest.raises(TunnelError, match='/opt/pl/bin must be owned by root'):
+        install_service(profile(tmp_path, consent=True), ProfileStore(tmp_path/'profiles'), [str(tmp_path/'bin'/'pseudolife-mcp')], persistent=True, system_service=True)
+    assert not manager.calls
+    assert not (tmp_path/'system'/'pseudolife-tunnel-personal.service').exists()
 
 
 def test_root_unit_has_explicit_privilege_and_narrow_write_paths(tmp_path):
@@ -324,6 +350,7 @@ def test_service_preview_replaces_shim_with_stable_supervisor(tmp_path, monkeypa
 def test_system_unit_registration_failure_is_rolled_back(tmp_path, manager, monkeypatch):
     from pseudolife_memory import tunnel_service as service
     monkeypatch.setattr(service, '_identity', lambda system: '0')
+    _root_chain_checked(monkeypatch)
     monkeypatch.setattr(service, '_system_directory', lambda: tmp_path/'system')
     manager.fail = lambda args: 'enable' in args and '--now' in args
     with pytest.raises(TunnelError, match='previous state restored'):

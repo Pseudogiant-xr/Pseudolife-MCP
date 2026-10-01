@@ -387,6 +387,34 @@ def test_an_old_runtime_a_session_still_runs_survives_and_is_named(cli):
     assert _runtime_dirs(cli) == ["000003"] and f"removed {old}" in result["detail"]
 
 
+def test_a_runtime_a_running_tunnels_frozen_bridge_imports_from_is_kept(cli, monkeypatch):
+    """The bridge a running tunnel froze imports from the runtime that froze
+    it; unreadable tunnel records keep every runtime."""
+    from pseudolife_memory import tunnel_runtime
+    from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, private_write
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    uc.update_shim(ROOT)
+    old = layout.root / "000001"
+    store = ProfileStore(cli.home / ".pseudolife-mcp" / "tunnel")
+    profile = Profile("dot", "http://127.0.0.1:8765", str(cli.home / "token"), tunnel_id="tunnel_0123",
+                      consent=True, state="ready")
+    with monkeypatch.context() as patched:
+        patched.setattr(tunnel_runtime.site, "getsitepackages", lambda: [str(old / "Lib" / "site-packages")])
+        snapshot = tunnel_runtime.snapshot_bridge(profile, store, ["pseudolife-mcp", "tunnel", "shim"])
+    record = store.root / "dot.process.json"
+    private_write(record, json.dumps({"pid": 4100, "snapshot": snapshot}).encode())
+    result = uc.update_shim(ROOT)
+    assert _runtime_dirs(cli) == ["000001", "000002"], result
+    record.write_bytes(b"not a record")
+    result = uc.update_shim(ROOT)
+    assert "older runtimes kept: saved tunnel records" in result["detail"]
+    assert _runtime_dirs(cli) == ["000001", "000002", "000003"]
+    record.unlink()
+    uc.update_shim(ROOT)
+    assert _runtime_dirs(cli) == ["000004"]
+
+
 def test_a_runtime_another_client_still_names_is_kept(cli):
     """Gemini keeps pointing at runtime 000001 by hand (a registration the
     migration could not edit): the runtime is pinned, not removed."""
