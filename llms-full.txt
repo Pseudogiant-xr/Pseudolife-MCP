@@ -408,6 +408,7 @@ deep material lives in the user guide:
 | [Comparison](docs/guide/comparison.md) | Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — the axes, and when to use something else |
 | [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
+| [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -2064,6 +2065,39 @@ instead of claiming a successful retry. This protocol does not repair
 historical losses or recover prior unsaved changes. It assumes the existing
 single-daemon writer. File-mode synthesis still returns `skipped: no-storage`.
 
+**Lessons keep their sources, and only a forget retires them (2026-10-01).**
+Synthesis records where each lesson came from. Its `provenance` lists the
+signal and episode ids it was distilled from (ids the model proposes are
+ignored), and the entries those signals credited through `used_ids` (the
+`credited` partition only) go into a `store_decisions` lineage row
+(`action='lineage'`, `decided_by='lesson_synthesis'`,
+`reason='verified_dependencies'`, record `{lesson, asserted_at,
+source_entry_ids}`) committed with the lesson. A rule's lineage is its own
+signal. Clustered claims do not map to single signals, so a clustered lesson
+carries every credited entry of its batch and is tagged `lineage:batch`.
+Re-deriving a lesson that already has lineage adds the new entries in another
+lineage row; re-deriving one that has none (an explicit write, or a lesson
+from before lineage existed) never attaches any.
+
+A lesson retires only when an explicit forget (`memory_forget(scope="memory")`)
+removes the **last** entry of its lineage. This follows the v51 forget
+cascade for facts and dream edges with one difference: that cascade counts
+only current sources, while a superseded entry still supports a lesson,
+because a correction is often what the lesson is about. Superseding a source (a
+correction), consolidating it into a merged note and capacity eviction never
+retire a lesson: a superseded entry is kept as history and still counts as
+support, and a digest the forget retires is superseded too. An entry already
+deleted (forgotten or evicted earlier) counts as gone, so a clustered lesson
+survives while any entry of its batch survives. The retirement commits in the
+forget's transaction with a `retire` row in `store_decisions`
+(`decided_by='source_cascade'`, `reason='source_forgotten'`); lessons without
+lineage are never retired this way. A signal stays pending, and is not
+offered to the extractor, only when every entry it credits has been deleted;
+one surviving credited entry is enough, and a superseded entry still counts.
+A signal whose credited entries were all evicted therefore waits until it
+ages out, because a deleted row cannot say whether it was forgotten or
+evicted.
+
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
 `avoids` (negative / dead-end) edge to the tool/source it concerns — so
@@ -2148,7 +2182,11 @@ gate, so look-alike situations with different actions coexist. The
 `detail` may carry a fixed block the prompt reads — `SITUATION:`,
 `VERDICT:`, `ACTIONS TAKEN:`, `CORRECT SOLUTION:`, `ACTION DIFF:`,
 `MUST INCLUDE: a; b` — and a rule that drops a `MUST INCLUDE` value is
-retried once before being accepted. Default off; an extractor without the
+retried once. A retry that is empty or still drops a value fails closed, as
+does a rule whose outcome or polarity is malformed or contradicts the
+signal's verdict: that signal stays pending (`rules_failed`) instead of
+becoming guidance, and the batch's other rules still land. Default off; an
+extractor without the
 rule path synthesises such signals under the shipped prompt instead and
 the dream report says so (`rules_fallback`).
 
@@ -7547,7 +7585,7 @@ The milestones:
 | v34 | `retrieval_events.served_facts` — the fact half of the reranker training tuple. The v31 event log recorded only served *entries*; the cortex-first block's facts, served above those entries in every `memory_search` response, were invisible to a future learned reranker. The search handler now attaches them (`[{entity_norm, attribute_norm, rank, score, kind, contested}]`) to the exact event row that search wrote, keyed by the event id `search(return_event_id=True)` hands back — no session-window guessing. `NULL` = a pre-v34 row or a search that served no facts. Also (no DDL): `memory_stats` `read_audit` gains `graduation_candidates` — entries served in ≥60% of the last 30 days' distinct sessions (once ≥8 sessions are on record), i.e. static-context ("promote to CLAUDE.md") candidates that retrieval keeps re-paying for per query. Additive/idempotent |
 | v35 | `entries.authority` / `entries.distortion_tolerance` and `facts.authority` / `facts.distortion_tolerance` — the write-time label pair (authority collapse, arXiv 2608.01679; the compaction cliff, arXiv 2608.22752). `authority` is the SPEECH ACT of the text (`directive` \| `observation` \| `quoted`), deliberately a separate axis from the `origin` tier (who wrote — which drives supersession arithmetic and which entries never persisted anyway); `distortion_tolerance` is the fidelity class (`constraint` \| `procedural` \| `belief` \| `preference` \| `episodic`). Set at write time — explicit `memory_store` / `memory_fact_set` parameters, or a deterministic heuristic under the `auto` default that asserts only `constraint` (rule-sized deontic/imperative text) and `quoted`/`directive` — and inherited through `memory_supersede` / `memory_consolidate` / fact supersession unless the new write restates one. Consumers: the dream carries a `constraint` source's text verbatim onto a derived fact and a post-dream guard reports any constraint entry left without a verbatim carrier (`constraint_verbatim` / `constraint_misses`); a `quoted` source is low-trust for the two-man rule; `constraint` facts are pinned ahead of cosine in `memory_search`'s cortex block and `memory_recall` (`memory.cortex.pin_constraints`). `NULL` = observation / unlabelled, exactly the pre-v35 reading, so the migration is a no-op on an existing bank — no backfill, by design. Additive/idempotent |
 | v36 | Review-queue autonomy (2026-09-02). `edge_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` / `judge_relation` / `decided_by` / `decided_at` — the link judge's opinion on a pending link proposal (the retype verdict's corrected relation in `judge_relation`) and who settled the row; `entity_proposals.judge2_verdict` / `judge2_confidence` / `judge2_model` / `judged2_at` — the merge judge's SECOND opinion beside the v30 first one (two-vote agreement is the apply gate for rows the single-vote 0.8 reject gate leaves pending); and `curation_judgments` (`store`, sorted slot keys, verdict, keep, fold, confidence, note, model, judged_at) — the store-curation judge's memo, because the lesson/world duplicate listings are recomputed per pass and would otherwise be re-sent every sweep. `NULL` judge columns = not yet judged, exactly the pre-v36 behaviour, so the migration is a no-op on existing banks. Gates measured by `evals/queue_judge_ladder.py` against `evals/results/queue-judge-panel-20260902.json`. Additive/idempotent |
-| v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Additive/idempotent |
+| v37 | Retire-not-delete (2026-09-03). `store_decisions` (`id`, `store`, `entity_norm`, `attribute_norm`, `action`, `decided_by`, `reason`, `record` JSONB, `decided_at`) — the FK-free audit of lesson/world forgets and restores. A `memory_forget(scope="lesson"\|"world")` now retires the slot's rows (`status='retired'`, rows kept; `memory.compaction` treats them like any non-live record) instead of deleting them, and the audit row carries the verbatim record so `lesson_restore` / `world_restore` (`memory_graph_review(action="restore_slot")`, `POST /api/lessons/restore`, `POST /api/world/restore`) still work after compaction has purged the retired row. Also (no DDL): merge and junk rejects write text-keyed tombstones to `dismissed_pairs` (canonical pair / `junk:<canonical>` self-pair) so a verdict outlives the CASCADE-deleted proposal row. No column changes; the table starts empty on an existing bank, so the migration is a no-op there. Since 2026-10-01 (no DDL) the table also holds lesson lineage rows (`action='lineage'`, `decided_by='lesson_synthesis'`: the entries a synthesised lesson was derived from) and the `retire` rows of lessons retired because a forget removed their last lineage entry (`decided_by='source_cascade'`, `reason='source_forgotten'`). Additive/idempotent |
 | v38 | Durable dream acknowledgement. `entries.dream_state` records `pending`, `acknowledged`, or `legacy-covered`; pre-existing rows retain `NULL` for one-time classification against the legacy cursor and configured source eligibility. New writes default to `pending`, regardless of their timestamps. Exact-entry commit tokens use a bank-local secret in `meta`; logical export excludes that secret. The numeric cursor remains display metadata. This preserves the previous migration boundary; it does not repair historical skipped entries. Additive/idempotent |
 | v39 | `memory_trace_invalidations` preserves source-supersession events by normalized slot and source entry ID, without entry or fact foreign keys. Explicit correction records entry retirement and existing trace invalidations together. Events survive source deletion, cortex snapshots and compaction; confirmation still clears the served warning. Table creation and older logical imports reconstruct only surviving superseded source/trace pairs. **Upgrade effect:** the first v39 start materialises one event per surviving superseded-source trace pair — 2077 pairs on the reference bank on 2026-09-11, measured with `ops/measure_reverify_population.py`. That reproduces the warnings the bank already served, but from then on they no longer drain when the source is evicted or deleted; each clears only when its slot is confirmed again (`memory_fact_set` at the slot with the same or a new value, or accepting a contender). To clear a population deliberately, re-assert those slots. `re_verify` stays a passive flag and is still excluded from `correct_with`. Additive/idempotent |
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
@@ -9442,6 +9480,10 @@ covers exposing that daemon beyond loopback, giving each remote machine its
 own identity, and wiring clients that run no daemon of their own.
 Part of the [user guide](../../README.md#documentation).
 
+For ChatGPT developer apps and a dot, use the optional guided
+[Secure MCP Tunnel setup](tunnels.md). It connects to this same daemon and
+keeps existing local client registrations.
+
 ## How it fits together
 
 ```
@@ -9853,5 +9895,202 @@ The daemon host does not have to be your workstation. Plan for:
 - **Images:** pull the GHCR images or build from the checkout; the
   extractor sidecar always builds locally
   ([README — install](../../README.md#install--containerized-any-os)).
+
+---
+
+<!-- source: docs/guide/tunnels.md -->
+
+# Secure MCP Tunnel access from ChatGPT
+
+An optional Secure MCP Tunnel connects a ChatGPT developer app to the same
+Pseudolife daemon your local clients use. Guided setup saves private progress,
+checks the existing MCP shim without starting a daemon, and keeps local client
+and plugin registrations unchanged. Browser steps need your own account choices;
+local readiness alone does not prove that your dot can access memory.
+
+```mermaid
+flowchart TD
+    A[Setup: discover existing daemon and credential file] --> B[Approve optional access and choose a tunnel]
+    B --> C[Enter a private restricted API key]
+    C --> D[Start tunnel and check local readiness]
+    D --> E[Associate workspace and create ChatGPT developer app]
+    E --> F[Run two read-only nonce challenge calls from the dot]
+    F --> G[Cloud access verified by private receipts]
+    A -. saved steps .-> H[Resume setup or update]
+    H --> D
+    H -. changed credentials or connection .-> F
+```
+
+## Start or resume
+
+Use an always-on host if you need access while a laptop sleeps. Both its daemon
+and tunnel must remain running. Install Pseudolife normally, then run:
+
+```sh
+pseudolife-mcp tunnel setup
+```
+
+The installer can enter this same flow with `ops/install.sh --tunnel` or
+`ops/install.ps1 -Tunnel`. Existing users can run the command directly. Setup
+reuses saved choices and does not ask again for access consent or a saved key.
+If discovery finds conflicting registrations or only a literal token, select the
+connection explicitly using an existing owner-only token file:
+
+```sh
+pseudolife-mcp tunnel setup --daemon-url http://127.0.0.1:8765 --token-file <private-token-file> --accept-access
+```
+
+`--accept-access` records your consent to this access path. It does not create
+accounts, API keys, workspace associations or apps. On a shell without a terminal,
+pass it explicitly. A profile is named `dot` by default; `--profile <name>` keeps
+separate connections. `--profile-dir <directory>` selects private profile storage.
+
+## Complete the account steps
+
+1. Open [Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels).
+   Check the selected organization, create or choose a tunnel, then copy its ID.
+   Resume with `pseudolife-mcp tunnel setup --tunnel-id <tunnel_id>`; supply
+   `--organization-id <organization_id>` when needed.
+2. In that organization's [API key settings](https://platform.openai.com/settings/organization/api-keys),
+   create a **Restricted** key with **Tunnels: Read + Use** for the running tunnel.
+   Creating or editing a tunnel separately needs **Read + Manage**. Enter the
+   runtime key privately with `pseudolife-mcp tunnel setup --read-key`, or use
+   `--key-file <owner-only-file>`. Keep it out of chat, command arguments and
+   environment variables. If its expiry is known, add
+   `--key-expires-at 2026-12-01T00:00:00Z`; a date such as `2026-12-01` means
+   midnight UTC. Timestamps need a timezone; otherwise status reports unknown
+   when no expiry is supplied.
+3. Start with `pseudolife-mcp tunnel start`, or use `tunnel run` in a foreground
+   terminal. `tunnel setup --start` resumes setup and starts the managed process.
+   Use `tunnel doctor` for local MCP and vendor checks.
+4. In the intended ChatGPT workspace, open [developer apps](https://chatgpt.com/plugins),
+   enable developer mode where available, create a developer app, choose
+   **Connection: Tunnel**, and select this tunnel. Review the workspace
+   association separately from the Platform organization and app creation.
+   Availability and access follow those account/workspace settings.
+
+`setup --open-browser tunnels`, `keys`, or `app` opens the selected step without
+inventing an OAuth or device-code flow. Use the commands printed by setup to resume.
+The local profile and key survive interrupted browser work.
+
+## Prove access through the cloud
+
+Run `pseudolife-mcp tunnel verify` after connecting the developer app, then paste
+its exact prompt into your dot with that app enabled. It asks for `memory_search`
+and `memory_agents(action="list")`, using a fresh nonce as the query and project
+filter. Empty search results and zero matching peers are fine: these calls verify
+the path without writing memory or changing the board. Optionally ask one cloud
+child to repeat the prompt; no model API spending is launched by the CLI.
+
+```sh
+pseudolife-mcp tunnel status
+pseudolife-mcp tunnel doctor --json
+```
+
+Only successful real responses to both challenge calls establish cloud verification.
+The tunnel forwards the installed shim's MCP traffic and saves private receipts
+containing tool names, success flags and timestamps, never memory or board contents.
+Receipts match the actual ready launch, its saved profile, connection, key and
+challenge. After changing a key, daemon, tunnel, organization or catalog, use
+`tunnel setup --start` to start or refresh the managed tunnel before a new challenge.
+An existing foreground run needs an explicit stop/start. Saved changes alone cannot
+prove that the running tunnel adopted them. Vendor doctor checks and
+`/readyz` remain separate local signals; they cannot establish cloud verification.
+
+## Discovery, updates and renewal
+
+The default catalog is the daemon's current discovery tier. Choose
+`tunnel setup --catalog full` explicitly to keep full tool discovery available
+after a daemon restart or tier expiry. This expands discovery for the reused
+daemon principal, including its other sessions; it does not change authentication
+permissions or create a dedicated principal. Each tools/list request rechecks full
+discovery and restores it when needed, then reports an error if it cannot do so.
+
+`pseudolife-mcp update` (and `ops/update_clients.py` from a checkout) refreshes
+running saved tunnels after it installs the new shim runtime, by running
+`tunnel update` through the installed launcher. A refresh freezes the bridge and
+packages of the process that runs it, so this moves running tunnels onto the
+release just installed and never onto a checkout's code. Without an installed
+launcher (pip or lite installs) the step is skipped and names
+`pseudolife-mcp tunnel update`; when the shim step fails it is skipped and names
+the launcher command to run once the shim is fixed. The refresh runs without
+`PYTHON*` environment variables, so an exported `PYTHONPATH` cannot reach the
+bridge; a refresh that times out is reported as timed out, with the command to
+run again after `tunnel status`. Removing old shim runtimes keeps any runtime a
+running tunnel's bridge still imports from while that tunnel's processes are
+alive, and removes nothing when saved tunnel records cannot be read.
+`pseudolife-mcp tunnel update` updates only saved tunnels. Running managed tunnels
+refresh their bridge and shim, even when the vendor version stays the same, and
+must become locally ready before the update succeeds. A failed candidate attempts
+to restore the previous immutable bridge/shim snapshot and readiness; a successful
+rollback preserves availability but still reports a failed update needing attention.
+Status shows this last refresh outcome separately from current runtime readiness.
+Cloud proof binds to the active snapshot: a successful source refresh needs a new
+challenge, while restoration of the same identity preserves existing proof files.
+
+Older running records without a safe snapshot are refused unchanged; use an explicit
+`tunnel stop` then `tunnel start` to adopt the managed refresh path. Rollback freezes
+the bridge and stdio shim files plus their launcher, while shared helpers and
+dependencies retain their installed versions. Changes to those shared components
+can therefore require further repair or fresh cloud verification after rollback.
+Idle profiles remain idle and no saved profile means no implicit new setup. The
+supported upstream runtime stays checksum-pinned; updates do not choose upstream
+latest or change profiles, keys, autostart consent or local client registrations.
+
+Renew with `tunnel setup --read-key --key-expires-at <ISO-timestamp>`. A replacement
+key is staged through local configuration checks before replacing the saved key;
+a rejected candidate leaves the existing key and profile intact. These checks do
+not prove cloud identity. Use `tunnel setup --start` to adopt the saved replacement
+in a ready managed launch, then repeat `tunnel verify`. Failed refreshes restore
+the previous launch; cloud proof is valid only when the saved selection agrees
+with the actual restored configuration and credentials.
+Correcting only the recorded expiry preserves cloud proof and does not require a
+restart; the CLI still checks that expiry before starting a tunnel.
+
+## Autostart and private storage
+
+`tunnel service preview` shows the host service definition. Install it only after
+reviewing it with `tunnel service install --accept-autostart`. Use
+`tunnel service status`, `stop` or `remove` to manage the owned service;
+`tunnel stop` stops an owned managed tunnel process. A tunnel stopped that way
+ends its supervisor successfully, so its service does not restart it; the
+service starts it again at the next login or boot. A runtime that exits by
+itself still counts as a failure, and the service restarts it.
+Each install needs this explicit consent; saved consent does not authorize a new
+installation. `--persistent` remains an equivalent compatibility option.
+
+Windows and macOS services depend on the user's login session. A Linux user
+service also normally depends on login; `--linger` explicitly opts into running
+that user service while logged out. This may require host authorization. A root
+Linux/LXC install instead needs the explicit `--system-service` choice on service
+commands; it uses the existing root privilege and should be reviewed as such.
+It installs, and a root tunnel starts or refreshes, only when every path root
+would run is owned by root and not writable by its group or others: the
+launcher, the runtime it starts, the interpreter, the site-packages the bridge
+imports from, the bridge interpreter's own import path and user site, the `.pth`
+files in those site directories (they run at interpreter start), the package,
+the tunnel profile directory, and each of their parent directories up to `/`.
+Otherwise it refuses and names the path; install Pseudolife as root, or fix that
+path's owner and mode, then retry. A group-writable
+`/usr/local/lib/python3.X/dist-packages` (Debian's historical root:staff 2775)
+is refused this way.
+No root service or login policy is changed implicitly. An autostart service cannot keep
+a sleeping or powered-off host available.
+
+Windows stores the runtime key using user-scoped DPAPI plus owner-only ACLs;
+POSIX stores it in an owner-only file, with disk encryption left to the host.
+Private launch files exist only while the supervisor owns the process. While a
+tunnel runs, one of them holds the decrypted runtime key for the vendor runtime
+to read, so DPAPI and other at-rest protection apply only while it is stopped.
+The CLI passes file references, never the API key in command arguments or the
+environment. Do not copy private profile storage into a repository or share
+runtime logs.
+
+The upstream [Secure MCP Tunnels runtime](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+provides the account transport. Reusing it avoids a second custom tunnel protocol;
+the small Pseudolife bridge adds resumable setup, discovery restoration and
+payload-free verification while retaining the existing shim's authentication and
+MCP behavior. It requires the upstream runtime and account features to remain
+available, and browser account setup stays an explicit user step.
 
 ---

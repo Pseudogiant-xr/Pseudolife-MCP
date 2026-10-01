@@ -67,16 +67,29 @@ exactly; they exist because each one was violated at least once.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
-4. **Deploy only via `ops/update.ps1`** (backup → rollback tag → daemon-only
-   `--no-deps` rebuild → health). Never `docker compose down -v` — the bank
-   volumes are external precisely so that this is survivable, but don't test it.
-   **A change under `plugin/` or to the shim needs `-All`** (or
-   `ops/update_clients.py` afterwards): the plugin cache and the shim are
-   separate installs that a daemon deploy never touches — the 2026-09-21
-   deploy ran an hour on the old hooks. Both install beside what running
-   sessions use (the plugin's cache is keyed by marketplace commit since
-   2026-09-30, its manifest carrying no version), so no client closes; new
-   sessions start on them.
+4. **Deploy only via `pseudolife-mcp update`**
+   (`pseudolife_memory/update_cli.py`, the one implementation since #460,
+   2026-09-29): backup → rollback tag → daemon-only `--no-deps` recreate →
+   health → clients. Release mode (no `--checkout`) pulls the newest
+   release (GHCR image, PyPI package) and moves the clients to it;
+   `--daemon-only` / `--clients-only` split the halves (`--clients-only`
+   targets the newest release unless given `--tag <daemon version>`).
+   **Merged but unreleased master needs checkout mode**, which rebuilds the
+   daemon from the tree: `ops/update.ps1` / `ops/update.sh` wrap
+   `--checkout <repo>` and run the checkout's own code. Release mode
+   installs published releases only, and a checkout-built daemon reports
+   the last release's version, so release mode's "nothing to do" on such a
+   host proves nothing. Never `docker compose down -v` — the bank volumes
+   are external precisely so that this is survivable, but don't test it.
+   **A change under `plugin/` or to the shim needs the client step**:
+   checkout mode moves the clients only with `-All` / `--all` and refuses
+   `--clients-only` (use `python ops/update_clients.py` afterwards);
+   release mode moves them unless `--daemon-only`. The plugin cache and
+   the shim are separate installs that a daemon deploy never touches — the
+   2026-09-21 deploy ran an hour on the old hooks. Both install beside what
+   running sessions use (the plugin's cache is keyed by marketplace commit
+   since 2026-09-30, its manifest carrying no version), so no client
+   closes; new sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
 

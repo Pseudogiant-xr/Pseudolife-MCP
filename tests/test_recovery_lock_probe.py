@@ -214,12 +214,19 @@ def test_delayed_correction_recovery_holds_lock_through_publication(
         tmp_path / "primary", monkeypatch, storage, embedding_dim=1024)
     old = correction_seed(svc)
     transaction = storage.transaction
+    injected = []
     load = storage.load_entries
 
     @contextmanager
     def committed_but_lost():
+        # Inject outcome loss only at the outer transaction boundary.
+        if storage._transaction_connection is not None:
+            with transaction():
+                yield
+            return
         with transaction():
             yield
+        injected.append("committed")
         raise RuntimeError("synthetic lost response")
 
     monkeypatch.setattr(storage, "transaction", committed_but_lost)
@@ -237,6 +244,7 @@ def test_delayed_correction_recovery_holds_lock_through_publication(
     try:
         with pytest.raises(Exception, match="synthetic recovery read failure"):
             correction_call(svc, "supersede", ids=[old.db_id])
+        assert injected == ["committed"]
         assert svc._correction_recovery is not None
         monkeypatch.setattr(storage, "transaction", transaction)
         monkeypatch.setattr(storage, "load_entries", load)
@@ -398,12 +406,19 @@ def test_correction_publication_loss_restores_resident_and_retries(
         tmp_path / "primary", monkeypatch, storage, embedding_dim=1024)
     old = correction_seed(svc)
     transaction = storage.transaction
+    injected = []
     load = storage.load_entries
 
     @contextmanager
     def committed_but_lost():
+        # Inject outcome loss only at the outer transaction boundary.
+        if storage._transaction_connection is not None:
+            with transaction():
+                yield
+            return
         with transaction():
             yield
+        injected.append("committed")
         raise RuntimeError("synthetic lost response")
 
     monkeypatch.setattr(storage, "transaction", committed_but_lost)
@@ -416,6 +431,7 @@ def test_correction_publication_loss_restores_resident_and_retries(
     try:
         with pytest.raises(Exception, match="synthetic recovery read failure"):
             correction_call(svc, "supersede", ids=[old.db_id])
+        assert injected == ["committed"]
         pending = svc._correction_recovery
         assert pending is not None
         assert pending.source_ids == (old.db_id,)
@@ -573,15 +589,22 @@ def test_correction_lock_session_loss_reconciles_on_fresh_session(
         tmp_path / "primary", monkeypatch, storage, embedding_dim=1024)
     old = correction_seed(svc)
     transaction = storage.transaction
+    injected = []
 
     @contextmanager
     def outcome_lost_with_session():
+        # Inject outcome loss only at the outer transaction boundary.
+        if storage._transaction_connection is not None:
+            with transaction():
+                yield
+            return
         try:
             with transaction():
                 yield
                 if outcome == "rolled_back":
                     raise RuntimeError("synthetic failure before commit")
         finally:
+            injected.append(outcome)
             _lose_lock_session(storage, pg_conn, loss_mode)
         raise RuntimeError("synthetic lost commit response")
 
@@ -608,6 +631,7 @@ def test_correction_lock_session_loss_reconciles_on_fresh_session(
                 for band in svc._cms.bands for entry in band.entries
             )
             assert _row(fresh, old.db_id)["superseded_at"] is None
+        assert injected == [outcome]
         assert svc._correction_recovery is None
     finally:
         fresh.close()

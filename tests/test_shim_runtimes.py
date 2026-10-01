@@ -348,6 +348,92 @@ def test_the_helper_itself_never_counts_as_holding_a_runtime(tmp_path, shape, to
     assert result["removed"] == [str(old.path)]
 
 
+def _tunnel_record(home: Path, monkeypatch, runtime: Path, pid: int | None = None, supervisor: int = 4200) -> Path:
+    """A running tunnel's process record whose bridge was frozen (the real
+    ``snapshot_bridge``) with the site-packages of ``runtime``; its runtime
+    child is ``pid`` (default: this live process)."""
+    from pseudolife_memory import tunnel_runtime
+    from pseudolife_memory.tunnel_profiles import Profile, ProfileStore, private_write
+    store = ProfileStore(home / ".pseudolife-mcp" / "tunnel")
+    profile = Profile("dot", "http://127.0.0.1:8765", str(home / "token"), tunnel_id="tunnel_0123",
+                      consent=True, state="ready")
+    with monkeypatch.context() as patched:
+        patched.setattr(tunnel_runtime.site, "getsitepackages", lambda: [str(runtime / "lib" / "site-packages")])
+        snapshot = tunnel_runtime.snapshot_bridge(profile, store, ["pseudolife-mcp", "tunnel", "shim"])
+    record = {"pid": os.getpid() if pid is None else pid, "supervisor": {"pid": supervisor}, "snapshot": snapshot}
+    private_write(store.root / "dot.process.json", json.dumps(record).encode())
+    return store.root
+
+
+@pytest.mark.parametrize("command", ["prune", "install"])
+def test_a_runtime_a_running_tunnels_frozen_bridge_imports_from_is_kept(tmp_path, monkeypatch, capsys, command):
+    """A running tunnel's bridge starts again from the runtime that froze it
+    for every connection, after a newer runtime is current; records that
+    cannot be read keep every runtime."""
+    shape = "windows" if os.name == "nt" else "posix"
+    layout = _layout(tmp_path, shape)
+    tools = FakeTools(shape)
+    old = _install(layout, tools, "0.15.0")
+    _install(layout, tools, "0.15.1")
+    home = tmp_path / "home"
+    for key, value in {"HOME": home, "USERPROFILE": home, "CODEX_HOME": home / ".codex", "CLAUDE_CONFIG_DIR": home,
+                       "APPDATA": home / "AppData" / "Roaming", "XDG_CONFIG_HOME": home / ".config",
+                       "PSEUDOLIFE_SHIM_RUNTIMES": layout.root, "PSEUDOLIFE_SHIM_LAUNCHER": layout.launcher}.items():
+        monkeypatch.setenv(key, str(value))
+    monkeypatch.setattr(rt, "install", lambda source, layout_, **kw: rt.current_runtime(layout_))
+    tunnels = _tunnel_record(home, monkeypatch, old.path)
+
+    def run():
+        code = rt.main(["--json", command] + (["--source", "unused"] if command == "install" else []))
+        out = json.loads(capsys.readouterr().out)
+        return code, (out["pruned"] if command == "install" else out)
+
+    code, result = run()
+    assert str(old.path) in result["kept"] and old.path.is_dir(), result
+    (tunnels / "dot.process.json").write_bytes(b"not a record")
+    code, result = run()
+    assert "saved tunnel records" in result["error"] and result["removed"] == [] and old.path.is_dir()
+    assert code == (1 if command == "prune" else 0)
+    (tunnels / "dot.process.json").unlink()      # the tunnel stopped
+    code, result = run()
+    assert result["removed"] == [str(old.path)] and not old.path.exists()
+
+
+def test_a_tunnel_record_pins_only_while_its_runtime_or_supervisor_is_alive(tmp_path, monkeypatch):
+    """A record outlives its processes after a reboot or a kill, and a
+    refresh request outlives its timeout: neither keeps a runtime."""
+    shape = "windows" if os.name == "nt" else "posix"
+    layout = _layout(tmp_path, shape)
+    tools = FakeTools(shape)
+    old = _install(layout, tools, "0.15.0")
+    _install(layout, tools, "0.15.1")
+    tunnels = _tunnel_record(tmp_path / "home", monkeypatch, old.path, pid=4100, supervisor=4200)
+
+    def prune(*alive):
+        rows = [(pid, 1, str(tmp_path / "elsewhere" / "tunnel-client.exe")) for pid in alive]
+        return rt.remove_unused(layout, processes=lambda: rows, tunnels=tunnels)
+
+    assert str(old.path) in prune(4100)["kept"] and str(old.path) in prune(4200)["kept"]
+    record = json.loads((tunnels / "dot.process.json").read_text(encoding="utf-8"))
+    (tunnels / "dot.process.json").unlink()
+    request = {"id": "a" * 32, "snapshot": record["snapshot"], "target": {"pid": 4300, "created": 1.0}}
+    (tunnels / "dot.reload.json").write_text(json.dumps(request), encoding="utf-8")
+    assert str(old.path) in prune(4300)["kept"]
+    assert prune(4100, 4200)["removed"] == [str(old.path)] and not old.path.exists()
+
+
+def test_a_deeply_nested_tunnel_record_removes_nothing(tmp_path, monkeypatch):
+    shape = "windows" if os.name == "nt" else "posix"
+    layout = _layout(tmp_path, shape)
+    tools = FakeTools(shape)
+    old = _install(layout, tools, "0.15.0")
+    _install(layout, tools, "0.15.1")
+    tunnels = _tunnel_record(tmp_path / "home", monkeypatch, old.path)
+    (tunnels / "dot.process.json").write_text("[" * 100000, encoding="utf-8")
+    result = rt.remove_unused(layout, processes=lambda: [], tunnels=tunnels)
+    assert "saved tunnel records" in result["error"] and result["removed"] == [] and old.path.is_dir()
+
+
 def _real_venv(path: Path) -> Path:
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(path)],
                    check=True, capture_output=True, timeout=180)

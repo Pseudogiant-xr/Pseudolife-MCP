@@ -114,7 +114,9 @@ param(
     [string]$DaemonUrl = "",
     [string]$TokenFile = "",
     [switch]$ClientOnly,
-    [switch]$ReadToken
+    [switch]$ReadToken,
+    # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
+    [switch]$Tunnel
 )
 $ErrorActionPreference = "Stop"
 
@@ -2948,4 +2950,25 @@ function Write-UpdateLine([string]$ShimPath, [switch]$ClientOnly) {
 }
 # <<< update line <<<
 Write-UpdateLine -ShimPath $script:shimInstallPath -ClientOnly:([bool]$ClientOnly)
+if ($Tunnel) {
+    if (-not $script:shimInstallPath) {
+        throw "Secure MCP Tunnel setup needs the installed shim; repair its installation, then run pseudolife-mcp tunnel setup."
+    }
+    $tunnelOldUrl = $env:PSEUDOLIFE_MCP_DAEMON_URL
+    $tunnelOldFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
+    try {
+        if ($boardFile) {
+            $env:PSEUDOLIFE_MCP_DAEMON_URL = $script:ClientDaemonUrl
+            $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile
+        }
+        & $script:shimInstallPath tunnel setup
+        $tunnelExit = $LASTEXITCODE
+    } finally {
+        $env:PSEUDOLIFE_MCP_DAEMON_URL = $tunnelOldUrl
+        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $tunnelOldFile
+    }
+    if ($tunnelExit -ne 0) { exit $tunnelExit }
+} else {
+    Write-Host "Optional ChatGPT access: pseudolife-mcp tunnel setup (guided private key and app setup; docs/guide/tunnels.md)."
+}
 Write-Host "Done. First session: tell your coding agent to remember something."

@@ -97,22 +97,51 @@ def _later(seconds, action):
     return timer
 
 
+class _Clock:
+    """Wall and monotonic time that move together, and only when the waiter
+    sleeps, so every lease expiry it stamps is exact on any runner."""
+
+    def __init__(self):
+        self.wall = 1_800_000_000.0
+        self.mono = 1_000.0
+
+    def time(self):
+        return self.wall
+
+    def monotonic(self):
+        return self.mono
+
+    def advance(self, seconds):
+        self.wall += seconds
+        self.mono += seconds
+
+
 def test_waiter_renews_its_short_listener_lease_and_disarms_on_timeout(digests, monkeypatch):
+    # The lease runs one minute past each renewal, capped at the waiter's own
+    # deadline. A sub-minute wait on wall time therefore re-stamps that deadline
+    # on every renewal, and only clock jitter made two stamps differ: the
+    # 2026-10-02 macOS lane stamped 1790864931.5014727 twice. A wait longer than
+    # the lease, on a clock that moves only when the waiter sleeps, shows both
+    # the renewal and the cap exactly.
+    from pseudolife_memory import wait_mail_cli, wake_liveness
+
     digest = _digest(digests)
     _write(digest, 1)
     leases = []
-    original_sleep = time.sleep
+    clock = _Clock()
+    start = clock.wall
 
     def observe(seconds):
         [armed] = list(digests.glob(f"{digest.stem}.*.wait-armed"))
-        leases.append((time.time(), armed.read_text().splitlines()))
-        original_sleep(seconds)
+        leases.append((clock.wall - start, float(armed.read_text().splitlines()[1]) - start))
+        clock.advance(seconds)
 
-    monkeypatch.setattr("pseudolife_memory.wait_mail_cli.time.sleep", observe)
-    assert run_wait_mail(["--timeout", "0.1", *FAST]) == 3
-    assert len(leases) >= 2
-    assert all(0 < float(lines[1]) - stamp < 61 for stamp, lines in leases)
-    assert len({lines[1] for _, lines in leases}) >= 2
+    clock.sleep = observe
+    monkeypatch.setattr(wait_mail_cli, "time", clock)
+    monkeypatch.setattr(wake_liveness, "time", clock)
+    assert run_wait_mail(["--timeout", "150", "--interval", "30"]) == 3
+    # (seconds since arming, lease expiry) at each poll's sleep.
+    assert leases == [(0, 60), (30, 90), (60, 120), (90, 150), (120, 150)]
     assert not list(digests.glob(f"{digest.stem}.*.wait-armed"))
 
 

@@ -269,9 +269,7 @@ def test_extract_rules_is_one_call_per_signal_with_the_rule_prompt(monkeypatch):
 
 def test_extract_rules_retries_once_when_a_must_include_value_is_missing(
         monkeypatch):
-    """The paper bounces a rule that drops a decision-critical value (up to
-    twice); one retry here, then the rule is accepted as-is rather than
-    lost — a slightly lossy rule beats a stranded signal."""
+    """One retry may recover a value; a still-incomplete rule stays pending."""
     from pseudolife_memory.memory import dream
 
     ext = dream.OpenAICompatExtractor("http://x/v1", "m")
@@ -289,15 +287,140 @@ def test_extract_rules_retries_once_when_a_must_include_value_is_missing(
     assert "4.5%" in calls[1]["messages"][1]["content"]  # the nudge names it
     assert out[0]["lesson"].endswith("4.5%")
 
-    # Both replies missing a value: two calls, the second is accepted.
+    # Both replies missing a value: neither rule may acknowledge the signal.
     calls = _urlopen_recorder(monkeypatch, [
         {"lessons": [{"task": "t", "lesson": "WHEN … THEN offer the card",
                       "about": "a", "polarity": "+", "outcome": "success"}]},
         {"lessons": [{"task": "t", "lesson": "WHEN … THEN offer a card",
                       "about": "a", "polarity": "+", "outcome": "success"}]},
     ])
-    out = ext.extract_rules([_sig(1, detail=detail)])
-    assert len(calls) == 2 and out[0]["lesson"] == "WHEN … THEN offer a card"
+    with pytest.raises(dream.ExtractorError):
+        ext.extract_rules([_sig(1, detail=detail)])
+    assert len(calls) == 2
+    assert ext.last_rule_failed_ids == [1]
+
+
+@pytest.mark.parametrize("retry", [
+    [],
+    [{"task": "t", "lesson": "WHEN eligible THEN offer a card at 4.5%",
+      "outcome": "success", "polarity": "+"}],
+    [{"task": "t", "lesson": "WHEN eligible THEN offer the Gold Rewards Card",
+      "outcome": "success", "polarity": "+"}],
+    [{"task": "t", "lesson": "WHEN eligible THEN continue",
+      "outcome": "success", "polarity": "+"}],
+])
+def test_extract_rules_rejects_invalid_retry_without_losing_other_signals(
+        monkeypatch, retry):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    complete = _claim("valid", "WHEN eligible THEN offer the Gold Rewards Card at 4.5%")
+    calls = _urlopen_recorder(monkeypatch, [
+        {"lessons": [_claim("invalid", "WHEN eligible THEN offer a card")]},
+        {"lessons": retry},
+        {"lessons": [complete]},
+    ])
+    detail = "MUST INCLUDE: 4.5%; Gold Rewards Card"
+    out = ext.extract_rules([_sig(1, detail=detail), _sig(2, detail=detail)])
+
+    assert len(calls) == 3
+    assert [c["task"] for c in out] == ["valid"]
+    assert ext.last_rule_failed_ids == [1]
+    assert ext.last_rule_failures == 1
+    assert ext.last_rule_empty_ids == []
+
+    _urlopen_recorder(monkeypatch, [{"lessons": [complete]}])
+    assert ext.extract_rules([_sig(3, detail=detail)])
+    assert ext.last_rule_failed_ids == []
+    assert ext.last_rule_empty_ids == []
+    assert ext.last_rule_failures == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("outcome", "malformed"), ("outcome", None), ("outcome", "success"),
+    ("polarity", "malformed"), ("polarity", None), ("polarity", "+"),
+])
+@pytest.mark.parametrize("outcome", ["failure", "correction"])
+def test_extract_rules_rejects_malformed_or_contradictory_verdict(
+        monkeypatch, field, value, outcome):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    invalid = _claim("invalid", "WHEN a deployment failed do NOT repeat it",
+                     outcome=outcome, polarity="-")
+    invalid[field] = value
+    valid = _claim("valid", "WHEN a deployment succeeds THEN retain its recipe")
+    calls = _urlopen_recorder(monkeypatch, [
+        {"lessons": [invalid]}, {"lessons": [valid]},
+    ])
+    source = _sig(1, outcome=outcome)
+    source["polarity"] = "-"
+    out = ext.extract_rules([source, _sig(2)])
+
+    assert len(calls) == 2
+    assert [c["task"] for c in out] == ["valid"]
+    assert ext.last_rule_failed_ids == [1]
+    assert ext.last_rule_empty_ids == []
+
+
+def test_extract_rules_keeps_initial_empty_separate_from_failure(monkeypatch):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    calls = _urlopen_recorder(monkeypatch, [{"lessons": []}])
+    assert ext.extract_rules([_sig(1)]) == []
+    assert len(calls) == 1
+    assert ext.last_rule_empty_ids == [1]
+    assert ext.last_rule_failed_ids == []
+
+
+def test_extract_rules_preserves_failure_and_correction_verdicts(monkeypatch):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    _urlopen_recorder(monkeypatch, [
+        {"lessons": [_claim("failure", "WHEN failed do NOT repeat it",
+                            outcome="failure", polarity="-")]},
+        {"lessons": [_claim("correction", "WHEN corrected THEN use the new value",
+                            outcome="correction", polarity="+")]},
+    ])
+    out = ext.extract_rules([_sig(1, outcome="failure"),
+                             _sig(2, outcome="correction")])
+    assert [(c["outcome"], c["polarity"]) for c in out] == [
+        ("failure", "-"), ("correction", "+")]
+
+
+def test_extract_lessons_keeps_permissive_enum_defaults(monkeypatch):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    _urlopen_recorder(monkeypatch, [{"lessons": [
+        _claim("ordinary", "retain clustered guidance", aspect="approach",
+               outcome="malformed", polarity="malformed")]}])
+    out = ext.extract_lessons([_sig(1, about="deploy")])
+    assert (out[0]["outcome"], out[0]["polarity"]) == ("success", "+")
+
+
+def test_extract_rules_ignores_unused_candidates_after_the_first_rule(monkeypatch):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    _urlopen_recorder(monkeypatch, [{"lessons": [
+        _claim("valid", "WHEN eligible THEN use the procedure"),
+        _claim("unused", "irrelevant output", outcome="malformed")]}])
+    out = ext.extract_rules([_sig(1)])
+    assert [c["task"] for c in out] == ["valid"]
+
+
+def test_extract_rules_accepts_whitespace_around_valid_enums(monkeypatch):
+    from pseudolife_memory.memory import dream
+
+    ext = dream.OpenAICompatExtractor("http://x/v1", "m")
+    _urlopen_recorder(monkeypatch, [{"lessons": [
+        _claim("valid", "WHEN failed do NOT repeat it",
+               outcome=" failure ", polarity=" - ")]}])
+    out = ext.extract_rules([_sig(1, outcome="failure")])
+    assert (out[0]["outcome"], out[0]["polarity"]) == ("failure", "-")
 
 
 def test_extract_rules_failure_raises_like_extract_lessons(monkeypatch):

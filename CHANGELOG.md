@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-01 — Cortex Console v3 brand)
+- The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
+  hero and the sidebar mark, and takes its two accents from it: the lavender
+  of the brain's outline for associative memory and the gold of the traces
+  for canonical facts, on the same black glass. The light theme follows.
+
 ### Added (2026-10-01 — Cortex Console v3, phase 1)
 - A rebuilt web console, served beside the classic one at `/ui/next/`: a
   Vite + Svelte 5 + TypeScript app under `frontend/` whose build output is
@@ -106,6 +112,98 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and Claude Code hosts keep their existing bindings. Custom cloud launchers
   require the operator marker and a restart; per-conversation mailbox binding
   through this shared shim remains unsupported.
+
+### Fixed (2026-10-01 - incomplete learned rules stay pending)
+- Rule synthesis validates decision-critical values after its single retry;
+  empty or incomplete retries cannot restore an invalid initial rule or
+  acknowledge its source signal. Other valid rules in the batch still land.
+- Malformed or contradictory rule verdicts and polarities fail closed instead
+  of becoming success guidance. Ordinary clustered lesson parsing is unchanged.
+
+### Fixed (2026-10-01 — learned lessons keep their sources; only a forget retires them)
+- A synthesised lesson now records where it came from: the signal and episode
+  ids in its provenance, and the entries those signals credited through
+  `used_ids` in a `store_decisions` lineage row committed with it. A rule
+  carries its own signal's lineage and event time; a clustered lesson carries
+  its whole batch's and is tagged `lineage:batch`. Source ids proposed by the
+  model are ignored. Re-deriving a lesson that has lineage adds the new
+  entries; re-deriving one without lineage (an explicit or older lesson)
+  never attaches any.
+- A lesson retires only when an explicit forget removes the last entry of its
+  lineage. This follows the 2026-09-29 forget cascade for facts and dream
+  edges, except that a superseded entry still supports a lesson. Corrections, consolidation and capacity eviction never retire a
+  lesson: a superseded entry is kept as history and still supports it (so do
+  digests the forget itself retires), and an entry deleted earlier counts as
+  gone. A clustered lesson survives while any entry of its batch survives.
+  The retirement and its audit row commit in the forget's transaction;
+  lessons without lineage are untouched.
+- A signal stays pending, and is skipped before extraction, only when every
+  entry it credits has been deleted (forgotten or evicted), so current inputs
+  in the same clustered batch still land. One surviving credited entry is
+  enough, as for retirement; a superseded entry does not hold its signal
+  back. Failed and empty signals stay pending too, and capped sweeps rotate
+  through eligible batches so the oldest invalid signal cannot monopolise
+  them (a restart begins with the oldest eligible signal again).
+- A lesson reload never fails or reverts a committed forget or correction.
+  The resident lessons reload only after a forget actually retired one; until
+  that reload succeeds, lesson reads retry it and saves skip only the lesson
+  snapshot.
+
+### Added (2026-10-01 — guided Secure MCP Tunnel access)
+- Optional `pseudolife-mcp tunnel setup` resumes private account, key and app
+  onboarding without replacing local client registrations. Installer entrypoints,
+  status/doctor, explicit autostart, private key renewal and saved-profile updates
+  use the same flow.
+- Cloud verification requires two successful read-only challenge calls through
+  the tunnel; private receipts retain no memory or agent-board contents. Local
+  readiness remains distinct from cloud access. Full tool discovery across daemon
+  restart or tier expiry requires an explicit catalog choice.
+- A `memory_agents` reply that says the agent board is unavailable does not
+  count as a successful verification call.
+- `pseudolife-mcp doctor` and the client update say nothing about tunnels when
+  no tunnel profile directory exists, so a redirected home folder cannot crash
+  doctor or fail the update for someone who never set up a tunnel.
+- Updating an idle saved tunnel no longer downloads the tunnel runtime.
+- `pseudolife-mcp update` and `ops/update_clients.py` refresh running saved
+  tunnels after the shim step by running `tunnel update` through the newly
+  installed launcher. A tunnel freezes the bridge and packages of the process
+  that refreshes it, so an in-process refresh kept tunnels one release behind,
+  and from a checkout it would have frozen the checkout's code and virtualenv.
+  Without an installed launcher (pip or lite installs) the step is skipped and
+  names `pseudolife-mcp tunnel update`; after a failed shim step it is skipped
+  and names the launcher command. Idle saved tunnels need no refresh. The
+  refresh runs without `PYTHON*` environment variables, so an exported
+  `PYTHONPATH` cannot be frozen into the bridge, and a refresh that times out
+  is reported as timed out with the command to retry.
+- Tunnel services and managed starts run the side-by-side runtimes' launcher
+  (`%LOCALAPPDATA%\pseudolife-mcp\bin\pseudolife-mcp.exe`,
+  `~/.local/share/pseudolife-mcp/bin/pseudolife-mcp`) before whatever
+  `pseudolife-mcp` comes first on `PATH`. The previous fallback,
+  `~/.pseudolife-mcp/bin`, is not where any installer puts it.
+- Removing old shim runtimes keeps any runtime a running tunnel's frozen bridge
+  imports from, while the tunnel's runtime or supervisor process is alive. A
+  record left by a reboot, a kill or a timed-out refresh keeps nothing. When
+  saved tunnel records cannot be read, no runtime is removed in that run and
+  the update says why.
+- The Linux root `--system-service` installs, and a root tunnel starts or
+  refreshes, only when every path root would run is owned by root and not
+  writable by its group or others: the launcher, the runtime it starts, the
+  interpreter, the site-packages the bridge imports from, the bridge
+  interpreter's own import path and user site (asked of that interpreter), the
+  `.pth` files in those site directories, the package, the tunnel profile
+  directory, and each of their parent directories up to `/`. Otherwise it
+  refuses and names the path, since a non-root user able to change one of them
+  could run code as root. Debian's historical group-writable
+  `/usr/local/lib/python3.X/dist-packages` (root:staff, 2775) is refused.
+- `tunnel stop` now stops a service-managed tunnel for good: the supervisor
+  exits 0 for a requested stop. It exited with its stopped runtime's non-zero
+  status, so systemd (`Restart=on-failure`) and launchd (`KeepAlive`) started
+  it again. A runtime that exits by itself still fails, so the service restarts
+  it.
+- On Windows, reading a tunnel's status while its supervisor replaces the
+  process record no longer reports the record as unavailable: the read and
+  the replace each retry briefly on a sharing violation.
+- A stop marker no supervisor consumed is removed when the tunnel next runs.
 
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt

@@ -38,6 +38,7 @@ load this file from a checkout by path before any package is installed, so
 nothing here imports the rest of ``pseudolife_memory``.
 """
 import argparse
+import ast
 import copy
 import json
 import os
@@ -1052,17 +1053,82 @@ def processes_inside(rows: list[tuple[int, int, str]], path: Path) -> list[int]:
     return [pid for pid, _ppid, image in rows if pid not in own and inside(image)]
 
 
+# ── saved tunnels ───────────────────────────────────────────────────────────
+#
+# A running Secure MCP Tunnel starts its bridge again for every connection
+# from a snapshot frozen with the interpreter and site-packages of the
+# runtime that froze it (pseudolife_memory/tunnel_runtime.py, snapshot_bridge),
+# not through the launcher and not as a process inside that runtime: the
+# process table cannot see the dependency, so the tunnel records name it.
+
+_BRIDGE_PATH_LINE = "sys.path[1:1]="   # the dependency line of a frozen launch.py
+
+
+def default_tunnel_root(env: dict | None = None) -> Path:
+    """Where saved tunnels live (tunnel_profiles.default_root)."""
+    return home(env) / ".pseudolife-mcp" / "tunnel"
+
+
+def _record_pids(record: dict) -> set:
+    """The processes a tunnel record names: a process record's runtime child
+    (``pid``) and supervisor, a refresh request's target child."""
+    named = [record.get("pid")] + [record[key].get("pid") for key in ("supervisor", "target")
+                                   if isinstance(record.get(key), dict)]
+    return {pid for pid in named if isinstance(pid, int) and not isinstance(pid, bool)}
+
+
+def tunnel_runtimes(layout: Layout, tunnel_root: Path, alive: set | None = None) -> set[Path]:
+    """The runtimes a running tunnel's frozen bridge (``<name>.process.json``)
+    or a pending refresh (``<name>.reload.json``) imports from. With
+    ``alive`` (the pids of the process table), a record none of whose
+    processes is alive pins nothing: it outlived a reboot, a kill or its
+    refresh's timeout. Raises ``OSError`` or ``ValueError`` when a record or
+    its snapshot cannot be read."""
+    if not os.path.lexists(tunnel_root):
+        return set()
+    paths: list[str] = []
+    for name in sorted(os.listdir(tunnel_root)):
+        if not name.endswith((".process.json", ".reload.json")):
+            continue
+        record = json.loads((Path(tunnel_root) / name).read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError(f"{name} is not a tunnel record")
+        snapshot = record.get("snapshot")
+        if snapshot is None:      # started without a frozen bridge
+            continue
+        if alive is not None and not _record_pids(record) & alive:
+            continue
+        digest = snapshot.get("digest") if isinstance(snapshot, dict) else None
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"{name} names no bridge snapshot")
+        launch = (Path(tunnel_root) / ".bridges" / digest / "launch.py").read_text(encoding="utf-8")
+        line = next((text for text in launch.splitlines() if text.startswith(_BRIDGE_PATH_LINE)), None)
+        dependencies = ast.literal_eval(line[len(_BRIDGE_PATH_LINE):]) if line else None
+        if not isinstance(dependencies, list) or not all(isinstance(p, str) for p in dependencies):
+            raise ValueError(f"the bridge snapshot of {name} names no dependencies")
+        paths += [str(snapshot.get("interpreter") or ""), *dependencies]
+    root = os.path.normcase(os.path.abspath(layout.root))
+    found = set()
+    for path in filter(None, paths):
+        absolute = os.path.abspath(path)
+        if os.path.normcase(absolute).startswith(root + os.sep):
+            found.add(Path(layout.root) / absolute[len(root) + 1:].split(os.sep)[0])
+    return found
+
+
 # ── removal ─────────────────────────────────────────────────────────────────
 
 def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
                   processes: Callable = list_processes,
-                  log: Callable[[str], None] = lambda _line: None) -> dict:
+                  log: Callable[[str], None] = lambda _line: None,
+                  tunnels: Path | None = None) -> dict:
     """Remove every runtime that is not the newest complete one, is not in
-    ``pinned`` (a registration still names it) and has no process running
-    from it; likewise unfinished runtimes older than an hour (a younger one
-    may still be installing) and launchers moved aside. Where the process
-    table cannot be read, nothing is removed and ``error`` says why; where
-    the platform has no process table, only the newest is kept and
+    ``pinned`` (a registration still names it), is not used by a running
+    tunnel saved under ``tunnels`` and has no process running from it;
+    likewise unfinished runtimes older than an hour (a younger one may still
+    be installing) and launchers moved aside. Where the process table or a
+    tunnel record cannot be read, nothing is removed and ``error`` says why;
+    where the platform has no process table, only the newest is kept and
     everything else is left, named under ``unverified``."""
     result: dict = {"removed": [], "held": [], "kept": [], "unverified": [], "error": None}
     current = current_runtime(layout)
@@ -1075,6 +1141,14 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     except OSError as exc:
         result["error"] = f"could not read the process table: {exc}"
         return result
+    if tunnels is not None:
+        alive = None if rows is None else {pid for pid, _ppid, _image in rows}
+        try:
+            keep |= {os.path.normcase(str(p)) for p in tunnel_runtimes(layout, tunnels, alive)}
+        except (OSError, ValueError, SyntaxError, TypeError, RecursionError) as exc:
+            result["error"] = (f"saved tunnel records under {tunnels} could not be read "
+                               f"({type(exc).__name__}: {exc}); no runtime was removed")
+            return result
     candidates: list[Path] = []
     try:
         for name in sorted(os.listdir(layout.root)):
@@ -1543,7 +1617,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"install failed at {exc.step}: {exc}\n{exc.output}", file=sys.stderr)
             return 1
         pruned = None if args.no_prune else remove_unused(
-            layout, pinned=pinned_runtimes(layout, find_registrations()), log=log)
+            layout, pinned=pinned_runtimes(layout, find_registrations()), log=log, tunnels=default_tunnel_root())
         if args.json:
             _print_result({"state": "installed", "runtime": str(runtime.path), "version": runtime.version,
                            "launcher": str(layout.launcher), "pruned": pruned}, True)
@@ -1578,7 +1652,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(result["hint"])
         return 1 if result["state"] == "failed" else 0
     if args.command == "prune":
-        result = remove_unused(layout, pinned=pinned_runtimes(layout, find_registrations()), log=log)
+        result = remove_unused(layout, pinned=pinned_runtimes(layout, find_registrations()), log=log,
+                               tunnels=default_tunnel_root())
         _print_result(result, args.json)
         return 0 if not result["error"] else 1
     if args.command == "migrate":
