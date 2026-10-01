@@ -166,6 +166,19 @@ _SIGNAL_COLS = (
     "episode_id", "created_at",
 )
 
+
+def signal_source_ids(signal: dict) -> set[int]:
+    """Only server-credited entry uses establish a source dependency.
+
+    Unmatched/unchecked uses and episode membership are not evidence that
+    an entry contributed. Legacy signals without this partition stay unlinked.
+    """
+    uses = signal.get("used_ids")
+    credited = uses.get("credited") if isinstance(uses, dict) else None
+    if not isinstance(credited, list):
+        return set()
+    return {i for i in credited if type(i) is int and i > 0}
+
 # Ontology-lite builtin relations (spec §5.3) — the closed vocabulary a
 # weak model starts from. Referenced inverses must come first (FK).
 _BUILTIN_RELATIONS = (
@@ -910,8 +923,8 @@ class PostgresStorage:
         if not ids:
             return 0
 
-        conn = self.conn
-        with conn.transaction() as tx:
+        with self.transaction():
+            conn = self.conn
             rows = conn.execute(
                 "SELECT id, superseded_at FROM entries "
                 "WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
@@ -943,10 +956,8 @@ class PostgresStorage:
                 "DO NOTHING",
                 (superseded_at, ids),
             )
-        if tx.status is not tx.Status.COMMITTED:
-            raise psycopg.OperationalError(
-                f"transaction did not commit (status={tx.status.name}); "
-                "connection lost during the block")
+            self.retire_lessons_for_entries(ids, now=superseded_at,
+                                           cause="source_superseded")
         return len(ids)
 
     @staticmethod
@@ -1128,7 +1139,10 @@ class PostgresStorage:
     def delete_entry_ids(self, ids: list[int]) -> int:
         if not ids:
             return 0
-        with self._txn():
+        with self.transaction():
+            self.conn.execute("SELECT id FROM entries WHERE id = ANY(%s) "
+                              "ORDER BY id FOR UPDATE", (sorted(set(ids)),)).fetchall()
+            self.retire_lessons_for_entries(ids, now=time.time(), cause="source_forgotten")
             cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
 
@@ -1140,9 +1154,18 @@ class PostgresStorage:
         edges without edge_evidence rows are intentionally untouched.
         """
         ids = sorted(set(int(i) for i in ids))
+        digest_ids = sorted(set(int(i) for i in digest_ids))
         if not ids:
             return {"slots": [], "digests": [], "edges": []}
         with self.transaction():
+            # Match synthesis/correction lock order: source rows before lessons.
+            locked = self.conn.execute(
+                "SELECT id, source, superseded_at FROM entries WHERE id = ANY(%s) "
+                "ORDER BY id FOR UPDATE", (sorted(set(ids) | set(digest_ids)),)).fetchall()
+            retiring_digests = [r[0] for r in locked
+                                if r[0] in digest_ids and r[1] == "digest" and r[2] is None]
+            self.retire_lessons_for_entries(
+                ids + retiring_digests, now=now, cause="source_forgotten")
             slots = self.conn.execute(
                 "SELECT DISTINCT t.entity_norm, t.attribute_norm "
                 "FROM memory_traces t WHERE t.entry_id = ANY(%s) "
@@ -1188,15 +1211,17 @@ class PostgresStorage:
                     "UPDATE edges SET superseded_at = %s WHERE id = ANY(%s)",
                     (now, edge_ids),
                 )
-            digest_ids = sorted(set(int(i) for i in digest_ids))
             if digest_ids:
-                self.conn.execute(
+                retired = [r[0] for r in self.conn.execute(
                     "UPDATE entries SET superseded_at = %s, "
                     "superseded_by_text = %s "
                     "WHERE id = ANY(%s) AND source = 'digest' "
-                    "AND superseded_at IS NULL",
+                    "AND superseded_at IS NULL RETURNING id",
                     (now, f"forgotten source entry {ids[0]}", digest_ids),
-                )
+                ).fetchall()]
+                if set(retired) != set(retiring_digests):
+                    raise RuntimeError("forget digest retirement was incomplete")
+                digest_ids = sorted(retired)
             self.set_meta("session_digest_cursor", digest_cursor)
             deleted = self.conn.execute(
                 "DELETE FROM entries WHERE id = ANY(%s)", (ids,),
@@ -1205,6 +1230,61 @@ class PostgresStorage:
                 raise RuntimeError("forget entry delete was incomplete")
         return {"slots": [tuple(r) for r in slots],
                 "digests": digest_ids, "edges": edge_ids}
+
+    def retire_lessons_for_entries(self, ids: list[int], *, now: float,
+                                  cause: str) -> None:
+        """Retire exact entry-dependent lessons in the source mutation's txn.
+
+        A changed contributor invalidates the derivation even if other inputs
+        remain. Coarse batch dependencies are conservative; episode-only and
+        legacy/unattributable lessons are intentionally untouched.
+        """
+        tokens = [f"entry:{i}" for i in sorted(set(ids))]
+        if not tokens:
+            return
+        # The resident service must reconcile this committed state before
+        # reads/autosaves, including CMS eviction paths with no service callback.
+        # A rolled-back transaction leaves only a harmless reload request.
+        self._lesson_source_refresh = True
+        cols = ("id", "entity", "attribute", "entity_norm", "attribute_norm",
+                "value", "about", "polarity", "outcome", "confidence", "origin",
+                "provenance", "support", "asserted_at", "last_confirmed",
+                "supersedes_value")
+        with self._txn():
+            records = [dict(zip(cols, r)) for r in self.conn.execute(
+                f"SELECT {', '.join(cols)} FROM lessons WHERE status = 'current' "
+                "AND provenance ?| %s ORDER BY id FOR UPDATE", (tokens,)).fetchall()]
+            verified = []
+            for row in records:
+                audits = self.conn.execute(
+                    "SELECT record FROM store_decisions WHERE store = 'lesson' "
+                    "AND entity_norm = %s AND attribute_norm = %s "
+                    "AND action = 'lineage' AND decided_by = 'lesson_synthesis' "
+                    "AND reason = 'verified_dependencies'",
+                    (row["entity_norm"], row["attribute_norm"])).fetchall()
+                if not any(isinstance(a, dict)
+                           and a.get("lesson") == row["value"]
+                           and a.get("asserted_at") == row["asserted_at"]
+                           and set(ids).intersection(
+                               i for i in a.get("source_entry_ids", []) if type(i) is int)
+                           for (a,) in audits):
+                    continue
+                verified.append(row)
+                snapshot = {k: row[k] for k in (
+                    "about", "polarity", "outcome", "confidence", "origin",
+                    "provenance", "support", "asserted_at", "last_confirmed",
+                    "supersedes_value")}
+                snapshot.update(task=row["entity"], aspect=row["attribute"],
+                                lesson=row["value"], status="retired",
+                                superseded_at=now, superseded_by_value=cause)
+                self.record_store_decision(
+                    "lesson", row["entity_norm"], row["attribute_norm"], "retire",
+                    decided_by="source_cascade", reason=cause, record=snapshot, now=now)
+            if verified:
+                self.conn.execute(
+                    "UPDATE lessons SET status = 'retired', superseded_at = %s, "
+                    "superseded_by_value = %s WHERE id = ANY(%s)",
+                    (now, cause, [r["id"] for r in verified]))
 
     def delete_evicted_entry(
         self, entry_id: int | None, *, source: str, superseded: bool,
@@ -1222,9 +1302,13 @@ class PostgresStorage:
             "count": 1, "last_at": time.time(), "last_entry_id": entry_id,
             "last_source": source, "last_superseded": bool(superseded),
         }
-        conn = self.conn
-        with self._txn():
+        with self.transaction():
+            conn = self.conn
             if entry_id is not None:
+                conn.execute("SELECT id FROM entries WHERE id = %s FOR UPDATE",
+                             (entry_id,)).fetchall()
+                self.retire_lessons_for_entries(
+                    [entry_id], now=time.time(), cause="source_forgotten")
                 conn.execute("DELETE FROM entries WHERE id = %s", (entry_id,))
             # A malformed prior count (hand-edited or imported: not a
             # number, negative, or without room below bigint max for the
@@ -1860,16 +1944,20 @@ class PostgresStorage:
         return int(row[0])
 
     def pending_signals(self, limit: int | None = None,
-                        since_ts: float | None = None) -> list[dict]:
+                        since_ts: float | None = None, *,
+                        after: tuple[float, int] | None = None) -> list[dict]:
         """Unconsumed signals, oldest first. ``since_ts`` keeps only those
         created at or after it (the synthesis retry window)."""
-        cols = ("id",) + _SIGNAL_COLS
+        cols = ("id",) + _SIGNAL_COLS + ("used_ids",)
         sql = (f"SELECT {', '.join(cols)} FROM outcome_signals "
                "WHERE consumed_at IS NULL")
         params: tuple = ()
         if since_ts is not None:
             sql += " AND created_at >= %s"
             params = (float(since_ts),)
+        if after is not None:
+            sql += " AND (created_at, id) > (%s, %s)"
+            params += (float(after[0]), int(after[1]))
         sql += " ORDER BY created_at, id"
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
@@ -1898,7 +1986,7 @@ class PostgresStorage:
         acknowledgements together. Changed/missing/partly acknowledged inputs
         cannot establish either outcome and must not authorize a replay.
         """
-        cols = ("id",) + _SIGNAL_COLS
+        cols = ("id",) + _SIGNAL_COLS + ("used_ids",)
         rows = self.conn.execute(
             f"SELECT {', '.join(cols)}, consumed_at FROM outcome_signals "
             "WHERE id = ANY(%s) ORDER BY id" + (" FOR UPDATE" if lock else ""),
@@ -1918,7 +2006,8 @@ class PostgresStorage:
         return "changed"
 
     @contextmanager
-    def lesson_synthesis_transaction(self, signals: list[dict]):
+    def lesson_synthesis_transaction(self, signals: list[dict], *,
+                                     source_status: dict[int, bool] | None = None):
         """Lock/recheck the selected input rows and pin one connection until
         lesson, graph and acknowledgement writes commit or roll back.
 
@@ -1926,13 +2015,32 @@ class PostgresStorage:
         or signal retargeting invalidates that extraction before any write.
         The caller holds the service lock and publishes staged RAM only after
         this context exits successfully.
+
+        ``source_status`` requests per-signal contributor checks for its keys;
+        values are filled under the source locks. This lets the caller omit
+        rejected inputs and preserve independent valid derivations. Without
+        it, all selected sources must be current as before. Signal snapshots
+        are always revalidated for the entire selected batch.
         """
         if self._lesson_transaction_connection is not None:
             raise RuntimeError("lesson synthesis transaction is already active")
         self._lesson_transaction_connection = self.conn
         try:
             with self._txn():
-                yield self.lesson_batch_status(signals, [], lock=True) == "pending"
+                contributors = (signals if source_status is None else
+                                [s for s in signals if s["id"] in source_status])
+                ids = sorted(set().union(*(signal_source_ids(s) for s in contributors)))
+                sources = self.conn.execute(
+                    "SELECT id, superseded_at FROM entries WHERE id = ANY(%s) "
+                    "ORDER BY id FOR UPDATE", (ids,)).fetchall() if ids else []
+                sources_current = (len(sources) == len(ids)
+                                   and all(r[1] is None for r in sources))
+                if source_status is not None:
+                    current_ids = {r[0] for r in sources if r[1] is None}
+                    source_status.update({s["id"]: signal_source_ids(s) <= current_ids
+                                          for s in contributors})
+                yield ((source_status is not None or sources_current)
+                       and self.lesson_batch_status(signals, [], lock=True) == "pending")
         finally:
             self._lesson_transaction_connection = None
 

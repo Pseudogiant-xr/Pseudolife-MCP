@@ -1472,7 +1472,7 @@ class OpenAICompatExtractor:
     def _lesson_claims(raw: list, *,
                        force_aspect: str | None = None) -> list[LessonClaim]:
         """Coerce the model's lesson dicts into :class:`LessonClaim`s —
-        enum violations are repaired to the safe default, never raised."""
+        clustering repairs enum violations; rules reject them."""
         out: list[LessonClaim] = []
         for c in raw:
             if not isinstance(c, dict):
@@ -1484,6 +1484,11 @@ class OpenAICompatExtractor:
             aspect = force_aspect or (
                 str(c.get("aspect", "") or "lesson").strip() or "lesson")
             about = str(c.get("about", "") or "").strip() or None
+            if force_aspect == "rule" and (
+                    str(c.get("outcome", "")).strip() not in (
+                        "success", "failure", "correction")
+                    or str(c.get("polarity", "")).strip() not in ("+", "-")):
+                raise ExtractorError("rule has invalid outcome or polarity")
             polarity = "-" if str(c.get("polarity", "+")).strip() == "-" else "+"
             outcome = str(c.get("outcome", "success")).strip()
             if outcome not in ("success", "failure", "correction"):
@@ -1495,6 +1500,8 @@ class OpenAICompatExtractor:
             out.append(LessonClaim(
                 task=task, aspect=aspect, lesson=lesson, about=about,
                 polarity=polarity, outcome=outcome, confidence=conf))
+            if force_aspect == "rule":
+                break  # Only the first rule can belong to this signal.
         return out
 
     def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
@@ -1514,8 +1521,9 @@ class OpenAICompatExtractor:
         stripped from ``about``. When the signal's detail lists ``MUST
         INCLUDE`` values and the rule drops one, the call is retried once
         naming the missing values (the paper bounces such rules up to twice);
-        the second answer is accepted as-is — a slightly lossy rule beats a
-        stranded signal.
+        an empty or still-incomplete retry fails closed. Rules must preserve
+        the source verdict and explicit polarity, never repair malformed
+        model enums to success.
 
         Failure is per signal, not per batch: a trial-boundary batch is
         ~100 calls, and a transient failure on the last one must not
@@ -1544,10 +1552,20 @@ class OpenAICompatExtractor:
                                  "values, which must appear verbatim: "
                                  + "; ".join(missing)
                                  + ". Reply again with the complete rule.")
-                        retried = self._lesson_claims(self._lessons_completion(
+                        claims = self._lesson_claims(self._lessons_completion(
                             _RULE_LESSON_SYSTEM_PROMPT, nudge),
                             force_aspect="rule")
-                        claims = retried or claims
+                        if not claims:
+                            raise ExtractorError("rule retry returned no rule")
+                if claims:
+                    if _missing_values(claims[0]["lesson"], must):
+                        raise ExtractorError("rule omitted required values")
+                    outcome = s.get("outcome")
+                    polarity = (s.get("polarity")
+                                or {"success": "+", "failure": "-"}.get(outcome))
+                    if (claims[0]["outcome"] != outcome
+                            or (polarity and claims[0]["polarity"] != polarity)):
+                        raise ExtractorError("rule contradicts the source verdict")
             except ExtractorError as exc:
                 self.last_rule_failed_ids.append(s.get("id"))
                 self.last_rule_failures += 1

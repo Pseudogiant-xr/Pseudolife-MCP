@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-01 - incomplete learned rules stay pending)
+- Rule synthesis validates decision-critical values after its single retry;
+  empty or incomplete retries cannot restore an invalid initial rule or
+  acknowledge its source signal. Other valid rules in the batch still land.
+- Malformed or contradictory rule verdicts and polarities fail closed instead
+  of becoming success guidance. Ordinary clustered lesson parsing is unchanged.
+
+### Fixed (2026-10-01 — learned lessons retain their contributing sources)
+
+- Lesson synthesis records trusted signal and episode IDs and uses each rule's own event time. Clustered lessons label their lineage as batch-level; model-provided source IDs are ignored.
+- Source correction, forgetting and entry eviction retire lessons linked to server-credited entry uses in the same pinned transaction, including digests retired by source forgetting. Source changes, lesson retirement and their audits remain transactionally consistent across rollback and uncertain commit outcomes. Existing audit records establish verified dependencies; legacy source-like tokens and episode-only lessons remain unchanged.
+- Failed and empty outcome signals stay pending, while capped synthesis rotates eligible batches so the oldest invalid signal cannot monopolize successive sweeps. Rejected or stale rule contributors cannot veto independent valid rules. A restart begins with the oldest eligible signal again.
+
 ### Fixed (2026-10-01 — wake receipts require an armed recipient listener)
 - An installed ring capability no longer makes an idle recipient's send receipt
   claim `rung` after its listener has stopped. The adapter renews short-lived

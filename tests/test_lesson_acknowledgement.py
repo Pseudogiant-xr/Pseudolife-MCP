@@ -77,6 +77,63 @@ def pending(svc):
     return [s["id"] for s in svc._storage.pending_signals()]
 
 
+@pytest.mark.parametrize("global_mode", [False, True])
+def test_rule_lineage_and_time_follow_each_signal(svc, global_mode):
+    import time
+
+    svc.config.memory.lessons.rule_mode = global_mode
+    now = time.time()
+    times = [now - 30, now - 20, now - 10]
+    ids = [svc._storage.add_signal(
+        f"situation {i}", "success", about="git" if i == 0 else "rule:git",
+        origin="action", episode_id=f"episode-{i}", now=t)
+        for i, t in enumerate(times)]
+
+    class Mixed(Extractor):
+        def extract_rules(self, signals):
+            return [{**claim(s["task"], f"rule for {s['task']}"), "aspect": "rule",
+                     "provenance": ["signal:999999", "episode:forged"]}
+                    for s in signals]
+
+    result = svc.synthesize_lessons(Mixed([claim("cluster")]))
+    assert result["lessons"] == 3, result
+    rows = {r["entity"]: r for r in svc._storage.load_lessons()}
+    rule_indices = range(3) if global_mode else range(1, 3)
+    for i in rule_indices:
+        row = rows[f"situation {i}"]
+        assert set(row["provenance"]) == {f"signal:{ids[i]}", f"episode:episode-{i}"}
+        assert row["valid_time"] == times[i]
+    if global_mode:
+        assert "cluster" not in rows
+    else:
+        assert set(rows["cluster"]["provenance"]) == {
+            "lineage:batch", f"signal:{ids[0]}", "episode:episode-0"}
+        assert rows["cluster"]["valid_time"] == times[0]
+    assert pending(svc) == []
+
+
+def test_invalid_oldest_rule_does_not_starve_newer_signal(svc):
+    old, new = [signal(svc, task, "rule:git") for task in ("old", "new")]
+
+    class Selective(Extractor):
+        seen = []
+
+        def extract_rules(self, signals):
+            self.seen.append([s["id"] for s in signals])
+            self.last_rule_failed_ids = [s["id"] for s in signals if s["id"] == old]
+            self.last_rule_empty_ids = []
+            return [{**claim("new"), "aspect": "rule"}
+                    for s in signals if s["id"] == new]
+
+    extractor = Selective([])
+    assert svc.synthesize_lessons(extractor, limit=1)["lessons"] == 0
+    assert svc.synthesize_lessons(extractor, limit=1)["lessons"] == 1
+    assert extractor.seen == [[old], [new]]
+    assert pending(svc) == [old]
+    assert svc.synthesize_lessons(extractor, limit=1)["lessons"] == 0
+    assert extractor.seen[-1] == [old]
+
+
 def durable_values(svc):
     return [r["value"] for r in svc._storage.load_lessons()]
 
@@ -231,9 +288,9 @@ def test_claim_embeddings_are_computed_before_the_transaction_opens(svc, monkeyp
     original = svc._storage.lesson_synthesis_transaction
 
     @contextmanager
-    def watched(signals):
+    def watched(signals, **kwargs):
         order.append("transaction")
-        with original(signals) as current:
+        with original(signals, **kwargs) as current:
             yield current
 
     monkeypatch.setattr(svc._storage, "lesson_synthesis_transaction", watched)
@@ -406,7 +463,8 @@ def test_valid_empty_rule_response_is_not_acknowledged(svc, monkeypatch):
     empty_id = signal(svc, "empty situation", "rule:git")
     signal(svc, "release", "rule:git")
     ext = OpenAICompatExtractor("http://unused.invalid/v1", "synthetic")
-    replies = iter([[], [{"task": "release", "lesson": "Check health"}]])
+    replies = iter([[], [{"task": "release", "lesson": "Check health",
+                          "polarity": "+", "outcome": "success"}]])
     monkeypatch.setattr(ext, "_lessons_completion", lambda *args: next(replies))
     result = svc.synthesize_lessons(ext)
     assert result["lessons"] == 1
@@ -440,8 +498,8 @@ def lose_commit_response(svc, monkeypatch):
     original = svc._storage.lesson_synthesis_transaction
 
     @contextmanager
-    def lost_response(signals):
-        with original(signals) as current:
+    def lost_response(signals, **kwargs):
+        with original(signals, **kwargs) as current:
             yield current
         # The real outer transaction committed; the caller cannot tell that
         # from the response. Reconnect before the durable reconciliation read.
@@ -556,8 +614,8 @@ def test_rollback_at_commit_boundary_preserves_preexisting_dirty_state(svc, monk
     original = svc._storage.lesson_synthesis_transaction
 
     @contextmanager
-    def abort_at_commit(signals):
-        with original(signals) as current:
+    def abort_at_commit(signals, **kwargs):
+        with original(signals, **kwargs) as current:
             yield current
             raise RuntimeError("abort immediately before commit")
 

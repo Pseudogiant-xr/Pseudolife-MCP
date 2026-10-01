@@ -620,6 +620,30 @@ class DreamOps:
                 self._save_digest_cursor(cur)
         return {"scanned": scanned, "written": written}
 
+    def _pending_lesson_signals(self, limit, since_ts):
+        """Rotate eligible capped batches without acknowledging failed work.
+
+        The cursor is process-local: a restart begins with the oldest signal
+        once. Every completed extraction attempt advances it, including empty
+        or invalid results, so those cannot monopolize the next sweep.
+        """
+        after = getattr(self, "_lesson_signal_cursor", None)
+        if limit is None:
+            after = None  # an uncapped sweep can offer every eligible signal
+        selected = self._storage.pending_signals(limit=limit, since_ts=since_ts,
+                                                 after=after)
+        if after is not None and len(selected) < limit:
+            wrapped = self._storage.pending_signals(
+                limit=limit - len(selected), since_ts=since_ts)
+            seen = {s["id"] for s in selected}
+            selected += [s for s in wrapped if s["id"] not in seen]
+        if selected:
+            # Keep input order oldest-first, but advance by cyclic traversal,
+            # including any wrap. A small backlog still gets one full batch.
+            last = selected[-1]
+            self._lesson_selected_cursor = (last["created_at"], last["id"])
+        return sorted(selected, key=lambda s: (s["created_at"], s["id"]))
+
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
 
@@ -650,7 +674,8 @@ class DreamOps:
         with self._lock:
             self._ensure_init()
             self._storage.prune_signals(cutoff)
-            signals = self._storage.pending_signals(limit=cap, since_ts=since)
+            signals = self._pending_lesson_signals(cap, since)
+            selected_cursor = getattr(self, "_lesson_selected_cursor", None)
         if not signals:
             return {"signals": 0, "lessons": 0}
         all_inferred = bool(signals) and all(
@@ -682,12 +707,12 @@ class DreamOps:
         try:
             # Give the extractor copies: its annotations must not change the
             # input snapshot used for durable row revalidation.
-            plain_claims = list(fn([dict(s) for s in plain])) if plain else []
+            plain_claims = list(fn(deepcopy(plain))) if plain else []
         except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
             errors.append(f"plain extraction: {exc}")
         if rule_sigs:
             try:
-                rule_claims = list(rules_fn([dict(s) for s in rule_sigs]))
+                rule_claims = list(rules_fn(deepcopy(rule_sigs)))
                 rule_ids = {s["id"] for s in rule_sigs}
                 rule_failed_ids = rule_ids.intersection(
                     getattr(extractor, "last_rule_failed_ids", None) or ())
@@ -696,6 +721,8 @@ class DreamOps:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"rule extraction: {exc}")
                 rule_failed_ids = {s["id"] for s in rule_sigs}
+        with self._lock:
+            self._lesson_signal_cursor = selected_cursor
         plain_handled = [s["id"] for s in plain] if plain_claims else []
         rule_handled = [s["id"] for s in rule_sigs
                         if s["id"] not in rule_failed_ids | rule_empty_ids]
@@ -712,12 +739,23 @@ class DreamOps:
         # map to single signals — that route is acknowledged as a whole once
         # any of its claims lands.
         claim_signals = [None] * len(plain_claims) + list(rule_handled)
-        # Bitemporal event time: the synthesised lesson became *true* when its
-        # underlying outcomes were observed, not when the dream wrote it. Claims
-        # don't map 1:1 to signals, so use the earliest contributing signal's
-        # created_at as the batch valid_time (None → store defaults to tx_time).
-        created = [s["created_at"] for s in signals if s.get("created_at")]
-        batch_valid_time = min(created) if created else None
+        # Source identity comes only from immutable input snapshots. Clustering
+        # has no exact contributor map, so label its route's lineage as coarse.
+        from pseudolife_memory.storage.postgres import signal_source_ids
+        by_id = {s["id"]: s for s in signals}
+
+        def lineage(sid):
+            sources = plain if sid is None else [by_id[sid]]
+            provenance = {"lineage:batch"} if sid is None else set()
+            for source in sources:
+                provenance.add(f"signal:{source['id']}")
+                if source.get("episode_id"):
+                    provenance.add(f"episode:{source['episode_id']}")
+                provenance.update(f"entry:{i}" for i in signal_source_ids(source))
+            if sources and all(s.get("origin") == "inferred" for s in sources):
+                provenance.add("inferred")
+            times = [s["created_at"] for s in sources if s.get("created_at") is not None]
+            return provenance, min(times) if times else None
         out = {"signals": len(signals), "lessons": 0, "deduped": 0}
         if rule_sigs:
             out["rule_signals"] = len(rule_sigs)
@@ -751,8 +789,15 @@ class DreamOps:
                     self._embedder.encode_single(
                         f"{c['task']} {c.get('aspect', 'lesson')} {c['lesson']}".strip())
                     for c in claims]
-                with self._storage.lesson_synthesis_transaction(signals) as current:
+                source_status = {sid: False for sid in plain_handled + rule_handled}
+                with self._storage.lesson_synthesis_transaction(
+                        signals, source_status=source_status) as current:
                     if not current:
+                        out["skipped"] = "signals-changed"
+                        return out
+                    plain_current = all(source_status[sid] for sid in plain_handled)
+                    if not any(plain_current if sid is None else source_status[sid]
+                               for sid in claim_signals):
                         out["skipped"] = "signals-changed"
                         return out
                     staged = deepcopy(self._lessons)
@@ -763,7 +808,12 @@ class DreamOps:
                         if rec.key in staged.dirty_slots and rec.status == "current":
                             self._link_lesson_graph(rec.entity, rec.about, rec.polarity)
                     for c, emb, sid in zip(claims, embeddings, claim_signals):
+                        if not (plain_current if sid is None else source_status[sid]):
+                            if sid is not None:
+                                failed_rule_ids.add(sid)
+                            continue
                         aspect = c.get("aspect", "lesson")
+                        provenance, valid_time = lineage(sid)
                         try:
                             if dedup_thr and aspect != "rule" and self._lesson_duplicate_locked(
                                     staged, c["task"], aspect, c["lesson"],
@@ -779,7 +829,7 @@ class DreamOps:
                                 # the same signals on every later sweep.
                                 with _staged_slot(staged, c["task"], aspect), \
                                         self._storage.savepoint():
-                                    self._write_lesson_locked(
+                                    _, rec = self._write_lesson_locked(
                                         staged, c["task"], aspect, c["lesson"],
                                         embedding=emb,
                                         about=c.get("about"),
@@ -788,9 +838,23 @@ class DreamOps:
                                         confidence=(0.4 if all_inferred
                                                     else float(c.get("confidence", 0.6))),
                                         origin=c.get("origin", "agent"),
-                                        provenance=(set(c.get("provenance") or [])
-                                                    | ({"inferred"} if all_inferred else set())),
-                                        valid_time=batch_valid_time)
+                                        provenance=provenance,
+                                        valid_time=valid_time)
+                                    source_ids = [int(p.removeprefix("entry:"))
+                                                  for p in provenance if p.startswith("entry:")]
+                                    if source_ids:
+                                        # This server-written audit is the trust boundary:
+                                        # legacy/model provenance tokens alone are not
+                                        # evidence of a source dependency. Commit it
+                                        # with the lesson and acknowledgement.
+                                        self._storage.record_store_decision(
+                                            "lesson", *rec.key, "lineage",
+                                            decided_by="lesson_synthesis",
+                                            reason="verified_dependencies",
+                                            record={"lesson": rec.value,
+                                                    "asserted_at": rec.asserted_at,
+                                                    "source_entry_ids": source_ids},
+                                            now=now)
                                 written += 1
                         except Exception as exc:  # noqa: BLE001 — bounded per-claim tolerance
                             write_errors += 1
