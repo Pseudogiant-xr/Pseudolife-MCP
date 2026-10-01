@@ -6,19 +6,25 @@
   import Icon from "../components/Icon.svelte";
   import type { BoardAgent } from "../lib/api/types";
   import {
+    adapterText,
     agentName,
     agentTone,
+    childSource,
     eventSentence,
+    expectedBy,
     isParked,
     leaseState,
     leaseTone,
     nameResolver,
+    parkExpired,
+    pendingText,
     scopeLine,
     stateChip,
     summarize,
+    waitersOmitted,
   } from "../lib/board";
   import { explainBoardUnavailable, explainError } from "../lib/errors";
-  import { fmtAgeShort, fmtClock, fmtDuration, fmtNum, fmtRelative, plural, shortId, words } from "../lib/format";
+  import { fmtAgeShort, fmtClock, fmtDateTime, fmtDuration, fmtNum, fmtRelative, plural, shortId, words } from "../lib/format";
   import { loadBoard, refresh, setSubtitle, store, ui } from "../lib/state.svelte";
 
   const AUTO_REFRESH_MS = 30_000;
@@ -111,13 +117,6 @@
   const ageMs = $derived(store.board.at ? now - store.board.at : 0);
   const stale = $derived(ageMs > FRESH_FOR_MS || (store.board.error !== null && store.board.at > 0));
 
-  function expectText(a: BoardAgent): { text: string; tone: string } {
-    if (a.status_expires_at === null || a.status_expires_at === undefined) return { text: "not set", tone: "" };
-    const delta = a.status_expires_at - now / 1000;
-    if (a.status_overdue || delta < 0) return { text: `overdue ${fmtDuration(Math.abs(delta))}`, tone: "danger" };
-    return { text: `in ${fmtDuration(delta)}`, tone: "" };
-  }
-
   function leaseProgress(holder: { acquired_at: number | null; expected_end: number | null }): number | null {
     const { acquired_at: a, expected_end: e } = holder;
     if (!a || !e || e <= a) return null;
@@ -145,12 +144,20 @@
         No snapshot yet
       {/if}
     </span>
-    <button type="button" class="btn btn-secondary btn-sm" onclick={refresh} disabled={store.board.loading}>
+    <button
+      type="button"
+      class="btn btn-secondary btn-sm"
+      aria-disabled={store.board.loading}
+      onclick={() => {
+        if (!store.board.loading) refresh();
+      }}
+    >
       <Icon name="refresh" size={14} /> Refresh the board
     </button>
   </div>
   <p class="readonly caption">
-    Read-only board metadata: message bodies are never served to the Console, and there is no compose here.
+    Read-only board metadata: message bodies are never served to the Console, and there is no compose here. Unread
+    counts are shown only for your own principal's peers. Refreshing never reads mail or changes the board.
   </p>
 
   {#if problem && !snap?.available}
@@ -170,7 +177,9 @@
       <section class="panel roster" aria-label="Peers">
         {#if shown.length === 0}
           <p class="empty">
-            {agents.length === 0 ? "No peer has been active recently." : `No peer matches the ${filter} filter.`}
+            {agents.length === 0
+              ? "No peer has been active recently. Idle addresses are counted, not listed."
+              : `No peer matches the ${filter} filter.`}
           </p>
         {/if}
         <ul class="peer-list">
@@ -209,11 +218,12 @@
       <section class="detail-col" aria-label="Selected peer" bind:this={detailEl}>
         <div class="panel detail">
           {#if selected}
-            {@const exp = expectText(selected)}
+            {@const exp = expectedBy(selected, snap?.snapshot_at)}
+            {@const adapter = adapterText(selected)}
             <div class="detail-head">
               <span class="dot big {agentTone(selected, snap?.snapshot_at)}" aria-hidden="true"></span>
               <h2 class="detail-name">{agentName(selected)}</h2>
-              <span class="mono meta">{shortId(selected.agent_id)}</span>
+              <span class="mono meta" title={selected.agent_id}>{shortId(selected.agent_id)}</span>
             </div>
             {#if scopeLine(selected)}<p class="detail-scope">{scopeLine(selected)}</p>{/if}
             <p class="status-box" class:none={!selected.status}>{selected.status || "No status set."}</p>
@@ -231,7 +241,7 @@
               </div>
               <div>
                 <dt>Expected by</dt>
-                <dd class:danger-ink={exp.tone === "danger"}>{exp.text}</dd>
+                <dd class:danger-ink={exp.overdue}>{exp.text}</dd>
               </div>
               <div>
                 <dt>Principal</dt>
@@ -239,8 +249,18 @@
               </div>
               <div>
                 <dt>Last active</dt>
-                <dd>{fmtRelative(selected.last_activity, now)}</dd>
+                <dd title={fmtDateTime(selected.last_activity)}>{fmtRelative(selected.last_activity, now)}</dd>
               </div>
+              <div>
+                <dt>Unread mail</dt>
+                <dd class:none={selected.pending_count === null}>{pendingText(selected)}</dd>
+              </div>
+              {#if adapter}
+                <div>
+                  <dt>Adapter</dt>
+                  <dd>{adapter}</dd>
+                </div>
+              {/if}
               {#if selected.episode}
                 <div>
                   <dt>Episode</dt>
@@ -251,6 +271,11 @@
                 <div>
                   <dt>Parent</dt>
                   <dd>{nameOf(selected.parent_agent_id)}</dd>
+                </div>
+              {:else if selected.subagent}
+                <div>
+                  <dt>Parent</dt>
+                  <dd class="none">Not linked yet</dd>
                 </div>
               {/if}
             </dl>
@@ -275,15 +300,33 @@
                   {/if}
                 </dl>
               </div>
+            {:else if parkExpired(selected, snap?.snapshot_at)}
+              <div class="park expired">
+                <p class="park-title">Park expired, {words(selected.park_reason)}</p>
+                <dl class="park-grid">
+                  <dt>Needed</dt>
+                  <dd>{selected.park_needs || "not stated"}</dd>
+                  <dt>Clear by</dt>
+                  <dd class="mono">{selected.park_clear_by || "not stated"}</dd>
+                  <dt>Resume</dt>
+                  <dd>{selected.park_resume || "not stated"}</dd>
+                  <dt>Expired</dt>
+                  <dd title={fmtDateTime(selected.park_expires)}>{fmtRelative(selected.park_expires, now)}</dd>
+                </dl>
+              </div>
             {/if}
 
             {#if selected.children.length}
               <div class="children">
                 <span class="caption">Subagents</span>
                 {#each selected.children as c, i (c.agent_id ?? `${c.label}-${i}`)}
-                  <span class="chip">{c.label}, {fmtAgeShort(c.since, now)}</span>
+                  <span class="chip" title={c.agent_id ? `Agent ${c.agent_id}` : undefined}
+                    >{c.label}, {childSource(c)}, {fmtAgeShort(c.since, now)}</span
+                  >
                 {/each}
               </div>
+            {:else}
+              <p class="caption">No reported subagents.</p>
             {/if}
           {:else}
             <p class="unavailable">Pick a peer to see its record.</p>
@@ -292,7 +335,10 @@
 
         <div class="panel timeline">
           <div class="timeline-head">
-            <h3 class="panel-title">Mail and wake timeline</h3>
+            <div class="timeline-title">
+              <h3 class="panel-title">Mail and wake timeline</h3>
+              <p class="caption">Retained events visible to your principal, newest first</p>
+            </div>
             <div class="segmented small" role="group" aria-label="Timeline scope">
               <button type="button" aria-pressed={scope === "peer"} onclick={() => (scope = "peer")} disabled={!selected}>
                 This peer
@@ -304,7 +350,7 @@
             <p class="empty">
               {scope === "peer" && selected
                 ? `No retained mail or wake event involves ${agentName(selected)}.`
-                : "No retained mail or wake events are visible to this token."}
+                : "No retained mail or wake events are visible to this token. This bounded view follows the configured audit retention."}
             </p>
           {:else}
             <ol class="events">
@@ -314,7 +360,9 @@
                   <span class="event-meta">
                     {#if e.message_id}<span class="mono meta" title="Message id">{shortId(e.message_id)}</span>{/if}
                     {#if e.detail}<span class="chip">{words(e.detail)}</span>{/if}
-                    <span class="age">{fmtAgeShort(e.created_at, now)}</span>
+                    <time class="age" datetime={new Date(e.created_at * 1000).toISOString()} title={fmtDateTime(e.created_at)}
+                      >{fmtAgeShort(e.created_at, now)}</time
+                    >
                   </span>
                 </li>
               {/each}
@@ -358,9 +406,13 @@
                 {/if}
                 {#if l.queued}
                   <p class="queue caption">
-                    {fmtNum(l.queued)} queued{#if l.queue.length}: {l.queue
-                        .map((w) => [w.label || shortId(w.agent_id), w.purpose].filter(Boolean).join(", "))
-                        .join("; ")}{/if}
+                    {fmtNum(l.queued)} queued, first in line first{#if l.queue.length}: {l.queue
+                        .map((w) =>
+                          [w.label || shortId(w.agent_id), w.purpose, w.enqueued_at ? `waiting ${fmtAgeShort(w.enqueued_at, now)}` : ""]
+                            .filter(Boolean)
+                            .join(", "),
+                        )
+                        .join("; ")}{/if}{#if waitersOmitted(l)}. {plural(waitersOmitted(l), "more waiter is", "more waiters are")} not listed.{/if}
                   </p>
                 {/if}
               </li>
@@ -650,6 +702,16 @@
     margin: 0;
     overflow-wrap: anywhere;
   }
+  .park.expired {
+    background: var(--fill);
+    border-color: var(--hairline);
+  }
+  .park.expired .park-title {
+    color: var(--ink-3);
+  }
+  .facts dd.none {
+    color: var(--ink-4);
+  }
   .children {
     display: flex;
     flex-wrap: wrap;
@@ -660,6 +722,11 @@
   /* timeline */
   .timeline {
     overflow: hidden;
+  }
+  .timeline-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
   .timeline-head {
     display: flex;
