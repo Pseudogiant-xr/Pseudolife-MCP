@@ -1,5 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { planCalls } from "./reviewActions";
+import { planCalls, refusalOf } from "./reviewActions";
+
+// The graph routes refuse with HTTP 200: {"<verb>": false, "reason": ...} or
+// {"error": ...}. The classic console counted every 200 as done.
+describe("refusalOf", () => {
+  it("reads a false verb as a refusal and names the reason", () => {
+    expect(refusalOf({ merged: false, reason: "same_entity", into: "x" })).toBe("same_entity");
+    expect(refusalOf({ dismissed: false, reason: "stale_review" })).toBe("stale_review");
+    expect(refusalOf({ accepted: false, reason: "not_pending", id: 3 })).toBe("not_pending");
+    for (const v of ["assigned", "removed", "blessed", "deleted", "rejected"]) {
+      expect(refusalOf({ [v]: false, reason: "unknown_entity" })).toBe("unknown_entity");
+    }
+    expect(refusalOf({ blessed: false })).toBe("not blessed");
+  });
+
+  it("reads an error answer as a refusal", () => {
+    expect(refusalOf({ error: "unknown_relation", suggestions: ["implements"] })).toBe("unknown_relation");
+  });
+
+  it("passes the work that was done", () => {
+    expect(refusalOf({ merged: true, into: "x" })).toBeNull();
+    expect(refusalOf({ src: "a", relation: "implements", dst: "b", warnings: [] })).toBeNull();
+    expect(refusalOf({ deleted: true, entity: "tmp" })).toBeNull();
+    expect(refusalOf(null)).toBeNull();
+  });
+
+  it("chains only the relate-then-dismiss pair", () => {
+    expect(planCalls({ kind: "relate-named", src: "a", relation: "implements", dst: "b" }).chained).toBe(true);
+    expect(planCalls({ kind: "bless", edges: [] }).chained).toBeFalsy();
+    expect(planCalls({ kind: "delete-names", entities: [] }).chained).toBeFalsy();
+  });
+});
 
 // Pins each review decision to the exact POSTs the classic console sent
 // (static/js/views/graph.js actOnFinding), so the port changes nothing the

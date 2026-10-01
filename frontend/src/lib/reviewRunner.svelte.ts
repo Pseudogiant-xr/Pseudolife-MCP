@@ -4,10 +4,10 @@
 // caller reloads only when something changed. <ReviewAsk/> in App.svelte
 // renders the two pickers a plain confirm cannot.
 
-import { post, softError } from "./api/client";
+import { post } from "./api/client";
 import { actionError } from "./errors";
 import { confirm, toast } from "./overlay.svelte";
-import { planCalls, type ReviewAction } from "./reviewActions";
+import { planCalls, refusalOf, type ReviewAction } from "./reviewActions";
 
 export type Pick =
   | { type: "pick-survivor"; a: string; b: string }
@@ -60,14 +60,16 @@ export async function runReviewAction(action: ReviewAction, opts: { projects?: s
   for (const c of calls) {
     try {
       const r = await post<unknown>(c.path, c.body);
-      const refused = softError(r);
+      const refused = refusalOf(r);
       if (refused) {
-        toast(`${callName(c.path)} was refused: ${refused}`, "danger", 6000);
+        toast(`${callName(c.path)} was refused: ${refused.replace(/_/g, " ")}`, "danger", 6000);
+        if (plan.chained) break;
         continue;
       }
       ok += 1;
     } catch (e) {
       toast(actionError(e, callName(c.path)), "danger", 6000);
+      if (plan.chained) break;
     }
   }
   if (ok) toast(calls.length > 1 ? `${plan.done} (${ok} of ${calls.length})` : plan.done, "ok");

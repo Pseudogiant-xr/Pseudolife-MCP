@@ -60,6 +60,27 @@ export interface Plan {
   calls: (answer?: string) => Call[];
   /** Past-tense outcome for the toast, e.g. "Merged". */
   done: string;
+  /**
+   * Each call depends on the one before (relate, then mark distinct): stop
+   * at the first failure. Bulk calls are independent and all go out.
+   */
+  chained?: boolean;
+}
+
+// The graph write routes answer a refusal with HTTP 200 and the verb set to
+// false plus a reason ({"merged": false, "reason": "same_entity"}), or with
+// {"error": ...} (graph_relate, storage unavailable). service.py, 2026-10-02.
+const VERBS = ["merged", "dismissed", "assigned", "removed", "blessed", "deleted", "accepted", "rejected"];
+
+/** Why the daemon refused this answer, or null when it did the work. */
+export function refusalOf(r: unknown): string | null {
+  if (!r || typeof r !== "object") return null;
+  const o = r as Record<string, unknown>;
+  if (typeof o.error === "string" && o.error) return o.error;
+  for (const v of VERBS) {
+    if (o[v] === false) return typeof o.reason === "string" && o.reason ? o.reason : `not ${v}`;
+  }
+  return null;
 }
 
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -129,6 +150,8 @@ export function planCalls(a: ReviewAction): Plan {
           { path: "/api/graph/dismiss-duplicate", body: { a: a.src, b: a.dst } },
         ],
         done: `Related (${a.relation})`,
+        // A refused relation must not still mark the pair distinct.
+        chained: true,
       };
     case "dismiss-duplicate":
       return {
