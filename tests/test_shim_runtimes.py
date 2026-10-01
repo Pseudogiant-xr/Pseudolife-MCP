@@ -1262,7 +1262,7 @@ def test_the_shim_requirements_cover_every_module_level_import_of_the_client_mod
     shim's first import. An optional import (``try: ... except
     ImportError``) does not count."""
     import importlib.metadata as md
-    reached, third = _import_closure(_CLIENT_ENTRY_MODULES)
+    reached, third = _import_closure((*_CLIENT_ENTRY_MODULES, "pseudolife_memory.rust_transport"))
     assert "pseudolife_memory.shim" in reached
     provided: set[str] = set()
     for requirement in rt.SHIM_REQUIREMENTS:

@@ -339,7 +339,8 @@ def _replace_token(path: Path, token: str) -> None:
 @asynccontextmanager
 async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
                         *, operation_timeout: float = 1.0, agent_headers: dict | None = None,
-                        prepare_delay: float = 0, coordination_refusal: str = ""):
+                        prepare_delay: float = 0, coordination_refusal: str = "",
+                        codex_metadata: bool = False):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -359,7 +360,7 @@ async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
            if prepare_delay else "") +
         "asyncio.run(_proxy(sys.argv[1],None,'fixture-session',"
         "provider=CredentialProvider.from_environment(),agent_headers=json.loads(sys.argv[2]),"
-        "coordination_refusal=sys.argv[3]))"
+        f"coordination_refusal=sys.argv[3],codex_metadata={codex_metadata!r}))"
     )
     params = StdioServerParameters(
         command=sys.executable,

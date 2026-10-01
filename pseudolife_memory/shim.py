@@ -1144,6 +1144,24 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                  coordination_adapter=None, codex_metadata: bool = False,
                  coordination_registry=None, instructions_note: str = "",
                  board_checkin=False, coordination_refusal: str = "") -> None:
+    from pseudolife_memory.rust_transport import transport_context
+
+    async with transport_context(_validated_daemon_url(url)) as http_transport:
+        await _proxy_impl(
+            url, token, session_uid, provider=provider, channel_inbox=channel_inbox,
+            agent_headers=agent_headers, coordination_hint=coordination_hint,
+            coordination_adapter=coordination_adapter, codex_metadata=codex_metadata,
+            coordination_registry=coordination_registry, instructions_note=instructions_note,
+            board_checkin=board_checkin, coordination_refusal=coordination_refusal,
+            http_transport=http_transport)
+
+
+async def _proxy_impl(url: str, token: str | None, session_uid: str, *, provider=None,
+                      channel_inbox=None, agent_headers=None, coordination_hint=None,
+                      coordination_adapter=None, codex_metadata: bool = False,
+                      coordination_registry=None, instructions_note: str = "",
+                      board_checkin=False, coordination_refusal: str = "",
+                      http_transport=None) -> None:
     import asyncio
     import contextlib
     import anyio
@@ -1192,8 +1210,12 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         connect_seconds = min(5.0, max(0.01, timeout_seconds / 2))
         timeout = streamable_http.httpx2.Timeout(
             timeout_seconds, connect=connect_seconds)
-        async with streamable_http.create_mcp_http_client(
-                headers=request_headers or None, timeout=timeout) as http:
+        http_client = (
+            streamable_http.create_mcp_http_client(headers=request_headers or None, timeout=timeout)
+            if http_transport is None else streamable_http.httpx2.AsyncClient(
+                headers=request_headers or None, timeout=timeout,
+                transport=http_transport.borrow(), follow_redirects=False))
+        async with http_client as http:
             # The SDK enables redirects by default. httpx strips Authorization
             # across origins but retains custom coordination credentials, so a
             # redirect could disclose an instance key or bank binding.

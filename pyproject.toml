@@ -36,6 +36,8 @@ dependencies = [
     # on httpx2, not httpx, and a shim runtime is built with --no-deps, so a
     # transitive httpx from the daemon's dependencies never reached it.
     "httpx>=0.27",
+    # The optional Rust HTTP adapter uses the MCP v2 client's transport API.
+    "httpx2>=2.5.0",
     "anyio>=4",
     # Declared 2026-08-25: `mcp_server.py` imports `pydantic.Field` directly
     # to attach per-argument descriptions to the tool inputSchemas, so it is

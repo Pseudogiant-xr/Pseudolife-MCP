@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-02 — optional Rust HTTP transport)
+- The Python stdio shim can opt into a persistent Rust HTTP helper by setting
+  `PSEUDOLIFE_MCP_RUST_HTTP` to a locally built executable. The helper streams
+  responses, cancels individual exchanges and never follows redirects or
+  retries requests. Existing Python MCP, credential and coordination policy
+  remains authoritative; unsupported transport settings select Python before
+  dispatch. The default transport and installers are unchanged.
+- Disposable HTTP and real stdio fixtures compare both paths, including TLS,
+  attribution, pagination, credential rotation and recovery without replay.
+  A bounded comparison harness records startup, call latency and aggregate
+  shim/helper memory; no performance improvement is claimed.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender

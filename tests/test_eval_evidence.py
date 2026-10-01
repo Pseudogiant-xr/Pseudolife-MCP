@@ -10564,6 +10564,72 @@ for _cid, _needle, _field, _stated in (
                         value=_probe_delta(_field), stated=_stated, places=3))
 
 
+# -- paired current-session stdio transport comparison (2026-10-02) -------
+RUST_TRANSPORT_CPU = RESULTS + "rust-transport-cpu-20261002-a.json"
+RUST_TRANSPORT_CPU_B = RESULTS + "rust-transport-cpu-20261002-b.json"
+
+
+def _check_rust_transport_cpu_evidence(artifact):
+    """Transport claims require paired full results and whole-process RSS."""
+    assert artifact in _tracked()
+    record = _load_artifact(artifact)
+    assert record["status"] == "passed"
+    assert record["build_profile"] == "release"
+    workload = record["workload"]
+    assert all(workload[key] > 0 for key in ("calls", "replicates", "concurrency", "bulk_bytes"))
+    assert workload["replicates"] >= 2
+    assert record["functional_equivalence"]["status"] == "passed"
+    assert record["functional_equivalence"]["completed_pairs"] == workload["replicates"]
+    assert record["rss_scope"] == "sum of Python stdio shim and all its child processes; driver and HTTP fixture excluded"
+    assert record["measurement"]["contention_detected"] is False
+    assert record["measurement"]["sample_interval_seconds"] == 0.01
+    assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
+               for value in [record["binary_sha256"], *record["source_sha256"].values()])
+    rows = record["rows"]
+    assert len(rows) == 2 * workload["replicates"]
+    for replicate in range(workload["replicates"]):
+        pair = {row["backend"]: row for row in rows if row["replicate"] == replicate}
+        assert set(pair) == {"python", "rust"}
+        assert pair["python"]["response_sha256"] == pair["rust"]["response_sha256"]
+        for backend, row in pair.items():
+            assert row["status"] == "passed"
+            assert row["owned_cleanup_before_emergency_stop"] is True
+            assert row["sample_count"] > 0
+            assert row["max_process_count"] >= (1 if backend == "python" else 2)
+            assert row["sampled_total_rss_peak_bytes"] >= row["sampled_total_rss_mean_bytes"] > 0
+            assert len(row["ordinary_call_seconds"]) == workload["calls"]
+            assert all(value > 0 for value in row["ordinary_call_seconds"])
+            assert row["startup_initialize_seconds"] > 0
+            assert row["bulk_call_seconds"] > 0
+            assert row["concurrent_burst_seconds"] > 0
+            hashes = row["response_sha256"]
+            assert len(hashes["ordinary"]) == workload["calls"]
+            assert len(hashes["concurrent"]) == workload["concurrency"]
+            assert set(hashes) == {"initialize", "list_tools", "ordinary", "bulk", "concurrent"}
+    for backend in ("python", "rust"):
+        selected = [row for row in rows if row["backend"] == backend]
+        summary = record["summary"][backend]
+        calls = [value for row in selected for value in row["ordinary_call_seconds"]]
+        assert summary["ordinary_call_seconds"]["sample_count"] == len(calls)
+        assert summary["ordinary_call_seconds"]["mean"] == pytest.approx(sum(calls) / len(calls))
+        for metric in ("startup_initialize_seconds", "bulk_call_seconds",
+                       "concurrent_burst_seconds", "sampled_total_rss_peak_bytes"):
+            assert summary[metric]["mean"] == pytest.approx(
+                sum(row[metric] for row in selected) / len(selected))
+    python_peak = record["summary"]["python"]["sampled_total_rss_peak_bytes"]["mean"]
+    rust_peak = record["summary"]["rust"]["sampled_total_rss_peak_bytes"]["mean"]
+    assert record["comparison"]["sampled_total_rss_peak_bytes"]["rust_total_rss_delta_pct_of_means"] == pytest.approx(
+        100 * (rust_peak - python_peak) / python_peak)
+
+
+def test_rust_transport_cpu_evidence_is_complete_and_equivalent():
+    _check_rust_transport_cpu_evidence(RUST_TRANSPORT_CPU)
+
+
+def test_rust_transport_cpu_b_evidence_is_complete_and_equivalent():
+    _check_rust_transport_cpu_evidence(RUST_TRANSPORT_CPU_B)
+
+
 def test_codex_doorbell_probe_record_backs_its_outcome():
     record = _load_artifact(DOORBELL_PROBE)
     assert record["harness"] == "evals/codex_doorbell_probe.py"
