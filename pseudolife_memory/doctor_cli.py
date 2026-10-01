@@ -577,6 +577,10 @@ def run_doctor() -> None:
             report["recovery"] = report["git_bash_recovery"]
     # Which `pseudolife-mcp` a terminal runs, beside the launcher (informational).
     report["path_resolution"] = path_resolution()
+    from pseudolife_memory.tunnel_cli import saved_tunnel_diagnostics
+    tunnels = saved_tunnel_diagnostics()
+    if tunnels:
+        report["tunnels"] = tunnels
     print(json.dumps(report, indent=2))
     raise SystemExit(0 if report["ok"] else 1)
 

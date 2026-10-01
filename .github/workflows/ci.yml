@@ -276,7 +276,9 @@ jobs:
         # attach / lock paths) — no pre-started server, no service
         # container (unsupported on Windows runners), no HF download.
         # test_suite_lock.py is the only CI coverage of the msvcrt backend.
-        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_update_cli.py tests/test_ops_update_wrappers.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py -q
+        # The test_tunnel_*.py files run the tunnel's DPAPI key storage,
+        # owner-only ACLs and Windows process handling, which no other lane reaches.
+        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py tests/test_credentials.py tests/test_coordination_credentials.py tests/test_coordination_adapter.py tests/test_wait_mail_cli.py tests/test_codex_hooks.py tests/test_codex_hook_setup.py tests/test_codex_hook_setup_edges.py tests/test_update_cli.py tests/test_ops_update_wrappers.py tests/test_register_claude_desktop.py tests/test_client_install_ux.py tests/test_installer_shim_upgrade.py tests/test_installer_existing_upgrade.py tests/test_tool_annotations.py::test_all_tools_have_conservative_approval_hints tests/test_doctor_cli.py tests/test_suite_lock.py tests/test_codex_doorbell.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q
 
   test-lite-macos:
     runs-on: macos-latest
@@ -312,6 +314,8 @@ jobs:
         # store tests in test_coordination_turn_digest.py skip; the Linux
         # lanes run them. -rs prints every skip reason, so a platform skip
         # cannot pass for coverage.
+        # The test_tunnel_*.py files run the tunnel's owner-only files and
+        # process handling on macOS.
         env:
           PSEUDOLIFE_SUITE_LOCK: "off"
-        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py -q -rs
+        run: python -m pytest tests/test_wait_mail_cli.py tests/test_hooks_digest.py tests/test_stop_wake_hook.py tests/test_hook_glob_ranges.py tests/test_coordination_turn_digest.py tests/test_coordination_adapter.py tests/test_coordination_credentials.py tests/test_codex_doorbell.py tests/test_lease_cli.py tests/test_suite_lock.py tests/test_memory_changes_hook.py tests/test_client_install_ux.py tests/test_codex_hooks.py tests/test_codex_hook_setup_edges.py tests/test_installer_legacy_hooks.py tests/test_plugin_packaging.py tests/test_embedded_pg.py tests/test_tunnel_bridge.py tests/test_tunnel_cli.py tests/test_tunnel_profiles.py tests/test_tunnel_runtime.py tests/test_tunnel_service.py -q -rs
