@@ -9,13 +9,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed (2026-10-02 — plain mail never wakes an unparked session)
 - Plain mail to an idle session that has not parked no longer wakes it.
   Before, such a session was rung at most once an hour (`nudged`) and
-  asked to record a park. Now only a parked session rings, and only for
-  mail that plausibly clears its need: the sender is its clearer (or just
-  released the lease it waits on), it accepts `anyone`, the message's
-  `clears` names the need, or `urgent`, each within the existing caps.
-  Mail to an unparked session, `urgent` and `clears` included, answers
-  `not_needed` with reason `no_park` and waits for its next turn
-  (maintainer decision 2026-10-02).
+  asked to record a park. Now a parked session rings only for mail that
+  plausibly clears its need: the sender is its clearer (or just released
+  the lease it waits on), it accepts `anyone`, the message's `clears`
+  names the need, or `urgent`. An idle session that has not parked rings
+  only for `urgent` mail (reason `urgent`), which spends the sender's
+  urgent allowance (6 an hour) like any urgent ring. Every ring keeps the
+  existing per-recipient, nightly and stagger caps. Plain mail or `clears`
+  to an unparked session answers `not_needed` with reason `no_park` and
+  waits for its next turn; an active session is `hinted`, urgent or not
+  (maintainer decisions 2026-10-02).
 - A `nudged` ring decided before the update is never served to an adapter
   and its mail is never delivered through a live channel; `history` and
   `board-audit stats` still show it. The shim ignores a `nudged` wake from

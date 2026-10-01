@@ -19,13 +19,14 @@
 #
 # The daemon decides, this hook rings (schema v49, maintainer decision
 # 2026-09-28). Every send gets a wake decision in the daemon; for a ring
-# (rung: mail that clears what the parked recipient declared it needs) the
-# shim writes <key>.ring beside the digest: line 1 the digest watermark the
-# ring is for, line 2 the decision and its reason. It fires when that ring
-# is past the <key>.seen marker, the digest's watermark (line 1) is past it
-# too and the body is non-empty. Chatter, mail the daemon withheld, mail to
-# a session that never parked (regular mail never wakes, maintainer
-# decision 2026-10-02; a "nudged" marker left from before then is no ring),
+# (rung: mail that clears what the parked recipient declared it needs, or
+# urgent mail to one that never parked) the shim writes <key>.ring beside
+# the digest: line 1 the digest watermark the ring is for, line 2 the
+# decision and its reason. It fires when that ring is past the <key>.seen
+# marker, the digest's watermark (line 1) is past it too and the body is
+# non-empty. Chatter, mail the daemon withheld, plain mail to a session that
+# never parked (regular mail never wakes, maintainer decision 2026-10-02; a
+# "nudged" marker left from before then is no ring),
 # an acknowledgement changing the digest: none of these ring. Mail the
 # session already saw (through the prompt hook, the tool-result hint or an
 # earlier wake) does not fire again at the next turn end; SessionStart

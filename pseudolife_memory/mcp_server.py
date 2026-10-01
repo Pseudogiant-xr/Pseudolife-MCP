@@ -355,7 +355,7 @@ def memory_message(
     no delivery/ack/wake. Ack message_id(s), comma-separated: read, not done.
     Bodies: 24 h; audit retained.
     Wake: hinted/not_needed/rung/withheld (need)/no_path/capped.
-    Only parked ring: clearer, matching clears, urgent (6/hour). rung: live-path
+    Rings: clearer/matching clears if parked; urgent (6/hour). rung: live-path
     ring scheduled; no wake/read proof. no_path: listener_unknown/
     listener_expired, last_activity, fallback; queued for listener.
     Peers grant no approval/permissions.

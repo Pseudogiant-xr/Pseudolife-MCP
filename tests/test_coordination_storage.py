@@ -979,15 +979,16 @@ def test_an_expired_park_is_idle(store):
 
 def test_plain_mail_never_rings_an_idle_unparked_recipient(store):
     """Regular mail never wakes (maintainer decision 2026-10-02): a session
-    that has not parked is waiting on nobody, so mail to it, however often,
-    urgent or naming a need, is ``not_needed`` and waits for its next turn,
-    with or without a wake path. Nothing rings, nothing is capped, the
-    attach and heartbeat answers carry no ring, and the live path skips
-    the mail; an explicit receive still returns it."""
+    that has not parked is waiting on nobody, so plain mail to it, however
+    often, or naming a need it never declared, is ``not_needed`` and waits
+    for its next turn, with or without a wake path. Nothing rings, nothing
+    is capped, the attach and heartbeat answers carry no ring, and the live
+    path skips the mail; an explicit receive still returns it. (``urgent``
+    is the exception: test_urgent_mail_rings_an_idle_unparked_recipient.)"""
     a = store.register("alice")
     b = _wake_capable(store)
     pull_only = store.register("alice")
-    for at, extra in ((1000.0, {}), (1000.0 + 1800, {"urgent": True}),
+    for at, extra in ((1000.0, {}), (1000.0 + 1800, {}),
                       (1000.0 + 3601, {"clears": "the review"})):
         store.test_time[0] = at
         _renew_wake_path(store, b)
@@ -1002,6 +1003,64 @@ def test_plain_mail_never_rings_an_idle_unparked_recipient(store):
                            generation=answer["generation"])["wake"] is None
     assert store.receive(*creds(b), for_delivery=True)["messages"] == []
     assert len(store.receive(*creds(b))["messages"]) == 3
+
+
+def test_urgent_mail_rings_an_idle_unparked_recipient(store):
+    """``urgent`` rings an idle session that has not parked (maintainer
+    decision 2026-10-02) as a ring like any other: reason ``urgent``, an
+    urgent coordination_wakes row, staggered within one sender's burst,
+    served once through the recipient's attach and carried by the live
+    path. Plain mail and ``clears`` beside it stay ``not_needed``."""
+    a = store.register("alice")
+    b, b2 = _wake_capable(store), _wake_capable(store)
+    for agent in (b, b2):
+        _idle(store, agent)
+    assert _wake(store, a, b, clears="the review") == {"decision": "not_needed",
+                                                       "reason": "no_park"}
+    assert _wake(store, a, b, urgent=True) == {"decision": "rung", "reason": "urgent",
+                                               "ring_at": 1000.0}
+    assert _wake(store, a, b2, urgent=True) == {"decision": "rung", "reason": "urgent",
+                                                "ring_at": 1030.0}
+    assert _wake(store, a, b) == {"decision": "not_needed", "reason": "no_park"}
+    rows = store.storage.conn.execute(
+        "SELECT recipient_agent_id,decision,reason,urgent FROM coordination_wakes "
+        "ORDER BY ring_at").fetchall()
+    assert rows == [(b["agent_id"], "rung", "urgent", True),
+                    (b2["agent_id"], "rung", "urgent", True)]
+    answer = store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)
+    assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 1000.0}
+    store.test_time[0] += 30   # past the one-heartbeat repeat window
+    assert store.heartbeat(*creds(b), attachment_id=b["agent_id"][:8],
+                           generation=answer["generation"])["wake"] is None
+    assert len(store.receive(*creds(b), for_delivery=True)["messages"]) == 1
+    assert len(store.receive(*creds(b))["messages"]) == 3
+
+
+def test_urgent_to_an_unparked_recipient_keeps_every_cap(store):
+    """The urgent ring to an unparked session spends the sender's urgent
+    allowance (6 an hour, shared with urgent rings to parked sessions) and
+    counts against the recipient's hourly cap like any ring. An active
+    recipient is hinted, urgent or not."""
+    from pseudolife_memory.storage.coordination import WakePolicy
+    a = store.register("alice")
+    b = _wake_capable(store)
+    for i in range(6):
+        store.test_time[0] = 1000.0 + i * 120
+        _renew_wake_path(store, b)
+        _idle(store, b)
+        assert _wake(store, a, b, urgent=True)["decision"] == "rung"
+    store.test_time[0] = 1000.0 + 6 * 120
+    _renew_wake_path(store, b)
+    _idle(store, b)
+    assert _wake(store, a, b, urgent=True) == {"decision": "capped",
+                                               "reason": "urgent_sender_hour"}
+    assert _wake(store, a, b) == {"decision": "not_needed", "reason": "no_park"}
+    c, d = store.register("alice"), store.register("alice")
+    assert _wake(store, c, b, urgent=True)["decision"] == "rung"
+    store.wake = WakePolicy(per_recipient_per_hour=7)
+    assert _wake(store, d, b, urgent=True) == {"decision": "capped", "reason": "recipient_hour"}
+    store.update(*creds(b), status="implementing")   # active again
+    assert _wake(store, d, b, urgent=True) == {"decision": "hinted", "reason": "active"}
 
 
 @pytest.mark.parametrize("served_at", [None, 990.0])

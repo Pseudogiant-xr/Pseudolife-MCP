@@ -148,8 +148,8 @@ MAX_PARK_CLEAR_BY = 120
 MAX_CLEARS = 120
 # A park must not withhold mail forever once its clearer is gone: a new
 # park without ``park_expires`` expires after PARK_DEFAULT_TTL, and none may
-# be set past PARK_MAX_TTL; an expired park is an idle session, which mail
-# never rings.
+# be set past PARK_MAX_TTL; an expired park is an idle session, which only
+# urgent mail rings.
 # Starting values from the board orchestrator's review of PR #433
 # (2026-09-28), awaiting the maintainer, not measurements: 12 h covers one
 # overnight run, a week the longest lease a session may hold.
@@ -2100,10 +2100,11 @@ class CoordinationStore:
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need so the sender knows what would wake it; idle with no park
-        (or a lapsed one), ``not_needed`` with reason ``no_park``: the
-        session is waiting on nobody, so the mail waits for its next turn.
-        Regular mail never wakes (maintainer decision 2026-10-02, retiring
-        the hourly ``nudged`` ring; rows decided ``nudged`` before then are
+        (or a lapsed one), ``rung`` for ``urgent`` (within the same urgent
+        cap), else ``not_needed`` with reason ``no_park``: the session is
+        waiting on nobody, so the mail waits for its next turn. Regular
+        mail never wakes (maintainer decision 2026-10-02, retiring the
+        hourly ``nudged`` ring; rows decided ``nudged`` before then are
         history, never served). Every ring is bounded per recipient per
         hour and by the nightly total, and rings from one sender's burst
         are staggered by ``fan_out_stagger_seconds``. Chatter never rings."""
@@ -2133,20 +2134,25 @@ class CoordinationStore:
             elif clears is not None and _need_matches(clears, park["park_needs"]):
                 how = "clears"
             elif urgent:
-                sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
-                                 "sender_agent_id=%s AND urgent AND created_at>%s",
-                                 (sender["agent_id"], hour))["n"]
-                if sent >= policy.urgent_per_sender_per_hour:
-                    return {"decision": "capped", "reason": "urgent_sender_hour", **need}
                 how = "urgent"
             if how is None:
                 return {"decision": "withheld", "reason": "need_not_cleared", **need}
-            decision, reason = "rung", how
+        elif urgent:
+            # Waiting on nobody, but the sender says it cannot wait
+            # (maintainer decision 2026-10-02): a ring like any other.
+            how = "urgent"
         else:
-            # Waiting on nobody: no ring, no row, whatever the mail says
-            # (urgent and clears answer a parked need). It waits for the
-            # session's next turn (maintainer decision 2026-10-02).
+            # Waiting on nobody: plain mail, or clears with no need to
+            # clear, never rings; it waits for the session's next turn
+            # (maintainer decision 2026-10-02).
             return {"decision": "not_needed", "reason": "no_park"}
+        if how == "urgent":
+            sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                             "sender_agent_id=%s AND urgent AND created_at>%s",
+                             (sender["agent_id"], hour))["n"]
+            if sent >= policy.urgent_per_sender_per_hour:
+                return {"decision": "capped", "reason": "urgent_sender_hour", **need}
+        decision, reason = "rung", how
         counts = self._one(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
             "count(*) FILTER (WHERE created_at>%s) AS night,"

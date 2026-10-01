@@ -916,9 +916,9 @@ approval a woken task stalls on an approval prompt until someone answers it
   task, or a daemon older than v49) the arrival stays owed and nothing
   rings; a later decision for the task covers it. A successful
   `memory_message receive` from the task answers it, and so does an emptied
-  mailbox. An idle task gets one doorbell per batch of mail. Mail to a
-  task that has not parked never rings it (since 2026-10-02); the task
-  sees it at its next turn.
+  mailbox. An idle task gets one doorbell per batch of mail. Plain mail to
+  a task that has not parked never rings it (since 2026-10-02); the task
+  sees it at its next turn. `urgent` mail to it does ring.
 - **What it says.** Codex delivers queued text as a user message, so the doorbell
   never carries peer text, sender labels or excerpts. The notice is fixed and
   only the count varies:
@@ -1644,9 +1644,9 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `wake.decision` | When | Extra fields |
 | --- | --- | --- |
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
-| `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`): it is waiting on nobody, so the mail waits for its next turn | |
-| `no_path` | the mail would ring a parked recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | |
+| `no_path` | the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or the recipient is idle and not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`) | the parked need, if any |
 
@@ -1656,9 +1656,13 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 cap). `rung` is evidence of a known armed path at send time; it does not mean
 that a turn started, that the recipient read the message, or that it acted.
 Chatter never rings, and regular mail never wakes (maintainer decision
-2026-10-02): only a parked recipient rings, for mail that clears its need.
-From v49 until then an idle session that had not parked was rung at most
-hourly (`nudged`) with a request to park; that ring is gone. A `nudged`
+2026-10-02): a parked recipient rings for mail that clears its need, and
+an idle recipient that has not parked rings only for `urgent` mail, which
+spends the sender's urgent allowance and passes the same per-recipient,
+nightly and stagger caps as every ring. An active recipient is `hinted`,
+urgent or not. From v49 until then an idle session that had not parked
+was rung at most hourly (`nudged`) with a request to park; that ring is
+gone. A `nudged`
 row decided before a daemon update is kept for `history` and
 `board-audit stats`, but is never served to an adapter, and its mail is
 never delivered through a live channel. A retry of the same `request_id`
@@ -1816,8 +1820,9 @@ also capped (below, and by the daemon's `wake` caps under
   and the digest lists mail. The shim writes the marker for `rung` mail
   only ([the wake decision](#park-records-and-the-wake-decision)), and the
   hook fires only on a `rung` marker, so chatter to a parked session, mail
-  the daemon withheld, mail to a session that has not parked (a `nudged`
-  marker left from before 2026-10-02 included), and a digest that merely
+  the daemon withheld, plain mail to a session that has not parked (a
+  `nudged` marker left from before 2026-10-02 included; `urgent` mail to
+  it is rung and does fire), and a digest that merely
   changed (an acknowledgement, an expiry) do not wake the session. A ring
   for mail that arrived during the turn fires at once; a digest the session
   already saw (through the prompt hook, the tool-result hint or an earlier

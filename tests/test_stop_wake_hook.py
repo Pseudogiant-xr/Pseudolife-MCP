@@ -728,6 +728,16 @@ def test_a_nudged_ring_never_wakes(tmp_path):
     assert _read_seen(tmp_path) != "3"
 
 
+def test_an_urgent_ring_wakes_a_session_that_never_parked(tmp_path):
+    """``urgent`` mail does ring a session that never parked (2026-10-02):
+    the shim writes ``rung urgent`` and the hook fires on it like any rung
+    marker, with the plain wake text."""
+    _digest(tmp_path, 3, BODY, ring="rung urgent")
+    result, _ = _run(_env(tmp_path, wait=3540))
+    assert result.returncode == 2 and _woke(result.stderr)
+    assert _read_seen(tmp_path) == "3"
+
+
 @pytest.mark.parametrize("ring", ["", "x\nrung anyone\n", "3\n", "3\n\n"])
 def test_a_malformed_ring_never_wakes(tmp_path, ring):
     _digest(tmp_path, 3, BODY, ring=False)
