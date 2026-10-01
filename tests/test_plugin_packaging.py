@@ -533,17 +533,21 @@ def test_checkin_says_when_to_send_not_only_how():
     inside it, so a reword means a new bench run."""
     from pseudolife_memory.coordination import CHECKIN_INSTRUCTION, CHECKIN_TEXT
     arms = ROOT / "evals" / "results" / "coordination-checkin-arms"
-    measured = (arms / "rules-v3-20260928.txt").read_text(encoding="utf-8").strip()
+    measured = (arms / "rules-v4-20261002.txt").read_text(encoding="utf-8").strip()
     assert CHECKIN_TEXT == measured
     assert (arms / "codex4-20260928.txt").read_text(encoding="utf-8").strip()         in CHECKIN_INSTRUCTION
     for phrase in ("look for whoever holds it or has it booked",
                    "message them that you are next", "a status line is not a queue",
-                   "If the board shows it free, use it", "Keep your status true"):
+                   "If the board shows it free, use it", "Keep your status true",
+                   "Subagents never send board mail", "only if they do not appear"):
         assert phrase in CHECKIN_TEXT, phrase
     # Cut: three rules the bench could not see help, and the clause that
     # made the shared-resource rule over-send on held-out situations.
     for cut in ("a message is what a peer must act on", "before you debug it",
-                "message everyone waiting on it", "do not guess that they are idle"):
+                "message everyone waiting on it", "do not guess that they are idle",
+                # Since v50 the hooks list subagents; naming them by hand
+                # listed each twice, and a Codex subagent has its own address.
+                "which can name its subagents", "A subagent shares its parent's"):
         assert cut not in CHECKIN_TEXT, cut
     # The mechanical steps stay, in front of the rules.
     assert CHECKIN_TEXT.index("memory_message(action=ack") < CHECKIN_TEXT.index("When to send")

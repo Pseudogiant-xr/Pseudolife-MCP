@@ -172,13 +172,14 @@ def test_arm_files_add_ablation_texts_without_shadowing_built_ins(tmp_path):
 
 # Each committed arm file, and the artifact arm that scored it.
 ARM_FILES = {
-    "cut13-20260928.txt": ("-ablation", "cut13"),
-    "codex-20260928.txt": ("-ablation", "codex"),
-    "cut134-20260928.txt": ("-ablation2", "cut134"),
-    "codex2-20260928.txt": ("-ablation2", "codex2"),
-    "codex3-20260928.txt": ("-codex", "codex3"),
-    "codex4-20260928.txt": ("-codex4", "codex4"),
-    "rules-v3-20260928.txt": ("-final", "new"),
+    "cut13-20260928.txt": ("checkin-rules-20260928-ablation", "cut13"),
+    "codex-20260928.txt": ("checkin-rules-20260928-ablation", "codex"),
+    "cut134-20260928.txt": ("checkin-rules-20260928-ablation2", "cut134"),
+    "codex2-20260928.txt": ("checkin-rules-20260928-ablation2", "codex2"),
+    "codex3-20260928.txt": ("checkin-rules-20260928-codex", "codex3"),
+    "codex4-20260928.txt": ("checkin-rules-20260928-codex4", "codex4"),
+    "rules-v3-20260928.txt": ("checkin-rules-20260928-final", "new"),
+    "rules-v4-20261002.txt": ("checkin-rules-20261002-subagents", "new"),
 }
 
 
@@ -186,18 +187,19 @@ def test_every_committed_arm_file_is_the_text_its_artifact_scored():
     """The arm files are the only readable record of texts scored at a
     dirty head; each must hash to the arm of the one artifact that scored
     it, not merely to some arm somewhere (orchestrator reviews of #435),
-    and the served check-in to the -final run's ``new`` arm."""
+    and the served check-in to the latest run's ``new`` arm (2026-10-02:
+    the subagent sentences reworded after v50)."""
     from pseudolife_memory.coordination import CHECKIN_TEXT
     results = Path(cb.ROOT) / "evals" / "results"
     arms_dir = results / "coordination-checkin-arms"
     assert {f.name for f in arms_dir.glob("*.txt")} == set(ARM_FILES)
-    for name, (suffix, label) in ARM_FILES.items():
-        art = json.loads((results / f"coordination-checkin-bench-checkin-rules-20260928{suffix}.json")
+    for name, (tag, label) in ARM_FILES.items():
+        art = json.loads((results / f"coordination-checkin-bench-{tag}.json")
                          .read_text(encoding="utf-8"))
         arm = next(a for a in art["arms"] if a["label"] == label)
         text = (arms_dir / name).read_text(encoding="utf-8").strip()
-        assert arm["text_sha256"] == cb.text_sha(text), f"{name} is not {suffix}'s {label} arm"
-    assert cb.text_sha((arms_dir / "rules-v3-20260928.txt").read_text(encoding="utf-8").strip())         == cb.text_sha(CHECKIN_TEXT)
+        assert arm["text_sha256"] == cb.text_sha(text), f"{name} is not {tag}'s {label} arm"
+    assert cb.text_sha((arms_dir / "rules-v4-20261002.txt").read_text(encoding="utf-8").strip())         == cb.text_sha(CHECKIN_TEXT)
 
 
 def test_both_frames_ask_for_the_same_decision():
