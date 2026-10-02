@@ -85,6 +85,113 @@ def test_pruning_drops_only_this_namespaces_dead_runs(monkeypatch):
     assert wsl.dropped == ["pseudolife_memory_test_wsl222", "pseudolife_memory_bench_wsl444"]
 
 
+def test_wsl_is_detected_without_microsoft_in_the_kernel_release(tmp_path):
+    """A custom WSL kernel need not say "microsoft" in its release; the
+    distro's environment or its interop binfmt entry still gives it away."""
+    custom = "6.6.0-custom"
+    nothing = tmp_path / "no-binfmt"
+    assert pg_defaults._in_wsl(platform="linux", release="6.6.114.1-microsoft-standard-WSL2",
+                               environ={}, binfmt=nothing)
+    assert pg_defaults._in_wsl(platform="linux", release=custom,
+                               environ={"WSL_DISTRO_NAME": "Ubuntu"}, binfmt=nothing)
+    assert pg_defaults._in_wsl(platform="linux", release=custom,
+                               environ={"WSL_INTEROP": "/run/WSL/1_interop"}, binfmt=nothing)
+    binfmt = tmp_path / "binfmt_misc"
+    binfmt.mkdir()
+    (binfmt / "WSLInterop-late").write_text("enabled\n")
+    assert pg_defaults._in_wsl(platform="linux", release=custom, environ={}, binfmt=binfmt)
+    # Plain Linux (the homelab box) and Windows, whatever its environment
+    # forwards, are not WSL.
+    assert not pg_defaults._in_wsl(platform="linux", release=custom, environ={}, binfmt=nothing)
+    assert not pg_defaults._in_wsl(platform="win32", release="11",
+                                   environ={"WSL_DISTRO_NAME": "Ubuntu"}, binfmt=binfmt)
+
+
+# The eval harnesses make private databases on the same dev server. A name
+# with a bare pid from a WSL run is one a Windows run's pruner would drop as
+# a dead run's (and an untagged one could collide with a Windows pid).
+
+def _eval_module(name):
+    import importlib
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    return importlib.import_module(name)
+
+
+def _windows_pruner_spares(name: str) -> bool:
+    return pg_defaults.own_run_pid(name.rsplit("_", 1)[1], namespace="") is None
+
+
+def test_the_epistemic_bench_names_its_database_in_the_run_namespace(monkeypatch):
+    eb = _eval_module("epistemic_bench")
+    monkeypatch.setattr(pg_defaults, "PID_NAMESPACE", "wsl")
+    name = eb._bench_db_name()
+    assert name == f"pseudolife_memory_bench_wsl{os.getpid()}"
+    assert _windows_pruner_spares(name)
+    # Its drop guard follows the tagged name, and a bare-pid twin (a
+    # Windows run's) is not this run's to drop.
+    with __import__("pytest").raises(SystemExit, match="did not create it"):
+        eb.drop_bench_db(f"pseudolife_memory_bench_{os.getpid()}")
+
+
+def test_the_audit_volume_scratch_database_is_named_in_the_run_namespace(monkeypatch):
+    from contextlib import contextmanager
+
+    import pytest
+
+    from evals import coordination_audit_volume as harness
+
+    monkeypatch.setattr(pg_defaults, "PID_NAMESPACE", "wsl")
+    executed, connects = [], []
+
+    class Admin:
+        def execute(self, statement):
+            executed.append(statement.as_string())
+
+    @contextmanager
+    def connect(dsn, **kwargs):
+        connects.append(dsn)
+        if len(connects) == 2:  # the scratch database itself: stop here
+            raise RuntimeError("stop before the schema")
+        yield Admin()
+
+    monkeypatch.setattr(harness.psycopg, "connect", connect)
+    with pytest.raises(RuntimeError, match="stop before the schema"):
+        with harness.scratch_database("host=127.0.0.1 port=6543 dbname=postgres"):
+            pass
+    name = f"pseudolife_memory_bench_audit_wsl{os.getpid()}"
+    assert executed == [f'CREATE DATABASE "{name}"',
+                        f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)']
+    assert _windows_pruner_spares(name)
+
+
+def test_the_coordination_bench_database_is_named_in_the_run_namespace(monkeypatch):
+    from contextlib import contextmanager
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    from evals import coordination_bench as harness
+
+    monkeypatch.setattr(pg_defaults, "PID_NAMESPACE", "wsl")
+    monkeypatch.delenv("PSEUDOLIFE_TEST_DATABASE_URL", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+
+    class Admin:
+        def execute(self, statement):
+            pass
+
+    @contextmanager
+    def connect(dsn, **kwargs):
+        yield Admin()
+
+    monkeypatch.setattr(harness.psycopg, "connect", connect)
+    with harness.disposable_database("host=127.0.0.1 port=6543 dbname=postgres") as dsn:
+        name = conninfo_to_dict(dsn)["dbname"]
+    assert name.startswith(f"coordination_bench_wsl{os.getpid()}_")
+
+
 def test_env_override_wins_verbatim(monkeypatch):
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setenv(

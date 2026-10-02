@@ -24,10 +24,27 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-def _in_wsl() -> bool:
-    import platform
+def _in_wsl(*, platform: str | None = None, release: str | None = None,
+            environ=None, binfmt: Path | None = None) -> bool:
+    """True inside WSL. The stock kernel's release says "microsoft"; a
+    custom kernel need not, so the distro's environment and its interop
+    binfmt entry ("WSLInterop", "WSLInterop-late" under systemd) count too."""
+    if (sys.platform if platform is None else platform) != "linux":
+        return False
+    if release is None:
+        import platform as _platform
 
-    return sys.platform == "linux" and "microsoft" in platform.uname().release.lower()
+        release = _platform.uname().release
+    if "microsoft" in release.lower():
+        return True
+    environ = os.environ if environ is None else environ
+    if environ.get("WSL_DISTRO_NAME") or environ.get("WSL_INTEROP"):
+        return True
+    binfmt = Path("/proc/sys/fs/binfmt_misc") if binfmt is None else binfmt
+    try:
+        return any(binfmt.glob("WSLInterop*"))
+    except OSError:
+        return False
 
 
 # Per-run databases are named after the run's pid, and a run drops the ones

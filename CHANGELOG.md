@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — eval benches inside WSL no longer lose their database to a Windows test run)
+- Three eval harnesses still named their private databases with a bare
+  pid: `evals/epistemic_bench.py` (`pseudolife_memory_bench_<pid>`),
+  `evals/coordination_audit_volume.py`
+  (`pseudolife_memory_bench_audit_<pid>`) and
+  `evals/coordination_bench.py`. The test suite prunes
+  `pseudolife_memory_bench_*` databases whose pid is gone, and a WSL pid
+  is invisible to Windows, so a Windows pytest session could drop a bench
+  running in WSL mid-run, as it did a WSL suite's on 2026-10-02. They now
+  use the test fixtures' run suffix (`wsl<pid>` inside WSL), which a
+  Windows run's pruner leaves alone; the epistemic bench's drop guard
+  follows the same name. The benches keep importing the helper from
+  `tests/pg_defaults.py`, as two of them already did.
+- WSL detection no longer depends on the kernel release saying
+  "microsoft": `WSL_DISTRO_NAME`, `WSL_INTEROP` or a `WSLInterop*` binfmt
+  entry also count, so a custom WSL kernel still tags its database names.
+
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
   the maintainer's workstation. `ops/remote-suite.ps1` now runs a

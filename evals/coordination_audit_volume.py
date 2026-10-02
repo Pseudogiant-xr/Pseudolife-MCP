@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
-import os
 from pathlib import Path
 import platform
 import random
@@ -130,9 +129,11 @@ def measure(dsn: str, *, agents: int, messages: int, updates_per_agent: int,
 
 @contextmanager
 def scratch_database(admin_url: str):
-    # The per-run pid suffix lets tests/pg_fixtures.py drop it if a hard kill
-    # skips the cleanup below.
-    name = f"pseudolife_memory_bench_audit_{os.getpid()}"
+    # The per-run suffix lets tests/pg_fixtures.py drop it if a hard kill
+    # skips the cleanup below; inside WSL it is tagged ("wsl<pid>") so a
+    # Windows run's pruner, which cannot see WSL pids, leaves it alone.
+    from tests.pg_defaults import run_suffix
+    name = f"pseudolife_memory_bench_audit_{run_suffix()}"
     with psycopg.connect(admin_url, autocommit=True, connect_timeout=5) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
