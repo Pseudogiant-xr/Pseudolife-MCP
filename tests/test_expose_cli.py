@@ -409,8 +409,9 @@ def test_success_runs_the_exact_command_and_prints_the_url(tailscale, daemon, ca
     url = f"http://127.0.0.1:{port}"
     assert url in out
     assert "same bank" in out
-    # The next step for a joining machine.
-    assert "connect " + url in out
+    # The next step for a joining machine: invite it.
+    assert "pseudolife-mcp invite <machine>" in out
+    assert "--token-file <file>" not in out
 
 
 def test_a_failing_probe_is_reported_and_does_not_roll_back(tailscale, daemon, capsys):

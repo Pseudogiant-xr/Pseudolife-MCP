@@ -22,6 +22,7 @@ import threading
 import pytest
 
 from pseudolife_memory.credentials import CredentialProvider, _write_token_file
+from tests.test_installer_client_only import CODE_FORMS, NOT_CODES, _pair_report
 from tests.test_installer_existing_upgrade import _between, _fixture_env
 
 
@@ -31,6 +32,12 @@ REMOTE = "http://100.64.0.2:8765"
 FIXTURE_TOKEN = "fixture-remote-token-0123456789"
 HEALTH_ON = '{"status": "ok", "version": "0.0.0", "auth": true}'
 HEALTH_OPEN = '{"status": "ok", "version": "0.0.0", "auth": false}'
+HELPER = ROOT / "ops" / "client_credentials.py"
+# The same fixtures as the Bash twin: a code as `invite` prints it, and a
+# token as `pair` mints one.
+PAIRING_CODE = "7KQ2-MX4P-9TZC"
+URLSAFE_TOKEN = "Zq3_x9-KfixtureUrlsafeToken0123456789abcdEF"
+PAIRED_TOKEN = "fixture-paired-token-0123456789"
 
 
 def _block(name: str) -> str:
@@ -121,9 +128,10 @@ class _PowerShell:
 def _mode(ps: _PowerShell, *, daemon_url: str = "", client_only: bool = False,
           token_file: str = "", extractor: str = "", model: str = "",
           shim_port: int = 0, no_token: bool = False, transport: str = "shim",
-          read_token: bool = False,
+          read_token: bool = False, pairing_code: str = "",
           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return ps.run(
+        f"$PairingCode = '{_q(pairing_code)}'\n"
         f"$DaemonUrl = '{_q(daemon_url)}'\n"
         f"$ReadToken = [switch]${'true' if read_token else 'false'}\n"
         f"$ClientOnly = [switch]${'true' if client_only else 'false'}\n"
@@ -276,6 +284,27 @@ def test_a_token_file_flag_needs_client_only(tmp_path):
     assert "-TokenFile" in _output(proc)
 
 
+def test_a_pairing_code_parameter_needs_client_only(tmp_path):
+    proc = _mode(_PowerShell(tmp_path), pairing_code=PAIRING_CODE)
+    assert proc.returncode == 2
+    assert "-PairingCode" in _output(proc)
+    assert "-ClientOnly -DaemonUrl" in _output(proc)
+    assert PAIRING_CODE not in _output(proc)
+
+
+def test_a_pairing_code_with_read_token_is_a_usage_error(tmp_path):
+    proc = _mode(_PowerShell(tmp_path), daemon_url=REMOTE, read_token=True,
+                 pairing_code=PAIRING_CODE)
+    assert proc.returncode == 2
+    assert "-PairingCode" in _output(proc) and "-ReadToken" in _output(proc)
+
+
+def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(tmp_path):
+    proc = _mode(_PowerShell(tmp_path), daemon_url=REMOTE, pairing_code=PAIRING_CODE)
+    assert proc.returncode == 0, _output(proc)
+    assert "CLIENT_ONLY=True" in proc.stdout
+
+
 def test_the_script_itself_refuses_client_only_without_a_url(tmp_path):
     ps = _PowerShell(tmp_path)
     proc = subprocess.run(
@@ -294,8 +323,9 @@ def test_the_new_parameters_are_declared_and_documented():
     assert "[string]$TokenFile" in params
     assert "[switch]$ClientOnly" in params
     assert "[switch]$ReadToken" in params
+    assert '[string]$PairingCode = ""' in params
     header = text.split("param(", 1)[0]
-    for flag in ("-DaemonUrl", "-TokenFile", "-ClientOnly", "-ReadToken"):
+    for flag in ("-DaemonUrl", "-TokenFile", "-ClientOnly", "-ReadToken", "-PairingCode"):
         assert re.search(rf"(?m)^#\s+.*{flag}\b", header), flag
     # One token file is one principal: the examples wire one client per run.
     assert "one principal" in header
@@ -315,9 +345,11 @@ def _preflight(ps: _PowerShell, *, daemon_url: str = REMOTE, token_file: str = "
                clients: tuple[str, ...] = ("claude",), missing: tuple[str, ...] = (),
                extra_env: dict[str, str] | None = None, client_only: bool = True,
                read_token: bool = False, feed: str | None = None, before: str = "",
-               cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+               cwd: Path | None = None, pairing_code: str = "",
+               after: str = "") -> subprocess.CompletedProcess[str]:
     """``feed``: text on the preflight's stdin (-ReadToken input); ``before``:
-    PowerShell run first, in the same session."""
+    PowerShell run first, in the same session; ``after``: run next (the
+    pairing step)."""
     env = {"FAKE_HEALTH": health, "FAKE_UNREACHABLE": "1" if unreachable else ""}
     env.update(extra_env or {})
     stubs = "".join(ps.stub_function(name) for name in ("claude", "codex", "gemini")
@@ -331,14 +363,17 @@ def _preflight(ps: _PowerShell, *, daemon_url: str = REMOTE, token_file: str = "
                            "if ($env:FAKE_UNREACHABLE) { throw 'unreachable' }\n"
                            "    return ($env:FAKE_HEALTH | ConvertFrom-Json)")
         + before
-        + f"$DaemonUrl = '{_q(daemon_url)}'\n"
+        + f"$PairingCode = '{_q(pairing_code)}'\n"
+        f"$DaemonUrl = '{_q(daemon_url)}'\n"
         f"$ClientOnly = [switch]${'true' if client_only else 'false'}\n"
         f"$ReadToken = [switch]${'true' if read_token else 'false'}\n"
         f"$TokenFile = '{_q(token_file)}'\n$clients = @({client_list})\n"
         "$Extractor = ''; $Model = ''; $ShimPort = 0; $NoToken = [switch]$false\n"
         "$Transport = 'shim'\n"
-        + _block("client-only mode") + _block("client-only preflight")
-        + "\nInvoke-ClientOnlyPreflight\nWrite-Output \"TOKEN_FILE=$TokenFile\"\n")
+        + _block("bank location") + _block("client-only mode") + _block("client-only preflight")
+        + "\nInvoke-ClientOnlyPreflight\nWrite-Output \"TOKEN_FILE=$TokenFile\"\n"
+        # Whether a pairing code is held, never the code itself.
+        "Write-Output \"PAIRING=$(if ($PairingCode) { 'held' })\"\n" + after)
     return ps.run(body, extra_env=env, stdin_text=feed)
 
 
@@ -508,6 +543,245 @@ def test_a_selected_cli_that_is_missing_is_refused_up_front(tmp_path):
                       missing=("gemini",))
     assert proc.returncode == 1
     assert "gemini CLI is not on PATH" in _output(proc)
+
+
+# -- a pairing code: the installed shim's pair makes the token file ------------
+
+# The installed shim as a function, as far as these tests need it: `pair`
+# records its pipeline input (a native shim's stdin) and, as the real one
+# does on success and on an unknown outcome, writes the token file
+# owner-only through the helper the installer checks it with; connect's dry
+# run finds no registration.
+PS_PAIR_SHIM = """function global:fake-shim {{
+    Add-Content -LiteralPath '{calls}' -Value ('shim|' + (@($args) -join ' '))
+    $callArgs = @($args)
+    if ($callArgs[0] -eq 'pair') {{
+        Add-Content -LiteralPath '{calls}.stdin' -Value (@($input) -join "`n")
+        $file = $callArgs[[array]::IndexOf($callArgs, '--token-file') + 1]
+        if ($env:FAKE_PAIR_EXIT -in '0', '5') {{
+            if ($env:FAKE_PAIR_PLAIN) {{
+                Set-Content -LiteralPath $file -Value $env:FAKE_PAIR_TOKEN
+            }} else {{
+                $null = $env:FAKE_PAIR_TOKEN | & '{python}' '{helper}' write-token-file --path $file
+            }}
+        }}
+        $global:LASTEXITCODE = [int]$env:FAKE_PAIR_EXIT
+        return $env:FAKE_PAIR_REPORT
+    }}
+    if (($callArgs[0] -eq 'connect') -and ($callArgs -contains '--dry-run')) {{
+        $global:LASTEXITCODE = 3
+        return '{{"url": null, "rows": [], "exit": 3, "error": "none"}}'
+    }}
+    $global:LASTEXITCODE = 0
+}}
+"""
+
+
+def _pair_env(*, pair_exit: int = 0, report: str | None = None,
+              plain: bool = False) -> dict[str, str]:
+    return {"FAKE_PAIR_EXIT": str(pair_exit), "FAKE_PAIR_TOKEN": PAIRED_TOKEN,
+            "FAKE_PAIR_PLAIN": "1" if plain else "",
+            "FAKE_PAIR_REPORT": report if report is not None else _pair_report("paired", pair_exit)}
+
+
+def _pairing_step(ps: _PowerShell, *, shim_ok: bool = True, connect: bool = True) -> str:
+    ensure = ("function Install-ShimOnce { $script:shimInstallPath = 'fake-shim'; return $true }\n"
+              if shim_ok else
+              "function Install-ShimOnce { $script:shimInstallPath = $null; return $false }\n")
+    body = (PS_PAIR_SHIM.format(calls=_q(ps.calls), python=_q(sys.executable), helper=_q(HELPER))
+            + ensure + _block("client-only pair") + "Invoke-ClientOnlyPair\n"
+            "Write-Output \"PAIRED=$TokenFile|$(if ($PairingCode) { 'held' })\"\n")
+    if connect:
+        body += _block("client-only connect") + "Invoke-ClientOnlyConnect\n"
+    return body
+
+
+def _shim_calls(ps: _PowerShell) -> list[str]:
+    return [call for call in ps.logged() if call.startswith("shim|")]
+
+
+def _pair_stdin(ps: _PowerShell) -> str:
+    path = Path(str(ps.calls) + ".stdin")
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def _assert_code_unseen(ps: _PowerShell, proc, code: str = PAIRING_CODE) -> None:
+    canonical = code.strip().upper().replace("-", "")
+    for text in [*ps.logged(), _output(proc)]:
+        assert code.strip() not in text and canonical not in text.upper().replace("-", ""), text
+
+
+def _is_code_ps(ps: _PowerShell, values: list[str], python: bool = True) -> list[bool]:
+    feed = ps.tmp / "values.txt"
+    feed.write_bytes("".join(value + "\n" for value in values).encode("utf-8"))
+    prelude = ("" if python else
+               "function Get-InstallerPython { 'broken-python' }\n"
+               "function global:broken-python { $global:LASTEXITCODE = 1 }\n")
+    proc = ps.run(prelude + _block("client-only preflight")
+                  + f"foreach ($value in [IO.File]::ReadAllLines('{_q(feed)}')) {{\n"
+                    "    if (Test-PairingCode $value) { Write-Output CODE } else { Write-Output TOKEN }\n}\n")
+    assert proc.returncode == 0, _output(proc)
+    return [line == "CODE" for line in proc.stdout.splitlines()]
+
+
+@pytest.mark.parametrize("python", [True, False], ids=["python", "own-rule"])
+def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(tmp_path, python):
+    from pseudolife_memory.principals import normalize_pairing_code
+    values = CODE_FORMS + NOT_CODES
+    assert _is_code_ps(_PowerShell(tmp_path), values, python) == [
+        normalize_pairing_code(value) is not None for value in values]
+
+
+@pytest.mark.parametrize("form", CODE_FORMS)
+def test_a_pasted_pairing_code_is_kept_for_pairing_not_written(tmp_path, form):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=form + "\n")
+    assert proc.returncode == 0, _output(proc)
+    assert "PAIRING=held" in proc.stdout.splitlines()
+    assert not target.exists()
+    assert target.parent.is_dir()
+    assert any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
+    assert "pairing code" in _output(proc)
+    _assert_code_unseen(ps, proc, form)
+
+
+@pytest.mark.parametrize("token", [URLSAFE_TOKEN, FIXTURE_TOKEN])
+def test_a_pasted_token_is_still_written_as_the_token(tmp_path, token):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=token + "\n")
+    assert proc.returncode == 0, _output(proc)
+    assert "PAIRING=" in proc.stdout.splitlines()
+    assert CredentialProvider(path=target).snapshot().token == token
+
+
+@pytest.mark.parametrize("clients,name", [(("claude",), "claude-code"), (("codex",), "codex"),
+                                          (("claude", "codex"), "shared")])
+def test_a_pairing_code_defaults_to_the_token_file_named_for_the_client(tmp_path, clients, name):
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, clients=clients,
+                      extra_env={"PSEUDOLIFE_MCP_TOKEN_FILE": str(tmp_path / "other.token")})
+    assert proc.returncode == 0, _output(proc)
+    target = ps.home / ".pseudolife-mcp" / f"{name}.token"
+    [line] = [line for line in proc.stdout.splitlines() if line.startswith("TOKEN_FILE=")]
+    assert Path(line[len("TOKEN_FILE="):]) == target
+    assert "PAIRING=held" in proc.stdout.splitlines()
+    assert target.parent.is_dir() and not target.exists()
+    assert any(call.startswith("Invoke-RestMethod|") and f"{REMOTE}/health" in call
+               for call in ps.logged())
+    _assert_code_unseen(ps, proc)
+
+
+def test_a_given_token_file_overrides_the_pairing_default(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "laptop.token"
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, token_file=str(target))
+    assert proc.returncode == 0, _output(proc)
+    assert f"TOKEN_FILE={target}" in proc.stdout.splitlines()
+    assert target.parent.is_dir() and not target.exists()
+
+
+def test_a_pairing_code_refuses_an_existing_token_file_before_pair_runs(tmp_path):
+    ps = _PowerShell(tmp_path)
+    token = _token(ps)
+    before = token.read_bytes()
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, token_file=str(token),
+                      after=_pairing_step(ps), extra_env=_pair_env())
+    assert proc.returncode == 1
+    assert "already exists" in _output(proc) and "remote.token" in _output(proc)
+    assert token.read_bytes() == before
+    assert _shim_calls(ps) == []
+    assert not any(call.startswith("Invoke-RestMethod|") for call in ps.logged())
+    _assert_code_unseen(ps, proc)
+
+
+def test_a_pairing_code_is_redeemed_on_stdin_and_then_used_as_the_token_file(tmp_path):
+    """-DaemonUrl <remote> -PairingCode <code>, non-interactive: the mode
+    block, the preflight, then pair with the code on stdin and never in an
+    argument list, then the token file checked and handed to connect."""
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, client_only=False, clients=("codex",),
+                      after=_pairing_step(ps), extra_env=_pair_env())
+    assert proc.returncode == 0, _output(proc)
+    target = ps.home / ".pseudolife-mcp" / "codex.token"
+    assert _shim_calls(ps) == [
+        f"shim|pair {REMOTE} --read-code --token-file {target} --json",
+        f"shim|connect {REMOTE} --token-file {target} --client codex --dry-run --json"]
+    assert _pair_stdin(ps).strip() == PAIRING_CODE
+    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    assert f"PAIRED={target}|" in proc.stdout.splitlines()
+    assert "fixture-laptop" in _output(proc)
+    _assert_code_unseen(ps, proc)
+    assert PAIRED_TOKEN not in _output(proc)
+
+
+def test_a_pasted_pairing_code_reaches_pair_as_it_was_typed(tmp_path):
+    ps = _PowerShell(tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(ps, token_file=str(target), read_token=True, feed=" oil2-mx4p-9tzc \n",
+                      after=_pairing_step(ps, connect=False), extra_env=_pair_env())
+    assert proc.returncode == 0, _output(proc)
+    assert _shim_calls(ps) == [f"shim|pair {REMOTE} --read-code --token-file {target} --json"]
+    assert _pair_stdin(ps).strip() == "oil2-mx4p-9tzc"
+    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    _assert_code_unseen(ps, proc, "oil2-mx4p-9tzc")
+
+
+def test_pairing_runs_even_with_no_client_for_connect(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, clients=("generic",),
+                      after=_pairing_step(ps), extra_env=_pair_env())
+    assert proc.returncode == 0, _output(proc)
+    assert [call.split()[0] for call in _shim_calls(ps)] == ["shim|pair"]
+
+
+def test_a_refused_pairing_stops_the_install(tmp_path):
+    ps = _PowerShell(tmp_path)
+    report = _pair_report("refused", 4, "fixture-refusal: the daemon refused the pairing code")
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, after=_pairing_step(ps),
+                      extra_env=_pair_env(pair_exit=4, report=report))
+    assert proc.returncode == 1
+    assert "pseudolife-mcp pair exited 4" in _output(proc)
+    assert "fixture-refusal: the daemon refused the pairing code" in _output(proc)
+    assert not any(line.startswith("PAIRED=") for line in proc.stdout.splitlines())
+    assert [call.split()[0] for call in _shim_calls(ps)] == ["shim|pair"]
+    assert not (ps.home / ".pseudolife-mcp" / "claude-code.token").exists()
+    _assert_code_unseen(ps, proc)
+
+
+def test_an_unknown_pairing_outcome_names_the_kept_token_file(tmp_path):
+    ps = _PowerShell(tmp_path)
+    report = _pair_report("unknown", 5, "fixture-unknown: no answer after the retries")
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, after=_pairing_step(ps),
+                      extra_env=_pair_env(pair_exit=5, report=report))
+    assert proc.returncode == 1
+    kept = ps.home / ".pseudolife-mcp" / "claude-code.token"
+    assert "pseudolife-mcp pair exited 5" in _output(proc)
+    assert "fixture-unknown: no answer after the retries" in _output(proc)
+    assert f"kept at {kept}" in _output(proc)
+    assert "may hold a token the daemon now accepts" in _output(proc)
+    assert [call.split()[0] for call in _shim_calls(ps)] == ["shim|pair"]
+    _assert_code_unseen(ps, proc)
+
+
+def test_pairing_without_a_shim_stops_the_install(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, after=_pairing_step(ps, shim_ok=False),
+                      extra_env=_pair_env())
+    assert proc.returncode == 1
+    assert "pairing needs the pseudolife-mcp shim" in _output(proc)
+    assert _shim_calls(ps) == []
+    _assert_code_unseen(ps, proc)
+
+
+def test_the_paired_token_file_is_checked_as_a_given_one_is(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _preflight(ps, pairing_code=PAIRING_CODE, after=_pairing_step(ps),
+                      extra_env=_pair_env(plain=True))
+    assert proc.returncode == 1
+    assert "the shim cannot use the token file" in _output(proc)
+    assert [call.split()[0] for call in _shim_calls(ps)] == ["shim|pair"]
 
 
 # -- Codex: the credential helper gets the operator's token and the remote URL --

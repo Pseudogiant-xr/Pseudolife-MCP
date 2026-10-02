@@ -15,6 +15,8 @@
 #       --model qwen3.6-27b --client claude
 #   ops/install.sh --daemon-url http://100.64.0.2:8765 \
 #       --token-file ~/.pseudolife-mcp/claude-code.token --read-token --client claude
+#   ops/install.sh --daemon-url http://100.64.0.2:8765 \
+#       --pairing-code ABCD-EFGH-JKMN --client claude
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -70,6 +72,15 @@
 #   --read-token                     client-only: create the --token-file (it
 #                                    must not exist yet) from the token typed,
 #                                    unechoed, or piped on stdin
+#   --pairing-code <code>            client-only: a pairing code from
+#                                    pseudolife-mcp invite on the daemon's
+#                                    host, instead of a token: the installed
+#                                    shim's pair creates the --token-file
+#                                    (default ~/.pseudolife-mcp/<client>.token;
+#                                    it must not exist yet). An interactive
+#                                    run also takes a code pasted where it
+#                                    asks for the token, which keeps it off
+#                                    the command line (and shell history)
 # One token file is one principal: every client a run wires shares it. For
 # per-client attribution on the board, run the installer once per client,
 # each run with that client's own token file.
@@ -116,6 +127,7 @@ DAEMON_URL=""
 TOKEN_FILE=""
 CLIENT_ONLY=""
 READ_TOKEN=""
+PAIRING_CODE=""
 
 usage() {
     sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
@@ -145,6 +157,7 @@ while [ $# -gt 0 ]; do
         --token-file) TOKEN_FILE="$2"; shift 2 ;;
         --client-only) CLIENT_ONLY=1; shift ;;
         --read-token) READ_TOKEN=1; shift ;;
+        --pairing-code) PAIRING_CODE="$2"; shift 2 ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -425,24 +438,42 @@ PL_CLIENT_ONLY
 # >>> shared bank notes >>>
 show_shared_bank_notes() {
     cat <<'PL_SHARED_BANK'
-  Other machines will use this bank: three steps here, then the
-  installer on each of them (docs/guide/remote-bank.md has the detail
-  and the other ways to expose the daemon).
-  1. Expose the daemon, after checking that
-     curl -s http://127.0.0.1:8765/health reports "auth": true. Over
-     Tailscale, no certificate needed:
-       tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765
-     The others then use http://<this machine's tailnet IP>:8765.
-  2. Give each of their clients its own principal, in ops/.env:
-       PSEUDOLIFE_MCP_TOKENS=<token>:<machine>-claude-code
-       PSEUDOLIFE_MCP_TIER_MAP=<machine>-claude-code:full
-     then redeploy (ops/update.sh, or ops\update.ps1 on Windows).
-  3. Admit those principals to the agent board: list them, with default,
-     in coordination.allowed_principals in the daemon's config.yaml, and
-     restart the daemon.
-  On each other machine, run the installer, answer 2 and give it the
-  daemon's URL and that client's token.
+  Other machines will use this bank: two commands here, then the
+  installer on each of them.
+  1. Put the daemon on the tailnet. It checks first that the daemon
+     requires a bearer token, and shows its plan before it changes
+     anything:
+       pseudolife-mcp expose tailscale
+  2. For each machine that will join, make a one-time pairing code:
+       pseudolife-mcp invite <machine>
+  On that machine, run the installer, answer 2, give it the daemon's URL
+  that expose printed, and paste the code where it asks for the token
+  (or run pseudolife-mcp pair <url> <code> there). The steps by hand,
+  and the other ways to expose the daemon: docs/guide/remote-bank.md.
 PL_SHARED_BANK
+}
+# Step 1 changes this machine's tailnet serve, so it is only offered, at a
+# terminal, with no as the default; expose then shows its own plan and asks
+# again before it changes anything. A failure is reported, not fatal: the
+# install itself is complete.
+offer_shared_bank_expose() {
+    bank_can_ask || return 0
+    bank_read "Run pseudolife-mcp expose tailscale now? It changes this machine's tailnet serve [y/N]: " ||
+        BANK_REPLY=""
+    case "$(bank_trimmed "$BANK_REPLY")" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "  Not run: run pseudolife-mcp expose tailscale when you are ready."; return 0 ;;
+    esac
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so expose did not run: run pseudolife-mcp expose tailscale once it is installed." >&2
+        return 0
+    fi
+    expose_rc=0
+    "$SHIM_PATH" expose tailscale || expose_rc=$?
+    if [ "$expose_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp expose tailscale exited $expose_rc (see its message above). The install itself is complete: run it again once that is fixed." >&2
+    fi
 }
 # <<< shared bank notes <<<
 
@@ -474,8 +505,8 @@ show_banner
 # in the environment): where the memory bank lives. "Another machine" is the
 # client-only install, with the daemon's URL asked for here and its token
 # after the agents are chosen; "shared" is a local install that ends with the
-# steps to expose it. --token-file or --read-token already mean another
-# machine, so with either only the URL is asked. The mode block below then
+# steps to expose it. --token-file, --read-token or --pairing-code already
+# mean another machine, so with any of them only the URL is asked. The mode block below then
 # resolves and checks the answer exactly as it does the flags. Without a
 # terminal nothing is asked; end of input at one is no answer (exit 2).
 BANK_LOCATION=local
@@ -510,7 +541,7 @@ choose_bank_location() {
         return 0
     fi
     bank_can_ask || return 0
-    if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ]; then
+    if [ -z "$TOKEN_FILE" ] && [ -z "$READ_TOKEN" ] && [ -z "${PAIRING_CODE:-}" ]; then
         show_bank_location_question
         while :; do
             if ! bank_read "Choose 1-3 (Enter = 1): "; then
@@ -540,40 +571,46 @@ choose_bank_location() {
         DAEMON_URL="$(bank_trimmed "$BANK_REPLY")"
     done
 }
-choose_bank_token() {  # the other machine's token file: an existing one, or a new one from a pasted token
+bank_token_name() {  # the new token file's name: one per principal
+    # Named for the one client this run wires, as docs/guide/remote-bank.md
+    # recommends, else shared.
+    case "$CLIENTS" in
+        claude) printf '%s' claude-code ;;
+        claude-desktop|codex|gemini) printf '%s' "$CLIENTS" ;;
+        generic) printf '%s' mcp-client ;;
+        *) printf '%s' shared ;;
+    esac
+}
+choose_bank_token() {  # the other machine's token file: an existing one, or a new one from a pasted token or a pairing code
     [ "$BANK_LOCATION" = remote ] || return 0
     [ -z "$TOKEN_FILE" ] || return 0
-    if [ -z "$READ_TOKEN" ] && [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
+    # A token or pairing code to come always goes to a new file.
+    bank_new_file=""
+    if [ -n "$READ_TOKEN" ] || [ -n "${PAIRING_CODE:-}" ]; then bank_new_file=1; fi
+    if [ -z "$bank_new_file" ] && [ -n "${PSEUDOLIFE_MCP_TOKEN_FILE:-}" ]; then
         step "Token file: $PSEUDOLIFE_MCP_TOKEN_FILE (PSEUDOLIFE_MCP_TOKEN_FILE in the environment)."
         return 0
     fi
-    # One token file per principal: named for the one client this run
-    # wires, as docs/guide/remote-bank.md recommends, else shared.
-    bank_token_name=shared
-    case "$CLIENTS" in
-        claude) bank_token_name=claude-code ;;
-        claude-desktop|codex|gemini) bank_token_name="$CLIENTS" ;;
-        generic) bank_token_name=mcp-client ;;
-    esac
-    if [ -z "$READ_TOKEN" ]; then
+    bank_token_name="$(bank_token_name)"
+    if [ -z "$bank_new_file" ]; then
         echo ""
-        echo "The daemon's bearer token:"
-        echo "  1) Paste it now: it is written to a new owner-only token file (default)"
-        echo "  2) It is already in a token file on this machine"
+        echo "The daemon's bearer token, or a pairing code from pseudolife-mcp invite:"
+        echo "  1) Paste it now: it makes a new owner-only token file (default)"
+        echo "  2) The token is already in a token file on this machine"
         while :; do
             if ! bank_read "Choose 1-2 (Enter = 1): "; then
                 echo "no answer was given: re-run and answer, or pass --token-file <path>" >&2
                 exit 2
             fi
             case "$(bank_trimmed "$BANK_REPLY")" in
-                ""|1) READ_TOKEN=1; break ;;
+                ""|1) READ_TOKEN=1; bank_new_file=1; break ;;
                 2) break ;;
                 *) echo "  please answer 1 or 2" ;;
             esac
         done
     fi
     while [ -z "$TOKEN_FILE" ]; do
-        if [ -n "$READ_TOKEN" ]; then
+        if [ -n "$bank_new_file" ]; then
             bank_prompt="The token file to write (Enter = ~/.pseudolife-mcp/$bank_token_name.token): "
         else
             bank_prompt="The token file: "
@@ -583,15 +620,15 @@ choose_bank_token() {  # the other machine's token file: an existing one, or a n
             exit 2
         fi
         TOKEN_FILE="$(bank_trimmed "$BANK_REPLY")"
-        if [ -z "$TOKEN_FILE" ] && [ -n "$READ_TOKEN" ]; then
+        if [ -z "$TOKEN_FILE" ] && [ -n "$bank_new_file" ]; then
             TOKEN_FILE="~/.pseudolife-mcp/$bank_token_name.token"
         fi
         case "$TOKEN_FILE" in
             "~") TOKEN_FILE="$HOME" ;;
             "~/"*) TOKEN_FILE="$HOME/${TOKEN_FILE#"~/"}" ;;
         esac
-        # A pasted token only ever goes to a new file.
-        if [ -n "$READ_TOKEN" ] && { [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; }; then
+        # A pasted token or a pairing code only ever goes to a new file.
+        if [ -n "$bank_new_file" ] && { [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; }; then
             echo "  $TOKEN_FILE exists already: name another file, or re-run and answer 2 to use it"
             TOKEN_FILE=""
         fi
@@ -684,8 +721,12 @@ if [ -n "$CLIENT_ONLY" ]; then
         echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
         exit 2
     fi
-elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ]; then
-    echo "client-only install: --token-file and --read-token name a remote daemon's token, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
+    if [ -n "${PAIRING_CODE:-}" ] && [ -n "$READ_TOKEN" ]; then
+        echo "client-only install: --pairing-code and --read-token both say where the token comes from: pass one of them" >&2
+        exit 2
+    fi
+elif [ -n "$TOKEN_FILE" ] || [ -n "$READ_TOKEN" ] || [ -n "${PAIRING_CODE:-}" ]; then
+    echo "client-only install: --token-file, --read-token and --pairing-code name a remote daemon's credential, and a local install keeps its token in ops/.env. Add --client-only --daemon-url <url>, or drop them" >&2
     exit 2
 fi
 # <<< client-only mode <<<
@@ -745,12 +786,56 @@ choose_bank_token
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
 # token file and on the remote daemon answering. The token is never read
-# into output.
+# into output. With a pairing code (--pairing-code, or one pasted where the
+# token is asked for) the token file does not exist yet: the installed
+# shim's pair creates it after the shim is installed (the client-only pair
+# block), so here it must not exist, and only the daemon is checked.
+is_pairing_code() {  # the value on stdin; status 0 when it is a pairing code
+    # The shim's own rule (principals.normalize_pairing_code), asked with the
+    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # anything else falls back to the same rule written here: 12 Crockford
+    # base32 characters once case, dashes and surrounding whitespace are
+    # ignored, O read as 0, and I and L as 1.
+    code_value=""
+    IFS= read -r code_value || true
+    code_py="$(installer_python)"
+    if [ -n "$code_py" ]; then
+        code_rc=0
+        printf '%s\n' "$code_value" | "$code_py" -c 'import sys
+sys.path.insert(0, sys.argv[1])
+from pseudolife_memory.principals import normalize_pairing_code
+line = sys.stdin.buffer.readline().decode("utf-8", "replace").rstrip("\r\n")
+sys.exit(10 if normalize_pairing_code(line) else 11)' "$repo" 2>/dev/null || code_rc=$?
+        case "$code_rc" in 10) code_value=""; return 0 ;; 11) code_value=""; return 1 ;; esac
+    fi
+    code_value="$(printf '%s' "$code_value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/-//g' |
+        tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' | tr 'OIL' '011')"
+    case "$code_value" in
+        ????????????) case "$code_value" in *[!0123456789ABCDEFGHJKMNPQRSTVWXYZ]*) code_value=""; return 1 ;; esac ;;
+        *) code_value=""; return 1 ;;
+    esac
+    code_value=""
+    return 0
+}
+check_client_token_file() {  # the shim's own check of TOKEN_FILE; exits when it cannot use it
+    # On every OS: an owner-only regular file (mode bits on POSIX, the ACL
+    # on Windows), no link, one well-formed token.
+    token_report=$("$(installer_python)" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
+    case "$token_report" in *'"ready"'*) ;; *)
+        token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with --read-token to create it again" >&2
+        exit 1 ;;
+    esac
+}
 client_only_preflight() {
     step "Client-only install${CLIENT_ONLY_VIA:-}: this machine's clients will use the daemon at $DAEMON_URL (no Docker, volumes or local daemon here)."
+    if [ -z "$TOKEN_FILE" ] && [ -n "${PAIRING_CODE:-}" ]; then
+        # The file the paste path offers: nothing asked where the token goes.
+        TOKEN_FILE="$HOME/.pseudolife-mcp/$(bank_token_name).token"
+    fi
     [ -n "$TOKEN_FILE" ] || TOKEN_FILE="${PSEUDOLIFE_MCP_TOKEN_FILE:-}"
     if [ -z "$TOKEN_FILE" ]; then
-        echo "client-only install: pass --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and --read-token to create it. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
+        echo "client-only install: pass --token-file <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and --read-token to create it, or --pairing-code <code> to pair. The installer never mints one for a remote daemon${CLIENT_ONLY_VIA:-}" >&2
         exit 2
     fi
     token_py="$(installer_python)"
@@ -758,40 +843,54 @@ client_only_preflight() {
         echo "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run" >&2
         exit 1
     fi
-    if [ -n "${READ_TOKEN:-}" ]; then
+    if [ -n "${PAIRING_CODE:-}" ]; then
+        # pair never replaces a file: refused here, before any code is spent.
+        if [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; then
+            echo "client-only install: pairing creates the token file, and it already exists: $TOKEN_FILE. Pass --token-file with a new path, or remove it first" >&2
+            exit 1
+        fi
+    elif [ -n "${READ_TOKEN:-}" ]; then
         if [ -e "$TOKEN_FILE" ] || [ -L "$TOKEN_FILE" ]; then
             echo "client-only install: --read-token creates the token file, and it already exists: $TOKEN_FILE. Drop --read-token to use it, or remove it first" >&2
             exit 1
         fi
         # Read unechoed, and handed to the helper on stdin through a shell
         # builtin: the token never reaches an argument list or the output.
-        [ ! -t 0 ] || printf "Paste the daemon's bearer token (not shown), then Enter: " >&2
+        [ ! -t 0 ] || printf "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown), then Enter: " >&2
         token_value=""
         IFS= read -rs token_value || true
         [ ! -t 0 ] || echo "" >&2
-        token_report=$(printf '%s\n' "$token_value" |
-            "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
-        token_value=""
-        case "$token_report" in
-            *'"written"'*) step "Wrote the token file $TOKEN_FILE (owner-only; the token is not shown)." ;;
-            *)
-                token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
-                echo "client-only install: could not write the token file (${token_problem:-no result}): $TOKEN_FILE" >&2
-                exit 1 ;;
-        esac
+        if printf '%s\n' "$token_value" | is_pairing_code; then
+            PAIRING_CODE="$token_value"
+            token_value=""
+            step "That is a pairing code: the token file $TOKEN_FILE is created by pairing, once the shim is installed."
+        else
+            token_report=$(printf '%s\n' "$token_value" |
+                "$token_py" "$repo/ops/client_credentials.py" write-token-file --path "$TOKEN_FILE") || true
+            token_value=""
+            case "$token_report" in
+                *'"written"'*) step "Wrote the token file $TOKEN_FILE (owner-only; the token is not shown)." ;;
+                *)
+                    token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
+                    echo "client-only install: could not write the token file (${token_problem:-no result}): $TOKEN_FILE" >&2
+                    exit 1 ;;
+            esac
+        fi
     fi
-    if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
-        echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Create it with --read-token, or write the daemon's token into it owner-only, then re-run" >&2
-        exit 1
+    if [ -n "${PAIRING_CODE:-}" ]; then
+        # Its directory, owner-only when it is new, so the path can be made
+        # absolute now and pair can create the file in it.
+        if ! (umask 077 && mkdir -p "$(dirname "$TOKEN_FILE")"); then
+            echo "client-only install: could not create the token file's directory: $(dirname "$TOKEN_FILE")" >&2
+            exit 1
+        fi
+    else
+        if [ ! -f "$TOKEN_FILE" ] || [ ! -s "$TOKEN_FILE" ]; then
+            echo "client-only install: the token file is missing or empty: $TOKEN_FILE. Create it with --read-token, or write the daemon's token into it owner-only, then re-run" >&2
+            exit 1
+        fi
+        check_client_token_file
     fi
-    # The shim's own check, on every OS: an owner-only regular file (mode
-    # bits on POSIX, the ACL on Windows), no link, one well-formed token.
-    token_report=$("$token_py" "$repo/ops/client_credentials.py" check-token-file --path "$TOKEN_FILE") || true
-    case "$token_report" in *'"ready"'*) ;; *)
-        token_problem=$(printf '%s' "$token_report" | sed -n 's/.*"recovery": "\([^"]*\)".*/\1/p')
-        echo "client-only install: the shim cannot use the token file (${token_problem:-no result}): $TOKEN_FILE. It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with --read-token to create it again" >&2
-        exit 1 ;;
-    esac
     TOKEN_FILE="$(cd "$(dirname "$TOKEN_FILE")" && pwd)/$(basename "$TOKEN_FILE")"
     for selected_client in $CLIENTS; do
         case "$selected_client" in claude|codex|gemini)
@@ -1743,6 +1842,55 @@ connect_existing_registrations() {
     CONNECTED_CLIENTS=$(printf '%s' "$connect_report" | connect_report_lines handled) || CONNECTED_CLIENTS=""
 }
 # <<< client-only connect <<<
+# >>> client-only pair >>>
+# A pairing code (--pairing-code, or one pasted where the token is asked
+# for) is redeemed by the installed shim's `pair` before anything reads the
+# token file: pair mints the token here, writes it owner-only to the token
+# file (never over an existing one) and has the daemon accept it. The code
+# goes to pair on stdin through a shell builtin, never in an argument list
+# or the output, and is forgotten once pair has it. The file is then checked
+# as a given one is, and the install continues exactly as with a token file.
+# Any failure stops the install: pair's exit 5 keeps the file, which may
+# hold a token the daemon now accepts.
+pair_report_field() {  # $1 = field; pair's --json report on stdin; echoes it when it is text
+    "$(installer_python)" -c '
+import json, sys
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+try:
+    report = json.load(sys.stdin)
+except ValueError:
+    report = None
+value = report.get(sys.argv[1]) if isinstance(report, dict) else None
+print(value if isinstance(value, str) else "")
+' "$1"
+}
+pair_with_code() {
+    ensure_shim
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        PAIRING_CODE=""
+        echo "client-only install: pairing needs the pseudolife-mcp shim, and it is unavailable (see above). Fix its installation and re-run with the pairing code, or pass --token-file <path> with the daemon's token" >&2
+        exit 1
+    fi
+    pair_rc=0
+    pair_report=$(printf '%s\n' "$PAIRING_CODE" |
+        "$SHIM_PATH" pair "$DAEMON_URL" --read-code --token-file "$TOKEN_FILE" --json) || pair_rc=$?
+    PAIRING_CODE=""
+    if [ "$pair_rc" -ne 0 ]; then
+        pair_error=$(printf '%s' "$pair_report" | pair_report_field error) || pair_error=""
+        case "$pair_rc" in
+            4) pair_meaning="the daemon did not accept the code, and nothing was kept. Ask for a new code (pseudolife-mcp invite <machine> on the daemon's host), then re-run" ;;
+            5) pair_meaning="the outcome is unknown, or the check after it failed. The token file was kept at $TOKEN_FILE and may hold a token the daemon now accepts: re-run with --token-file $TOKEN_FILE to use it, or remove it and ask for a new code" ;;
+            *) pair_meaning="see its message above" ;;
+        esac
+        echo "client-only install: pseudolife-mcp pair exited $pair_rc${pair_error:+ ($pair_error)}: $pair_meaning" >&2
+        exit 1
+    fi
+    pair_principal=$(printf '%s' "$pair_report" | pair_report_field principal) || pair_principal=""
+    step "Paired with the daemon at $DAEMON_URL${pair_principal:+ as $pair_principal}: wrote the token file $TOKEN_FILE (owner-only; the token is not shown)."
+    check_client_token_file
+}
+# <<< client-only pair <<<
+[ -z "${PAIRING_CODE:-}" ] || pair_with_code
 [ -z "${CLIENT_ONLY:-}" ] || connect_existing_registrations
 
 instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
@@ -2967,6 +3115,7 @@ if [ -n "$codex_shim_mode" ]; then
 fi
 if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
+if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
