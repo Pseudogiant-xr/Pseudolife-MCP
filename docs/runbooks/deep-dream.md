@@ -247,14 +247,14 @@ Nothing is ever auto-deleted:
 - **Unsure** → leave listed; the pair costs one of the
   `memory.deep_dream.curation_top_k` slots until settled.
 
-The same pairs are reviewable by a human in the Console: the Atlas Review
-drawer's "Store curation" panel (fed by the standing
+The same pairs are reviewable by a human in the Console: the Review view's
+"Store curation" panel (fed by the standing
 `GET /api/curation/duplicates`, so no dream run is needed) renders each side's
 entity/attribute/value plus context and offers the distinct verdict as a
 confirm-gated "Mark distinct" button.
 
-## 4. Confirm in Atlas
-Open Atlas Review → `proposed_link` findings → accept (promotes to a real edge)
+## 4. Confirm in the Review view
+Open the Console's Review view → `proposed_link` findings → accept (promotes to a real edge)
 or reject, per item. With `link_judge_mode: auto` the sweep has already
 settled every link whose verdict cleared its gate; what remains carries the
 link judge's `judge` block (verdict, confidence, note, and the corrected

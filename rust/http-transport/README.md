@@ -13,7 +13,7 @@ cargo build --release --locked -j1 --manifest-path rust/http-transport/Cargo.tom
 
 Set `PSEUDOLIFE_MCP_RUST_HTTP` to the absolute path of the resulting
 `pseudolife-http` executable (`pseudolife-http.exe` on Windows) in the shim's
-environment, then start the existing shim command. Removing that variable
+environment, then start the existing shim command. Removing or emptying that variable
 selects the Python transport. An explicit missing or unusable executable fails
 closed. Installers, entry points, plugin configuration and daemon deployment do
 not select or distribute the helper; this is an opt-in source build.
@@ -108,6 +108,7 @@ Two tagged Windows CPU comparisons are committed in
 MCP outputs and peak simultaneous RSS over the whole owned process tree. Their
 fingerprints identify the measured adapter stages, which precede the final
 capacity-reservation correction; they do not benchmark that later revision.
+`tests/test_eval_evidence.py` pins their exact recorded source and binary hashes.
 The results do not demonstrate a combined latency and total-memory benefit: the
 Python host remains, and the helper adds memory. Four paired trials against a
 local fixture cannot establish production throughput or cross-platform gains.

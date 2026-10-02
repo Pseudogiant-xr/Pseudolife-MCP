@@ -5264,12 +5264,11 @@ class MemoryService(DreamOps):
                        if p.get("source") == "dream-low-confidence"][:cap]
             if not pending:
                 return {"considered": 0, "retyped": 0, "settled": 0}
-            entries = self._storage.load_entries()
+            entries = self._storage.load_entry_texts()
             known = [(r["name"], r["description"])
                      for r in self._graph.load_relations()
                      if r["name"] not in ("prefers", "avoids")]
-            names = [r["name"] for r in self._graph.load_relations()
-                     if r["name"] not in ("prefers", "avoids")]
+            names = [name for name, _ in known]
         retyped = settled = 0
         for p in pending:
             texts = gc.shared_mention_entries(entries, p["src"], p["dst"])
@@ -8421,8 +8420,8 @@ class MemoryService(DreamOps):
         if principal is None:
             principal = self._request_principal()
         # The daemon's reserved sender is never a client (as in dispatch).
-        from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
-        if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+        from pseudolife_memory.principals import principal_admitted
+        if not principal_admitted(cfg, principal):
             return {**result, "reason": "principal_not_allowed"}
         cap = min(cfg.awareness_limit, limit if limit is not None else cfg.awareness_limit, 20)
         # The header/context is an attribution signal, not bearer authentication.

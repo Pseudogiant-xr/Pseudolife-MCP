@@ -974,22 +974,128 @@ def test_an_expired_park_is_idle(store):
     _idle(store, b)
     store.test_time[0] = 1600.0
     _renew_wake_path(store, b)
-    assert _wake(store, a, b)["decision"] == "nudged"
+    assert _wake(store, a, b) == {"decision": "not_needed", "reason": "no_park"}
 
 
-def test_an_idle_unparked_recipient_is_nudged_once_an_hour(store):
+def test_plain_mail_never_rings_an_idle_unparked_recipient(store):
+    """Regular mail never wakes (maintainer decision 2026-10-02): a session
+    that has not parked is waiting on nobody, so plain mail to it, however
+    often, or naming a need it never declared, is ``not_needed`` and waits
+    for its next turn, with or without a wake path. Nothing rings, nothing
+    is capped, the attach and heartbeat answers carry no ring, and the live
+    path skips the mail; an explicit receive still returns it. (``urgent``
+    is the exception: test_urgent_mail_rings_an_idle_unparked_recipient.)"""
+    a = store.register("alice")
+    b = _wake_capable(store)
+    pull_only = store.register("alice")
+    for at, extra in ((1000.0, {}), (1000.0 + 1800, {}),
+                      (1000.0 + 3601, {"clears": "the review"})):
+        store.test_time[0] = at
+        _renew_wake_path(store, b)
+        for agent in (b, pull_only):
+            _idle(store, agent)
+            assert _wake(store, a, agent, **extra) == {"decision": "not_needed",
+                                                       "reason": "no_park"}
+    assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (0,)
+    answer = store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)
+    assert answer["wake"] is None
+    assert store.heartbeat(*creds(b), attachment_id=b["agent_id"][:8],
+                           generation=answer["generation"])["wake"] is None
+    assert store.receive(*creds(b), for_delivery=True)["messages"] == []
+    assert len(store.receive(*creds(b))["messages"]) == 3
+
+
+def test_urgent_mail_rings_an_idle_unparked_recipient(store):
+    """``urgent`` rings an idle session that has not parked (maintainer
+    decision 2026-10-02) as a ring like any other: reason ``urgent``, an
+    urgent coordination_wakes row, staggered within one sender's burst,
+    served once through the recipient's attach and carried by the live
+    path. Plain mail and ``clears`` beside it stay ``not_needed``."""
+    a = store.register("alice")
+    b, b2 = _wake_capable(store), _wake_capable(store)
+    for agent in (b, b2):
+        _idle(store, agent)
+    assert _wake(store, a, b, clears="the review") == {"decision": "not_needed",
+                                                       "reason": "no_park"}
+    assert _wake(store, a, b, urgent=True) == {"decision": "rung", "reason": "urgent",
+                                               "ring_at": 1000.0}
+    assert _wake(store, a, b2, urgent=True) == {"decision": "rung", "reason": "urgent",
+                                                "ring_at": 1030.0}
+    assert _wake(store, a, b) == {"decision": "not_needed", "reason": "no_park"}
+    rows = store.storage.conn.execute(
+        "SELECT recipient_agent_id,decision,reason,urgent FROM coordination_wakes "
+        "ORDER BY ring_at").fetchall()
+    assert rows == [(b["agent_id"], "rung", "urgent", True),
+                    (b2["agent_id"], "rung", "urgent", True)]
+    answer = store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)
+    assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 1000.0}
+    store.test_time[0] += 30   # past the one-heartbeat repeat window
+    assert store.heartbeat(*creds(b), attachment_id=b["agent_id"][:8],
+                           generation=answer["generation"])["wake"] is None
+    assert len(store.receive(*creds(b), for_delivery=True)["messages"]) == 1
+    assert len(store.receive(*creds(b))["messages"]) == 3
+
+
+def test_urgent_to_an_unparked_recipient_keeps_every_cap(store):
+    """The urgent ring to an unparked session spends the sender's urgent
+    allowance (6 an hour, shared with urgent rings to parked sessions) and
+    counts against the recipient's hourly cap like any ring. An active
+    recipient is hinted, urgent or not."""
+    from pseudolife_memory.storage.coordination import WakePolicy
+    a = store.register("alice")
+    b = _wake_capable(store)
+    for i in range(6):
+        store.test_time[0] = 1000.0 + i * 120
+        _renew_wake_path(store, b)
+        _idle(store, b)
+        assert _wake(store, a, b, urgent=True)["decision"] == "rung"
+    store.test_time[0] = 1000.0 + 6 * 120
+    _renew_wake_path(store, b)
+    _idle(store, b)
+    assert _wake(store, a, b, urgent=True) == {"decision": "capped",
+                                               "reason": "urgent_sender_hour"}
+    assert _wake(store, a, b) == {"decision": "not_needed", "reason": "no_park"}
+    c, d = store.register("alice"), store.register("alice")
+    assert _wake(store, c, b, urgent=True)["decision"] == "rung"
+    store.wake = WakePolicy(per_recipient_per_hour=7)
+    assert _wake(store, d, b, urgent=True) == {"decision": "capped", "reason": "recipient_hour"}
+    store.update(*creds(b), status="implementing")   # active again
+    assert _wake(store, d, b, urgent=True) == {"decision": "hinted", "reason": "active"}
+
+
+@pytest.mark.parametrize("served_at", [None, 990.0])
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("decision", ["rung", "nudged"])
+def test_a_nudge_decided_before_the_change_never_rings(store, decision, queued, served_at):
+    """A ``nudged`` ring still in coordination_wakes when the daemon is
+    updated (decided before 2026-10-02, immediate or queued behind a
+    ``no_path`` receipt, served already or not) is history, not a ring:
+    the recipient's attach never serves or re-offers it and the live path
+    skips its mail, which an explicit receive still returns. The same row
+    decided ``rung`` is served."""
     a = store.register("alice")
     b = _wake_capable(store)
     _idle(store, b)
-    assert _wake(store, a, b) == {"decision": "nudged", "reason": "no_park", "ring_at": 1000.0}
-    store.test_time[0] = 1000.0 + 1800
-    _renew_wake_path(store, b)
-    _idle(store, b)
-    assert _wake(store, a, b) == {"decision": "capped", "reason": "nudge_hour"}
-    store.test_time[0] = 1000.0 + 3601
-    _renew_wake_path(store, b)
-    _idle(store, b)
-    assert _wake(store, a, b)["decision"] == "nudged"
+    sent = store.send(*creds(a), to=b["agent_id"], text="note", request_id="before")
+    reason = "anyone" if decision == "rung" else "no_park"
+    wake = ({"decision": "no_path", "reason": "listener_expired", "queued": True} if queued
+            else {"decision": decision, "reason": reason, "ring_at": 1000.0})
+    store.storage.conn.execute("UPDATE coordination_messages SET wake=%s::jsonb "
+                               "WHERE message_id=%s", (json.dumps(wake), sent["message_id"]))
+    store.storage.conn.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+        "decision,reason,ring_at,created_at,served_at) VALUES (%s,%s,%s,%s,%s,1000.0,1000.0,%s)",
+        (b["agent_id"], a["agent_id"], sent["message_id"], decision, reason, served_at))
+    answer = store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)
+    delivered = [m["message_id"] for m in store.receive(*creds(b), for_delivery=True)["messages"]]
+    served = store.storage.conn.execute("SELECT served_at FROM coordination_wakes").fetchone()[0]
+    if decision == "rung":
+        assert answer["wake"] == {"decision": "rung", "reason": "anyone", "ring_at": 1000.0}
+        assert (delivered, served) == ([sent["message_id"]], served_at or 1000.0)
+    else:
+        assert answer["wake"] is None
+        assert (delivered, served) == ([], served_at)
+    assert [m["message_id"] for m in store.receive(*creds(b))["messages"]] == [sent["message_id"]]
 
 
 def test_rings_to_one_recipient_are_capped_per_hour(store):
@@ -1083,13 +1189,6 @@ def test_the_ring_reaches_the_recipient_once_through_its_heartbeat(store):
         "decision": "rung", "reason": "anyone", "ring_at": 1000.0}
     store.test_time[0] += 30   # past the one-heartbeat repeat window
     assert store.heartbeat(*creds(b), **beat)["wake"] is None
-    # A nudge says so, so the shim can ask for a park record.
-    store.update(*creds(b), park_reason=None)
-    store.test_time[0] = 5000.0
-    _idle(store, b)
-    _wake(store, a, b)
-    assert store.attach(*creds(b), attachment_id=b["agent_id"][:8], wake_enabled=True)["wake"] == {
-        "decision": "nudged", "reason": "no_park", "ring_at": 5000.0}
 
 
 def test_send_validates_clears_and_urgent(store):
@@ -1108,10 +1207,11 @@ def test_send_validates_clears_and_urgent(store):
 def test_a_retried_send_repeats_its_wake_decision(store):
     a = store.register("alice")
     b = _wake_capable(store)
+    store.update(*creds(b), park_reason="blocked", park_needs="x", park_clear_by="anyone")
     _idle(store, b)
     first = store.send(*creds(a), to=b["agent_id"], text="t", request_id="again")
     again = store.send(*creds(a), to=b["agent_id"], text="t", request_id="again")
-    assert first["wake"]["decision"] == "nudged"
+    assert first["wake"]["decision"] == "rung"
     assert again["wake"] == first["wake"]
     assert store.storage.conn.execute("SELECT count(*) FROM coordination_wakes").fetchone() == (1,)
 
@@ -1215,13 +1315,18 @@ def test_park_gate_ignores_rung_deliveries_to_another_agent(store):
         "gate": "allow", "reason": "parked"}
 
 
-def test_park_gate_ignores_a_nudge_when_the_recipient_then_parks(store):
+def test_park_gate_ignores_a_historical_nudge_when_the_recipient_then_parks(store):
+    """Only a rung delivery makes a standing park stale. A ``nudged`` row
+    decided before 2026-10-02 may still sit in coordination_wakes after the
+    update; it never counts."""
     sender = store.register("alice")
     recipient = _wake_capable(store)
     store.test_time[0] = 1600.0
     _renew_wake_path(store, recipient)
-    _idle(store, recipient)
-    assert _wake(store, sender, recipient)["decision"] == "nudged"
+    store.storage.conn.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+        "decision,reason,ring_at,created_at) VALUES (%s,%s,%s,'nudged','no_park',%s,%s)",
+        (recipient["agent_id"], sender["agent_id"], "fixture-message", 1600.0, 1600.0))
     store.update(*creds(recipient), park_reason="blocked", park_needs="a review",
                  park_clear_by="anyone")
     assert store.park_gate(recipient["agent_id"], "alice", since=1500.0) == {

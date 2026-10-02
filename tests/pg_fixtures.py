@@ -48,6 +48,7 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 from tests.pg_defaults import (  # noqa: E402
+    own_run_pid, run_suffix,
     PostgresAuthError, PostgresSetupError, PostgresUnavailableError, RedactedUrl,
     auth_failure_message, conninfo_dbname, conninfo_with_dbname,
     default_admin_url, is_auth_failure, is_server_unavailable,
@@ -56,7 +57,7 @@ from tests.pg_defaults import (  # noqa: E402
 
 # Per-run private database — see module docstring. A fixed name here would
 # reintroduce the concurrent-run reaper crossfire.
-_TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
+_TEST_DB = f"pseudolife_memory_test_{run_suffix()}"
 
 # The truncate list. Was a hand-maintained copy of the FK-free tables
 # CASCADE cannot reach — which is a list that has to be re-derived on every
@@ -163,14 +164,16 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _prune_dead_run_dbs(conn) -> None:
+def _prune_dead_run_dbs(conn, *, namespace: str | None = None) -> None:
     """Drop private DBs leaked by hard-killed runs (atexit never fired).
 
-    Only names carrying a pid suffix whose process is gone — a live
-    concurrent run's database matches the pattern but its pid is alive,
-    so it is never touched (its connection count may legitimately be
-    zero between PG-backed tests, which is why liveness is checked on
-    the pid, not on pg_stat_activity).
+    Only names carrying a pid suffix of this process namespace whose
+    process is gone — a live concurrent run's database matches the pattern
+    but its pid is alive, so it is never touched (its connection count may
+    legitimately be zero between PG-backed tests, which is why liveness is
+    checked on the pid, not on pg_stat_activity). Another namespace's run
+    (WSL beside Windows) has a pid this process cannot see, so it is left
+    alone (pg_defaults.PID_NAMESPACE).
     """
     rows = conn.execute(
         "SELECT datname FROM pg_database "
@@ -178,10 +181,10 @@ def _prune_dead_run_dbs(conn) -> None:
         "   OR datname LIKE 'pseudolife_memory_bench_%'"
     ).fetchall()
     for (name,) in rows:
-        suffix = name.rsplit("_", 1)[1]
-        if not suffix.isdigit() or int(suffix) == os.getpid():
+        pid = own_run_pid(name.rsplit("_", 1)[1], namespace=namespace)
+        if pid is None or pid == os.getpid():
             continue
-        if _pid_alive(int(suffix)):
+        if _pid_alive(pid):
             continue
         try:
             conn.execute(f'DROP DATABASE "{name}" WITH (FORCE)')

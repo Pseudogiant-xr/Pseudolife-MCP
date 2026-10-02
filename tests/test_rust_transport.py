@@ -55,14 +55,52 @@ def listener(handler):
         assert not thread.is_alive()
 
 
-def test_default_transport_is_python(monkeypatch):
+@pytest.mark.parametrize("selection", [None, ""])
+def test_default_transport_is_python(monkeypatch, selection):
     from pseudolife_memory.rust_transport import transport_context
-    monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    if selection is None:
+        monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    else:
+        monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", selection)
 
     async def drive():
         async with transport_context() as transport:
             assert transport is None
     asyncio.run(drive())
+
+
+@pytest.mark.parametrize("utility", ["URLPattern", "get_environment_proxies"])
+def test_default_shim_works_without_optional_httpx_utilities(monkeypatch, utility):
+    import httpx2._utils as httpx_utils
+    import pseudolife_memory
+    import sys
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    monkeypatch.delattr(httpx_utils, utility)
+    # Exercise the shim's real import/selection boundary even after another
+    # test has loaded the optional module, restoring both import caches later.
+    monkeypatch.setattr(pseudolife_memory, "rust_transport", None, raising=False)
+    monkeypatch.delitem(sys.modules, "pseudolife_memory.rust_transport", raising=False)
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args): pass
+        def do_GET(self):
+            seen.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"python")
+
+    async def proxy_impl(url, *_args, http_transport, **_kwargs):
+        assert http_transport is None
+        async with httpx2.AsyncClient() as client:
+            assert (await client.get(url)).content == b"python"
+
+    monkeypatch.setattr(shim, "_proxy_impl", proxy_impl)
+    with listener(Handler) as url:
+        asyncio.run(shim._proxy(url, None, "fixture-session"))
+    assert seen == ["/"]
 
 
 def test_explicit_unusable_binary_fails_closed(monkeypatch, tmp_path):

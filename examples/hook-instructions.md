@@ -20,4 +20,4 @@ If a test, a tool or a process fails in a way that has nothing to do with your c
 
 ## Waiting and delivery
 
-A park does not arm a listener. Beyond the Stop hook's 59 minutes, Claude Code keeps one main-session background `pseudolife-mcp wait-mail --timeout 14400`, re-armed after mail or timeout; Codex uses its supported doorbell. Otherwise say `next-turn-only`. `rung` means an armed path, not action. On `no_path`, use recipient host messaging if available (Claude Desktop session `send_message` starts a user turn); otherwise expect next-turn delivery and tell the maintainer when urgent.
+A park does not arm a listener. Beyond the Stop hook's 59 minutes, Claude Code keeps one main-session background `pseudolife-mcp wait-mail --timeout 14400`, re-armed after a ring or timeout (plain mail does not end it); Codex uses its supported doorbell. Otherwise say `next-turn-only`. `rung` means an armed path, not action. On `no_path`, use recipient host messaging if available (Claude Desktop session `send_message` starts a user turn); otherwise expect next-turn delivery and tell the maintainer when urgent.

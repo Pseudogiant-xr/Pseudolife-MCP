@@ -1,25 +1,31 @@
-"""``pseudolife-mcp wait-mail`` — block until new addressed mail, print it.
+"""``pseudolife-mcp wait-mail`` — block until the daemon rings, print the mail.
 
 MCP gives a server no way to start a turn in an idle session; only the host
 can, for instance when a background command exits (Claude Code's Bash tool
 with ``run_in_background``) or a hook asks it to. This is that command. It
 reads the coordination digest file the shim's adapter rewrites on its
-heartbeat, plus the ``.seen`` delivery marker it shares with the prompt hooks
-and the tool-result hint. No daemon connection, token or network is
-involved, and nothing heavy is imported. While waiting, a short local
-listener lease lets the authenticated adapter report a live wake path;
-the waiter renews it each poll and removes it on exit.
+heartbeat, the ``<key>.ring`` marker the adapter writes beside it when the
+daemon decides a ring, and the ``.seen`` delivery marker it shares with the
+prompt hooks and the tool-result hint. No daemon connection, token or
+network is involved, and nothing heavy is imported. While waiting, a short
+local listener lease lets the authenticated adapter report a live wake path
+(the daemon decides a ring only for a recipient with one); the waiter renews
+it each poll and removes it on exit.
 
-It fires when the digest's watermark is past ``.seen`` and the digest lists
-pending mail, i.e. mail no hook, hint or earlier wait has shown. It then
-prints the digest body verbatim (the body already frames the mail as
-agent-origin, not user authority), advances ``.seen`` to that watermark so
-nothing repeats it, and exits 0. Re-arming with that mail still unread waits
-for the next change instead of firing again. Mail that reached the digest
-between one wake and the re-arm fires at once. A baseline taken at arm time
-would absorb it, which the 2026-09-23 coordination trial observed.
+Regular mail never wakes, only a ring does (maintainer decision 2026-10-02),
+so it fires on the Stop hook's rule (plugin/hooks/stop-wake.sh): the ring
+marker is a ``rung`` ring past ``.seen``, the digest's watermark is past
+``.seen`` too and the digest lists pending mail. Plain mail the daemon
+decided no ring for keeps it waiting; that mail is still pending at the
+session's next turn. On firing it prints the digest body verbatim (the body
+already frames the mail as agent-origin, not user authority), advances
+``.seen`` to the digest's watermark so nothing repeats it, and exits 0.
+Re-arming with that mail still unacknowledged waits for the next ring
+instead of firing again. A ring that arrived between one wake and the
+re-arm fires at once. A baseline taken at arm time would absorb it, which
+the 2026-09-23 coordination trial observed.
 
-Exit codes: 0 new mail (the body on stdout); 3 timeout, re-arm to keep
+Exit codes: 0 a ring (the mail on stdout); 3 timeout, re-arm to keep
 waiting; 2 nothing to wait on (no session id, no readable digest file, bad
 arguments, or a stdout that cannot take the mail). Diagnostics go to stderr
 only.
@@ -61,6 +67,14 @@ MAX_INTERVAL = 60.0
 # arguments.
 _DIGEST_NAME = re.compile(r"[0-9a-f]{64}\.txt")
 
+# The ring marker as coordination_adapter._write_ring writes it and the Stop
+# hook's ring_past_seen reads it: line 1 the digest watermark the ring is
+# for, at most 12 digits once CR, LF and spaces are dropped; line 2, one
+# trailing CR dropped, the daemon's decision and reason in [-A-Za-z0-9_ ],
+# and only a rung decision rings.
+_RING_AT = re.compile(rb"[0-9]{1,12}")
+_RING_REASON = re.compile(rb"rung [-A-Za-z0-9_ ]*")
+
 
 class _DigestGone(Exception):
     """The digest file vanished mid-wait: its shim exited or restarted."""
@@ -69,8 +83,9 @@ class _DigestGone(Exception):
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp wait-mail",
-        description="Wait for new addressed mail, print it, exit. "
-                    "Exit 0: mail (on stdout); 3: timeout; 2: nothing to wait on.")
+        description="Wait until the daemon rings this session for addressed mail (plain "
+                    "mail never wakes it), print the mail, exit. "
+                    "Exit 0: a ring (the mail on stdout); 3: timeout; 2: nothing to wait on.")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--session-id", help="host session id keying the digest, e.g. a Codex "
                         "thread id (default: CLAUDE_CODE_SESSION_ID)")
@@ -91,6 +106,41 @@ def _read_digest(path: Path) -> tuple[int | None, bytes]:
         return int(head), body
     except ValueError:
         return None, b""
+
+
+def _read_ring(path: Path) -> tuple[int, str] | None:
+    """(watermark, "rung <reason>") from the ring marker, or None when it
+    holds no rung ring. Anything but a regular file (a symlink included)
+    with a watermark and a rung decision is no ring, as in the Stop hook. An
+    OSError other than a missing file propagates: a sharing violation
+    mid-replace on Windows, looked at again next poll."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    head, _, rest = raw.partition(b"\n")
+    reason = rest.partition(b"\n")[0]
+    head = re.sub(rb"[\r ]", b"", head)
+    if reason.endswith(b"\r"):
+        reason = reason[:-1]
+    if not _RING_AT.fullmatch(head) or not _RING_REASON.fullmatch(reason):
+        return None
+    return int(head), reason.decode("ascii")
+
+
+def _signature(path: Path):
+    """What changes on every replace of ``path``; None while it is absent.
+    A file that cannot be inspected for now never matches, so it is looked
+    at again next poll."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return object()
+    return info.st_ino, info.st_mtime_ns, info.st_size
 
 
 def _read_seen(path: Path) -> int:
@@ -123,15 +173,18 @@ def _mark_seen(path: Path, watermark: int) -> None:
             time.sleep(0.05)
 
 
-def _ledger(digest: Path, watermark: int, size: int) -> None:
-    """One line per delivery, beside the adapter's and the prompt hooks'."""
+def _ledger(digest: Path, watermark: int, size: int, ring: str) -> None:
+    """One line per delivery, beside the adapter's and the prompt hooks';
+    like the Stop hook's ``wait`` line, the sixth column is the ring."""
     with suppress(OSError):
         with open(digest.parent / "ledger.log", "a", encoding="utf-8") as handle:
-            handle.write(f"{int(time.time())}\twait\t{digest.stem[:8]}\t{watermark}\t{size}\n")
+            handle.write(f"{int(time.time())}\twait\t{digest.stem[:8]}\t{watermark}\t{size}"
+                         f"\t{ring}\n")
 
 
-def _wait(digest: Path, timeout: float, interval: float) -> tuple[int, bytes] | None:
-    """Poll until unshown mail appears: ``(watermark, body)``, or None on timeout."""
+def _wait(digest: Path, timeout: float, interval: float) -> tuple[int, bytes, str] | None:
+    """Poll until the daemon rings for unshown mail: ``(watermark, body,
+    ring)``, or None on timeout."""
     seen = digest.with_suffix(".seen")
     deadline = time.monotonic() + timeout
     listener = WaitListener(digest, timeout)
@@ -142,6 +195,7 @@ def _wait(digest: Path, timeout: float, interval: float) -> tuple[int, bytes] | 
 
 
 def _wait_listener(digest, seen, deadline, interval, listener):
+    ring = digest.with_suffix(".ring")
     last = None
     while True:
         listener.renew()
@@ -152,19 +206,23 @@ def _wait_listener(digest, seen, deadline, interval, listener):
         except OSError:
             info = None  # e.g. a sharing violation mid-replace on Windows; look again next poll
         if info is not None:
-            # A replace makes a new file, so the signature moves on every rewrite.
-            signature = (info.st_ino, info.st_mtime_ns, info.st_size)
+            # A replace makes a new file, so the signature moves on every
+            # rewrite of the digest or the ring marker.
+            signature = ((info.st_ino, info.st_mtime_ns, info.st_size), _signature(ring))
             if signature != last:
                 last = signature
                 try:
                     watermark, body = _read_digest(digest)
+                    rung = _read_ring(ring)
                 except FileNotFoundError:
                     raise _DigestGone from None
                 except OSError:
                     last = None  # read again next poll
                 else:
-                    if watermark is not None and body.strip() and watermark > _read_seen(seen):
-                        return watermark, body
+                    if watermark is not None and body.strip() and rung is not None:
+                        shown = _read_seen(seen)
+                        if watermark > shown and rung[0] > shown:
+                            return watermark, body, rung[1]
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
@@ -222,13 +280,14 @@ def run_wait_mail(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     if found is None:
-        print(f"wait-mail: no new addressed mail in {args.timeout:g} s; re-arm to keep waiting.",
-              file=sys.stderr)
+        print(f"wait-mail: no ring in {args.timeout:g} s (plain mail does not end the wait); "
+              "re-arm to keep waiting.", file=sys.stderr)
         return EXIT_TIMEOUT
 
-    watermark, body = found
-    print(f"wait-mail: new addressed mail at {time.strftime('%H:%M:%S')} (watermark {watermark}, "
-          f"{time.monotonic() - started:.0f} s after arming):", file=sys.stderr, flush=True)
+    watermark, body, ring = found
+    print(f"wait-mail: the daemon rang for addressed mail at {time.strftime('%H:%M:%S')} ({ring}, "
+          f"watermark {watermark}, {time.monotonic() - started:.0f} s after arming):",
+          file=sys.stderr, flush=True)
     try:
         sys.stdout.flush()
         sys.stdout.buffer.write(body)
@@ -243,5 +302,5 @@ def run_wait_mail(argv: list[str] | None = None) -> int:
     except OSError as error:
         print(f"wait-mail: could not advance the .seen marker ({error}); the prompt hook or "
               "tool-result hint may show this mail again.", file=sys.stderr)
-    _ledger(digest, watermark, len(body.decode("utf-8", "replace")))
+    _ledger(digest, watermark, len(body.decode("utf-8", "replace")), ring)
     return EXIT_MAIL

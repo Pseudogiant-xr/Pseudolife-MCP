@@ -116,8 +116,8 @@ include = ["pseudolife_memory*"]
 
 [tool.setuptools.package-data]
 # The Cortex Console is served from inside the package — the wheel must
-# carry its static assets (css/fonts/js/index.html) or a pip install gets
-# a 404 console.
+# carry its committed build (index.html, assets/, vendor/) or a pip install
+# gets a 404 console. The source is frontend/; nothing at install time needs Node.
 "pseudolife_memory.web" = ["static/**"]
 # `pseudolife-mcp update` recreates the daemon container from the compose
 # files the running container was created with; when those are gone (the

@@ -718,13 +718,24 @@ def test_a_ring_behind_a_newer_digest_still_wakes(tmp_path):
     assert _read_seen(tmp_path) == "5"
 
 
-def test_a_nudge_asks_for_a_park_record(tmp_path):
+def test_a_nudged_ring_never_wakes(tmp_path):
+    """Regular mail never wakes (maintainer decision 2026-10-02): a
+    ``nudged`` marker (an idle session that never parked), left by a shim
+    from before the change, is no ring. Only ``rung`` fires."""
     _digest(tmp_path, 3, BODY, ring="nudged no_park")
+    result, _ = _run(_env(tmp_path, wait=8))
+    assert (result.returncode, result.stderr) == (0, "")
+    assert _read_seen(tmp_path) != "3"
+
+
+def test_an_urgent_ring_wakes_a_session_that_never_parked(tmp_path):
+    """``urgent`` mail does ring a session that never parked (2026-10-02):
+    the shim writes ``rung urgent`` and the hook fires on it like any rung
+    marker, with the plain wake text."""
+    _digest(tmp_path, 3, BODY, ring="rung urgent")
     result, _ = _run(_env(tmp_path, wait=3540))
-    assert result.returncode == 2
-    assert _woke(result.stderr.split("\nSet your park status", 1)[0])
-    assert "set your park status" in result.stderr.lower()
-    assert "park_reason" in result.stderr
+    assert result.returncode == 2 and _woke(result.stderr)
+    assert _read_seen(tmp_path) == "3"
 
 
 @pytest.mark.parametrize("ring", ["", "x\nrung anyone\n", "3\n", "3\n\n"])

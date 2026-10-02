@@ -50,6 +50,24 @@ class _RecoveryStorage:
             raise RecoveryError("database commit was not confirmed; keep coordination disabled")
 
 
+def _owner_admitted(config, principal) -> bool:
+    """The board's admission rule (``principals.principal_admitted``) for an
+    offline run: listed in the configuration, or a principal stored in the
+    restored bank (schema v53) with board access and not revoked. The table
+    is read only when the configuration does not list the owner; no daemon
+    runs, so no snapshot is installed in this process."""
+    from pseudolife_memory.principal_store import PrincipalSnapshot, load_rows
+    from pseudolife_memory.principals import env_auth, principal_admitted
+
+    if principal_admitted(config.coordination, principal, store=PrincipalSnapshot()):
+        return True
+    with _connect() as conn:
+        rows, _bank = load_rows(conn)
+    stored = PrincipalSnapshot(shadowed=env_auth()[0].values())
+    stored.refresh(lambda: (rows, None))
+    return principal_admitted(config.coordination, principal, store=stored)
+
+
 def _perform(args):
     path = Path(args.config)
     if not path.is_file():
@@ -74,8 +92,9 @@ def _perform(args):
 
     if not all((args.agent, args.principal, args.bank_url, args.state)):
         raise RecoveryError("rebind requires --agent, --principal, --bank-url and --state")
-    if args.principal not in config.coordination.allowed_principals:
-        raise RecoveryError("the requested owner must be in coordination.allowed_principals")
+    if not _owner_admitted(config, args.principal):
+        raise RecoveryError("the requested owner must be in coordination.allowed_principals, or a "
+                            "principal invited with board access")
     state_path = Path(args.state).resolve()
     if any((parent / ".git").exists() for parent in state_path.parents):
         raise RecoveryError("private state must be outside a Git repository")

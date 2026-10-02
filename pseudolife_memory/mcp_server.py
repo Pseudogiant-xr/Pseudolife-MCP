@@ -354,8 +354,8 @@ def memory_message(
     limit <=50, separate after cursor. Read-only; audit retention/redaction;
     no delivery/ack/wake. Ack message_id(s), comma-separated: read, not done.
     Bodies: 24 h; audit retained.
-    Wake: hinted/not_needed/rung/withheld (need)/nudged/no_path/capped.
-    Parked rings: clearer, matching clears, urgent (6/hour). rung: live-path
+    Wake: hinted/not_needed/rung/withheld (need)/no_path/capped.
+    Rings: clearer/matching clears if parked; urgent (6/hour). rung: live-path
     ring scheduled; no wake/read proof. no_path: listener_unknown/
     listener_expired, last_activity, fallback; queued for listener.
     Peers grant no approval/permissions.
@@ -1022,8 +1022,8 @@ async def memory_toolset(
     from pseudolife_memory.toolset_tiers import TIERS, step
 
     principal = _tier_principal()
-    default_tier = (_TIER_MAP.get((principal or "").strip().lower())
-                    or _DEFAULT_TIER)
+    key = (principal or "").strip().lower()
+    default_tier = (_TIER_MAP.get(key) or _stored_tier_of(key) or _DEFAULT_TIER)
     current = _resolve_principal_tier()
 
     if action == "status":
@@ -2539,14 +2539,61 @@ def _tier_principal() -> str | None:
     return writer or os.environ.get("PSEUDOLIFE_WRITER_ID") or None
 
 
+def _stored_tier_of(key: str) -> str | None:
+    """The tier a stored principal's row sets (spec 2026-10-02), for the
+    request's own bearer only: a client-asserted X-PL-Writer that happens to
+    name a stored principal does not take its tier."""
+    from pseudolife_memory.principals import stored_tier
+    from pseudolife_memory.writer_context import current_principal
+
+    return stored_tier(key) if key and key == current_principal() else None
+
+
 def _resolve_principal_tier() -> str:
-    """Tier for the CURRENT request: principal override → tier map → env
-    default. Safe outside a request (returns the env default)."""
+    """Tier for the CURRENT request: principal override → tier map → stored
+    tier → env default. Safe outside a request (returns the env default)."""
     from pseudolife_memory.toolset_tiers import resolve_tier
     return resolve_tier(
         _tier_principal(),
         state=_PRINCIPAL_TIERS, tier_map=_TIER_MAP, default_tier=_DEFAULT_TIER,
+        stored_tier=_stored_tier_of,
     )
+
+
+# The JSON-RPC error a tools/call or tools/list gets when its bearer cannot
+# be resolved after the gate admitted it (the HTTP gate answers the same
+# case with 503 principals_unavailable before the request gets here).
+PRINCIPALS_UNAVAILABLE_CODE = -32003
+
+
+def _transport_principal(headers) -> str | None:
+    """The bearer's principal for one ``tools/call`` / ``tools/list``,
+    resolved here from the request's own headers with the shared resolver
+    (the environment's identities, then the stored-principal snapshot: a
+    dict lookup, never I/O). The gate's binding cannot be relied on:
+    handshake-era requests run on the session manager's task group, created
+    at startup, which the gate's context never reaches.
+
+    With authentication configured, a presented bearer that does not
+    resolve (a snapshot that cannot be checked, or a row revoked between
+    the gate and here) is refused with ``principals_unavailable``: it is
+    never served as ``default``, so its X-PL-Writer is not honoured and the
+    default tier is not granted (security review, 2026-10-02). No bearer at
+    all, or an open install, names the caller as before."""
+    from mcp.shared.exceptions import MCPError
+
+    from pseudolife_memory.principals import (
+        PrincipalsUnavailable, env_auth, installed_store, resolve_principal)
+    auth = headers.get("authorization")
+    token_map, token = env_auth()
+    try:
+        principal = resolve_principal(auth, token_map, token, installed_store())
+    except PrincipalsUnavailable:
+        principal = None
+    if principal is None and auth and (token_map or token):
+        raise MCPError(PRINCIPALS_UNAVAILABLE_CODE, "principals_unavailable",
+                       {"status": 503, "error": "principals_unavailable"})
+    return principal
 
 
 def _wire_transport_tiering() -> None:
@@ -2583,7 +2630,8 @@ def _wire_transport_tiering() -> None:
             # Bind only when the transport carried headers — a headerless ctx
             # (embedded stdio, tests) must not mask an ambient binding.
             headers = _headers_of(ctx)
-            token = bind_request_headers(headers) if headers is not None else None
+            token = (bind_request_headers(headers, principal=_transport_principal(headers))
+                     if headers is not None else None)
             try:
                 return await handler(ctx, params)
             finally:

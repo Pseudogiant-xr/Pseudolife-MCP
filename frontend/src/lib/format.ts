@@ -71,3 +71,57 @@ export function shortId(id: string | null | undefined, len = 8): string {
 export function words(code: string | null | undefined): string {
   return (code ?? "").replace(/_/g, " ").trim();
 }
+
+/** Cut to n characters on a word boundary where one is near, with an ellipsis. */
+export function truncate(s: string | null | undefined, n: number): string {
+  const t = (s ?? "").trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n);
+  const sp = cut.lastIndexOf(" ");
+  return `${(sp > n * 0.6 ? cut.slice(0, sp) : cut).trimEnd()}…`;
+}
+
+/** Local date, "2026-10-02". */
+export function fmtDate(ts: number | null | undefined): string {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Full local date and time for a tooltip. */
+export function fmtDateTime(ts: number | null | undefined): string {
+  if (!ts) return "";
+  return new Date(ts * 1000).toLocaleString();
+}
+
+/**
+ * The daemon sends a server-rendered `age` ("18 minutes ago") on most rows;
+ * prefer it, else derive one from the epoch.
+ */
+export function ageOf(row: { age?: string | null }, ts?: number | null): string {
+  if (row.age) return row.age;
+  return fmtRelative(ts ?? null);
+}
+
+/**
+ * The daemon's slot key: lowercase, runs of space . _ - / collapse to one
+ * hyphen, hyphens trimmed. Two (entity, attribute) spellings with the same
+ * key are the same slot.
+ */
+export function slotKey(entity: string, attribute: string): string {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[\s._\-/]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  return `${norm(entity)}\u0000${norm(attribute)}`;
+}
+
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return (...args: A) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}

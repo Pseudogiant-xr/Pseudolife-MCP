@@ -45,6 +45,25 @@ modes:
                  --token-file, the token file; verifies the daemon accepts
                  them first; all-or-nothing with backups (--dry-run shows
                  the plan; --help for options)
+  invite         on the daemon host: give another machine its own principal
+                 (`invite <machine>`): prints a short-lived, single-use
+                 pairing code, no daemon restart; --list, --revoke NAME
+  pair           join a bank with a pairing code from `invite` on the daemon
+                 host (`pair <url> <code>`, or --read-code): mints the token
+                 here, writes it owner-only and sends the daemon only its
+                 SHA-256; never prints the token or the code
+  expose         on the daemon host: put the daemon on the tailnet with
+                 Tailscale Serve (`expose tailscale`), refusing a daemon
+                 without a token and never replacing another serve;
+                 `expose off` removes only that forward, `expose status`
+                 prints the client URL
+  move           move this host's Docker-tier bank to another Docker-tier
+                 checkout host over key-based ssh (`move --to <ssh-target>`):
+                 final backup from the stopped daemon, database fence,
+                 restore and row-count check on the target, one start there,
+                 then this machine's clients re-pointed; the source is
+                 stopped and fenced, never deleted, and a failure rolls back
+                 (--dry-run shows the plan; --help for options)
   update         update the daemon and the client side from a release, with
                  no checkout: pull the pinned GHCR image, back the bank up,
                  tag a rollback, recreate only the daemon, wait for health,
@@ -58,9 +77,10 @@ modes:
   import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
-  wait-mail      block until new addressed agent mail, print it and exit
-                 (arm as a background command to wake an idle session;
-                 exit 0 mail, 3 timeout, 2 setup; --help for options)
+  wait-mail      block until the daemon rings this session for agent mail
+                 (plain mail never wakes), print the mail and exit (arm as a
+                 background command to wake an idle session; exit 0 ring,
+                 3 timeout, 2 setup; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
@@ -135,9 +155,21 @@ def main() -> None:
     elif mode == "connect":
         from pseudolife_memory.connect_cli import main as connect_main
         sys.exit(connect_main(sys.argv[2:]))
+    elif mode == "invite":
+        from pseudolife_memory.invite_cli import main as invite_main
+        sys.exit(invite_main(sys.argv[2:]))
+    elif mode == "pair":
+        from pseudolife_memory.pair_cli import main as pair_main
+        sys.exit(pair_main(sys.argv[2:]))
+    elif mode == "expose":
+        from pseudolife_memory.expose_cli import main as expose_main
+        sys.exit(expose_main(sys.argv[2:]))
     elif mode == "tunnel":
         from pseudolife_memory.tunnel_cli import main as tunnel_main
         sys.exit(tunnel_main(sys.argv[2:]))
+    elif mode == "move":
+        from pseudolife_memory.move_cli import main as move_main
+        sys.exit(move_main(sys.argv[2:]))
     elif mode == "update":
         from pseudolife_memory.update_cli import main as update_main
         sys.exit(update_main(sys.argv[2:]))

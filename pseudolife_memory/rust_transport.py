@@ -20,7 +20,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 import anyio
 import httpx2
-from httpx2._utils import URLPattern, get_environment_proxies
 
 
 _MAX_BODY = 32 * 1024 * 1024
@@ -44,7 +43,7 @@ def _origin(value: str) -> str:
 @asynccontextmanager
 async def transport_context(origin: str | None = None):
     selected = os.environ.get("PSEUDOLIFE_MCP_RUST_HTTP")
-    if selected is None:
+    if not selected:
         yield None
         return
     path = Path(selected)
@@ -105,6 +104,8 @@ class _ResponseStream(httpx2.AsyncByteStream):
 
 class RustTransport(httpx2.AsyncBaseTransport):
     def __init__(self, binary: Path, *, origin: str | None = None):
+        from httpx2._utils import URLPattern, get_environment_proxies
+
         self.binary, self.origin = binary, origin
         self._process = None
         self._reader = None

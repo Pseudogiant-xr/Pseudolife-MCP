@@ -277,6 +277,13 @@ _LEASE_RETRY_SECONDS = 5.0
 # bounds a burst to one attempt, and recovery waits at most this long.
 _RECONNECT_RETRY_SECONDS = 5.0
 
+# While a started bank has no coordination bank id yet (the board creates
+# it on its first context call), /health asks again at most this often.
+# Not measured: the Docker healthcheck polls every 15 s, and this keeps the
+# extra connection to one a minute until the id exists; once found it is
+# never read again.
+BANK_ID_RETRY_SECONDS = 60.0
+
 # How long a writer session verified alive stays trusted before
 # verify_writer_session probes it again. Measured 2026-09-23 on the bench PG
 # (Windows host -> Docker): the probe (SELECT 1) costs 0.72 ms median,
@@ -375,6 +382,11 @@ def _application_name() -> str:
 
 class PostgresStorage:
     """Durable layer under the in-memory bands / cortex (single writer)."""
+
+    # The coordination bank id once read (see cached_bank_id); it never
+    # changes for a bank. Class-level defaults: no I/O until asked.
+    _bank_id: str | None = None
+    _bank_id_retry_at = 0.0
 
     def __init__(self, dsn: str, *, writer_lease: bool = True) -> None:
         """Connect, take the bank's writer lease, and ensure the schema.
@@ -673,6 +685,10 @@ class PostgresStorage:
             self._lease_lost = None
             self._session_ok_at = time.monotonic()  # fresh, epoch-checked
             if handed_over is not None:
+                # Another writer may have restored a different bank here:
+                # the cached bank id goes with the resident copy.
+                self._bank_id = None
+                self._bank_id_retry_at = 0.0
                 self.resident_invalidated = (
                     "another writer held this bank while this process was "
                     f"disconnected (lease epoch {handed_over[0]} -> "
@@ -701,6 +717,39 @@ class PostgresStorage:
         if self.resident_invalidated:
             raise BankChangedHands(self.resident_invalidated)
         return True
+
+    def cached_bank_id(self) -> str | None:
+        """The coordination bank id (meta ``coordination_bank_id``), for
+        ``/health``'s ``bank`` fingerprint, or ``None`` while it is unknown.
+
+        Read on a DEDICATED short-lived connection, like :meth:`ping`, so it
+        never waits on the shared connection, the service lock or a dream,
+        and never runs DDL. ``/health`` calls it only after :meth:`ping`
+        succeeded. Cached once found, and dropped when a reconnect finds
+        that another writer held the bank. While the row is absent or the
+        read fails, it is asked again at most every
+        ``BANK_ID_RETRY_SECONDS``. Raises on nothing it can catch."""
+        if self._bank_id is not None:
+            return self._bank_id
+        now = time.monotonic()
+        if now < self._bank_id_retry_at:
+            return None
+        self._bank_id_retry_at = now + BANK_ID_RETRY_SECONDS
+        from pseudolife_memory.storage.coordination import BANK_ID_META_KEY
+
+        try:
+            with connect_retrying_local_ports(
+                    self.dsn, connect_timeout=2, autocommit=True) as c:
+                c.execute("SET statement_timeout = '2s'")
+                row = c.execute("SELECT value FROM public.meta WHERE key = %s",
+                                (BANK_ID_META_KEY,)).fetchone()
+        except Exception:  # noqa: BLE001 — /health must never fail on this
+            logger.debug("bank id read failed", exc_info=True)
+            return None
+        value = row[0] if row else None
+        if isinstance(value, str) and value:
+            self._bank_id = value
+        return self._bank_id
 
     def _seed_relations(self) -> None:
         with self._txn(), self.conn.cursor() as cur:
@@ -1386,10 +1435,10 @@ class PostgresStorage:
 
     def load_entry_texts(self) -> list[dict]:
         """``id``/``text``/``source`` of every entry, in :meth:`load_entries`
-        order, for readers that never touch an embedding (the review-judge
-        evidence packs). Transferring and decoding the vectors is ~96% of
-        a full load: 650 ms vs 23 ms for 2,239 entries, live bank,
-        2026-09-23."""
+        order, for readers that never touch an embedding (review-judge
+        evidence packs and quarantine retyping). Transferring and decoding
+        the vectors is ~96% of a full load: 650 ms vs 23 ms for 2,239 entries,
+        live bank, 2026-09-23."""
         return [{"id": r[0], "text": r[1], "source": r[2]}
                 for r in self.conn.execute(
                     "SELECT id, text, source FROM entries ORDER BY id").fetchall()]

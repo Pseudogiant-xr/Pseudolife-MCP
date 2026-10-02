@@ -27,6 +27,19 @@ NEW_TOKEN = "fixture-new-secret"
 BODY_MARKER = "private-body-marker"
 
 
+@pytest.fixture
+def rust_binary():
+    candidate = os.environ.get("PSEUDOLIFE_RUST_TEST_BINARY")
+    if candidate is None:
+        candidate = str(Path(__file__).resolve().parents[1] / "rust" / "http-transport"
+                        / "target" / "debug" / ("pseudolife-http.exe" if os.name == "nt"
+                                                else "pseudolife-http"))
+    path = Path(candidate)
+    if not path.is_file():
+        pytest.skip("build rust/http-transport before running Rust integration tests")
+    return path
+
+
 class _ReusableHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
@@ -36,6 +49,9 @@ class _Fixture:
         self.requests: list[tuple[str, str | None, dict]] = []
         self.fault_method: str | None = None
         self.fault: int | str | None = None
+        self.principals_fault: str | dict | None = None
+        self.refuse_initialized = False
+        self.notification_refusals = 0
         self.block_initialize = False
         self.initialize_blocked = Event()
         self.release_initialize = Event()
@@ -50,8 +66,8 @@ class _Fixture:
             def log_message(self, *_args) -> None:
                 pass
 
-            def _reply(self, status: int, body: dict) -> None:
-                raw = json.dumps(body).encode()
+            def _reply(self, status: int, body: dict | bytes) -> None:
+                raw = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
@@ -93,6 +109,28 @@ class _Fixture:
                 auth = self.headers.get("Authorization")
                 owner.requests.append((method, auth, request.get("params") or {}))
                 fault = None
+
+                if method == "notifications/initialized" and owner.refuse_initialized:
+                    owner.notification_refusals += 1
+                    self._reply(503, {"error": "principals_unavailable"})
+                    return
+
+                if method == "tools/call" and owner.principals_fault is not None:
+                    # Exact wire contracts from the principal wrapper/API gate;
+                    # admission refuses before the tool's write counter runs.
+                    if isinstance(owner.principals_fault, dict):
+                        mode = owner.principals_fault["mode"]
+                        body = owner.principals_fault["body"]
+                        self._reply(200 if mode == "jsonrpc" else 503,
+                                    {"jsonrpc": "2.0", "id": request["id"], "error": body}
+                                    if mode == "jsonrpc" else body)
+                    elif owner.principals_fault == "jsonrpc":
+                        self._reply(200, {"jsonrpc": "2.0", "id": request["id"], "error": {
+                            "code": -32003, "message": "principals_unavailable",
+                            "data": {"status": 503, "error": "principals_unavailable"}}})
+                    else:
+                        self._reply(503, {"error": "principals_unavailable"})
+                    return
 
                 if owner.block_initialize and method == "initialize":
                     owner.block_initialize = False
@@ -340,7 +378,7 @@ def _replace_token(path: Path, token: str) -> None:
 async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
                         *, operation_timeout: float = 1.0, agent_headers: dict | None = None,
                         prepare_delay: float = 0, coordination_refusal: str = "",
-                        codex_metadata: bool = False):
+                        codex_metadata: bool = False, pid_file: Path | None = None):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -352,6 +390,8 @@ async def _proxy_client(upstream: _Fixture, token_file: Path, stderr: Path,
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)
     code = (
         "import asyncio,json,sys; "
+        + (f"import os; from pathlib import Path; Path({str(pid_file)!r}).write_text(str(os.getpid())); "
+           if pid_file is not None else "") +
         "from pseudolife_memory.credentials import CredentialProvider; "
         "from pseudolife_memory.shim import _proxy; "
         + ("import time; from pseudolife_memory import repository_claims; "
@@ -558,6 +598,203 @@ def test_http_failure_is_sanitized_and_next_call_recovers(
     assert BODY_MARKER not in errors
     assert OLD_TOKEN not in errors
     assert "private.invalid" not in errors
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+def test_refused_notification_cannot_prove_later_write_was_not_dispatched(
+        tmp_path, upstream, monkeypatch, backend, request):
+    from mcp.shared.exceptions import MCPError
+    import psutil
+
+    if backend == "rust":
+        binary = request.getfixturevalue("rust_binary")
+        monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", str(binary.resolve()))
+    else:
+        monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "client-home"))
+    token_file, pid_file = tmp_path / "token", tmp_path / "proxy.pid"
+    _replace_token(token_file, NEW_TOKEN)
+    owned = []
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=5, pid_file=pid_file) as client:
+            parent = psutil.Process(int(pid_file.read_text()))
+            helpers = parent.children(recursive=True)
+            assert len(helpers) == (1 if backend == "rust" else 0)
+            owned.extend([parent, *helpers])
+            upstream.refuse_initialized = True
+            upstream.fault_method = "tools/call"
+            upstream.fault = "drop_after_commit"
+            with pytest.raises(MCPError) as caught:
+                await client.call_tool("write", {})
+            assert upstream.writes == 1
+            assert upstream.notification_refusals == 1
+            assert sum(method == "tools/call" for method, _auth, _params in upstream.requests) == 1
+            assert caught.value.data["phase"] == "call"
+            assert caught.value.data["operation_outcome"] == "unknown"
+            assert "check its result before retrying" in caught.value.message.lower()
+            assert parent.children(recursive=True) == helpers
+            upstream.refuse_initialized = False
+            recovered = await client.call_tool("read", {})
+            assert json.loads(recovered.content[0].text)["writes"] == 1
+            assert parent.children(recursive=True) == helpers
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=20))
+    finally:
+        _, alive = psutil.wait_procs(owned, timeout=3)
+        assert not alive, "disposable proxy/helper cleanup failed"
+
+
+@pytest.mark.parametrize("method,request_id,http_method", [
+    ("initialize", 1, "POST"),
+    ("tools/list", 1, "POST"),
+    ("tools/call", 1, "POST"),
+    ("tools/call", 2, "GET"),
+    ("tools/call", 2, "DELETE"),
+])
+def test_unrelated_admission_response_cannot_classify_current_call(
+        method, request_id, http_method):
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
+    import httpx2
+
+    attempt = shim._UpstreamAttempt(phase="call", dispatched=True)
+    attempt.observe_request("POST", {"id": 2, "method": "tools/call"})
+    response = httpx2.Response(503, json={"error": "principals_unavailable"},
+                              request=httpx2.Request(http_method, "http://fixture.invalid/mcp",
+                                  extensions={"pseudolife_rpc_request": (method, request_id)}))
+    asyncio.run(attempt.observe_response(response))
+    error = shim._transport_error(MCPError(CONNECTION_CLOSED, "closed"), attempt, "call")
+    assert error.data["phase"] == "call"
+    assert error.data["operation_outcome"] == "unknown"
+    assert "check its result before retrying" in error.message.lower()
+
+
+def test_earlier_initialize_admission_evidence_does_not_survive_call_dispatch():
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
+    import httpx2
+
+    attempt = shim._UpstreamAttempt()
+    key = attempt.observe_request("POST", {"id": 1, "method": "initialize"})
+    response = httpx2.Response(503, json={"error": "principals_unavailable"},
+                              request=httpx2.Request("POST", "http://fixture.invalid/mcp",
+                                  extensions={"pseudolife_rpc_request": key}))
+    asyncio.run(attempt.observe_response(response))
+    refused = shim._transport_error(MCPError(CONNECTION_CLOSED, "closed"), attempt, "call")
+    assert refused.data["operation_outcome"] == "not_dispatched"
+    assert refused.data["classification"] == "principals_unavailable"
+    attempt.phase, attempt.dispatched = "call", True
+    attempt.observe_request("POST", {"id": 2, "method": "tools/call"})
+    # Even an out-of-order old response cannot restore the initialize evidence.
+    asyncio.run(attempt.observe_response(response))
+    lost = shim._transport_error(MCPError(CONNECTION_CLOSED, "closed"), attempt, "call")
+    assert lost.data["phase"] == "call"
+    assert lost.data["operation_outcome"] == "unknown"
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+@pytest.mark.parametrize("mode", ["jsonrpc", "http503"])
+def test_principal_admission_refusal_survives_persistent_sdk(
+        tmp_path, upstream, monkeypatch, backend, mode, request):
+    from mcp.shared.exceptions import MCPError
+    import psutil
+
+    if backend == "rust":
+        binary = request.getfixturevalue("rust_binary")
+        monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", str(binary.resolve()))
+    else:
+        monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "client-home"))
+    token_file, pid_file = tmp_path / "token", tmp_path / "proxy.pid"
+    _replace_token(token_file, NEW_TOKEN)
+    owned = []
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log",
+                                 operation_timeout=5, pid_file=pid_file) as client:
+            parent = psutil.Process(int(pid_file.read_text()))
+            helpers = parent.children(recursive=True)
+            assert len(helpers) == (1 if backend == "rust" else 0)
+            owned.extend([parent, *helpers])
+            upstream.principals_fault = mode
+            for _ in range(2):
+                with pytest.raises(MCPError) as caught:
+                    await client.call_tool("write", {})
+                assert caught.value.code == -32003
+                assert caught.value.message == "principals_unavailable"
+                assert caught.value.data == {
+                    "classification": "principals_unavailable", "phase": "call",
+                    "operation_outcome": "not_dispatched", "status": 503,
+                    "error": "principals_unavailable",
+                }
+                assert parent.children(recursive=True) == helpers
+                assert upstream.writes == 0
+            assert sum(method == "tools/call" for method, _auth, _params in upstream.requests) == 2
+            upstream.principals_fault = None
+            recovered = await client.call_tool("write", {})
+            assert json.loads(recovered.content[0].text)["writes"] == 1
+            assert parent.children(recursive=True) == helpers
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=20))
+    finally:
+        _, alive = psutil.wait_procs(owned, timeout=3)
+        assert not alive, "disposable proxy/helper cleanup failed"
+
+
+@pytest.mark.parametrize("backend", ["python", "rust"])
+@pytest.mark.parametrize("mode,body", [
+    ("jsonrpc", {"code": -32003, "message": BODY_MARKER,
+                 "data": {"status": 503, "error": "principals_unavailable"}}),
+    ("jsonrpc", {"code": -32003, "message": "principals_unavailable",
+                 "data": {"status": "503", "error": "principals_unavailable"}}),
+    ("jsonrpc", {"code": -32003, "message": "principals_unavailable",
+                 "data": {"status": 503, "error": "principals_unavailable", "credential": OLD_TOKEN}}),
+    ("jsonrpc", {"code": -32003, "message": "principals_unavailable", "data": None}),
+    ("http503", {"error": BODY_MARKER}),
+    ("http503", {"error": "principals_unavailable", "credential": OLD_TOKEN}),
+    ("http503", b'{"error":"principals_unavailable","error":"principals_unavailable"}'),
+    ("http503", b'{"error":"principals_unavailable"'),
+    ("http503", b'{"error":"principals_unavailable"}' + b" " * 257),
+], ids=["rpc-message", "rpc-status", "rpc-extra", "rpc-missing", "generic-503",
+        "http-extra", "http-duplicate", "http-malformed", "http-oversized"])
+def test_unverified_principal_refusal_stays_unknown_through_persistent_sdk(
+        tmp_path, upstream, monkeypatch, backend, mode, body, request):
+    from mcp.shared.exceptions import MCPError
+
+    if backend == "rust":
+        binary = request.getfixturevalue("rust_binary")
+        monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", str(binary.resolve()))
+    else:
+        monkeypatch.delenv("PSEUDOLIFE_MCP_RUST_HTTP", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "client-home"))
+    token_file, stderr = tmp_path / "token", tmp_path / "stderr.log"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, stderr, operation_timeout=5) as client:
+            upstream.principals_fault = {"mode": mode, "body": body}
+            with pytest.raises(MCPError) as caught:
+                await client.call_tool("write", {})
+            assert caught.value.code == (-32003 if mode == "jsonrpc" else -32603)
+            assert caught.value.data == {
+                "classification": "protocol" if mode == "jsonrpc" else "service_unavailable",
+                "phase": "call", "operation_outcome": "unknown",
+            }
+            assert "check its result before retrying" in caught.value.message.lower()
+            rendered = repr(caught.value) + repr(caught.value.data)
+            assert BODY_MARKER not in rendered and OLD_TOKEN not in rendered
+            assert sum(method == "tools/call" for method, _auth, _params in upstream.requests) == 1
+            upstream.principals_fault = None
+            recovered = await client.call_tool("write", {})
+            assert json.loads(recovered.content[0].text)["writes"] == 1
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=15))
+    errors = stderr.read_text(encoding="utf-8")
+    assert BODY_MARKER not in errors and OLD_TOKEN not in errors
 
 
 def test_lost_write_response_is_unknown_and_never_replayed(tmp_path, upstream):

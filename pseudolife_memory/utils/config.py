@@ -1375,6 +1375,12 @@ class MemoryPolicyConfig:
         self.ab_arms = list(self.ab_arms)
 
 
+# Keys `coordination.wake` once took and no longer uses. A deployed
+# config.yaml may still carry them (the guide's example did), so they are
+# dropped at load rather than refused: WakeConfig takes no unknown key.
+RETIRED_WAKE_KEYS = frozenset({"nudge_interval_seconds"})
+
+
 @dataclass
 class WakeConfig:
     """Caps on the rings the daemon decides at send (schema v49).
@@ -1393,9 +1399,11 @@ class WakeConfig:
     the trial's whole evening of messages, every one rung. A cap of 0
     rings nobody (or never honours ``urgent``). ``active_seconds`` is the
     window in which a recipient's own last board action makes new mail
-    ``hinted`` (its next tool result carries it) rather than rung, and
-    ``nudge_interval_seconds`` bounds the ring that asks an idle, unparked
-    session for a park record; both are judgment calls, at least 1.
+    ``hinted`` (its next tool result carries it) rather than rung; a
+    judgment call, at least 1. ``nudge_interval_seconds``, which bounded
+    the hourly ring to an idle, unparked session, is retired with that
+    ring (2026-10-02, regular mail never wakes): a config.yaml that still
+    names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
     """
 
     per_recipient_per_hour: int = 20
@@ -1403,13 +1411,12 @@ class WakeConfig:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
-    nudge_interval_seconds: int = 3600
 
     def __post_init__(self) -> None:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
-                     "fan_out_stagger_seconds", "active_seconds", "nudge_interval_seconds"):
+                     "fan_out_stagger_seconds", "active_seconds"):
             value = getattr(self, name)
-            floor = 1 if name in {"active_seconds", "nudge_interval_seconds"} else 0
+            floor = 1 if name == "active_seconds" else 0
             if type(value) is not int or value < floor:
                 raise ValueError(f"coordination.wake.{name} must be a whole number of at least {floor}")
 
@@ -1457,7 +1464,8 @@ class CoordinationConfig:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
         if isinstance(self.wake, dict):
-            self.wake = WakeConfig(**self.wake)
+            self.wake = WakeConfig(**{key: value for key, value in self.wake.items()
+                                      if key not in RETIRED_WAKE_KEYS})
         if not isinstance(self.wake, WakeConfig):
             raise ValueError("coordination.wake must be a mapping of wake caps")
         if type(self.awareness_limit) is not int or not 1 <= self.awareness_limit <= 20:

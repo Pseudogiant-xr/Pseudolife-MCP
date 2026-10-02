@@ -1,13 +1,48 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Topbar from "./components/Topbar.svelte";
   import TabBar from "./components/TabBar.svelte";
   import TokenDialog from "./components/TokenDialog.svelte";
+  import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import Toasts from "./components/Toasts.svelte";
+  import ReviewAsk from "./components/ReviewAsk.svelte";
   import Icon from "./components/Icon.svelte";
   import Observatory from "./views/Observatory.svelte";
+  import Cortex from "./views/Cortex.svelte";
+  import World from "./views/World.svelte";
+  import Lessons from "./views/Lessons.svelte";
+  import Stream from "./views/Stream.svelte";
+  import Recall from "./views/Recall.svelte";
+  import Graph from "./views/Graph.svelte";
+  import Review from "./views/Review.svelte";
+  import Insight from "./views/Insight.svelte";
   import Board from "./views/Board.svelte";
-  import { classicHref, findNav, navForDigit } from "./lib/nav";
+  import Episodes from "./views/Episodes.svelte";
+  import Settings from "./views/Settings.svelte";
+  import { findNav, navForDigit } from "./lib/nav";
   import { loadHealth, loadOverview, navigate, page, refresh, startRouter, ui } from "./lib/state.svelte";
+
+  const VIEWS: Record<string, Component> = {
+    observatory: Observatory,
+    cortex: Cortex,
+    world: World,
+    lessons: Lessons,
+    stream: Stream,
+    recall: Recall,
+    graph: Graph,
+    review: Review,
+    insight: Insight,
+    board: Board,
+    episodes: Episodes,
+    settings: Settings,
+  };
+
+  // Gold behind the canonical side of the product, lavender behind the
+  // associative side; the glow says which half of the bank you are in.
+  const CANON_GLOW = new Set(["board", "cortex", "world", "graph", "review", "insight"]);
+  // The graph needs the whole width for the galaxy.
+  const FULL_BLEED = new Set(["graph"]);
 
   $effect(() => startRouter());
 
@@ -19,10 +54,10 @@
   });
 
   const item = $derived(findNav(ui.route));
-  const native = $derived(item?.native ? item.id : null);
+  const View = $derived(VIEWS[ui.route]);
   const title = $derived(item?.label ?? "Not found");
   const subtitle = $derived((page.route === ui.route && page.subtitle) || item?.subtitle || "");
-  const glow = $derived(ui.route === "board" ? "board" : "observatory");
+  const glow = $derived(CANON_GLOW.has(ui.route) ? "canon" : "assoc");
 
   $effect(() => {
     document.title = `${title}, Cortex Console`;
@@ -31,7 +66,7 @@
   function onKeydown(e: KeyboardEvent) {
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
-    if (t instanceof Element && t.closest("input, textarea, select, [contenteditable='true'], dialog")) return;
+    if (t instanceof Element && t.closest("input, textarea, select, [contenteditable='true'], dialog, canvas")) return;
     if (document.querySelector("dialog[open]")) return;
     if (e.key === "r") {
       refresh();
@@ -59,28 +94,31 @@
   </div>
 
   <main class="main">
-    <Topbar {title} {subtitle} />
-    <div class="content">
-      {#if native === "observatory"}
-        <Observatory />
-      {:else if native === "board"}
-        <Board />
+    <Topbar {title} {subtitle} full={FULL_BLEED.has(ui.route)} />
+    <div class="content" class:full={FULL_BLEED.has(ui.route)}>
+      {#if View}
+        {#key ui.route}
+          <!-- A view that throws while rendering shows this instead of
+               leaving the content area blank; the rest of the shell lives. -->
+          <svelte:boundary onerror={(e) => console.error("view failed to render", e)}>
+            <View />
+            {#snippet failed(_error, reset)}
+              <section class="panel notfound" role="alert">
+                <h2 class="panel-title">{title} failed to render</h2>
+                <p class="state-body">
+                  Something in the data broke this view. The error is in the browser console; try again, or
+                  open another view.
+                </p>
+                <button type="button" class="btn btn-primary btn-sm" onclick={reset}>Try again</button>
+              </section>
+            {/snippet}
+          </svelte:boundary>
+        {/key}
       {:else}
         <section class="panel notfound">
-          {#if item}
-            <h2 class="panel-title">{item.label} opens in the classic console</h2>
-            <p class="state-body">This console does not have its own {item.label} view yet.</p>
-            <a class="btn btn-primary btn-sm" href={classicHref(item.classic ?? item.id)}>
-              Open {item.label} in the classic console
-            </a>
-          {:else}
-            <h2 class="panel-title">There is no view called "{ui.route}"</h2>
-            <p class="state-body">The address may come from the classic console, which has more views.</p>
-            <div class="row">
-              <a class="btn btn-primary btn-sm" href="#/observatory">Go to the Observatory</a>
-              <a class="btn btn-secondary btn-sm" href={classicHref(ui.route)}>Try it in the classic console</a>
-            </div>
-          {/if}
+          <h2 class="panel-title">There is no view called "{ui.route}"</h2>
+          <p class="state-body">The address may be mistyped, or point at a view this console no longer has.</p>
+          <a class="btn btn-primary btn-sm" href="#/observatory">Go to the Observatory</a>
         </section>
       {/if}
     </div>
@@ -106,6 +144,9 @@
 </dialog>
 
 <TokenDialog />
+<ConfirmDialog />
+<ReviewAsk />
+<Toasts />
 
 <style>
   .glow {
@@ -121,14 +162,14 @@
     opacity: var(--glow-opacity);
     filter: blur(140px);
   }
-  .glow.observatory span {
+  .glow.assoc span {
     left: 10%;
     top: 10%;
     width: 720px;
     height: 520px;
     background: #a855f7;
   }
-  .glow.board span {
+  .glow.canon span {
     left: 18%;
     top: -5%;
     width: 640px;
@@ -152,6 +193,12 @@
     padding: 26px 28px 40px;
     max-width: 1240px;
     width: 100%;
+    /* Centred in the space beside the sidebar, so a wide window has even
+       margins instead of an empty right side. */
+    margin-inline: auto;
+  }
+  .content.full {
+    max-width: none;
   }
   .notfound {
     display: flex;
@@ -159,11 +206,6 @@
     align-items: flex-start;
     gap: 12px;
     padding: 24px 26px;
-  }
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
   }
   .tabs-wrap {
     display: none;

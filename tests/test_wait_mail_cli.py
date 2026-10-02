@@ -58,9 +58,18 @@ def digests(tmp_path, monkeypatch):
 
 
 def _write(path, watermark, body=""):
-    """Replace the file atomically, the way the adapter writes it."""
+    """Replace the file atomically, the way the adapter writes it. On Windows
+    the replace is refused while the waiter has the file open for a read;
+    the adapter then writes again on its next heartbeat, so this retries
+    (a 2026-10-02 local run lost a timer write to WinError 5 here)."""
     temp = path.with_name(path.name + ".tmp")
     temp.write_bytes(f"{watermark}\n{body}".encode("utf-8"))
+    for _ in range(100):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            time.sleep(0.01)
     os.replace(temp, path)
 
 
@@ -70,6 +79,13 @@ def _digest(directory, session_id="fixture-session"):
 
 def _seen(path):
     return path.with_suffix(".seen")
+
+
+def _ring(digest, watermark, reason="rung anyone"):
+    """The ring marker the adapter writes beside the digest when the daemon
+    decides a ring (the same file the Stop hook reads): line 1 the digest
+    watermark the ring is for, line 2 the decision and reason."""
+    _write(digest.with_suffix(".ring"), watermark, f"{reason}\n")
 
 
 async def _wait_for(condition, timeout=2.0):
@@ -147,9 +163,128 @@ def test_waiter_renews_its_short_listener_lease_and_disarms_on_timeout(digests, 
 
 # --- firing rule ------------------------------------------------------------
 
+def test_plain_mail_does_not_end_the_wait(digests, capsysbinary):
+    """Regular mail never wakes (maintainer decision 2026-10-02): mail the
+    daemon decided no ring for reaches the digest, and the waiter keeps
+    waiting; the mail is still pending at the session's next turn."""
+    digest = _digest(digests)
+    _write(digest, 1)
+    timer = _later(0.1, lambda: _write(digest, 2, MAIL))
+    try:
+        assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
+    finally:
+        timer.cancel()
+    assert timer.done.is_set()
+    assert capsysbinary.readouterr().out == b""
+    assert not _seen(digest).exists()
+
+
+def test_a_rung_marker_ends_the_wait_once(digests, capsysbinary):
+    """The daemon's ring, not the mail, ends the wait: mail already in the
+    digest waits for the ring marker (a staggered ring_at writes it later),
+    then fires once. Re-armed with that mail still unacknowledged, the same
+    ring does not fire again."""
+    digest = _digest(digests)
+    _write(digest, 2, MAIL)
+    timer = _later(0.2, lambda: _ring(digest, 2, "rung urgent"))
+    try:
+        assert run_wait_mail(["--timeout", "5", *FAST]) == 0
+    finally:
+        timer.cancel()
+    assert timer.done.is_set()
+    captured = capsysbinary.readouterr()
+    assert captured.out == MAIL.encode("utf-8")
+    assert b"rung urgent" in captured.err and b"watermark 2" in captured.err
+    assert _seen(digest).read_text().strip() == "2"
+    [line] = (digests / "ledger.log").read_text().splitlines()
+    assert line.split("\t")[1:] == ["wait", digest.stem[:8], "2", str(len(MAIL)), "rung urgent"]
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
+def test_a_stale_ring_marker_never_fires(digests, capsysbinary):
+    """A marker at or below ``.seen`` is a ring the session already took (the
+    Stop hook's rule): plain mail arriving after it does not borrow it."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _ring(digest, 3)
+    _seen(digest).write_text("3\n")
+    timer = _later(0.1, lambda: _write(digest, 4, MAIL + "- 1 more pending\n"))
+    try:
+        assert run_wait_mail(["--timeout", "0.6", *FAST]) == 3
+    finally:
+        timer.cancel()
+    assert timer.done.is_set()
+    assert capsysbinary.readouterr().out == b""
+    assert _seen(digest).read_text().strip() == "3"
+
+
+@pytest.mark.parametrize("ring", ["", "x\nrung anyone\n", "3\n", "3\n\n", "3\nnudged no_park\n",
+                                  "3\nwithheld need_not_cleared\n", "1234567890123\nrung anyone\n",
+                                  "3\nrung café\n"])
+def test_a_marker_that_is_not_a_rung_ring_never_fires(digests, capsysbinary, ring):
+    """Read as the Stop hook reads it: anything but a watermark and a rung
+    decision is no ring, so the waiter never wakes on a guess."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    digest.with_suffix(".ring").write_bytes(ring.encode("utf-8"))
+    assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
+@pytest.mark.parametrize("ring", [b"3\r\nrung anyone\r\n", b" 3 \nrung anyone\n", b"3\r\nrung urgent"])
+def test_a_marker_the_stop_hook_accepts_fires_the_waiter_too(digests, capsysbinary, ring):
+    """The Stop hook drops CR, LF and spaces from line 1 and one trailing CR
+    from line 2, so a marker it rings on rings the waiter as well."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    digest.with_suffix(".ring").write_bytes(ring)
+    assert run_wait_mail(["--timeout", "5", *FAST]) == 0
+    assert capsysbinary.readouterr().out == MAIL.encode("utf-8")
+
+
+def test_a_ring_ahead_of_the_digest_waits_for_the_digest(digests, capsysbinary):
+    """On Windows a digest replace can fail while a reader holds the file;
+    the adapter has already moved its watermark, so the ring marker can name
+    mail the digest on disk does not hold yet. Firing then would print mail
+    already shown, leave ``.seen`` where it is and fire again on every
+    re-arm: the waiter waits until the digest itself is past ``.seen``."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _seen(digest).write_text("3\n")
+    _ring(digest, 4)
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+    newer = MAIL + "- 1 more pending\n"
+    timer = _later(0.1, lambda: _write(digest, 4, newer))
+    try:
+        assert run_wait_mail(["--timeout", "5", *FAST]) == 0
+    finally:
+        timer.cancel()
+    assert timer.done.is_set()
+    assert capsysbinary.readouterr().out == newer.encode("utf-8")
+    assert _seen(digest).read_text().strip() == "4"
+
+
+def test_a_symlinked_ring_marker_never_fires(digests, tmp_path, capsysbinary):
+    """Only a regular file is a ring, as in the Stop hook: a link planted at
+    the marker's path rings nothing."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    target = tmp_path / "planted.ring"
+    target.write_bytes(b"3\nrung anyone\n")
+    try:
+        digest.with_suffix(".ring").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks need privileges on this platform")
+    assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
 def test_unshown_mail_fires_at_once_prints_the_body_verbatim_and_marks_it(digests, capsysbinary):
     digest = _digest(digests)
     _write(digest, 3, MAIL)
+    _ring(digest, 3)
     _seen(digest).write_text("2\n")
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     captured = capsysbinary.readouterr()
@@ -158,13 +293,15 @@ def test_unshown_mail_fires_at_once_prints_the_body_verbatim_and_marks_it(digest
     assert _seen(digest).read_text().strip() == "3"
     ledger = (digests / "ledger.log").read_text().splitlines()
     assert len(ledger) == 1
-    stamp, kind, key, watermark, size = ledger[0].split("\t")
-    assert (kind, key, watermark, size) == ("wait", digest.stem[:8], "3", str(len(MAIL)))
+    stamp, kind, key, watermark, size, reason = ledger[0].split("\t")
+    assert (kind, key, watermark, size, reason) == (
+        "wait", digest.stem[:8], "3", str(len(MAIL)), "rung anyone")
 
 
 def test_mail_already_shown_does_not_fire_so_a_rearm_cannot_loop(digests, capsysbinary):
     digest = _digest(digests)
     _write(digest, 3, MAIL)
+    _ring(digest, 3)
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     capsysbinary.readouterr()
     # Re-armed with the same mail still pending and unacknowledged.
@@ -180,10 +317,10 @@ def test_mail_already_shown_does_not_fire_so_a_rearm_cannot_loop(digests, capsys
     assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
 
 
-def test_mail_arriving_during_the_wait_fires(digests, capsysbinary):
+def test_a_ring_arriving_during_the_wait_fires(digests, capsysbinary):
     digest = _digest(digests)
     _write(digest, 1)
-    timer = _later(0.2, lambda: _write(digest, 2, MAIL))
+    timer = _later(0.2, lambda: (_write(digest, 2, MAIL), _ring(digest, 2)))
     try:
         assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     finally:
@@ -195,11 +332,12 @@ def test_mail_arriving_during_the_wait_fires(digests, capsysbinary):
 
 def test_a_change_that_empties_the_digest_does_not_fire(digests, capsysbinary):
     """Acknowledging the last message rewrites the digest with an empty body:
-    the watermark moves but there is nothing to wake for."""
+    the watermark moves but there is nothing to wake for, even when a ring
+    for it lands too."""
     digest = _digest(digests)
     _write(digest, 5, MAIL)
     _seen(digest).write_text("5\n")
-    timer = _later(0.1, lambda: _write(digest, 6))
+    timer = _later(0.1, lambda: (_write(digest, 6), _ring(digest, 6)))
     try:
         assert run_wait_mail(["--timeout", "1.5", *FAST]) == 3
     finally:
@@ -214,6 +352,7 @@ def test_a_malformed_digest_or_marker_never_crashes_the_wait(digests, capsysbina
     digest.write_bytes(b"not-a-number\n" + MAIL.encode())
     assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
     _write(digest, 2, MAIL)
+    _ring(digest, 2)
     _seen(digest).write_text("garbage")
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert _seen(digest).read_text().strip() == "2"
@@ -233,6 +372,7 @@ def test_the_body_is_out_before_the_marker_moves(digests, monkeypatch, capsysbin
     monkeypatch.setattr(wait_mail_cli, "_mark_seen", killed)
     digest = _digest(digests)
     _write(digest, 3, MAIL)
+    _ring(digest, 3)
     with pytest.raises(Killed):
         run_wait_mail(["--timeout", "5", *FAST])
     assert capsysbinary.readouterr().out == MAIL.encode("utf-8")
@@ -274,6 +414,7 @@ def test_non_ascii_peer_text_reaches_stdout_byte_for_byte(digests, capsysbinary)
     digest = _digest(digests)
     body = MAIL.replace("please look", "review — naïve café ✓ 検証")
     _write(digest, 1, body)
+    _ring(digest, 1)
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == body.encode("utf-8")
 
@@ -284,12 +425,14 @@ def test_default_key_is_the_claude_session_id_like_the_shim(digests, capsysbinar
     from pseudolife_memory.coordination_identity import digest_path_for
     assert digest_path_for("fixture-session") == _digest(digests)
     _write(_digest(digests), 1, MAIL)
+    _ring(_digest(digests), 1)
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
 
 
 def test_session_id_flag_keys_a_codex_thread_digest(digests, capsysbinary):
     thread = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
     _write(_digest(digests, thread), 1, MAIL)
+    _ring(_digest(digests, thread), 1)
     _write(_digest(digests), 1)  # this Claude session: nothing pending
     assert run_wait_mail(["--session-id", thread, "--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == MAIL.encode("utf-8")
@@ -324,6 +467,7 @@ def test_after_clear_the_process_record_maps_the_new_id_to_the_shims_file(
     monkeypatch.setenv("CLAUDE_PID", "4242")
     _host_record(digests, 4242, SPAWN_KEY, AFTER_CLEAR)
     _write(digests / f"{SPAWN_KEY}.txt", 2, MAIL)
+    _ring(digests / f"{SPAWN_KEY}.txt", 2)
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == MAIL.encode("utf-8")
     assert (digests / f"{SPAWN_KEY}.seen").read_text().strip() == "2"
@@ -337,6 +481,7 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
     spawn, current = "fixture-session", f"after-{reason}"
     digest = _digest(digests, spawn)
     _write(digest, 2, MAIL)
+    _ring(digest, 2)
     _seen(digest).write_text("2\n")
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_DIGEST_DIR": str(digests),
@@ -399,6 +544,7 @@ def test_prompt_hook_and_waiter_share_the_marker_in_both_hook_runtimes(
 
     newer = "Coordination: newer addressed mail\n"
     _write(digest, 4, newer)
+    _ring(digest, 4)
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == newer.encode()
     assert _seen(digest).read_text().strip() == "4"
@@ -489,6 +635,7 @@ def test_digest_flag_overrides_the_keying(tmp_path, digests, capsysbinary):
     elsewhere = tmp_path / "elsewhere" / f"{_key('other')}.txt"
     elsewhere.parent.mkdir()
     _write(elsewhere, 4, MAIL)
+    _ring(elsewhere, 4)
     assert run_wait_mail(["--digest", str(elsewhere), "--timeout", "5", *FAST]) == 0
     assert _seen(elsewhere).read_text().strip() == "4"
 
@@ -539,9 +686,10 @@ def test_a_digest_that_disappears_mid_wait_exits_2(digests, capsysbinary):
     ["--interval", "nan"], ["--session-id", "x", "--digest", "y.txt"], ["--bogus"],
 ])
 def test_bad_arguments_exit_2(args, digests, capsysbinary):
-    # Unshown mail is pending, so any of these that slipped through would
-    # exit 0 (or, for a NaN timeout, never exit).
+    # Unshown, rung mail is pending, so any of these that slipped through
+    # would exit 0 (or, for a NaN timeout, never exit).
     _write(_digest(digests), 1, MAIL)
+    _ring(_digest(digests), 1)
     assert run_wait_mail(args) == 2
     captured = capsysbinary.readouterr()
     assert captured.out == b"" and b"error:" in captured.err
@@ -572,6 +720,7 @@ def test_a_stat_error_is_retried_mid_wait_but_stops_the_arming(digests, monkeypa
     def arrive():
         refusals["left"] = 3
         _write(digest, 2, MAIL)
+        _ring(digest, 2)
     timer = _later(0.1, arrive)
     try:
         assert run_wait_mail(["--timeout", "5", *FAST]) == 0
@@ -597,6 +746,7 @@ def test_mail_that_cannot_be_written_to_stdout_stays_unshown(digests, monkeypatc
             pass
     digest = _digest(digests)
     _write(digest, 3, MAIL)
+    _ring(digest, 3)
     monkeypatch.setattr("sys.stdout", Stdout())
     assert run_wait_mail(["--timeout", "5", *FAST]) == 2
     assert not _seen(digest).exists()
@@ -615,13 +765,23 @@ def _one_pending(action, body):
                              "excerpt": "please look"}]})
 
 
+def _one_rung(action, body):
+    """One pending message the daemon decided to ring."""
+    answer = _one_pending(action, body)
+    if answer is not None:
+        answer = httpx.Response(200, json={**answer.json(), "wake": {
+            "decision": "rung", "reason": "anyone", "ring_at": time.time()}})
+    return answer
+
+
 def test_waits_on_the_file_the_adapter_writes_and_its_hint_then_stays_quiet(tmp_path, capsysbinary):
-    """The contract between writer and reader: the adapter's digest makes the
-    wait fire, and once the wait has shown the mail, the adapter's
-    tool-result hint does not repeat it."""
+    """The contract between writer and reader: the adapter's digest and the
+    ring marker it writes for the daemon's ring make the wait fire, and once
+    the wait has shown the mail, the adapter's tool-result hint does not
+    repeat it."""
     async def drive():
         daemon = FakeDaemon()
-        daemon.hook = _one_pending
+        daemon.hook = _one_rung
         digest = tmp_path / "d" / f"{_key('e2e')}.txt"
         client, instance = adapter(daemon, digest_path=digest)
         async with client, instance:
@@ -676,6 +836,7 @@ def test_a_daemon_outage_and_recovery_do_not_wake_a_waiter(monkeypatch, tmp_path
 
 def test_cli_dispatches_wait_mail_and_passes_its_exit_code(digests, monkeypatch, capsysbinary):
     _write(_digest(digests), 1, MAIL)
+    _ring(_digest(digests), 1)
     monkeypatch.setattr("sys.argv", ["pseudolife-mcp", "wait-mail", "--timeout", "5", *FAST])
     with pytest.raises(SystemExit) as exc:
         cli_main()

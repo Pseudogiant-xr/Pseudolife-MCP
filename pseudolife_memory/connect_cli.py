@@ -1,6 +1,7 @@
 """``pseudolife-mcp connect``: point this machine's clients at a daemon.
 
     pseudolife-mcp connect <daemon-url> [--token-file PATH [--read-token]]
+        [--code CODE | --read-code]
         [--client claude-code,codex,claude-desktop,gemini | --client all]
         [--dry-run] [--yes] [--json]
 
@@ -39,10 +40,23 @@ Commands, writer ids, state directories and user-added env stay as they
 are. Codex is written through its own app-server (``codex_connection``'s
 replace mode). Tokens are never printed.
 
+``--code CODE`` (or ``--read-code``, the code on stdin) joins a bank with a
+pairing code from ``pseudolife-mcp invite`` on the daemon host: it runs
+``pair`` and then connects with the new token file. The plan names that file
+as ``~/.pseudolife-mcp/<principal>.token (name from the daemon)``, or the
+``--token-file`` path, which must not exist. The code is redeemed only after
+confirmation, at the point where ``--read-token`` writes its file, so
+``--dry-run`` never consumes it, and a plan with nothing to re-point stops
+before redeeming. After redemption the plan is rebuilt with the real path.
+When several clients would be re-pointed, the plan warns that they will
+share one principal. The code is never printed.
+
 Exit codes: 0 done or already current; 1 a write failed and was rolled
 back; 2 usage, an invalid URL, or no confirmation; 3 no registration it can
-write (none found, or only ``manual`` ones); 4 the target refused verification, nothing written; 5 applied, but the
-post-apply check failed.
+write (none found, or only ``manual`` ones); 4 the target refused
+verification or the pairing code, nothing written (a pairing whose outcome
+is unknown keeps, and names, its token file); 5 applied, but the post-apply
+check failed.
 
 Standard library only at import time, like the other client modes: the MCP
 handshake runs in a subprocess, and the shim (httpx) is imported only to
@@ -64,9 +78,10 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 
-from pseudolife_memory import client_config, codex_connection, runtimes
+from pseudolife_memory import client_config, codex_connection, pair_cli, runtimes
 from pseudolife_memory.credentials import CredentialError, CredentialProvider
 from pseudolife_memory.daemon_url import DEFAULT_URL, _is_loopback_url
+from pseudolife_memory.principals import normalize_pairing_code
 
 CLIENTS = ("claude-code", "codex", "claude-desktop", "gemini")
 SERVER = runtimes.SERVER
@@ -86,6 +101,13 @@ EXIT_REFUSED = 4
 EXIT_UNVERIFIED = 5
 
 HANDSHAKE_TIMEOUT_S = 20.0
+
+#: The plan's name for the token file a pairing code will create.
+PAIRED_TOKEN_FILE = "~/.pseudolife-mcp/<principal>.token (name from the daemon)"
+
+_BOARD_HINT = ("to admit this principal, list it under coordination.allowed_principals in the "
+               "daemon's config.yaml, or invite this machine with `pseudolife-mcp invite <machine>` "
+               "on the daemon host (an invited principal is admitted to the board)")
 
 _PLAIN_HTTP = ("WARNING: {url} is plain HTTP: the link itself is unencrypted, so it must be a "
                "private network such as a tailnet, or a TLS reverse proxy must front the daemon.")
@@ -703,8 +725,7 @@ def verify(ctx: Context, rows: list[dict], health: dict) -> tuple[list[dict], li
         results.append({"credential": shown, "tools": answer.get("tool_count"), "board": board})
         if not board.startswith("on"):
             warnings.append(f"the agent board for {shown}: {board}. Memory works without the board; "
-                            "to admit this principal, list it under coordination.allowed_principals "
-                            "in the daemon's config.yaml")
+                            + _BOARD_HINT)
     return results, warnings, None
 
 
@@ -857,10 +878,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp connect",
         description="Point every client registration on this machine at a daemon URL, replacing old "
-                    "values, after proving the daemon accepts them. Exit codes: 0 done or current, "
+                    "values, after proving the daemon accepts them. With --code, first join the bank "
+                    "with a pairing code from `pseudolife-mcp invite`. Exit codes: 0 done or current, "
                     "1 a write failed (rolled back), 2 usage or not confirmed, 3 no registration it "
-                    "can write, 4 verification refused (nothing written), 5 applied but the post-apply "
-                    "check failed.")
+                    "can write, 4 verification or the pairing code refused (nothing written), 5 "
+                    "applied but the post-apply check failed.")
     parser.add_argument("daemon_url", metavar="daemon-url",
                         help="the daemon's origin, e.g. http://100.64.0.2:8765 (no path)")
     parser.add_argument("--token-file", default=None,
@@ -869,6 +891,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-token", action="store_true",
                         help="read the token without echo (or from stdin) and create --token-file "
                              "owner-only; an existing file is refused")
+    parser.add_argument("--code", default=None,
+                        help="a pairing code from `pseudolife-mcp invite` on the daemon host: after "
+                             "confirmation, pair (a new owner-only token file, "
+                             "~/.pseudolife-mcp/<principal>.token or --token-file) and connect "
+                             "with it; --dry-run never redeems it")
+    parser.add_argument("--read-code", action="store_true",
+                        help="as --code, reading the code from stdin (without echo on a terminal)")
     parser.add_argument("--client", default="all",
                         help="comma-separated: claude-code, codex, claude-desktop, gemini, or all "
                              "(default)")
@@ -948,6 +977,13 @@ def _ask(question: str) -> bool:
     return answer.strip().lower() in ("y", "yes")
 
 
+def _code_line() -> str:
+    """One line holding the pairing code (without echo on a terminal)."""
+    if interactive():
+        return getpass.getpass("pairing code: ")
+    return sys.stdin.readline()
+
+
 def _token_stream():
     if interactive():
         return io.BytesIO(getpass.getpass("token: ").encode("utf-8"))
@@ -987,12 +1023,27 @@ def main(argv: list[str] | None = None) -> int:
     clients = _clients(args.client)
     if clients is None:
         return report.fail(EXIT_USAGE, f"--client takes {', '.join(CLIENTS)} or all (got {args.client!r})")
+    pairing = args.code is not None or args.read_code
+    if pairing and args.read_token:
+        return report.fail(EXIT_USAGE, "--code/--read-code pair a new token and --read-token stores one "
+                                       "you already have; pass one of them")
+    if args.code is not None and args.read_code:
+        return report.fail(EXIT_USAGE, "give the pairing code with --code or --read-code, not both")
     if args.read_token and not args.token_file:
         return report.fail(EXIT_USAGE, "--read-token creates the file --token-file names; pass both")
     token_file = os.path.abspath(os.path.expanduser(args.token_file)) if args.token_file else None
-    if args.read_token and (os.path.exists(token_file) or os.path.islink(token_file)):
-        return report.fail(EXIT_USAGE, f"{token_file} already exists; --read-token creates a token file "
+    if (args.read_token or pairing) and token_file and (os.path.exists(token_file)
+                                                         or os.path.islink(token_file)):
+        flag = "--read-token" if args.read_token else "pairing"
+        return report.fail(EXIT_USAGE, f"{token_file} already exists; {flag} creates a token file "
                                        "but never replaces one")
+    code = None
+    if pairing:
+        text = _code_line() if args.read_code else args.code
+        code = normalize_pairing_code(text)
+        if code is None:
+            return report.fail(EXIT_USAGE, "that is not a pairing code: it has 12 letters and digits, "
+                                           "shown as XXXX-XXXX-XXXX (nothing was changed)")
     remote = not _is_loopback_url(url)
     report.data.update(url=url, remote=remote, dry_run=args.dry_run)
 
@@ -1007,6 +1058,10 @@ def main(argv: list[str] | None = None) -> int:
                                          "An unauthenticated bank must never be reached over a network: "
                                          "set PSEUDOLIFE_MCP_TOKEN for the daemon on its host, restart it, "
                                          "and re-run. Nothing was changed")
+    if pairing and health.get("auth") is not True:
+        return report.fail(EXIT_REFUSED, f"the daemon at {url} does not report authentication, and "
+                                         "pairing needs a daemon with a bearer token. Nothing was "
+                                         "changed")
     report.data["daemon"] = {"version": health.get("version"), "auth": health.get("auth")}
     if remote and url.startswith("http://"):
         report.warn(_PLAIN_HTTP.format(url=url))
@@ -1015,24 +1070,37 @@ def main(argv: list[str] | None = None) -> int:
         layout = runtimes.default_layout(env)
     except ValueError:
         layout = None
-    ctx = Context(url, remote, token_file, clients, env, layout)
+    ctx = Context(url, remote, token_file or (PAIRED_TOKEN_FILE if pairing else None), clients, env,
+                  layout)
     rows = discover(ctx)
     report.say(f"connect: {url} ({'another machine' if remote else 'this machine'}; daemon "
                f"{health.get('version') or 'unknown'}, auth {'on' if health.get('auth') else 'off'})")
     report.plan(rows)
+    if pairing:
+        sharing = sorted({row["client"] for row in rows
+                          if row["client"] in CLIENTS and row["place"] == "registration"
+                          and row["state"] in ("current", "change")})
+        if len(sharing) > 1:
+            report.warn(f"{len(sharing)} clients ({', '.join(sharing)}) will share one principal "
+                        "through this pairing code; invite one name per client (`pseudolife-mcp "
+                        "invite <name>` on the daemon host, then one `connect --code` per client "
+                        "with --client) to keep their writes apart")
+    unpaired = (" The pairing code was not redeemed: run the installer with it instead (option 2, "
+                "or --pairing-code / -PairingCode)") if pairing else ""
     manual = [row for row in rows if row["state"] == "manual"]
     if not any(row["client"] in CLIENTS and row["state"] in ("current", "change") for row in rows):
         if any(row["client"] in CLIENTS and row["state"] == "manual" for row in rows):
             return report.fail(EXIT_NOTHING, f"no registration connect can write was found for "
                                              f"{', '.join(clients)}: {_places(len(manual))} manual "
-                                             "action (listed above)")
+                                             "action (listed above)." + unpaired)
         return report.fail(EXIT_NOTHING, "no registration of the shim was found for "
                                          f"{', '.join(clients)}; register a client first (the commands "
-                                         "are above), or run the installer")
+                                         "are above), or run the installer." + unpaired)
     changes = [row for row in rows if row["state"] == "change"]
     if args.dry_run:
         report.note("dry run: nothing was written and no token was sent; the credentials are "
-                    "verified only on a real run")
+                    "verified only on a real run" + ("; the pairing code was not redeemed"
+                                                     if pairing else ""))
         return report.finish(EXIT_OK)
     if not changes:
         report.note(f"{_places(len(manual))} manual action (listed above); nothing else to write"
@@ -1056,13 +1124,32 @@ def main(argv: list[str] | None = None) -> int:
             return report.fail(EXIT_USAGE, f"{type(exc).__name__} while writing {token_file}; check its "
                                            "directory's permissions. Nothing was changed")
         created.append(Path(token_file))
+    kept = ""
+    if pairing:
+        # The code is spent from here on: the paired file is never in
+        # ``created``, so no failure below removes the only copy of the token.
+        paired = pair_cli.redeem(url, code, token_file)
+        report.data["pairing"] = {key: paired[key] for key in
+                                  ("state", "principal", "tier", "bank", "token_file")}
+        for line in paired["warnings"]:
+            report.warn(line)
+        if paired["exit"] != pair_cli.EXIT_OK:
+            return report.fail(EXIT_REFUSED, f"pairing did not complete: {paired['error']}. No client "
+                                             "configuration was written")
+        token_file = ctx.token_file = paired["token_file"]
+        kept = (f" The paired token file {token_file} is kept: the code is spent, and the daemon "
+                "accepts this token")
+        report.say(f"paired: {paired['principal'] or 'a principal whose name could not be used'} "
+                   f"on {url}; token file {token_file}")
+        rows = discover(ctx)
+        report.data["rows"] = [_public(row) for row in rows]
 
     # 3. Verify every credential against the target.
     results, warnings, failure = verify(ctx, rows, health)
     if failure:
         for path in created:
             path.unlink(missing_ok=True)
-        return report.fail(EXIT_REFUSED, f"{failure}. Nothing was written")
+        return report.fail(EXIT_REFUSED, f"{failure}. Nothing was written." + kept)
     report.data["verification"] = results
     for line in warnings:
         report.warn(line)
@@ -1075,7 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
             report.say(f"  {item['state']:<8} {item['file']}" + (f": {item['detail']}" if item.get("detail") else "")
                        + (f" (backup {item['backup']})" if item.get("backup") and item["state"] != "restored" else ""))
         return report.fail(EXIT_FAILED, f"writing {failure['file']} failed ({failure['reason']}); every file "
-                                        "this run wrote was rolled back as listed above")
+                                        "this run wrote was rolled back as listed above." + kept)
 
     # 5. Report and check.
     report.data["rows"] = [_public(row) for row in rows]

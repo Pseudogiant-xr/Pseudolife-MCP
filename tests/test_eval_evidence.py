@@ -10481,6 +10481,31 @@ for _cid, _doc, _needle, _art, _value, _stated, _places in (
                         value=_value, stated=_stated, places=_places))
 
 
+# ── the check-in subagent rewording (evals/README.md, 2026-10-02) ──────────
+# The closing subagent sentence reworded after schema v50: arms v3 (served
+# text), new and new@aa on all three sets.
+CCB_SUB = RESULTS + "coordination-checkin-bench-checkin-rules-20261002-subagents.json"
+for _cid, _needle, _value, _stated, _places in (
+        ("ccb-sub-spend", "run valid, $4.29)", _USD, 4.29, 2),
+        ("ccb-sub-valid", "3 replicates, 576 runs", lambda d: d["summary"]["valid_runs"], 576, 0),
+        ("ccb-sub-new-v3", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3"), 0.005, 3),
+        ("ccb-sub-new-v3-lo", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 0), -0.021, 3),
+        ("ccb-sub-new-v3-hi", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 1), 0.036, 3),
+        ("ccb-sub-aa", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new"), -0.016, 3),
+        ("ccb-sub-aa-lo", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 0), -0.057, 3),
+        ("ccb-sub-aa-hi", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 1), 0.021, 3),
+        ("ccb-sub-held2", "second held-out +0.021",
+         _ccb_delta("new - v3", part="heldout2"), 0.021, 3)):
+    CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(CCB_SUB,),
+                        value=_value, stated=_stated, places=_places))
+
+
 # ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
 # evals/seed_bench.py before and after the _mentions boundary change, plus
 # a control that patches the old matcher back in on the new tree (it
@@ -10567,6 +10592,20 @@ for _cid, _needle, _field, _stated in (
 # -- paired current-session stdio transport comparison (2026-10-02) -------
 RUST_TRANSPORT_CPU = RESULTS + "rust-transport-cpu-20261002-a.json"
 RUST_TRANSPORT_CPU_B = RESULTS + "rust-transport-cpu-20261002-b.json"
+# These are historical adapter stages, not the current checkout. Preserve
+# their exact measured sources; later repairs do not inherit these timings.
+_RUST_TRANSPORT_SOURCE_SHA256 = {
+    "pseudolife_memory/shim.py": "38d0441e9d195f5aec5c6c7c865e3e606e3b362f3a0540a9071debb586185917",
+    "rust/http-transport/Cargo.toml": "5b222017dde766786a861278c94503bb18423e51376058f54f5669a5128db152",
+    "rust/http-transport/Cargo.lock": "78bbf07914c6badc078ad2e418b3dbfc3389fd281fedca2dff8314e3fe50af8c",
+    "rust/http-transport/src/main.rs": "bc37bc9ced3ce67765c7fa1dc03dd040c8e444299605c766b5d39081912337a7",
+    "tests/test_shim_transport_recovery.py": "8cd55b90ca0f4b431e707954cfb39486ec351c3cb7ad78311748487b862e4180",
+    "evals/bench_rust_transport.py": "b68d6c28940542f16ea8bddb1ea827d534a40b4ab3249da564c25fea1b1fc002",
+}
+_RUST_TRANSPORT_ADAPTER_SHA256 = {
+    RUST_TRANSPORT_CPU: "30b2fd0380442d48e723acfa3402ab4526ca963b57d18f8c8f86a631d72f4255",
+    RUST_TRANSPORT_CPU_B: "832892c8382b0d96faa27f4cfd96772405da72432fa2d385319e1b0c69aeda56",
+}
 
 
 def _check_rust_transport_cpu_evidence(artifact):
@@ -10585,6 +10624,11 @@ def _check_rust_transport_cpu_evidence(artifact):
     assert record["measurement"]["sample_interval_seconds"] == 0.01
     assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
                for value in [record["binary_sha256"], *record["source_sha256"].values()])
+    assert record["binary_sha256"] == "dca33d07813346ec87366ab79c25eaea270e48dcda6534508a64cdebd5c0dc74"
+    assert record["source_sha256"] == {
+        **_RUST_TRANSPORT_SOURCE_SHA256,
+        "pseudolife_memory/rust_transport.py": _RUST_TRANSPORT_ADAPTER_SHA256[artifact],
+    }
     rows = record["rows"]
     assert len(rows) == 2 * workload["replicates"]
     for replicate in range(workload["replicates"]):
@@ -10628,6 +10672,19 @@ def test_rust_transport_cpu_evidence_is_complete_and_equivalent():
 
 def test_rust_transport_cpu_b_evidence_is_complete_and_equivalent():
     _check_rust_transport_cpu_evidence(RUST_TRANSPORT_CPU_B)
+
+
+@pytest.mark.parametrize("artifact", [RUST_TRANSPORT_CPU, RUST_TRANSPORT_CPU_B])
+@pytest.mark.parametrize("fingerprint", ["binary_sha256", "source_sha256"])
+def test_rust_transport_historical_fingerprints_reject_substitution(monkeypatch, artifact, fingerprint):
+    record = json.loads(json.dumps(_load_artifact(artifact)))
+    if fingerprint == "source_sha256":
+        record[fingerprint]["pseudolife_memory/rust_transport.py"] = "0" * 64
+    else:
+        record[fingerprint] = "0" * 64
+    monkeypatch.setattr(sys.modules[__name__], "_load_artifact", lambda _path: record)
+    with pytest.raises(AssertionError):
+        _check_rust_transport_cpu_evidence(artifact)
 
 
 def test_codex_doorbell_probe_record_backs_its_outcome():

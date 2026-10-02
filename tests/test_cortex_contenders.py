@@ -435,7 +435,7 @@ def test_overview_facts_contested_keys_slots_like_the_store(pristine_service):
 def test_fixture_fact_rows_carry_what_the_cortex_view_reads(pristine_service):
     """Fixture-vs-real contract for the Cortex view (the class of drift that
     hid this bug: ``web/fixtures.py`` synthesised ``contested`` while the
-    real dump never set it). Every key views/cortex.js reads must be present
+    real dump never set it). Every key the Cortex view (frontend/src/lib/api/facts.ts) reads must be present
     on BOTH a real dump row and a fixture row, contested or not, scalar or
     member, with the same presence rule for the contender fields."""
     from pseudolife_memory.web.fixtures import FixtureService

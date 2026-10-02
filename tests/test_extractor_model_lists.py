@@ -89,8 +89,8 @@ def _guide_modes() -> set[str]:
 
 
 def _console_models() -> set[str]:
-    block = _read("pseudolife_memory/web/static/js/views/console.js").split(
-        "const DREAMER_MODELS = [", 1)[1].split("];", 1)[0]
+    block = _read("frontend/src/lib/dreamer.ts").split(
+        "export const DREAMER_MODELS = [", 1)[1].split("];", 1)[0]
     return set(re.findall(rf'id: "({MODEL})"', block))
 
 
@@ -115,7 +115,7 @@ def test_the_claude_model_list_is_one_list():
         "ops/install-shim-autostart.sh help": _autostart("ops/install-shim-autostart.sh"),
         "ops/install-shim-autostart.ps1 help": _autostart("ops/install-shim-autostart.ps1"),
         "docs/guide/dreaming.md": _guide_models("Claude"),
-        "console.js DREAMER_MODELS": _family(_console_models(), "claude-"),
+        "dreamer.ts DREAMER_MODELS": _family(_console_models(), "claude-"),
         "config_io extractor_model_override": _family(_panel_suggestions(), "claude-"),
         "evals/claude_shim.py /models": _shim_models(),
     }
@@ -135,7 +135,7 @@ def test_the_openai_model_list_is_one_list():
         "ops/install-codex-shim-autostart.ps1 help": _autostart(
             "ops/install-codex-shim-autostart.ps1", "OpenAI"),
         "docs/guide/dreaming.md": _guide_models("OpenAI"),
-        "console.js DREAMER_MODELS": _family(_console_models(), "gpt-"),
+        "dreamer.ts DREAMER_MODELS": _family(_console_models(), "gpt-"),
         "config_io extractor_model_override": _family(_panel_suggestions(), "gpt-"),
         "evals/codex_shim.py /models": _shim_models("evals/codex_shim.py"),
     }
