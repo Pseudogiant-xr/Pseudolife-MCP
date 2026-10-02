@@ -730,6 +730,32 @@ def test_the_slot_count_comes_from_the_env_then_the_file_then_one(tmp_path):
             suite_lock.slot_count({}, tmp_path)
 
 
+# --- the board lease name, per machine ------------------------------------------
+
+def test_the_lease_name_comes_from_the_env_then_the_file_then_full_suite(tmp_path):
+    assert suite_lock.lease_name({}, tmp_path) == "full-suite"
+    (tmp_path / suite_lock.LEASE_FILE).write_text("full-suite@box\n", encoding="utf-8")
+    assert suite_lock.lease_name({}, tmp_path) == "full-suite@box"
+    assert suite_lock.lease_name({"PSEUDOLIFE_SUITE_LEASE": " full-suite@pc "},
+                                 tmp_path) == "full-suite@pc"
+    (tmp_path / suite_lock.LEASE_FILE).write_text("full-suite@box\r\n", encoding="utf-8-sig")
+    assert suite_lock.lease_name({}, tmp_path) == "full-suite@box"
+    for bad in ("", "gpu", "full-suite@", "full-suite@a b", "Full-Suite",
+                "full-suite@" + "x" * 41, "full-suite-box"):
+        with pytest.raises(ValueError, match="PSEUDOLIFE_SUITE_LEASE"):
+            suite_lock.lease_name({"PSEUDOLIFE_SUITE_LEASE": bad}, tmp_path)
+        (tmp_path / suite_lock.LEASE_FILE).write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match="full-suite.lease"):
+            suite_lock.lease_name({}, tmp_path)
+
+
+def test_the_board_mirror_takes_the_lease_name_it_is_given(tmp_path):
+    pytest.importorskip("pseudolife_memory.lease_cli")
+    assert suite_lock.board_mirror(tmp_path, tmp_path / "wt", {}).name == "full-suite"
+    named = suite_lock.board_mirror(tmp_path, tmp_path / "wt", {}, name="full-suite@box")
+    assert named.name == "full-suite@box"
+
+
 # --- native Windows full runs, refused where configured -----------------------
 
 def test_the_windows_policy_comes_from_the_env_then_the_file_then_allow(tmp_path):
@@ -899,6 +925,7 @@ def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
     env.pop("PSEUDOLIFE_SUITE_SLOTS", None)  # each test sets its own
     env.pop("PSEUDOLIFE_SUITE_WINDOWS", None)
+    env.pop("PSEUDOLIFE_SUITE_LEASE", None)
     # These runs never reach a PG test; don't provision a database for them,
     # and don't check the dev server's password for them either: an explicit
     # test DSN is used verbatim, so the full-run password preflight has
@@ -969,6 +996,18 @@ def test_a_listing_pytest_run_over_the_tree_is_not_locked(held, procs, listing):
                 _pytest_env(held.dir, "fail"))
     assert run.drain() != pytest.ExitCode.USAGE_ERROR, run.seen
     assert not any("full-suite lock held by" in line for line in run.seen), run.seen
+
+
+def test_a_full_pytest_run_mirrors_under_the_machines_lease_name(tmp_path, procs):
+    # No bearer in this environment, so the mirror says once that it skipped
+    # the board, naming the lease it would have held: the lock directory's.
+    (tmp_path / suite_lock.LEASE_FILE).write_text("full-suite@box\n", encoding="utf-8")
+    env = _pytest_env(tmp_path, "fail")
+    for name in suite_lock.BOARD_ENVIRONMENT:
+        env.pop(name, None)
+    run = procs(_full_run_collecting_nothing(), env)
+    assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
+    assert any("'full-suite@box'" in line for line in run.seen), run.seen
 
 
 def test_a_full_pytest_run_on_windows_is_refused_before_it_queues(tmp_path, procs):

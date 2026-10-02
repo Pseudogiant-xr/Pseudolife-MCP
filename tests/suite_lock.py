@@ -111,6 +111,13 @@ Configuration:
     WSL run cannot see a Windows run's lock (checked the same day: neither
     ``flock`` nor ``lockf`` over ``/mnt/c`` blocks on an ``msvcrt.locking``
     lock), so a host that moves to WSL refuses Windows full runs outright.
+``PSEUDOLIFE_SUITE_LEASE``, else a ``full-suite.lease`` file in the lock directory
+    The board lease this machine's runs mirror as: ``full-suite`` (default)
+    or ``full-suite@<host>``. Every machine shares one board, so a second
+    machine running suites (the maintainer's homelab box, 2026-10-02) names
+    its own lease; otherwise its runs read as the first machine's on the
+    board, and that machine's gates (``lease check full-suite``) would hold
+    off for a suite that does not load it.
 ``PSEUDOLIFE_SUITE_LOCK_DIR``
     Overrides ``~/.pseudolife-mcp/locks`` (the tests use a temp dir).
 ``PSEUDOLIFE_TEST_CUDA=1``
@@ -143,6 +150,7 @@ else:
 LOCK_ENV = "PSEUDOLIFE_SUITE_LOCK"
 LOCK_DIR_ENV = "PSEUDOLIFE_SUITE_LOCK_DIR"
 SLOTS_ENV = "PSEUDOLIFE_SUITE_SLOTS"
+LEASE_ENV = "PSEUDOLIFE_SUITE_LEASE"
 WINDOWS_ENV = "PSEUDOLIFE_SUITE_WINDOWS"
 WINDOWS_POLICIES = ("allow", "refuse")
 CUDA_OPT_IN_ENV = "PSEUDOLIFE_TEST_CUDA"
@@ -151,6 +159,7 @@ LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
 SLOTS_FILE = "full-suite.slots"
 WINDOWS_FILE = "full-suite.windows"
+LEASE_FILE = "full-suite.lease"
 MAX_SLOTS = 8  # a sanity bound: each slot is a ~20 GB full suite
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
@@ -285,6 +294,31 @@ def slot_count(environ, directory: Path) -> int:
         raise ValueError(f"{source}={text!r}: expected a whole number from 1 "
                          f"to {MAX_SLOTS}")
     return int(text)
+
+
+def lease_name(environ, directory: Path) -> str:
+    """The board lease this machine's full runs mirror as:
+    ``PSEUDOLIFE_SUITE_LEASE``, else the ``full-suite.lease`` file in the
+    lock directory, else ``full-suite``. ``full-suite@<host>`` with a host of
+    1-40 letters, digits, ``.``, ``_`` or ``-``."""
+    raw, source = environ.get(LEASE_ENV), LEASE_ENV
+    if raw is None:
+        path = directory / LEASE_FILE
+        try:
+            raw, source = path.read_text(encoding="utf-8-sig"), str(path)
+        except FileNotFoundError:
+            return SUITE_LEASE
+        except UnicodeDecodeError:
+            raise ValueError(f"{path}: not UTF-8 text (PowerShell 5.1's `>` "
+                             f"writes UTF-16; use Set-Content -Encoding ascii)") from None
+    name = raw.strip()
+    host = name[len(SUITE_LEASE) + 1:] if name.startswith(SUITE_LEASE + "@") else None
+    if name != SUITE_LEASE and not (
+            host and len(host) <= 40 and host.isascii()
+            and all(c.isalnum() or c in "._-" for c in host)):
+        raise ValueError(f"{source}={name!r}: expected {SUITE_LEASE} or "
+                         f"{SUITE_LEASE}@<host> (1-40 letters, digits, '.', '_', '-')")
+    return name
 
 
 def windows_policy(environ, directory: Path) -> str:
@@ -733,12 +767,13 @@ def board_environment(environ) -> dict[str, str]:
         {name: environ[name] for name in BOARD_ENVIRONMENT if name in environ})
 
 
-def board_mirror(directory: Path, worktree, board_environ, *, transport=None):
+def board_mirror(directory: Path, worktree, board_environ, *, name: str = SUITE_LEASE,
+                 transport=None):
     """The board's view of this run's lock, or None when the package that
-    talks to the board cannot be imported. The lease is ``full-suite``; its
-    purpose names the run, and its expected end comes from the recorded run
-    times in ``directory``. Nothing is contacted until the lock is waited
-    for or taken."""
+    talks to the board cannot be imported. The lease is ``name`` (this
+    machine's, :func:`lease_name`); its purpose names the run, and its
+    expected end comes from the recorded run times in ``directory``.
+    Nothing is contacted until the lock is waited for or taken."""
     try:
         from pseudolife_memory.lease_cli import BoardMirror
     except ImportError as exc:
@@ -747,7 +782,7 @@ def board_mirror(directory: Path, worktree, board_environ, *, transport=None):
         return None
     worktree = Path(worktree)
     return BoardMirror(
-        SUITE_LEASE, purpose=f"pytest pid {os.getpid()} in {worktree.name}",
+        name, purpose=f"pytest pid {os.getpid()} in {worktree.name}",
         expect=expected_seconds(directory), worktree=str(worktree),
         environ=board_environ, transport=transport, lock_dir=directory)
 

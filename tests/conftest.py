@@ -379,7 +379,8 @@ def pytest_configure(config: pytest.Config) -> None:
     # full-suite.windows): it runs full suites in WSL, whose lock a Windows
     # run cannot see. tests/suite_lock.py carries the measurement.
     #
-    # The board mirrors the lock as the lease `full-suite` (holder, queue,
+    # The board mirrors the lock as this machine's suite lease, `full-suite`
+    # unless PSEUDOLIFE_SUITE_LEASE / full-suite.lease names it (holder, queue,
     # expected end, a notice to the peers concerned), built only for a full
     # run past that preflight, before the fingerprint, so its module is part
     # of it.
@@ -387,6 +388,8 @@ def pytest_configure(config: pytest.Config) -> None:
         try:
             refusal = suite_lock.native_windows_refusal(
                 kind, os.environ, suite_lock.lock_dir(os.environ))
+            if kind == "full":  # a bad lease name stops the run before it queues
+                suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))
         except ValueError as exc:
             raise pytest.UsageError(str(exc)) from None
         if refusal:
@@ -398,7 +401,8 @@ def pytest_configure(config: pytest.Config) -> None:
     held = suite_lock.take_for_session(
         config, os.environ, ROOT / "tests", read_files=(ENV_FILE,), preflight=preflight,
         mirror=lambda: suite_lock.board_mirror(
-            suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV))
+            suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV,
+            name=suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))))
     if held is not None:
         config.stash[_SUITE_LOCK] = held
 
