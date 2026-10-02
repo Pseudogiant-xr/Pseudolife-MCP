@@ -35,7 +35,7 @@ class _Fixture:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str | None, dict]] = []
         self.fault_method: str | None = None
-        self.fault: int | str | None = None
+        self.fault: int | str | bytes | dict | None = None
         self.block_initialize = False
         self.initialize_blocked = Event()
         self.release_initialize = Event()
@@ -54,6 +54,17 @@ class _Fixture:
                 raw = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                try:
+                    self.wfile.write(raw)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def _reply_raw(self, status: int, raw: bytes,
+                           content_type: str = "application/json") -> None:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
                 try:
@@ -111,6 +122,21 @@ class _Fixture:
                         return
                     if fault == "stall":
                         time.sleep(0.5)
+                    if fault == "principals_503":
+                        # The daemon's HTTP gate refusing an unresolvable
+                        # bearer, byte for byte (web/api.py _send_json).
+                        self._reply_raw(503, json.dumps(
+                            {"error": "principals_unavailable"}).encode(),
+                            "application/json; charset=utf-8")
+                        return
+                    if isinstance(fault, bytes):
+                        self._reply_raw(503, fault)
+                        return
+                    if isinstance(fault, dict):
+                        # A JSON-RPC error object answering the request.
+                        self._reply(200, {"jsonrpc": "2.0", "id": request["id"],
+                                          "error": fault})
+                        return
 
                 if auth not in {f"Bearer {OLD_TOKEN}", f"Bearer {NEW_TOKEN}"}:
                     self._reply(401, {"error": BODY_MARKER})
@@ -557,6 +583,146 @@ def test_http_failure_is_sanitized_and_next_call_recovers(
     assert BODY_MARKER not in errors
     assert OLD_TOKEN not in errors
     assert "private.invalid" not in errors
+
+
+_PRINCIPALS_RPC_ERROR = {"code": -32003, "message": "principals_unavailable",
+                         "data": {"status": 503, "error": "principals_unavailable"}}
+
+
+@pytest.mark.parametrize("fault_method,fault,phase", [
+    ("tools/call", "principals_503", "call"),
+    ("tools/call", _PRINCIPALS_RPC_ERROR, "call"),
+    ("initialize", "principals_503", "initialize"),
+], ids=["call-gate-503", "call-jsonrpc", "initialize-gate-503"])
+def test_principals_unavailable_refusal_is_definitely_not_executed(
+        tmp_path, upstream, fault_method, fault, phase):
+    """The daemon refuses an unresolvable bearer before any tool runs, as a
+    503 from its HTTP gate or a -32003 JSON-RPC error after admission. The
+    shim keeps that code and a reason the caller can act on, and never says
+    the operation may have completed."""
+    from pseudolife_memory.board_status import _REASONS
+
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
+            upstream.fault_method = fault_method
+            upstream.fault = fault
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("write", {})
+            error = caught.value.error
+            assert error.code == -32003
+            assert error.data == {
+                "classification": "principals_unavailable",
+                "phase": phase,
+                "operation_outcome": "not_dispatched",
+                "status": 503,
+                "error": "principals_unavailable",
+                "hint": _REASONS["principals_unavailable"],
+            }
+            assert "no tool ran" in error.message.lower()
+            assert "may have completed" not in error.message
+            assert upstream.writes == 0
+            recovered = await client.call_tool("write", {})
+            assert json.loads(recovered.content[0].text)["writes"] == 1
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_principals_unavailable_on_tools_list_keeps_its_code(tmp_path, upstream):
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
+            upstream.fault_method = "tools/list"
+            upstream.fault = _PRINCIPALS_RPC_ERROR
+            with pytest.raises(Exception) as caught:
+                await client.list_tools()
+            data = caught.value.error.data
+            assert caught.value.error.code == -32003
+            assert data["classification"] == "principals_unavailable"
+            assert data["phase"] == "list"
+            assert data["operation_outcome"] == "not_dispatched"
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+@pytest.mark.parametrize("fault,code,classification", [
+    ({"code": -32003, "message": BODY_MARKER,
+      "data": {"status": 503, "error": "principals_unavailable"}}, -32003, "protocol"),
+    ({"code": -32003, "message": "principals_unavailable",
+      "data": {"status": "503", "error": "principals_unavailable"}}, -32003, "protocol"),
+    ({"code": -32003, "message": "principals_unavailable",
+      "data": {"status": 503, "error": "principals_unavailable", "credential": OLD_TOKEN}},
+     -32003, "protocol"),
+    ({"code": -32003, "message": "principals_unavailable", "data": None}, -32003, "protocol"),
+    (b'{"error":"principals_unavailable","credential":"' + OLD_TOKEN.encode() + b'"}',
+     -32603, "service_unavailable"),
+    (b'{"error":"principals_unavailable","error":"principals_unavailable"}',
+     -32603, "service_unavailable"),
+    (b'{"error":"principals_unavailable"', -32603, "service_unavailable"),
+    (b'{"error":"principals_unavailable"}' + b" " * 257, -32603, "service_unavailable"),
+], ids=["rpc-message", "rpc-status-type", "rpc-extra", "rpc-no-data",
+        "http-extra", "http-duplicate", "http-malformed", "http-oversized"])
+def test_inexact_principals_refusal_stays_unknown(
+        tmp_path, upstream, fault, code, classification):
+    """Only the daemon's exact refusal proves no tool ran; anything that
+    merely resembles it keeps the unknown-outcome guidance and echoes
+    nothing from the body."""
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
+            upstream.fault_method = "tools/call"
+            upstream.fault = fault
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("write", {})
+            error = caught.value.error
+            assert error.code == code
+            assert error.data == {
+                "classification": classification,
+                "phase": "call",
+                "operation_outcome": "unknown",
+            }
+            assert "check its result before retrying" in error.message.lower()
+            rendered = repr(caught.value) + repr(error.data)
+            assert BODY_MARKER not in rendered and OLD_TOKEN not in rendered
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_principals_refusal_counts_only_for_the_request_that_failed():
+    """A refusal of an earlier request (initialize) or of a notification
+    cannot vouch for a later tool call whose response was lost."""
+    from mcp.shared.exceptions import MCPError
+    from mcp.types import CONNECTION_CLOSED
+    import httpx2
+
+    def refusal_for(message: dict):
+        return httpx2.Response(
+            503, json={"error": "principals_unavailable"},
+            request=httpx2.Request("POST", "http://fixture.invalid/mcp", json=message))
+
+    attempt = shim._UpstreamAttempt(phase="initialize")
+    asyncio.run(attempt.observe_response(
+        refusal_for({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})))
+    refused = shim._transport_error(
+        MCPError(-32603, "Server returned an error response"), attempt, "call")
+    assert refused.data["classification"] == "principals_unavailable"
+    assert refused.data["operation_outcome"] == "not_dispatched"
+
+    attempt.phase, attempt.dispatched = "call", True
+    lost = shim._transport_error(MCPError(CONNECTION_CLOSED, "closed"), attempt, "call")
+    assert lost.data["operation_outcome"] == "unknown"
+
+    notified = shim._UpstreamAttempt(phase="call", dispatched=True)
+    asyncio.run(notified.observe_response(
+        refusal_for({"jsonrpc": "2.0", "method": "notifications/initialized"})))
+    lost = shim._transport_error(MCPError(CONNECTION_CLOSED, "closed"), notified, "call")
+    assert lost.data["operation_outcome"] == "unknown"
 
 
 def test_lost_write_response_is_unknown_and_never_replayed(tmp_path, upstream):

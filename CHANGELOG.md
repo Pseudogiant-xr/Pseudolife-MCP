@@ -35,6 +35,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - WSL detection no longer depends on the kernel release saying
   "microsoft": `WSL_DISTRO_NAME`, `WSL_INTEROP` or a `WSLInterop*` binfmt
   entry also count, so a custom WSL kernel still tags its database names.
+### Fixed (2026-10-03 — a token the daemon cannot check is reported as such)
+- When the daemon cannot check invited machines' tokens (its database is
+  not answering), it refuses the request before any tool runs: a
+  `principals_unavailable` 503 from its HTTP gate, or JSON-RPC error
+  -32003 after admission. When the refusal came after the tool call was
+  sent, the stdio shim reported it as "the memory operation may have
+  completed" (`operation_outcome: unknown`). It also replaced the
+  refusal's data with a generic `protocol` or `service_unavailable`
+  classification, and sent the 503 as -32603. The shim now answers -32003
+  with `classification: principals_unavailable`,
+  `operation_outcome: not_dispatched` (no tool ran), the daemon's
+  `status`/`error` data, and the same hint `doctor` prints. Only the
+  daemon's exact refusal counts: a small JSON body for the very request
+  that failed, or the exact JSON-RPC error. Anything that merely resembles
+  it keeps the unknown-outcome warning. The shim is a client install:
+  deploy with the client step (`ops/update.ps1 -All`).
+- The Console explained an invited machine's 403 on an operator-only
+  action (`operator_principal_required`: saving the config or the daemon
+  notice) as "a
+  tokenless daemon serves loopback browsers only", and a 503
+  `principals_unavailable` as a bare HTTP code. Each now has its own
+  explanation.
 
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
