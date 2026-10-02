@@ -30,7 +30,10 @@
 # default paths would still reach 5433, which may hold a live bank), and
 # unless that machine names its own suite lease (full-suite.lease there,
 # full-suite@<host>); ops/wsl-suite.sh checks both under
-# PSEUDOLIFE_SUITE_DISPATCHED. The board
+# PSEUDOLIFE_SUITE_DISPATCHED. Port checks cannot see the live bank's
+# container on its Docker-network address (port 5432), so pytest there also
+# refuses any server it would use that holds a production bank
+# (tests/pg_defaults.py, dispatched_live_bank_refusal). The board
 # bearer, when this session
 # has one, is sent on SSH's stdin, never on a command line, so the remote
 # run mirrors on the board under that machine's lease (full-suite.lease

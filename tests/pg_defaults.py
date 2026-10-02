@@ -375,6 +375,81 @@ def full_run_password_preflight(kind: str,
             f"{fix}. Targeted runs still start.")
 
 
+def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
+                                 env_file: Path | None = None, *,
+                                 connect=None) -> str | None:
+    """For a run dispatched to a second machine (``PSEUDOLIFE_SUITE_DISPATCHED``):
+    the refusal message when a server the suite would use holds a production
+    bank, else ``None``. Undispatched runs are not checked: on the Windows host
+    the dev server is the live bank's server by design.
+
+    The launchers refuse ``PSEUDOLIFE_TEST_PG_HOST_PORT`` on port 5433, the live
+    bank's on the homelab box, but that server also answers on its container's
+    Docker-network address (container port 5432), and an explicit test or bench
+    URL is not port-checked at all (2026-10-03). The suite's connections come
+    from the default admin URL, ``PSEUDOLIFE_TEST_DATABASE_URL`` and the bench
+    admin URL, so each distinct server among them is asked for its database
+    list; one holding a production bank (``pseudolife_memory``, or the database
+    the exported daemon DSN named) is the live bank's server, under whatever
+    address. A refused connection or an unknown host is passed over, since the
+    suite cannot write there either; anything else refuses, as the server could
+    not be cleared: a timeout (a slow server is still a server), a URL naming
+    several hosts (only the first to answer would be checked), a URL that does
+    not parse. Messages name the setting and never carry a password.
+    """
+    env = os.environ if env is None else env
+    if not env.get("PSEUDOLIFE_SUITE_DISPATCHED"):
+        return None
+    if connect is None:
+        import psycopg
+
+        connect = psycopg.connect
+    from psycopg.conninfo import conninfo_to_dict
+
+    from pseudolife_memory.storage.schema import is_production_database
+
+    prefix = "refusing a dispatched run"
+    targets: dict[str, str] = {}
+    try:
+        settings = [("PSEUDOLIFE_TEST_PG_HOST_PORT", default_admin_url(env, env_file)),
+                    ("PSEUDOLIFE_BENCH_ADMIN_URL",
+                     conninfo_with_dbname(bench_admin_url(env, env_file), "postgres"))]
+        if env.get("PSEUDOLIFE_TEST_DATABASE_URL"):
+            settings.append(("PSEUDOLIFE_TEST_DATABASE_URL", conninfo_with_dbname(
+                env["PSEUDOLIFE_TEST_DATABASE_URL"], "postgres")))
+        for setting, url in settings:
+            targets.setdefault(RedactedUrl(url), setting)
+        hosts = {url: conninfo_to_dict(url) for url in targets}
+    except Exception:  # noqa: BLE001 - never echo a credential-bearing value
+        return (f"{prefix}: a PostgreSQL URL among PSEUDOLIFE_TEST_DATABASE_URL "
+                f"and PSEUDOLIFE_BENCH_ADMIN_URL does not parse; value withheld")
+    for url, setting in targets.items():
+        where = f"{setting} ({url.host})"
+        parts = hosts[url]
+        if "," in (parts.get("host") or "") + (parts.get("hostaddr") or ""):
+            return (f"{prefix}: {where} names several hosts, and only the first "
+                    f"to answer could be checked; name one test server")
+        try:
+            with connect(url, connect_timeout=3) as conn:
+                names = [row[0] for row in
+                         conn.execute("SELECT datname FROM pg_database").fetchall()]
+        except Exception as exc:  # noqa: BLE001 - classified, never re-raised
+            text = str(exc).lower()
+            timed_out = isinstance(exc, TimeoutError) or "timeout" in text                 or "timed out" in text                 or getattr(exc, "errno", None) in (errno.ETIMEDOUT, 10060)
+            if is_auth_failure(exc) or (is_server_unavailable(exc) and not timed_out):
+                continue
+            return (f"{prefix}: could not check that the Postgres at {where} is "
+                    f"not the live bank's server ({redacted_error_text(exc, url)})")
+        live = [name for name in names if is_production_database(name)]
+        if live:
+            return (f"{prefix}: the Postgres at {where} holds the production "
+                    f"bank {live[0]!r}, so it is the live bank's server under "
+                    f"another address. Point PSEUDOLIFE_TEST_PG_HOST_PORT, "
+                    f"PSEUDOLIFE_TEST_DATABASE_URL and PSEUDOLIFE_BENCH_ADMIN_URL "
+                    f"at the test server.")
+    return None
+
+
 def default_admin_url(env: os._Environ | dict | None = None,
                       env_file: Path | None = None) -> str:
     """Admin (``postgres`` db) URL of the dev container. The password is
