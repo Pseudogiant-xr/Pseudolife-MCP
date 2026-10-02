@@ -174,10 +174,12 @@ took 143 CUDA OOMs.
   deliberate run with no WSL suite going). Targeted runs on Windows are
   unaffected, and CI's Windows job covers Windows-only behaviour. The
   launcher keeps a uv environment per checkout under `~/.venvs/pseudolife`
-  in WSL, needs the worktree's `ops/.env` like any run, and forwards the
+  in WSL, needs the worktree's `ops/.env` like any run and the models in
+  WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and forwards the
   bearer, so the run still shows as the `full-suite` lease; from Windows,
   `lease check full-suite` sees it through the board only (its local-lock
-  line stays free).
+  line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
+  with the lock, so it is never a way to start a Windows full run here.
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot

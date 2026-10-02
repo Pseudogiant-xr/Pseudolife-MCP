@@ -41,8 +41,15 @@ $forward = @(
 $paths = @('PSEUDOLIFE_MCP_TOKEN_FILE') | Where-Object { Test-Path "env:$_" } |
     ForEach-Object { "$_/p" }
 $entries = @($forward) + @($paths)
-if ($env:WSLENV) { $entries = @($env:WSLENV) + $entries }
-$env:WSLENV = $entries -join ':'
-
-& wsl.exe @distro --cd $linuxRoot -e bash ops/wsl-suite.sh @args
-exit $LASTEXITCODE
+$saved = $env:WSLENV
+if ($saved) { $entries = @($saved) + $entries }
+try {
+    # Restored afterwards: run with `&` or dot-sourced, this script shares the
+    # caller's environment, and a later wsl call there must not inherit it.
+    $env:WSLENV = $entries -join ':'
+    & wsl.exe @distro --cd $linuxRoot -e bash ops/wsl-suite.sh @args
+    $code = $LASTEXITCODE
+} finally {
+    $env:WSLENV = $saved
+}
+exit $code

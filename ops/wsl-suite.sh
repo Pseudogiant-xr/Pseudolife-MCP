@@ -12,6 +12,12 @@
 #                            under ~/.venvs/pseudolife, kept on the Linux
 #                            filesystem so uv can hard-link from its cache)
 #   PSEUDOLIFE_SUITE_PYTHON  the interpreter version (default 3.11, as CI)
+#
+# The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
+# cache, so a fresh distribution needs the embedders CI warms
+# (Qwen/Qwen3-Embedding-0.6B, sentence-transformers/all-MiniLM-L6-v2) and the
+# cross-encoders the config names, once: copy them from the Windows cache
+# into ~/.cache/huggingface/hub, or run once with HF_HUB_OFFLINE=0.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
