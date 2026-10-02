@@ -177,6 +177,17 @@ def test_scrub_removes_a_non_ascii_home_path_and_user_name(tmp_path, monkeypatch
     assert rec["b"] == "<redacted> ran it"
 
 
+def test_scrub_ignores_the_case_of_the_user_name_and_home_path(tmp_path, monkeypatch):
+    # Windows paths and names are case-insensitive: a lower-cased home is the same one.
+    home = tmp_path / "Bob9"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    rec = {"a": f"at {str(home).lower()}", "b": "BOB9 and bob9 ran it",
+           "c": "bob92 and device stay"}
+    mb.scrub_record(rec, None)
+    assert rec == {"a": "at <redacted>", "b": "<redacted> and <redacted> ran it",
+                   "c": "bob92 and device stay"}
+
+
 # ── validity ───────────────────────────────────────────────────────────────
 
 PROMPT = "Fill in the Region line in docs/RUNBOOK.md, please, for the production deploy."

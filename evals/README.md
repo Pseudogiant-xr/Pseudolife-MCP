@@ -2668,7 +2668,7 @@ unchanged by the correction and is stated once, above.
 
 Two harnesses answer "can a judge model reproduce the ratified human panel"
 for the daemon's autonomous review-queue judging (2026-09-02 — every queue
-the Console's Atlas Review view surfaces now gets a shadow/auto-gated
+the Console's Review view surfaces now gets a shadow/auto-gated
 verdict from the SHIPPED judge code path itself, not a separate scorer).
 
 `judge_ladder.py` runs `OpenAICompatExtractor.judge_merges` against the

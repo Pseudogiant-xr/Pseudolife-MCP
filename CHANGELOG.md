@@ -152,7 +152,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   used to be replaced inside ordinary words, so `device` was saved as
   `<redacted>ice`. A name next to punctuation, curly quotes or an escaped
   control character is still redacted, and a non-ASCII user name or home
-  path, which was never matched before, is now removed too.
+  path, which was never matched before, is now removed too. Both match in
+  any case, as a Windows home does (a lower-cased home path is the same home).
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
