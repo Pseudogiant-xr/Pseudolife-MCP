@@ -2041,12 +2041,30 @@ class CoordinationStore:
     def _serve_wake(self, agent_id, now):
         """Offer the newest pending ring; the adapter deduplicates its identity.
         Queued mail retains a stable offer until acknowledgment or expiry,
-        covering lost handoffs and replacement attachments. Other rings
+        covering lost handoffs and replacement attachments. Codex ring offers
+        require retained audit proof of the unchanged current live park. Other rings
         repeat only for one heartbeat interval. ``attention`` rows are offered
         to Codex for pending hints, never a queue or channel delivery. A
         ``nudged`` row decided before 2026-10-02 (regular mail never wakes) is history, never served."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
         codex = "codex" in (row.get("capabilities") or {})
+        park = self._live_park(row, now) if codex else None
+        if park and park["park_reason"] == "done":
+            return None
+        park_since = park["park_set_at"] if park else None
+        # Audit sequence, not wall time, binds a grant to the unchanged
+        # current park. A missing or mismatched audit snapshot proves nothing.
+        park_event = self._one(
+            "SELECT seq,payload::jsonb->'fields'->'park_set_at' AS park_set_at "
+            "FROM coordination_events WHERE agent_id=%s AND event='update' "
+            "AND payload::jsonb->'fields' ? 'park_set_at' ORDER BY seq DESC LIMIT 1",
+            (agent_id,)) if park else None
+        park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
+        ring_allowed = park_seq is not None and self._listener_path(row, now) is None
+        serve_guard = (" AND (decision='attention' OR (%s AND EXISTS (SELECT 1 "
+                       "FROM coordination_events s WHERE s.event='send' "
+                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))") if codex else ""
+        serve_values = (ring_allowed, park_seq or 0) if codex else ()
         if not codex and self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
@@ -2054,17 +2072,29 @@ class CoordinationStore:
             "AND decision IN ('rung','attention') "
             "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
             "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
-            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)", (now, agent_id, agent_id, now))
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)" + serve_guard,
+            (now, agent_id, agent_id, now, *serve_values))
         rows = self._all(
             "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,"
-            "coalesce(m.wake->>'queued'='true',false) AS queued FROM coordination_wakes w "
+            "coalesce(m.wake->>'queued'='true',false) AS queued,"
+            "EXISTS (SELECT 1 FROM coordination_events s WHERE s.event='send' "
+            "AND s.message_id=w.message_id AND s.seq>%s) AS park_authorized FROM coordination_wakes w "
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
             "AND w.decision IN ('rung','attention') "
-            "AND w.served_at IS NOT NULL AND m.acknowledged_at IS NULL AND m.expires_at>%s",
-            (agent_id, now))
+            "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
+            (park_seq or 0, agent_id, codex, now))
         if not rows:
             return None
+        if codex:
+            eligible = [item for item in rows if item["decision"] == "attention"
+                        or (ring_allowed and item["park_authorized"])]
+            if not eligible:
+                # Historical ring authorization without its unchanged park is
+                # pending context, never a new queue or a recorded ring handoff.
+                return {"decision": "attention", "reason": "no_steer_path",
+                        "ring_at": max(item["ring_at"] for item in rows)}
+            rows = eligible
         # Attention is context for pull/hints, never an idle ring. An armed
         # queue listener does not establish an active-turn steer path.
         if self._listener_path(row, now) is not None:

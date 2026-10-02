@@ -966,6 +966,11 @@ Hook setup sets that approval when you approve the hooks
   receive; it never queues this attention behind an active turn. Previously
   an unparked task with old board activity could ring for urgency; that case
   now waits for pull or a hint because idle state cannot be proved.
+  Historical database ring grants also require the current live park and
+  retained audit ordering proving the grant follows its latest park update.
+  Clearing, expiry or refinement invalidates the old grant, even when clock
+  stamps repeat or go backwards. Missing audit evidence stays pending for
+  pull/hints; serving does not rewrite the grant or spend its caps again.
 - **What it says.** Queued text is a user message, so it contains only fixed
   agent-origin instructions, a pending count and a system-generated opaque
   nonce. Peer text, sender labels and message IDs never enter that notice.

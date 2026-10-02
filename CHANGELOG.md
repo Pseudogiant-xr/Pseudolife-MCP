@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `no_steer_path` and pending unknown host state, and waits for pull/hints
   rather than queuing behind a potentially active turn. Eligible parked
   wakes retain the queue path. Active hints resume the original task.
+- Historical Codex ring grants cannot create a new queue after their park
+  is cleared, expires or is refined. Serving requires retained audit ordering
+  proving the grant follows the unchanged current park; missing evidence
+  stays pending for pull/hints. Historical grant and cap records are retained.
 - An ambiguous bridge failure no longer queues an alternate notice. Current
   desktop queued-notice prompt-hook emission remains unverified; missing
   exact receipts retain pending state. The client hooks must be updated to

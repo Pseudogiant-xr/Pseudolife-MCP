@@ -1903,3 +1903,139 @@ def test_codex_attention_staggers_while_eligible_parked_wake_keeps_queue_path(st
     parked = _wake(store, sender, peers[2], clears="the review")
     assert parked["decision"] == "rung" and parked["reason"] == "clears"
     assert parked["ring_at"] == 1060.0
+
+
+
+def _legacy_codex_urgent_ring(store, *, queued=True, served_at=None, parked_before=False, parked_at=1999.0):
+    """Seed the persisted v49 authorization an older daemon could produce."""
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"codex": False, "ring": True})
+    if parked_before:
+        store.test_time[0] = parked_at
+        store.update(*creds(recipient), park_reason="blocked", park_needs="the review",
+                     park_clear_by="maintainer")
+    store.test_time[0] = 2000.0
+    sent = store.send(*creds(sender), to=recipient["agent_id"], text="urgent dependency",
+                      request_id="before-upgrade")
+    wake = ({"decision": "no_path", "reason": "listener_unknown", "queued": True}
+            if queued else {"decision": "rung", "reason": "urgent", "ring_at": 2000.0})
+    store.storage.conn.execute("UPDATE coordination_messages SET wake=%s::jsonb WHERE message_id=%s",
+                               (json.dumps(wake), sent["message_id"]))
+    store.storage.conn.execute(
+        "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+        "decision,reason,urgent,ring_at,created_at,served_at) "
+        "VALUES (%s,%s,%s,'rung','urgent',true,2000.0,2000.0,%s)",
+        (recipient["agent_id"], sender["agent_id"], sent["message_id"], served_at))
+    return sender, recipient
+
+
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("served_at", [None, 2000.0])
+@pytest.mark.parametrize("park", ["unparked", "expired", "done", "blocked", "changed"])
+def test_codex_legacy_rung_offer_requires_current_live_park(store, queued, served_at, park):
+    sender, recipient = _legacy_codex_urgent_ring(
+        store, queued=queued, served_at=served_at, parked_before=park in {"blocked", "changed"})
+    store.test_time[0] = 2001.0
+    if park not in {"unparked", "blocked"}:
+        if park == "done":
+            store.update(*creds(recipient), park_reason="done")
+        else:
+            store.update(*creds(recipient), park_reason="blocked", park_needs="a different review",
+                         park_clear_by="maintainer", park_expires=2002.0 if park == "expired" else 3000.0)
+    store.test_time[0] = 2003.0
+    answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
+                          ring_armed_until=2063.0)
+    if park == "blocked":
+        assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0}
+    elif park == "done":
+        assert answer["wake"] is None
+    else:
+        assert answer["wake"] == {"decision": "attention", "reason": "no_steer_path", "ring_at": 2000.0}
+    # Serving does not rewrite the historical authorization or spend caps again.
+    row = store.storage.conn.execute("SELECT decision,reason,urgent FROM coordination_wakes").fetchone()
+    assert row == ("rung", "urgent", True)
+    if park != "blocked":
+        assert store.storage.conn.execute("SELECT served_at FROM coordination_wakes").fetchone()[0] == served_at
+
+
+def test_upgrade_legacy_unparked_ring_never_queues_after_unshown_hint_and_plain_mail(store, tmp_path, monkeypatch):
+    import asyncio
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    from tests.test_codex_doorbell import THREAD, _stub, _calls, _settle
+
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(tmp_path))
+    sender, recipient = _legacy_codex_urgent_ring(store)
+    store.test_time[0] = 2001.0
+    attached = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
+                            ring_armed_until=2061.0)
+    command, log = _stub(tmp_path)
+
+    async def drive():
+        now = [0.0]
+        adapter = CoordinationAdapter("http://127.0.0.1:1", "fixture-token",
+            state_path=tmp_path / "unused-state.json", delivery_transport="codex",
+            digest_path=tmp_path / "digest.txt")
+        adapter._update_pending_count(attached)
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        bell.watch(THREAD, adapter)
+        try:
+            # A cancelled calling turn need not show its initial tool-result hint.
+            store.test_time[0] = 2002.0
+            plain = store.send(*creds(sender), to=recipient["agent_id"], text="ordinary follow-up",
+                               request_id="after-upgrade")
+            assert plain["wake"]["decision"] == "hinted"
+            store.test_time[0] = 2042.0
+            answer = store.heartbeat(*creds(recipient), attachment_id="upgraded-shim",
+                generation=attached["generation"], ring_armed_until=2102.0)
+            now[0] = 60.0
+            adapter._update_pending_count(answer)
+            await _settle(bell)
+            assert not _calls(log), "legacy unparked authorization must not create a fresh native queue"
+            assert adapter.ring_due() is None
+            assert "no_steer_path" in adapter.unread_hint
+            assert "recipient turn state unknown" in adapter.unread_hint
+            assert not (tmp_path / "digest.ring").exists()
+        finally:
+            await bell.aclose()
+            if adapter._ring_timer is not None:
+                adapter._ring_timer.cancel()
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("refined_at", [2000.0, 1998.0])
+def test_codex_legacy_grant_cannot_follow_equal_or_backwards_clock_refinement(store, refined_at):
+    _, recipient = _legacy_codex_urgent_ring(store, parked_before=True)
+    store.test_time[0] = refined_at
+    store.update(*creds(recipient), park_needs="a different review")
+    store.test_time[0] = 2003.0
+    answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
+                          ring_armed_until=2063.0)
+    assert answer["wake"]["decision"] == "attention"
+    assert answer["wake"]["reason"] == "no_steer_path"
+    assert store.storage.conn.execute("SELECT served_at FROM coordination_wakes").fetchone()[0] is None
+
+
+def test_codex_legacy_grant_preserves_unchanged_park_with_same_clock_stamp(store):
+    _, recipient = _legacy_codex_urgent_ring(store, parked_before=True, parked_at=2000.0)
+    store.test_time[0] = 2003.0
+    answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
+                          ring_armed_until=2063.0)
+    assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0}
+
+
+@pytest.mark.parametrize("missing", ["send", "park", "park_snapshot"])
+def test_codex_legacy_grant_requires_retained_current_park_audit_evidence(store, missing):
+    _, recipient = _legacy_codex_urgent_ring(store, parked_before=True)
+    if missing == "park_snapshot":
+        store.storage.conn.execute("UPDATE coordination_agents SET park_set_at=1997.0 WHERE agent_id=%s",
+                                   (recipient["agent_id"],))
+    else:
+        event = "send" if missing == "send" else "update"
+        store.storage.conn.execute("DELETE FROM coordination_events WHERE event=%s", (event,))
+    store.test_time[0] = 2003.0
+    answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
+                          ring_armed_until=2063.0)
+    assert answer["wake"]["decision"] == "attention"
+    assert answer["wake"]["reason"] == "no_steer_path"
+    assert store.storage.conn.execute("SELECT served_at FROM coordination_wakes").fetchone()[0] is None
