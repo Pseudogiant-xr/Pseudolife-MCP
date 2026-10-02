@@ -54,6 +54,21 @@ attack surface rather than a defense. Defenses that key on *who wrote*
 are the class this attack does not straightforwardly evade, and that is
 why the mechanisms below are provenance-shaped.
 
+**Board mail is a cross-session channel.** On an authenticated install the
+experimental agent board lets one session's text reach another session's
+context: the per-turn digest previews up to five pending messages (sender
+label and a 100-character excerpt each), `memory_message(action="receive")`
+returns them in full, and a wake can start a turn in a parked session. A
+session that a hostile page has steered can therefore try to steer its
+peers. The mitigations are provenance-shaped too: every delivery is framed
+as agent-origin under a daemon-verified sender, never as a user
+instruction, and peer text cannot grant user approval; mailbox access
+needs a bearer whose principal is on the allowed list and a registered
+adapter's own credential; wakes are policy-gated and capped; and an open install
+with no token keeps the board dormant. None of that stops a model from
+acting on a persuasive message, so treat peer mail like any other read
+content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).
+
 ## Mechanism → threat map
 
 Every row ships today. "Default" says what a fresh install does, because a
@@ -73,7 +88,7 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Writer keying / per-principal tokens** | Narrows the blast radius of a leaked credential: a matched per-principal token *becomes* its caller's writer id, where the singular shared token's holder may assert any writer via `X-PL-Writer` | Single token / open loopback |
 | **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log` / `digest`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
-| **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. The links tell you what else to retire | On |
+| **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. Forgetting an entry also retires the facts, dream edges and lessons it alone supported (Postgres); the links tell you what else to retire | On |
 
 Two of these deserve their exact claim restated, because overselling them
 would be the same failure this page is about:
@@ -131,10 +146,16 @@ problem than the limitation it hides.
 1. **Do not try to correct it conversationally.** That leaves live poison
    with a correction beside it.
 2. **Find it and delete it** — `memory_forget(scope="memory", ...)` for the
-   entry.
+   entry. On Postgres the same transaction retires what it alone supported:
+   current cortex facts with no other current source entry (kept as
+   history), dream edges with no other current evidence, and lessons whose
+   last lineage entry it was; session digests that drew on it are retired
+   and queued for regeneration.
 3. **Follow the engram links** — `memory_fact_get` reports `source_entries`;
-   retire any cortex facts derived from the entry
-   (`memory_forget(scope="fact", ...)`).
+   a fact that still has another surviving source stays current, so retire
+   it yourself if it is poisoned too (`memory_forget(scope="fact", ...)`).
+   Dream edges extracted before schema v51 carry no evidence rows and are
+   not retired by the cascade.
 4. **If a dream did it, roll the pass back** —
    `memory_dream(action="runs")` to find it, then
    `memory_dream(action="rollback")`, which restores each touched slot's

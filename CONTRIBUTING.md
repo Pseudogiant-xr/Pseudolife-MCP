@@ -27,7 +27,14 @@ finds it at `127.0.0.1:5433` on its own, reading the role password from
 `ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
-password can never produce a green run by accident.
+password can never produce a green run by accident. A full run checks this
+before it queues for the suite lock and refuses to start, naming where the
+rejected password came from and the fix: copy `ops/.env` from the main
+checkout into the worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD`
+(or correct it, since it overrides `ops/.env`). A targeted run prints one
+warning line and starts. The check is skipped when
+`PSEUDOLIFE_TEST_DATABASE_URL` is set, in xdist workers, and with
+`PSEUDOLIFE_SUITE_LOCK=off`.
 
 That instance is also the server holding your real bank (`pseudolife_memory`),
 so for it **set nothing**: the suite provisions its own per-run database
@@ -114,6 +121,19 @@ the suite lock, one local slot, CPU-only execution, PostgreSQL preflight
 and fingerprint guard, and avoid overlapping saturating work. Follow
 [the project validation rules](CLAUDE.md#running-tests-exit-code-discipline)
 for docs-only and test-only changes and merges from master.
+
+`tests/conftest.py` enforces the lock for full runs (all of `tests/`, half
+or more of its files, or a `-k`/`-m` that only excludes): it takes
+`~/.pseudolife-mcp/locks/full-suite.lock` and queues runs in arrival order.
+`PSEUDOLIFE_SUITE_LOCK=fail` exits instead of queueing and `=off` skips the
+lock, which is the default on GitHub Actions. `PSEUDOLIFE_SUITE_SLOTS` (a
+whole number from 1 to 8, default 1) sets how many full runs may hold it at
+once. The suite hides the GPU unless `PSEUDOLIFE_TEST_CUDA=1`. A run whose
+imported files change on disk while it waits refuses to start and asks for
+a rerun. On a Windows host, `pwsh ops/wsl-suite.ps1` runs the committed
+HEAD's suite in WSL, and `pwsh ops/remote-suite.ps1` runs it on the first
+free machine (local WSL, or a second Linux machine configured outside the
+repository); both refuse a checkout with uncommitted changes.
 
 All tests must pass. Every PR requires fresh CI for its current head
 integrated with current master, including the full PostgreSQL, lite Linux,
