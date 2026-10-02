@@ -82,5 +82,5 @@ evals/results/*-gate*.summary.json
 /.venv-taubench/
 /local/
 
-# Console v3 source toolchain (build output under static/next/ is tracked)
+# Console source toolchain (its build output under pseudolife_memory/web/static/ is tracked)
 frontend/node_modules/

@@ -37,6 +37,12 @@ HELPER = ROOT / "ops" / "client_credentials.py"
 FIXTURE_TOKEN = "fixture-remote-token-0123456789"
 HEALTH_ON = '{"status": "ok", "version": "0.0.0", "auth": true}'
 HEALTH_OPEN = '{"status": "ok", "version": "0.0.0", "auth": false}'
+# A pairing code as `pseudolife-mcp invite` prints it (12 Crockford base32
+# characters), and a bearer token as `pair` and the daemon mint them
+# (secrets.token_urlsafe(32): 43 URL-safe characters).
+PAIRING_CODE = "7KQ2-MX4P-9TZC"
+URLSAFE_TOKEN = "Zq3_x9-KfixtureUrlsafeToken0123456789abcdEF"
+PAIRED_TOKEN = "fixture-paired-token-0123456789"
 
 
 def _block(name: str) -> str:
@@ -116,10 +122,13 @@ class _Shell:
 def _mode(shell: _Shell, *, daemon_url: str = "", client_only: str = "",
           token_file: str = "", extractor: str = "", model: str = "",
           shim_port: str = "0", no_token: str = "", transport: str = "shim",
-          read_token: str = "", prelude: str = "",
+          read_token: str = "", prelude: str = "", pairing_code: str | None = None,
           extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    """``pairing_code``: None leaves PAIRING_CODE unset, as a run of the
+    blocks from before it does (they must hold under ``set -u`` either way)."""
+    pairing = "" if pairing_code is None else f"PAIRING_CODE='{_q(pairing_code)}'\n"
     return shell.run(
-        prelude + f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\nREAD_TOKEN='{read_token}'\n"
+        prelude + pairing + f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\nREAD_TOKEN='{read_token}'\n"
         f"TOKEN_FILE='{_q(token_file)}'\nEXTRACTOR='{extractor}'\nMODEL='{model}'\n"
         f"SHIM_PORT='{shim_port}'\nNO_TOKEN='{no_token}'\nTRANSPORT='{transport}'\n"
         + _block("client-only mode")
@@ -278,6 +287,31 @@ def test_a_token_file_flag_needs_client_only(bash, tmp_path):
 
 
 @BASH
+def test_a_pairing_code_flag_needs_client_only(bash, tmp_path):
+    """Like --token-file, a pairing code names a remote daemon's credential."""
+    proc = _mode(_Shell(bash, tmp_path), pairing_code=PAIRING_CODE)
+    assert proc.returncode == 2
+    assert "--pairing-code" in proc.stderr
+    assert "--client-only --daemon-url" in proc.stderr
+    assert PAIRING_CODE not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pairing_code_with_read_token_is_a_usage_error(bash, tmp_path):
+    proc = _mode(_Shell(bash, tmp_path), daemon_url=REMOTE, read_token="1",
+                 pairing_code=PAIRING_CODE)
+    assert proc.returncode == 2
+    assert "--pairing-code" in proc.stderr and "--read-token" in proc.stderr
+
+
+@BASH
+def test_a_pairing_code_with_a_remote_daemon_url_is_client_only(bash, tmp_path):
+    proc = _mode(_Shell(bash, tmp_path), daemon_url=REMOTE, pairing_code=PAIRING_CODE)
+    assert proc.returncode == 0, proc.stderr
+    assert "CLIENT_ONLY=1\n" in proc.stdout
+
+
+@BASH
 def test_the_script_itself_refuses_client_only_without_a_url(bash, tmp_path):
     """Refused while parsing arguments: nothing else has run yet."""
     shell = _Shell(bash, tmp_path)
@@ -294,7 +328,9 @@ def test_the_new_flags_are_parsed_and_documented():
     assert "--client-only) CLIENT_ONLY=1; shift ;;" in sh
     usage = sh.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0]
     assert "--read-token) READ_TOKEN=1; shift ;;" in sh
-    for flag in ("--daemon-url", "--token-file", "--client-only", "--read-token"):
+    assert '--pairing-code) PAIRING_CODE="$2"; shift 2 ;;' in sh
+    for flag in ("--daemon-url", "--token-file", "--client-only", "--read-token",
+                 "--pairing-code"):
         assert re.search(rf"(?m)^#\s+.*{flag}\b", usage), flag
     # One token file is one principal: the examples wire one client per run.
     assert "one principal" in usage
@@ -312,18 +348,28 @@ def test_the_new_flags_are_parsed_and_documented():
 def _preflight(shell: _Shell, *, daemon_url: str = REMOTE, token_file: str = "",
                health: str = HEALTH_ON, curl_exit: int = 0, clients: str = "claude",
                client_only: str = "1", read_token: str = "", feed: str | None = None,
+               pairing_code: str | None = None, after: str = "",
                extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    """``feed``: a line piped to the preflight's stdin (--read-token input)."""
+    """``feed``: a line on the preflight's stdin (--read-token input), from
+    a file so the preflight runs in this shell and ``after`` (Bash run next,
+    such as the pairing step) sees what it set."""
     env = {"FAKE_HEALTH": health, "FAKE_CURL_EXIT": str(curl_exit),
            "FIXTURE_FEED": feed or ""}
     env.update(extra_env or {})
-    call = ("printf '%s\\n' \"$FIXTURE_FEED\" | client_only_preflight\n" if feed is not None
-            else "client_only_preflight\nprintf 'TOKEN_FILE=%s\\n' \"$TOKEN_FILE\"\n")
+    call = ("printf '%s\\n' \"$FIXTURE_FEED\" >\"$CALL_LOG.feed\"\n"
+            "client_only_preflight <\"$CALL_LOG.feed\"\n" if feed is not None
+            else "client_only_preflight\n")
+    # Whether a pairing code is held, never the code itself: tests assert it
+    # appears in no output.
+    call += ("printf 'TOKEN_FILE=%s\\nPAIRING=%s\\n' \"$TOKEN_FILE\" \"${PAIRING_CODE:+held}\"\n"
+             + after)
+    pairing = "" if pairing_code is None else f"PAIRING_CODE='{_q(pairing_code)}'\n"
     return shell.run(
-        f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
+        pairing + f"DAEMON_URL='{_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
         f"TOKEN_FILE='{_q(token_file)}'\nREAD_TOKEN='{read_token}'\n"
         f"CLIENTS='{clients}'\nEXTRACTOR='' MODEL='' SHIM_PORT=0 NO_TOKEN='' TRANSPORT=shim\n"
-        + _block("client-only mode") + _block("client-only preflight") + "\n" + call,
+        + _block("bank location") + _block("client-only mode") + _block("client-only preflight")
+        + "\n" + call,
         extra_env=env)
 
 
@@ -518,6 +564,302 @@ def test_a_selected_cli_that_is_missing_is_refused_up_front(bash, tmp_path):
     proc = _preflight(shell, token_file=shell.path(token), clients="claude gemini")
     assert proc.returncode == 1
     assert "gemini CLI is not on PATH" in proc.stderr
+
+
+# -- a pairing code: the installed shim's pair makes the token file ------------
+
+# Pasted where the token is asked for, these are pairing codes (case, dashes
+# and surrounding whitespace ignored; O reads as 0, I and L as 1) ...
+CODE_FORMS = [PAIRING_CODE, "7kq2mx4p9tzc", "  7KQ2-MX4P-9TZC  ", "\t7kq2-mx4p-9tzc",
+              "OIL2-MX4P-9TZC", "oil2mx4p9tzc", "7-K-Q-2MX4P9TZC", "--7KQ2MX4P9TZC--"]
+# ... and these are not: written as a token, as before.
+NOT_CODES = [URLSAFE_TOKEN, FIXTURE_TOKEN, "", "7KQ2-MX4P-9TZU", "7KQ2-MX4P-9TZ",
+             "7KQ2-MX4P-9TZC1", "7KQ2 MX4P 9TZC", "7KQ2_MX4P_9TZC", "'7KQ2-MX4P-9TZC'"]
+
+
+def _pair_report(state: str, exit_code: int, error: str | None = None,
+                 token_file: str = "/fixture/token") -> str:
+    """pair's --json report: never the token or the code."""
+    return json.dumps({"url": REMOTE, "state": state, "principal": "fixture-laptop",
+                       "tier": "full", "bank": "fixture-bank", "token_file": token_file,
+                       "warnings": [], "error": error, "exit": exit_code})
+
+
+# The installed shim, as far as these tests need it: `pair` records its stdin
+# and, as the real one does on success and on an unknown outcome, writes the
+# token file owner-only (through the helper the installer checks it with);
+# connect's dry run finds no registration; `expose` answers FAKE_EXPOSE_EXIT.
+PAIR_SHIM = (
+    "printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+    "case \"$1\" in\n"
+    "  pair)\n"
+    "    cat >>\"$CALL_LOG.stdin\"\n"
+    "    pair_file=''\n"
+    "    while [ $# -gt 0 ]; do [ \"$1\" = --token-file ] && pair_file=\"$2\"; shift; done\n"
+    "    case \"${FAKE_PAIR_EXIT:-0}\" in 0|5)\n"
+    "      if [ -n \"${FAKE_PAIR_PLAIN:-}\" ]; then\n"
+    "        printf '%s\\n' \"$FAKE_PAIR_TOKEN\" >\"$pair_file\"; chmod 644 \"$pair_file\"\n"
+    "      else printf '%s\\n' \"$FAKE_PAIR_TOKEN\" |\n"
+    "        \"$FIXTURE_PYTHON\" \"$FIXTURE_HELPER\" write-token-file --path \"$pair_file\" >/dev/null; fi ;;\n"
+    "    esac\n"
+    "    printf '%s\\n' \"$FAKE_PAIR_REPORT\"; exit \"${FAKE_PAIR_EXIT:-0}\" ;;\n"
+    "  connect)\n"
+    "    case \" $* \" in *' --dry-run '*)\n"
+    "      echo '{\"url\": null, \"rows\": [], \"exit\": 3, \"error\": \"none\"}'; exit 3 ;; esac\n"
+    "    exit 0 ;;\n"
+    "  expose) exit \"${FAKE_EXPOSE_EXIT:-0}\" ;;\n"
+    "esac\n"
+    "exit 0\n")
+
+
+def _pair_env(shell: _Shell, *, pair_exit: int = 0, report: str | None = None,
+              plain: bool = False) -> dict[str, str]:
+    return {"FAKE_PAIR_EXIT": str(pair_exit), "FAKE_PAIR_TOKEN": PAIRED_TOKEN,
+            "FAKE_PAIR_PLAIN": "1" if plain else "",
+            "FAKE_PAIR_REPORT": report if report is not None else _pair_report("paired", pair_exit),
+            "FIXTURE_PYTHON": _bash_fixture_path(shell.bash, Path(sys.executable), shell.env),
+            "FIXTURE_HELPER": _bash_fixture_path(shell.bash, HELPER, shell.env)}
+
+
+def _pairing_step(shell: _Shell, *, shim_ok: bool = True, connect: bool = True) -> str:
+    """The pairing step, then (``connect``) the connect step, as section 9
+    runs them, with the fake shim installed."""
+    shim = shell.bin / "fake-shim"
+    _stub(shim, PAIR_SHIM)
+    ensure = (f"ensure_shim() {{ SHIM_OK=1; SHIM_PATH='{shell.path(shim)}'; }}\n" if shim_ok
+              else "ensure_shim() { SHIM_OK=''; SHIM_PATH=''; }\n")
+    body = (ensure + "SHIM_HELD=''\n" + _block("client-only pair")
+            + "pair_with_code\nprintf 'PAIRED=%s|%s\\n' \"$TOKEN_FILE\" \"${PAIRING_CODE:+held}\"\n")
+    if connect:
+        body += _block("client-only connect") + "connect_existing_registrations\n"
+    return body
+
+
+def _shim_calls(shell: _Shell) -> list[str]:
+    return [call for call in shell.logged() if call.startswith("shim|")]
+
+
+def _pair_stdin(shell: _Shell) -> str:
+    path = Path(str(shell.calls) + ".stdin")
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def _assert_code_unseen(shell: _Shell, proc, code: str = PAIRING_CODE) -> None:
+    """The code never reaches an argument list a stub recorded, or the output."""
+    canonical = code.strip().upper().replace("-", "")
+    for text in [*shell.logged(), proc.stdout, proc.stderr]:
+        assert code.strip() not in text and canonical not in text.upper().replace("-", ""), text
+
+
+def _is_code_sh(shell: _Shell, values: list[str], python: str | None = None) -> list[bool]:
+    """is_pairing_code on each value, fed on stdin as the preflight feeds it."""
+    feed = shell.tmp / "values.txt"
+    feed.write_bytes("".join(value + "\n" for value in values).encode("utf-8"))
+    prelude = (f"installer_python() {{ printf '%s\\n' '{python}'; }}\n" if python else "")
+    proc = shell.run(
+        prelude + _block("client-only preflight")
+        + f"while IFS= read -r value; do\n"
+          "    if printf '%s\\n' \"$value\" | is_pairing_code; then echo CODE; else echo TOKEN; fi\n"
+          f"done <'{shell.path(feed)}'\n")
+    assert proc.returncode == 0, proc.stderr
+    return [line == "CODE" for line in proc.stdout.splitlines()]
+
+
+@pytest.mark.parametrize("fallback", [False, True], ids=["python", "shell-rule"])
+@BASH
+def test_a_pairing_code_is_recognised_exactly_as_pair_reads_one(bash, tmp_path, fallback):
+    """The shape is the shim's own rule (principals.normalize_pairing_code),
+    and the shell rule used when that cannot be asked gives the same answer."""
+    from pseudolife_memory.principals import normalize_pairing_code
+    shell = _Shell(bash, tmp_path)
+    python = None
+    if fallback:
+        _stub(shell.bin / "broken-python", "exit 1\n")
+        python = shell.path(shell.bin / "broken-python")
+    values = CODE_FORMS + NOT_CODES
+    assert _is_code_sh(shell, values, python) == [
+        normalize_pairing_code(value) is not None for value in values]
+
+
+@pytest.mark.parametrize("form", CODE_FORMS)
+@BASH
+def test_a_pasted_pairing_code_is_kept_for_pairing_not_written(bash, tmp_path, form):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1", feed=form)
+    assert proc.returncode == 0, proc.stderr
+    assert "PAIRING=held\n" in proc.stdout
+    assert not target.exists()
+    assert target.parent.is_dir()
+    assert any(call.startswith("curl|") for call in shell.logged())
+    assert "pairing code" in proc.stdout
+    _assert_code_unseen(shell, proc, form)
+
+
+@pytest.mark.parametrize("token", [URLSAFE_TOKEN, FIXTURE_TOKEN])
+@BASH
+def test_a_pasted_token_is_still_written_as_the_token(bash, tmp_path, token):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1", feed=token)
+    assert proc.returncode == 0, proc.stderr
+    assert "PAIRING=\n" in proc.stdout
+    assert CredentialProvider(path=target).snapshot().token == token
+
+
+def test_the_paste_prompt_names_the_pairing_code():
+    prompt = "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown)"
+    assert prompt in _block("client-only preflight")
+    assert prompt in (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8").split(
+        "# >>> client-only preflight >>>", 1)[1].split("# <<< client-only preflight <<<", 1)[0]
+
+
+@pytest.mark.parametrize("clients,name", [("claude", "claude-code"), ("codex", "codex"),
+                                          ("claude codex", "shared")])
+@BASH
+def test_a_pairing_code_defaults_to_the_token_file_named_for_the_client(bash, tmp_path,
+                                                                        clients, name):
+    """Non-interactive (--daemon-url ... --pairing-code ...): nothing asks
+    where the token goes, so it is the file the paste path offers, in a
+    directory made for it; the environment's token file is someone else's."""
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, clients=clients,
+                      extra_env={"PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/other.token"})
+    assert proc.returncode == 0, proc.stderr
+    target = shell.home / ".pseudolife-mcp" / f"{name}.token"
+    assert f"TOKEN_FILE={shell.path(target)}\nPAIRING=held\n" in proc.stdout
+    assert target.parent.is_dir() and not target.exists()
+    # The daemon is still checked, exactly as for a token file.
+    assert f"curl|-fsS --max-time 5 {REMOTE}/health" in shell.logged()
+    _assert_code_unseen(shell, proc)
+
+
+@BASH
+def test_a_given_token_file_overrides_the_pairing_default(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "laptop.token"
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, token_file=shell.path(target))
+    assert proc.returncode == 0, proc.stderr
+    assert f"TOKEN_FILE={shell.path(target)}\n" in proc.stdout
+    assert target.parent.is_dir() and not target.exists()
+
+
+@BASH
+def test_a_pairing_code_refuses_an_existing_token_file_before_pair_runs(bash, tmp_path):
+    """pair never overwrites: an existing file is refused at the preflight,
+    before the daemon is asked and before any code is spent."""
+    shell = _Shell(bash, tmp_path)
+    token = _token(shell)
+    before = token.read_bytes()
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, token_file=shell.path(token),
+                      after=_pairing_step(shell), extra_env=_pair_env(shell))
+    assert proc.returncode == 1
+    assert "already exists" in proc.stderr and "remote.token" in proc.stderr
+    assert token.read_bytes() == before
+    assert _shim_calls(shell) == []
+    assert not any(call.startswith("curl|") for call in shell.logged())
+    _assert_code_unseen(shell, proc)
+
+
+@BASH
+def test_a_pairing_code_is_redeemed_on_stdin_and_then_used_as_the_token_file(bash, tmp_path):
+    """--daemon-url <remote> --pairing-code <code>, non-interactive: the mode
+    block, the preflight, then pair with the code on stdin and never in an
+    argument list, then the token file checked and handed to connect."""
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, client_only="", clients="codex",
+                      after=_pairing_step(shell), extra_env=_pair_env(shell))
+    assert proc.returncode == 0, proc.stderr
+    target = shell.path(shell.home / ".pseudolife-mcp" / "codex.token")
+    assert _shim_calls(shell) == [
+        f"shim|pair {REMOTE} --read-code --token-file {target} --json",
+        f"shim|connect {REMOTE} --token-file {target} --client codex --dry-run --json"]
+    assert _pair_stdin(shell) == PAIRING_CODE + "\n"
+    assert CredentialProvider(path=shell.home / ".pseudolife-mcp" / "codex.token"
+                              ).snapshot().token == PAIRED_TOKEN
+    # The code is forgotten once pair has it.
+    assert f"PAIRED={target}|\n" in proc.stdout
+    assert "fixture-laptop" in proc.stdout
+    _assert_code_unseen(shell, proc)
+    assert PAIRED_TOKEN not in proc.stdout + proc.stderr
+
+
+@BASH
+def test_a_pasted_pairing_code_reaches_pair_as_it_was_typed(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    target = tmp_path / "keys" / "new.token"
+    proc = _preflight(shell, token_file=shell.path(target), read_token="1",
+                      feed=" oil2-mx4p-9tzc ", after=_pairing_step(shell, connect=False),
+                      extra_env=_pair_env(shell))
+    assert proc.returncode == 0, proc.stderr
+    assert _shim_calls(shell) == [
+        f"shim|pair {REMOTE} --read-code --token-file {shell.path(target)} --json"]
+    assert _pair_stdin(shell).strip() == "oil2-mx4p-9tzc"
+    assert CredentialProvider(path=target).snapshot().token == PAIRED_TOKEN
+    _assert_code_unseen(shell, proc, "oil2-mx4p-9tzc")
+
+
+@BASH
+def test_pairing_runs_even_with_no_client_for_connect(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, clients="generic",
+                      after=_pairing_step(shell), extra_env=_pair_env(shell))
+    assert proc.returncode == 0, proc.stderr
+    assert [call.split()[0] for call in _shim_calls(shell)] == ["shim|pair"]
+
+
+@BASH
+def test_a_refused_pairing_stops_the_install(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    report = _pair_report("refused", 4, "fixture-refusal: the daemon refused the pairing code")
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, after=_pairing_step(shell),
+                      extra_env=_pair_env(shell, pair_exit=4, report=report))
+    assert proc.returncode == 1
+    assert "pseudolife-mcp pair exited 4" in proc.stderr
+    assert "fixture-refusal: the daemon refused the pairing code" in proc.stderr
+    assert "PAIRED=" not in proc.stdout
+    assert [call.split()[0] for call in _shim_calls(shell)] == ["shim|pair"]
+    assert not (shell.home / ".pseudolife-mcp" / "claude-code.token").exists()
+    _assert_code_unseen(shell, proc)
+
+
+@BASH
+def test_an_unknown_pairing_outcome_names_the_kept_token_file(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    report = _pair_report("unknown", 5, "fixture-unknown: no answer after the retries")
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, after=_pairing_step(shell),
+                      extra_env=_pair_env(shell, pair_exit=5, report=report))
+    assert proc.returncode == 1
+    kept = shell.path(shell.home / ".pseudolife-mcp" / "claude-code.token")
+    assert "pseudolife-mcp pair exited 5" in proc.stderr
+    assert "fixture-unknown: no answer after the retries" in proc.stderr
+    assert f"kept at {kept}" in proc.stderr
+    assert "may hold a token the daemon now accepts" in proc.stderr
+    assert [call.split()[0] for call in _shim_calls(shell)] == ["shim|pair"]
+    _assert_code_unseen(shell, proc)
+
+
+@BASH
+def test_pairing_without_a_shim_stops_the_install(bash, tmp_path):
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, after=_pairing_step(shell, shim_ok=False),
+                      extra_env=_pair_env(shell))
+    assert proc.returncode == 1
+    assert "pairing needs the pseudolife-mcp shim" in proc.stderr
+    assert _shim_calls(shell) == []
+    _assert_code_unseen(shell, proc)
+
+
+@BASH
+def test_the_paired_token_file_is_checked_as_a_given_one_is(bash, tmp_path):
+    """A file the shim could not read (here: not owner-only) stops the
+    install at the same check a --token-file meets."""
+    shell = _Shell(bash, tmp_path)
+    proc = _preflight(shell, pairing_code=PAIRING_CODE, after=_pairing_step(shell),
+                      extra_env=_pair_env(shell, plain=True))
+    assert proc.returncode == 1
+    assert "the shim cannot use the token file" in proc.stderr
+    assert [call.split()[0] for call in _shim_calls(shell)] == ["shim|pair"]
 
 
 # -- Codex: the credential helper gets the operator's token and the remote URL --
@@ -957,6 +1299,7 @@ def _messages(text: str) -> set[str]:
     found |= set(re.findall(r"An unauthenticated bank must never[^\"$]*", text))
     spellings = {"--daemon-url": "-DaemonUrl", "--token-file": "-TokenFile",
                  "--client-only": "-ClientOnly", "--read-token": "-ReadToken",
+                 "--pairing-code": "-PairingCode",
                  "--client,": "-Client,"}
     normalized = set()
     for message in found:
@@ -969,7 +1312,8 @@ def _messages(text: str) -> set[str]:
 def test_client_only_messages_match_across_installers():
     sh = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
     ps = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8")
-    for name in ("client-only mode", "client-only preflight", "client-only connect"):
+    for name in ("client-only mode", "client-only preflight", "client-only connect",
+                 "client-only pair"):
         sh_block = "\n".join(_marker_block(sh, name))
         ps_block = "\n".join(_marker_block(ps, name))
         assert _messages(sh_block), name
@@ -1001,3 +1345,17 @@ def test_preflight_checks_the_venv_the_shim_runtime_needs(bash, tmp_path, venv_e
         assert "sudo apt install python3-venv" in lines[warned + 1]
     [pipx] = [line for line in lines if re.search(r"(OK|WARN)\S*\s+pipx", line)]
     assert "fallback" in pipx and "preferred" not in proc.stdout
+
+
+
+def test_the_pairing_code_help_says_the_prompt_keeps_it_off_the_command_line():
+    """Security review, 2026-10-02: a code passed as a flag sits in shell
+    history and the process list; the help says the prompt avoids that."""
+    sh = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8")
+    usage = sh.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0]
+    sh_help = usage.split("--pairing-code <code>", 1)[1].split("# One token file", 1)[0]
+    ps_help = ps.split("# -PairingCode <code>:", 1)[1].split("\n#\n", 1)[0]
+    for text in (sh_help, ps_help):
+        flat = " ".join(line.lstrip("# ").strip() for line in text.splitlines())
+        assert "off the command line" in flat, flat

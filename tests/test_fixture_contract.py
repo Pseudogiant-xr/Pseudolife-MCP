@@ -20,7 +20,7 @@ from pseudolife_memory.service import _entry_to_dict
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 from pseudolife_memory.web.fixtures import FixtureService
 
-# What views/stream.js actually reads.
+# What the Console's Stream view (frontend/src/lib/api/stream.ts) reads.
 _DRAWER_TIER_KEYS = {"name", "candidates"}
 _DRAWER_CANDIDATE_KEYS = {"text_preview", "kept"}
 _DRAWER_TOPK_KEYS = {"text_preview", "score"}
@@ -70,7 +70,7 @@ def test_fixture_trace_matches_drawer_contract():
     _assert_drawer_shape(fx, "FixtureService.trace")
 
 
-# What atlas_review.js's curation section actually reads per duplicate pair.
+# What the Review view's curation panel (frontend/src/components/review/CurationPanel.svelte) reads per duplicate pair.
 _CURATION_PAIR_KEYS = {"a_key", "b_key", "a", "b", "similarity"}
 _CURATION_LESSON_SIDE_KEYS = {"entity", "attribute", "value",
                               "polarity", "outcome", "about"}

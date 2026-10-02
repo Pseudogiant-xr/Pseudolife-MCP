@@ -58,9 +58,18 @@ def digests(tmp_path, monkeypatch):
 
 
 def _write(path, watermark, body=""):
-    """Replace the file atomically, the way the adapter writes it."""
+    """Replace the file atomically, the way the adapter writes it. On Windows
+    the replace is refused while the waiter has the file open for a read;
+    the adapter then writes again on its next heartbeat, so this retries
+    (a 2026-10-02 local run lost a timer write to WinError 5 here)."""
     temp = path.with_name(path.name + ".tmp")
     temp.write_bytes(f"{watermark}\n{body}".encode("utf-8"))
+    for _ in range(100):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            time.sleep(0.01)
     os.replace(temp, path)
 
 
@@ -219,6 +228,55 @@ def test_a_marker_that_is_not_a_rung_ring_never_fires(digests, capsysbinary, rin
     digest = _digest(digests)
     _write(digest, 3, MAIL)
     digest.with_suffix(".ring").write_bytes(ring.encode("utf-8"))
+    assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
+@pytest.mark.parametrize("ring", [b"3\r\nrung anyone\r\n", b" 3 \nrung anyone\n", b"3\r\nrung urgent"])
+def test_a_marker_the_stop_hook_accepts_fires_the_waiter_too(digests, capsysbinary, ring):
+    """The Stop hook drops CR, LF and spaces from line 1 and one trailing CR
+    from line 2, so a marker it rings on rings the waiter as well."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    digest.with_suffix(".ring").write_bytes(ring)
+    assert run_wait_mail(["--timeout", "5", *FAST]) == 0
+    assert capsysbinary.readouterr().out == MAIL.encode("utf-8")
+
+
+def test_a_ring_ahead_of_the_digest_waits_for_the_digest(digests, capsysbinary):
+    """On Windows a digest replace can fail while a reader holds the file;
+    the adapter has already moved its watermark, so the ring marker can name
+    mail the digest on disk does not hold yet. Firing then would print mail
+    already shown, leave ``.seen`` where it is and fire again on every
+    re-arm: the waiter waits until the digest itself is past ``.seen``."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _seen(digest).write_text("3\n")
+    _ring(digest, 4)
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+    newer = MAIL + "- 1 more pending\n"
+    timer = _later(0.1, lambda: _write(digest, 4, newer))
+    try:
+        assert run_wait_mail(["--timeout", "5", *FAST]) == 0
+    finally:
+        timer.cancel()
+    assert timer.done.is_set()
+    assert capsysbinary.readouterr().out == newer.encode("utf-8")
+    assert _seen(digest).read_text().strip() == "4"
+
+
+def test_a_symlinked_ring_marker_never_fires(digests, tmp_path, capsysbinary):
+    """Only a regular file is a ring, as in the Stop hook: a link planted at
+    the marker's path rings nothing."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    target = tmp_path / "planted.ring"
+    target.write_bytes(b"3\nrung anyone\n")
+    try:
+        digest.with_suffix(".ring").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks need privileges on this platform")
     assert run_wait_mail(["--timeout", "0.2", *FAST]) == 3
     assert capsysbinary.readouterr().out == b""
 

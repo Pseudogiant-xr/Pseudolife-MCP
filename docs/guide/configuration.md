@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v52). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v53). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -260,7 +260,15 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
-unchanged, a one-line reminder rides every tenth tool result. The file is
+unchanged, a one-line reminder rides every tenth tool result. A Claude Code
+subagent runs inside its parent's shim, so a tool result may be the
+subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
+`<key>.sub-<agent_id>` marker beside the digest (start to stop, ignored after
+`HOOK_CHILD_TTL`), the hint and the reminder wait and `.seen` is left alone,
+so a subagent's call never spends the parent's mail; the prompt hook still
+delivers it (the Stop hook only mail that rang), and so does the parent's
+first tool result after the subagents finish. A parent that gets no prompts
+therefore sees plain mail only once its subagents stop. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
@@ -834,13 +842,30 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged and prints the approval choice at the
-end of successful hook setup. A recipient running with approval policy `never`
-cannot execute a tool that still requires approval. To authorize
-unattended mailbox operations specifically, configure the installed server's
-`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
-tool's send, receive and acknowledgment actions; it does not approve file writes,
-commands or other tools. Without that choice, use the host's normal approval flow.
+Codex hook setup (`ops/setup-codex-hooks.py`, or the installer's Codex step)
+asks for the `memory_message` approval together with the hooks. Its prompt
+names it, and a yes, or `--trust yes`, sets
+`tools.memory_message.approval_mode = "approve"` on the `pseudolife-memory`
+server in Codex's user configuration, through Codex's own config writer and
+after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
+yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
+alone. The JSON report's `mailbox_approval` says which happened: `set`,
+`already`, `kept-explicit`, `declined`, or `unavailable` (no
+`pseudolife-memory` server in the user configuration, or Codex refused the
+write; `mailbox_approval_detail` gives the reason, and hook setup still
+completes). When the approval is not set, the end-of-setup notice says how to
+choose it. The reason is the doorbell: a board ring wakes a thread only when it
+has mail it needs, and a woken thread that must ask before calling
+`memory_message` stalls on that prompt. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval.
+
+The trade-off is plain: Codex approves per tool, not per action, so the same
+approval lets the thread send board mail without asking. Board mail is
+rate-limited, audited and expires, cannot grant permissions, and reaches only
+allowed principals. The approval covers that one tool; it does not approve file
+writes, commands or other tools. To set it by hand, configure the installed
+server's `tools.memory_message.approval_mode = "approve"` in Codex; without
+it, use the host's normal approval flow.
 
 ### Optional Codex live delivery
 
@@ -925,6 +950,8 @@ A woken task reads its mail with `memory_message receive`, so the task needs
 `memory_message` approved in Codex's tool configuration; without that
 approval a woken task stalls on an approval prompt until someone answers it
 (the 2026-09-12 validation record's complete-path test approved it explicitly).
+Hook setup sets that approval when you approve the hooks
+([Codex CLI and desktop](#codex-cli-and-desktop)).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
@@ -1557,8 +1584,11 @@ payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
 anything but a yes, let the call through. Installs without the plugin keep
 the instruction only. In Codex the same entry allows everything: a Codex
 child has a board address of its own. Claude Code
-subagents get no addresses of their own: the parent names them on its own row
-with `memory_agents(action="update", children=["review storage", "tests"])`, at
+subagents get no addresses of their own. With the plugin, its subagent hooks
+list them on the parent's row (below), and the served check-in asks a parent
+to name its subagents only when they do not appear; without it the parent
+names them with
+`memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 `{label, since}` in which the daemon stamps `since` and keeps it for a label
 the next update carries over. Omitting `children` leaves it unchanged and `[]`
@@ -3343,7 +3373,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v52**; migrations are additive
+The current Postgres meta version is **v53**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3401,6 +3431,7 @@ The milestones:
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
+| v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

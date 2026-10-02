@@ -43,7 +43,9 @@ exactly; they exist because each one was violated at least once.
    For a required full run, finish review fixes and targeted validation
    before joining the queue, then run
    `HF_HUB_OFFLINE=1 python -m pytest tests/` with the bench Postgres up
-   (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled. Keep
+   (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled —
+   on a Windows host, in WSL through `pwsh ops/wsl-suite.ps1` (see
+   "Running tests"). Keep
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
@@ -158,6 +160,32 @@ took 143 CUDA OOMs.
   instead; `=off` skips the lock (the default on GitHub Actions: one job per
   VM). Targeted runs are never locked. The lock lives in your home
   directory: a WSL or other-user run does not see it.
+- **On the maintainer's Windows host, full suites run in WSL** (maintainer
+  decision 2026-10-02): `pwsh ops/wsl-suite.ps1` from the worktree, in the
+  background, output redirected as below; any arguments go to pytest, none
+  means the full suite. Measured that day: a native Windows full suite's
+  hook-script tests start Git Bash processes in bursts of 10-32 a second,
+  and mouse input stalled 82-347 ms in exactly those seconds while CPU,
+  memory, disk and the compositor stayed normal. A WSL run's lock lives in
+  the WSL home, and neither `flock` nor `lockf` there sees a Windows
+  holder, so that host refuses native Windows full runs:
+  `~/.pseudolife-mcp/locks/full-suite.windows` says `refuse`
+  (`PSEUDOLIFE_SUITE_WINDOWS=refuse|allow` overrides it; `allow` only for a
+  deliberate run with no WSL suite going). Targeted runs on Windows are
+  unaffected, and CI's Windows job covers Windows-only behaviour. The
+  launcher tests the worktree's committed HEAD from a copy on WSL's own
+  filesystem (it refuses uncommitted changes to tracked files: commit
+  first), keeps a uv environment per checkout under `~/.venvs/pseudolife`
+  in WSL, needs the worktree's `ops/.env` like any run and the models in
+  WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and forwards the
+  bearer, so the run still shows as the `full-suite` lease; from Windows,
+  `lease check full-suite` sees it through the board only (its local-lock
+  line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
+  with the lock, so it is never a way to start a Windows full run here.
+  Rebase a branch onto master before its first WSL run: code from before
+  the WSL database-name tag (2026-10-02) names its databases after a WSL
+  pid that Windows runs cannot see, and any Windows pytest session drops
+  them mid-run.
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot
@@ -337,8 +365,8 @@ three lists, its menus and the `-Extractor` ValidateSet), the `Claude
 models:` / `OpenAI models:` help text of the shims' autostart scripts
 (`ops/install-shim-autostart.*`, `ops/install-codex-shim-autostart.*`), the
 "Extractor modes and dreamer models" section of `docs/guide/dreaming.md`,
-the Console's `DREAMER_MODELS` (`pseudolife_memory/web/static/js/views/
-console.js`), the Extractor panel's `extractor_model_override` suggestions
+the Console's `DREAMER_MODELS` (`frontend/src/lib/dreamer.ts`), the
+Extractor panel's `extractor_model_override` suggestions
 (`pseudolife_memory/web/config_io.py`) and both shims' `/models` lists
 (`evals/claude_shim.py`, `evals/codex_shim.py`). The lists are the menu, not
 a gate: a CLI shim mode passes a model id they do not hold to the shim
@@ -502,7 +530,7 @@ the same thing with the same word.
   survives (re-derived from current evidence at review time); a veto is a
   name-shape rule that blocks a bad fold at filing.
 - **review queue** — pending graph proposals awaiting accept/reject (the
-  Console's Atlas Review view).
+  Console's Review view).
 - **quarantine** — overloaded; qualify it: *serving-side* quarantine is the
   `stale_policy` that withholds a stale value; *consolidation* quarantine is
   the two-man rule parking low-trust dream claims as contenders.
@@ -519,4 +547,4 @@ the same thing with the same word.
   the toolset tier.
 - **Console** — the web UI (Cortex Console). The **System Atlas**
   (`docs/atlas/`) is the hand-curated *codebase* architecture map — distinct
-  from the Console's Atlas view, which visualizes the memory bank's graph.
+  from the Console's Graph view, which visualizes the memory bank's graph.

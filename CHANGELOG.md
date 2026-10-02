@@ -26,6 +26,134 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no codex CLI found) a Codex thread still declares no ring path, so
   wait-mail there only times out; the configuration guide says so.
 
+### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
+- On the maintainer's Windows host, a full test suite made the mouse stutter.
+  Its hook-script tests start Git Bash processes in bursts of 10-32 a
+  second, and mouse input stalled 82-347 ms in exactly those seconds while
+  CPU, memory, disk and the compositor stayed normal. `ops/wsl-suite.ps1`
+  now runs a checkout's suite inside WSL instead, where starting a process
+  never touches the Windows console. It tests the checkout's committed HEAD
+  from a copy on WSL's own filesystem, fetched through a mirror so only new
+  objects cross `/mnt/c`: Linux git cannot read a Windows worktree, and a
+  run over `/mnt/c` roughly doubled driver (DPC) work on the host's first
+  CPU. A checkout with uncommitted changes is refused. It keeps a uv
+  environment per checkout (CPU torch, as CI), forwards the board bearer so
+  the run still shows as the `full-suite` lease, and returns pytest's exit
+  code. `ops/wsl-suite.sh` is its Linux half and works from any Linux shell.
+- A lock taken in WSL cannot see one taken on Windows, so a host that moves
+  to WSL needs Windows full runs stopped. The suite lock gains a per-machine
+  setting: `PSEUDOLIFE_SUITE_WINDOWS`, else a `full-suite.windows` file in
+  the lock directory, `allow` (the default) or `refuse`. With `refuse`, a
+  full run on native Windows exits before it queues and names the launcher.
+  Targeted runs and CI are unaffected.
+- A test run names its private databases after its pid and drops those
+  whose pid is gone. Windows and WSL share the dev Postgres but not a
+  process table, so a Windows pytest session dropped a running WSL suite's
+  database mid-run (78 setup errors, 2026-10-02). A run inside WSL now tags
+  its names (`pseudolife_memory_test_wsl<pid>`), and each run prunes only
+  its own namespace's.
+- `AGENTS.md` is now tracked and points every coding agent to `CLAUDE.md`,
+  so Codex sessions get the same conventions as Claude Code.
+
+### Added (2026-10-02 — `invite` and `pair`: a new machine joins a bank with one short code; schema v53)
+- `pseudolife-mcp invite <machine>` on the daemon host gives another machine
+  its own principal, admitted to the agent board, with no daemon restart and
+  no hand edits of `ops/.env` or `config.yaml`. It prints a single-use
+  12-character pairing code that expires after 15 minutes (`--expires`, at
+  most 24 hours), and the line to run on the new machine. `--tier`,
+  `--board` / `--no-board` (kept on a re-invite unless given), `--replace`
+  (a new code for a paired machine; its old token works until it is
+  redeemed), `--list` (never a token or a code) and `--revoke` (effective
+  within 10 seconds, 60 at worst while the daemon cannot read its database). `--list` and `--revoke` need no running daemon
+  (`--bank <fingerprint>` confirms the database); with a Docker daemon
+  container stopped they run through `psql` in the Postgres container. Names are lowercase
+  `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name
+  in `PSEUDOLIFE_MCP_TOKENS` or `PSEUDOLIFE_MCP_TIER_MAP` are refused. It
+  refuses a daemon without `"auth": true`, and a database whose bank is not
+  the one the local daemon's `/health` reports. On a Docker install it runs
+  inside the daemon container after checking the image has the command.
+- `pseudolife-mcp pair <url> <code>` on the new machine mints the bearer
+  token there, writes it to an owner-only `~/.pseudolife-mcp/<principal>.token`
+  (never replacing a file), and sends the daemon only its SHA-256: the token
+  never appears in a terminal, a chat, shell history or a network response.
+  A lost response is retried and answered again; a refused code removes the
+  file; an unknown outcome keeps it and says so, also when a later attempt
+  is refused (the lost one may have spent the code). `--read-code` reads the
+  code from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
+  confirmation (never in `--dry-run`, never for a plan with nothing to
+  re-point) and re-points the clients at the new file.
+- `POST /api/pair` redeems a code with one conditional UPDATE on the
+  database clock, so a code is single use under concurrency. It refuses any
+  request with an `Origin` header, takes only JSON up to 1 KiB, answers every
+  failure with the same `400 {"error": "pairing_refused"}` (any parse error,
+  a deeply nested body included), holds pairing at `429` after 20 failed
+  attempts in a minute without consulting the store (each attempt is
+  charged on arrival and refunded on success), runs at most two
+  redemptions at once on its own executor (a third gets `429`), refuses
+  without spending a code whose name the environment or a reservation
+  uses, and never logs the body.
+- The installers' option 2 accepts a pairing code where it asks for the
+  token (and `--pairing-code` / `-PairingCode`), and option 3 prints
+  `expose tailscale` and `invite <machine>` instead of the hand steps,
+  offering to run `expose tailscale` at the end (default no).
+- `pseudolife-mcp expose tailscale` now names `pseudolife-mcp invite
+  <machine>` as the next step.
+
+### Changed (2026-10-02 — stored principals in the bank; schema v53)
+- Schema v53: a `principals` table holds each invited machine's name, the
+  SHA-256 of its token (once paired) and of a pending code, its tier, its
+  board access and its times. Neither a token nor a code is stored in
+  plaintext. Excluded from logical exports (`EXCLUDED_TABLES`, like the
+  board's instance credentials); a physical backup carries it.
+- Every bearer is resolved by one resolver: the environment's
+  `PSEUDOLIFE_MCP_TOKENS` and `PSEUDOLIFE_MCP_TOKEN` first (they always win),
+  then an in-memory snapshot of the table keyed by token hash. The daemon
+  refreshes the snapshot every 10 s on its own connection, never under the
+  service or coordination lock and never on the event loop; a redemption is
+  visible at once. The HTTP gate, `/mcp` tool calls (resolved inside the
+  transport wrap from the request's own headers, so handshake-era requests
+  on the session manager's task group see it too), the board and its hooks
+  all use it, and the toolset tier falls back to the stored tier after
+  `PSEUDOLIFE_MCP_TIER_MAP`. An open daemon still refuses the board with
+  `authentication_required`. A presented bearer that stops resolving after
+  the gate (revoked meanwhile, or a stale snapshot) is refused with
+  `principals_unavailable`, never served as the default principal.
+- Board admission goes through one helper, `principal_admitted`: listed in
+  `coordination.allowed_principals`, or a stored principal with board
+  access that is not revoked (`coordination-recovery rebind` reads the
+  restored bank's table the same way). `is_stored_principal` is exposed
+  beside it.
+- A stored principal is refused `POST /api/config` and `POST
+  /api/daemon-notice` with `403 {"error": "operator_principal_required"}`;
+  environment principals keep both.
+- When the snapshot has never loaded or is older than 60 s, a bearer that
+  matches nothing in the environment gets `503 {"error":
+  "principals_unavailable"}` instead of 401; the always-200 hooks treat it
+  as unauthorized, and the board check-in names the reason. The daemon warns
+  at startup when the table has rows but no authentication is configured,
+  and when a stored name is shadowed by the environment.
+
+### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
+- A Codex thread woken by board mail could stall on an approval prompt,
+  because hook setup left the `memory_message` tool unapproved and only
+  printed how to approve it. Now the consent that approves PseudoLife's hooks
+  covers that tool too. The `--trust ask` prompt names it, and a yes, or
+  `--trust yes`, sets `approval_mode = "approve"` for `memory_message` on the
+  `pseudolife-memory` server in Codex's user configuration, through Codex's
+  config writer and after a backup. `--trust no` leaves it alone.
+- Setup never overrides a value you chose (`"prompt"`, say), and an existing
+  `"approve"` needs no change. The JSON report gains `mailbox_approval`
+  (`set`, `already`, `kept-explicit`, `declined` or `unavailable`, with
+  `mailbox_approval_detail` for a kept value or the reason it could not be
+  set). If the approval cannot be set, hook setup still completes. The
+  end-of-setup notice gives the remaining choice only when the approval is
+  not set.
+- The trade-off: Codex approves per tool, so this also lets the thread send
+  board mail without asking. Board mail is rate-limited, audited and
+  expires, cannot grant permissions, and reaches only allowed principals.
+  Nothing else is approved: no file writes, commands or other tools. The
+  plugin's `hooks.json` is unchanged, so no hook needs approving again.
+
 ### Changed (2026-10-02 — plain mail never wakes an unparked session)
 - Plain mail to an idle session that has not parked no longer wakes it,
   through the Claude Code Stop hook, the Codex doorbell or
@@ -59,6 +187,141 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that still sets it loads as before and the key does nothing; `/health`
   and `pseudolife-mcp doctor` no longer report it. The change is under
   `plugin/` and in the shim, so a deploy needs the client step.
+
+### Fixed (2026-10-02 — subagents and the parent's mail hint)
+- A Claude Code subagent's memory tool call no longer spends its parent's
+  "you have mail" notice. The subagent runs inside the parent's shim, so the
+  tool-result hint could ride the subagent's result and advance the shared
+  `.seen` marker, after which the parent's prompt and Stop hooks stayed
+  quiet about mail the parent never saw (the mail itself stayed unacked).
+  The plugin's SubagentStart/SubagentStop hook now keeps a
+  `<key>.sub-<agent_id>` marker beside the digest while the subagent runs,
+  and the shim holds the hint and the reminder while one is live (markers
+  older than `HOOK_CHILD_TTL` are ignored, swept with stale digests, and
+  removed with the session's digest). Needs `ops/update.ps1 -All`.
+- The coordination check-in served at session start no longer asks a parent
+  to name its subagents by hand, which listed each one twice now that the
+  v50 hooks list them, and no longer says every subagent shares its parent's
+  address (a Codex subagent has its own). Rescored with
+  `evals/coordination_checkin_bench.py` against the text it replaces
+  (artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`).
+
+### Changed (2026-10-02 — bounded lease-list reads)
+- Board lease listings fetch the displayed FIFO queues and exact queue counts
+  in two reads for the whole lease page, avoiding two reads per returned lease.
+  Queue display limits, resource-first ordering, settlement and stale holders
+  retain their existing behavior.
+
+### Changed (2026-10-02 — quarantine retyping reads)
+- The second pass over quarantined untyped graph links loads ordered entry
+  text without transferring or decoding embeddings, and reads the relation
+  registry once per pass. Shared-note selection and proposal settlement are
+  unchanged.
+
+### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
+- `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
+  Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
+  tcp://127.0.0.1:<port>`). It refuses a daemon whose `/health` does not
+  report `"auth": true` (a redirect or a non-JSON answer on the port is not
+  the daemon), a Tailscale that is not installed or not running, and a
+  tailnet port that already serves anything else or has Funnel (public
+  internet) on; it shows the command and client URL and asks first
+  (`--yes` skips the question, no terminal without it exits 2). A
+  permission refusal names the fix for the OS (Linux:
+  `sudo tailscale set --operator=$USER`). A serve the status does not show
+  afterwards is removed again (exit 5), and a status that cannot be read
+  back is reported for checking rather than undone (exit 5); the probe of `<url>/health` through
+  the tailnet is advisory and never rolls back. `expose off` removes only a
+  forward to `127.0.0.1:<port>`, and `expose status` prints the client URL.
+  Standard library only, so it runs from a shim runtime. Guide:
+  `docs/guide/remote-bank.md`.
+- `/health` reports `bank`: the first 16 hex characters of the SHA-256 of
+  the coordination bank id, so two daemons' banks can be told apart. It is
+  `null` until storage has started and the id exists; `/health` never
+  starts storage for it, reads the meta row only after its database ping
+  succeeded (so a stalled database costs no second connect timeout), on
+  its own short-lived connection (never the service lock), at most once a
+  minute while it is absent, and caches it once found. The cache is dropped
+  when a reconnect finds that another writer held the bank.
+
+### Added (2026-10-02 — `pseudolife-mcp move`)
+- `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
+  Docker-tier checkout host over key-based ssh with no lost writes. It stops
+  the source daemon, cuts off any other connection to its database, takes
+  the final backup from the stopped container (dump, `/data` archive,
+  manifest with per-table row counts), and fences the source database
+  (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), which stops a daemon
+  of any version. It copies the files with a SHA-256 check, restores on the
+  target without starting it, compares the row counts and the bank identity
+  in Postgres, carries the environment identities into the target's
+  `ops/.env` over ssh stdin (keeping the file's owner and mode), starts the
+  target once, checks its running environment and its `/health` bank
+  fingerprint, and re-points this machine's clients.
+- Writing `moved.json` on the source is the commit point. A failure before it
+  rolls back in a fixed order that never leaves the target running beside
+  the source: the target is stopped, gated and confirmed stopped before the
+  source starts. A failure after it never rolls a moved bank back; it exits 5
+  with each follow-up's exact command. SIGTERM, SIGHUP and Ctrl-Break roll
+  back like Ctrl-C, and the rollback ignores them; every progress flag, with
+  the manual rollback, is written to the move record as it flips. A rollback
+  that cannot finish exits 6. `--resume` takes over only this move's
+  half-restored bank, through a marker kept on the target host outside
+  `/data`.
+- The target's unattended update and restart policy are paused for the move,
+  and the source's restart policy is set to `no` once moved. The report lists
+  the manual rollback, every other machine's `connect` line, held leases,
+  undelivered mail, the target's files that held its replaced token, and the
+  source leftovers to retire. The source is stopped and fenced, never
+  deleted.
+- Preflight refuses a target whose PostgreSQL major version is older than
+  the source's, since a plain dump restores only forward. The move's
+  directories, which hold the dump, the state archive and the move record,
+  are owner-only on both hosts.
+- `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
+  that leaves the daemon stopped (refused without `--apply` / `-Apply`). The
+  restore scripts' safety dump now covers the database being replaced
+  (`--container/--db/--user` are passed through).
+- The daemon refuses to start when its data dir holds `moved.json` (naming
+  the bank's new location) or `move.json` (an unfinished move: the bank is a
+  clone of the source, and the message says how to abandon or finish it).
+
+### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
+- `/ui/` now serves the rebuilt console, with every view native: Observatory,
+  Cortex, World, Lessons, Stream, Recall, Graph, Review, Insight, Board,
+  Episodes and Settings. The classic vanilla-JS console
+  (`pseudolife_memory/web/static/js`, `css`, `fonts`) is removed and
+  `/ui/next/` is gone; old `/ui/#/...` bookmarks land on the matching view
+  (`#/console` opens Settings, `#/atlas` the Graph, `#/coordination` the
+  Board). Nothing the classic console could do was dropped: every read,
+  every write and its confirmation step was ported, and the graph review
+  queue, formerly a drawer inside the Graph view, is now its own Review view.
+- A review decision answered with HTTP 200 `{"error": ...}` is now reported
+  as a refusal; the classic console counted it as done.
+- `GET /api/config` adds `saved` to a restart-required knob whose value in
+  `config.yaml` differs from the running one, and Settings measures edits
+  against it: a restart knob saved by mistake can be put back from the
+  console (typing the old value used to look like no change), and the row
+  says which value the next start will use.
+- The content column is centred on wide windows. On phones, touch screens
+  get ~44 px controls and 16 px form text (no zoom on focus), the topbar
+  drops the squeezed view-jump field, and the More tab marks a view that has
+  no tab of its own.
+- The build (Vite base `/ui/`) is committed under
+  `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
+  `frontend/public/vendor/` and is copied into the build unchanged.
+- CI gains a `frontend` job: type check, unit tests (vitest, which replace
+  the node-based tests over the classic sources), and a rebuild that must
+  match the committed output. `.gitattributes` checks the console's sources
+  out with LF on every OS so a Windows build reproduces the CI one.
+
+### Fixed (2026-10-02 — bench records keep words that contain the user name)
+- The memory-policy and coordination check-in benches redact the OS user name
+  from each saved record only as a whole word. A short name such as `dev`
+  used to be replaced inside ordinary words, so `device` was saved as
+  `<redacted>ice`. A name next to punctuation, curly quotes or an escaped
+  control character is still redacted, and a non-ASCII user name or home
+  path, which was never matched before, is now removed too. Both match in
+  any case, as a Windows home does (a lower-cased home path is the same home).
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory

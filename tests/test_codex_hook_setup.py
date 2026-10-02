@@ -104,6 +104,17 @@ def test_consent_prompt_names_the_board_check_in_and_mail_hint(monkeypatch, caps
     assert "new-mail hint" in prompt
 
 
+@pytest.mark.parametrize("instructions", ["auto", "append"])
+def test_consent_prompt_names_the_mailbox_tool_approval(monkeypatch, capsys, instructions):
+    # Yes also approves memory_message (maintainer decision 2026-10-02), so
+    # both the menu and the yes/no prompt must name it for informed consent.
+    monkeypatch.setattr(setup.sys, "stdin", Terminal("n\n"))
+    setup.consent(options(instructions=instructions))
+    prompt = capsys.readouterr().err
+    assert "memory_message" in prompt
+    assert "receive, ack, send" in prompt
+
+
 def report():
     return {"backups": []}
 
@@ -468,10 +479,11 @@ def test_failed_setup_keeps_promised_fallback_and_redacts_errors(tmp_path, monke
     assert "secret-token" not in json.dumps(result)
 
 
-@pytest.mark.parametrize("approval_mode", [None, "prompt", "approve"])
+@pytest.mark.parametrize("approval_mode,state", [
+    (None, "declined"), ("prompt", "kept-explicit"), ("approve", "already")])
 @pytest.mark.parametrize("trusted", [True, False])
 def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
-        tmp_path, monkeypatch, approval_mode, trusted):
+        tmp_path, monkeypatch, approval_mode, state, trusted):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     original = '# User tool approvals\n'
     if approval_mode:
@@ -481,7 +493,12 @@ def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
     path.write_text(original, encoding="utf-8")
     writer = Writer()
     selected = [hook(tmp_path, trustStatus="trusted" if trusted else "untrusted")]
-    runtime_config = {**config(tmp_path), "config": {}}
+    # What Codex's config/read reports for that file.
+    server = {"command": "pseudolife-mcp"}
+    if approval_mode:
+        server["tools"] = {"memory_message": {"approval_mode": approval_mode}}
+    layer = {"mcp_servers": {"pseudolife-memory": server}}
+    runtime_config = {"config": layer, "layers": [{**config(tmp_path)["layers"][0], "config": layer}]}
     monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
     monkeypatch.setattr(setup, "codex", lambda *args: nullcontext(writer))
     monkeypatch.setattr(setup, "inventory", lambda *args: (runtime_config, selected))
@@ -496,18 +513,25 @@ def test_mailbox_approval_notice_requires_ready_hooks_and_preserves_approvals(
     assert result["status"] == ("ready" if trusted else "pending")
     assert path.read_text(encoding="utf-8") == original
     assert not writer.calls
+    assert result["mailbox_approval"] == state
     if trusted:
         notice = result["mailbox_approval_notice"]
         assert "Hooks ready" in notice
-        assert "[mcp_servers.pseudolife-memory.tools.memory_message]" in notice
-        assert 'approval_mode = "approve"' in notice
         assert "receive, ack and send" in notice
-        assert "approval prompt" in notice
-        assert "unchanged" in notice
-        assert notice.startswith("Hooks ready; setup leaves tool approvals unchanged. ")
-        assert "\nSee docs/guide/configuration.md" in notice
         assert notice.splitlines()[1:] == [
             "See docs/guide/configuration.md (Experimental agent coordination)."]
+        if state == "already":
+            # Nothing left to choose: no approval advice.
+            assert "choose approval_mode" not in notice
+            assert "already approved" in notice
+        else:
+            assert "[mcp_servers.pseudolife-memory.tools.memory_message]" in notice
+            assert 'choose approval_mode = "approve"' in notice
+            assert "approval prompt" in notice
+        if state == "declined":
+            assert notice.startswith("Hooks ready; setup leaves tool approvals unchanged. ")
+        if state == "kept-explicit":
+            assert 'kept your memory_message approval_mode = "prompt"' in notice
     else:
         assert not result.get("mailbox_approval_notice")
 
@@ -533,6 +557,177 @@ def test_main_accepts_ready_report_without_mailbox_notice(monkeypatch, capsys):
     output = capsys.readouterr()
     assert json.loads(output.out) == result
     assert output.err == "\n"
+
+
+# --- the mailbox tool approval (maintainer decision 2026-10-02) -------------
+# Hook setup's consent also covers approval_mode = "approve" for
+# memory_message on the pseudolife-memory server, written through Codex's
+# config writer like the hook trust; an explicit choice is never overridden.
+
+MAILBOX_KEY = setup.dotted("mcp_servers", "pseudolife-memory", "tools", "memory_message", "approval_mode")
+
+
+class MailboxCodex:
+    """Codex's config RPCs over one user layer. config/read reports the layer
+    (and, as the effective config, the layer plus ``effective_mode``, a
+    value another layer sets); config/batchWrite applies its edits to the
+    layer and moves the version, as Codex's writer does."""
+
+    def __init__(self, home, server=True, mode=None, effective_mode=None, reject=False,
+                 ignore=False, trusted=True):
+        self.home, self.effective_mode, self.reject, self.ignore = home, effective_mode, reject, ignore
+        self.hooks = [hook(home, trustStatus="trusted" if trusted else "untrusted")]
+        self.writes = []
+        self.version = 1
+        self.user = {}
+        if server:
+            self.user = {"mcp_servers": {"pseudolife-memory": {"command": "pseudolife-mcp"}}}
+            if mode:
+                self.user["mcp_servers"]["pseudolife-memory"]["tools"] = {
+                    "memory_message": {"approval_mode": mode}}
+
+    def rpc(self, method, params):
+        if method == "config/read":
+            effective = json.loads(json.dumps(self.user))
+            if self.effective_mode:
+                effective.setdefault("mcp_servers", {}).setdefault("pseudolife-memory", {})[
+                    "tools"] = {"memory_message": {"approval_mode": self.effective_mode}}
+            return {"config": effective, "layers": [
+                {"name": {"type": "user", "file": str(self.home / "config.toml"), "profile": None},
+                 "version": f"v{self.version}", "config": json.loads(json.dumps(self.user))}]}
+        if method == "hooks/list":
+            return {"data": [{"hooks": self.hooks, "errors": []}]}
+        if method == "config/batchWrite":
+            if self.reject:
+                raise setup.SetupError("Codex rejected config/batchWrite; update Codex or use /hooks for manual review.")
+            assert params["expectedVersion"] == f"v{self.version}"
+            assert Path(params["filePath"]) == (self.home / "config.toml").resolve()
+            self.writes.append(params)
+            for edit in params["edits"]:
+                *parents, leaf = json.loads("[" + edit["keyPath"].replace('"."', '","') + "]")
+                if parents[0] == "hooks":
+                    for h in self.hooks:
+                        h["trustStatus"] = "trusted"
+                if self.ignore:  # accepted, but not what Codex then reports
+                    continue
+                table = self.user
+                for name in parents:
+                    table = table.setdefault(name, {})
+                table[leaf] = edit["value"]
+            self.version += 1
+            return {}
+        pytest.fail("Unexpected RPC: " + method)
+
+
+def mailbox_setup(tmp_path, monkeypatch, client, source="manual", **choices):
+    """Run setup() to ready against ``client``; only Codex's config is real."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text("# User configuration\n", encoding="utf-8")
+    monkeypatch.setattr(setup, "resolve_codex", lambda: "fixture-codex")
+    monkeypatch.setattr(setup, "codex", lambda *args: nullcontext(client))
+    monkeypatch.setattr(setup, "configure_credential_file", lambda *args: {
+        "backup": None, "credential_file_configured": False})
+    monkeypatch.setattr(setup, "credential_environment", lambda *args: nullcontext())
+    monkeypatch.setattr(setup, "select_hooks", lambda *args: (source, client.hooks, []))
+    monkeypatch.setattr(setup, "vet_manual", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup, "vet_plugin", lambda *args: None)
+    monkeypatch.setattr(setup, "install_manual", lambda *args, **kwargs: None)
+    monkeypatch.setattr(setup, "complete_set", lambda *args: True)
+    monkeypatch.setattr(setup, "verify", lambda *args: {"session_start": True})
+    result = setup.setup(options(source=source, **choices))
+    assert result["status"] == "ready", result
+    return result
+
+
+@pytest.mark.parametrize("source", ["manual", "plugin"])
+def test_trust_yes_approves_the_mailbox_tool_when_unset(tmp_path, monkeypatch, source):
+    client = MailboxCodex(tmp_path)
+    result = mailbox_setup(tmp_path, monkeypatch, client, source=source, trust="yes", non_interactive=True)
+    assert result["mailbox_approval"] == "set"
+    [write] = client.writes
+    assert write["edits"] == [{"keyPath": MAILBOX_KEY, "value": "approve", "mergeStrategy": "replace"}]
+    assert write["expectedVersion"] == "v1"
+    assert client.user["mcp_servers"]["pseudolife-memory"] == {
+        "command": "pseudolife-mcp", "tools": {"memory_message": {"approval_mode": "approve"}}}
+    # Backed up like the hook trust write.
+    [saved] = result["backups"]
+    assert Path(saved).read_text(encoding="utf-8") == "# User configuration\n"
+    notice = result["mailbox_approval_notice"]
+    assert "setup approved memory_message" in notice
+    assert "choose approval_mode" not in notice
+    assert "No other tool" in notice
+
+
+@pytest.mark.parametrize("instructions,answer", [("skip", "y\n"), ("auto", "1\n")])
+def test_ask_and_yes_approves_the_mailbox_tool(tmp_path, monkeypatch, capsys, instructions, answer):
+    monkeypatch.setattr(setup.sys, "stdin", Terminal(answer))
+    client = MailboxCodex(tmp_path)
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="ask", instructions=instructions)
+    assert "memory_message" in capsys.readouterr().err
+    assert result["mailbox_approval"] == "set"
+    assert [edit["keyPath"] for write in client.writes for edit in write["edits"]] == [MAILBOX_KEY]
+
+
+@pytest.mark.parametrize("trust,answer", [("no", ""), ("ask", "n\n")])
+def test_without_consent_the_mailbox_tool_is_left_unset(tmp_path, monkeypatch, trust, answer):
+    monkeypatch.setattr(setup.sys, "stdin", Terminal(answer))
+    client = MailboxCodex(tmp_path)
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust=trust, instructions="skip")
+    assert result["mailbox_approval"] == "declined"
+    assert not client.writes and not result["backups"]
+    assert (tmp_path / "config.toml").read_text(encoding="utf-8") == "# User configuration\n"
+    assert 'choose approval_mode = "approve"' in result["mailbox_approval_notice"]
+
+
+@pytest.mark.parametrize("where", ["user", "another-layer"])
+def test_an_explicit_mailbox_approval_mode_is_kept(tmp_path, monkeypatch, where):
+    client = (MailboxCodex(tmp_path, mode="prompt") if where == "user"
+              else MailboxCodex(tmp_path, effective_mode="prompt"))
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="yes", non_interactive=True)
+    assert result["mailbox_approval"] == "kept-explicit"
+    assert result["mailbox_approval_detail"] == 'approval_mode = "prompt"'
+    assert not client.writes and not result["backups"]
+    notice = result["mailbox_approval_notice"]
+    assert 'kept your memory_message approval_mode = "prompt"' in notice
+    assert 'choose approval_mode = "approve"' in notice
+
+
+def test_an_existing_mailbox_approval_is_left_as_it_is(tmp_path, monkeypatch):
+    client = MailboxCodex(tmp_path, mode="approve")
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="yes", non_interactive=True)
+    assert result["mailbox_approval"] == "already"
+    assert not client.writes and not result["backups"]
+    assert "choose approval_mode" not in result["mailbox_approval_notice"]
+
+
+def test_the_mailbox_approval_follows_the_hook_trust_write(tmp_path, monkeypatch):
+    """The trust write moves the config version; the approval is written
+    against the version after it (the fake refuses a stale one)."""
+    client = MailboxCodex(tmp_path, trusted=False)
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="yes", non_interactive=True)
+    assert result["mailbox_approval"] == "set"
+    trust, mailbox = client.writes
+    assert trust["expectedVersion"] == "v1" and mailbox["expectedVersion"] == "v2"
+    assert [edit["keyPath"] for edit in mailbox["edits"]] == [MAILBOX_KEY]
+    assert len(result["backups"]) == 2
+
+
+@pytest.mark.parametrize("problem,detail", [
+    ("no-server", "no pseudolife-memory server"), ("rejected", "rejected"),
+    ("ignored", "differs")])
+def test_a_mailbox_approval_setup_cannot_make_does_not_fail_hook_setup(
+        tmp_path, monkeypatch, problem, detail):
+    # No pseudolife-memory server in the user configuration: writing the
+    # key would create a server table with no command, so nothing is written.
+    client = MailboxCodex(tmp_path, server=problem != "no-server", reject=problem == "rejected",
+                          ignore=problem == "ignored")
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="yes", non_interactive=True)
+    assert result["mailbox_approval"] == "unavailable"
+    assert len(client.writes) == (1 if problem == "ignored" else 0)
+    assert detail in result["mailbox_approval_detail"]
+    notice = result["mailbox_approval_notice"]
+    assert "could not approve memory_message" in notice
+    assert 'choose approval_mode = "approve"' in notice
 
 
 def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_path):

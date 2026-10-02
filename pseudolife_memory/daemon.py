@@ -160,6 +160,24 @@ def reserved_principal_warnings(allowed_principals, token_map) -> list[str]:
     return out
 
 
+def start_stored_principals(svc, token_map, *, auth_configured: bool):
+    """Install the stored-principal snapshot (schema v53) and start its
+    refresh thread, or ``None`` on a daemon without Postgres, which has no
+    store. The snapshot ignores rows whose name the environment already
+    uses. The refresher gets the DSN, never the service, so it cannot take
+    the service or coordination lock."""
+    from pseudolife_memory.principal_store import PrincipalRefresher, PrincipalSnapshot
+    from pseudolife_memory.principals import install_store
+
+    dsn = getattr(svc, "_db_url", None)
+    if not dsn:
+        return None
+    snapshot = PrincipalSnapshot(shadowed=set((token_map or {}).values()))
+    install_store(snapshot)
+    PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured).start()
+    return snapshot
+
+
 def _dream_stall(svc) -> dict | None:
     """The service's open dream-stall record, or ``None`` (none open, or a
     stand-in without a tracker). Lock-free; never raises."""
@@ -170,6 +188,27 @@ def _dream_stall(svc) -> dict | None:
         return tracker.snapshot()["stall"]
     except Exception:  # noqa: BLE001 — /health must never fail on this
         return None
+
+
+def _bank_fingerprint(svc) -> str | None:
+    """The first 16 hex characters of the SHA-256 of the coordination bank
+    id, or ``None`` while it is unknown: before storage has started (this
+    never starts it), on file-mode storage, or before the board has created
+    the id. Called only after the storage ping succeeded. Not secret; it
+    tells two daemons' banks apart, which ``version`` and ``schema``
+    cannot. Never raises."""
+    read = getattr(getattr(svc, "_storage", None), "cached_bank_id", None)
+    if read is None:
+        return None
+    try:
+        bank_id = read()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
+    if not isinstance(bank_id, str) or not bank_id:
+        return None
+    import hashlib
+
+    return hashlib.sha256(bank_id.encode("utf-8")).hexdigest()[:16]
 
 
 def _warn_near_memory_limit(memory: dict) -> None:
@@ -210,6 +249,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         "schema": SCHEMA_META_VERSION,
         "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
         "auth": token_present,
+        # Which bank this is (see _bank_fingerprint); null means unknown.
+        # Filled in after the storage ping below succeeds.
+        "bank": None,
         # Durable-save failures since start (see service.PersistenceError);
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
@@ -351,6 +393,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         try:
             storage.ping()
             payload["db"] = "ok"
+            # Only after a successful ping: a stalled database has already
+            # cost this probe one connect timeout, never a second.
+            payload["bank"] = _bank_fingerprint(svc)
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"
@@ -364,9 +409,76 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     return payload
 
 
+MOVED_MARKER = "moved.json"
+MOVE_MARKER = "move.json"
+
+
+def moved_refusal(environ) -> str | None:
+    """Why this daemon must not start because of ``pseudolife-mcp move``:
+    the message, else ``None``.
+
+    On the old host, ``move`` fences the database (``ALLOW_CONNECTIONS
+    false``) and writes ``moved.json`` into the stopped daemon's data dir.
+    The fence is what stops the old host; the file is the readable reason, so
+    an operator who starts the old container hears where the bank went
+    instead of a refused database connection. On the new host, ``move.json``
+    marks a restored bank whose move has not started this daemon yet.
+    Presence is the refusal: a file that cannot be read still refuses."""
+    data_dir = environ.get("PSEUDOLIFE_MCP_DATA_DIR")
+    if not data_dir:
+        return None
+    import json
+    from pathlib import Path
+
+    incoming = Path(data_dir) / MOVE_MARKER
+    if incoming.exists():
+        # The other end of a move: the bank was restored here and the move
+        # that restored it has not started this daemon yet. Starting now
+        # (a reboot, an unattended update) could serve a half-moved bank
+        # beside a source that still runs.
+        try:
+            record = json.loads(incoming.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            record = None
+        move_id = record.get("move_id") if isinstance(record, dict) else None
+        return (f"an unfinished pseudolife-mcp move{' ' + move_id if isinstance(move_id, str) else ''} "
+                f"is restoring into this bank ({incoming}); refusing to start. The bank here is a clone "
+                f"of the move's source, which may still be serving it. Let the move finish (it starts "
+                f"this daemon itself), or rerun it with --resume. To abandon the move, restore this "
+                f"host's own pre-move safety dump from data/backups with ops/restore.sh --apply "
+                f"--backup-file <dump> --state-archive <archive>, which replaces /data and this gate "
+                f"with it. Remove the gate by hand only to finish the move deliberately, with the "
+                f"source stopped and fenced: docker run --rm --volumes-from pseudolife-mcp-daemon "
+                f"<image> rm -f /data/move.json")
+    marker = Path(data_dir) / MOVED_MARKER
+    if not marker.exists():
+        return None
+    try:
+        record = json.loads(marker.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        record = None
+    where = record.get("moved_to") if isinstance(record, dict) else None
+    when = record.get("moved_at") if isinstance(record, dict) else None
+    if isinstance(where, str) and where:
+        head = f"this bank moved to {where}" + (f" on {when}" if isinstance(when, str) and when else "")
+    else:
+        head = "this bank moved to another host"
+    return (f"{head} ({marker}); refusing to start. Point clients at the new daemon "
+            f"(pseudolife-mcp connect <its url>). To roll the move back instead, stop the new "
+            f"daemon first, lift the database fence (ALTER DATABASE <db> WITH ALLOW_CONNECTIONS "
+            f"true) and remove {marker}.")
+
+
 def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
+
+    # Before storage, the model and the bind: a moved bank's old daemon
+    # never starts (see moved_refusal).
+    moved = moved_refusal(os.environ)
+    if moved is not None:
+        print(f"pseudolife-mcp serve: {moved}", file=sys.stderr, flush=True)
+        sys.exit(2)
 
     # Logging must be configured BEFORE storage resolution: mcp_server's
     # basicConfig (the process's usual configurer) is only imported
@@ -439,6 +551,9 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     for warning in reserved_principal_warnings(allowed, token_map):
         logger.warning("%s", warning)
     auth_configured = token is not None or bool(token_map)
+    # Invited machines (pseudolife-mcp invite / pair): resolved after the
+    # environment from an in-memory view of the bank's principals table.
+    start_stored_principals(mcp_server.service, token_map, auth_configured=auth_configured)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
     )

@@ -643,11 +643,16 @@ class FixtureService:
     def world_restore(self, entity, attribute=None, decided_by="human"):
         return {"restored": 1, "store": "world"}
 
+    def review_rejudge(self, queue="all", *, limit=32):
+        # The real shape (memory/review_judgments.requeue); nothing pending
+        # in the fixture bank, so the Review view's rejudge action reports 0.
+        return {"requeued": 0, "queues": {}, "limit": limit}
+
     def curation_duplicates(self):
         # Representative lesson/world cross-key duplicate pairs so the
         # console's curation section (and its Mark-distinct action) is
         # exercisable against fixtures. Shape pinned by
-        # tests/test_fixture_contract.py against what atlas_review.js reads.
+        # tests/test_fixture_contract.py against what the Review view reads.
         return {
             "lesson_duplicates": [{
                 "a_key": "deploy-daemon-to-homelab-host|approach",

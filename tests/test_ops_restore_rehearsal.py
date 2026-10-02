@@ -253,3 +253,171 @@ def test_real_restore_sh_checks_drop_and_create_status():
             rf'[\s\S]{{0,200}}{verb} DATABASE \$DB failed', text), (
             f"restore.sh does not check the exit status of {stmt} "
             f"immediately after issuing it")
+
+
+# ----------------------------------------------------------------------
+# Real restore, --no-start / -NoStart (``pseudolife-mcp move``)
+# ----------------------------------------------------------------------
+#
+# ``move`` restores the source's final backup on the target and must check
+# the restored row counts, write its move marker and carry the environment
+# identities BEFORE the target daemon starts once: a restore that starts the
+# daemon would let it serve (and write) a bank that has not been verified.
+# The real script runs from a copy in a temp repo whose ops/backup.* (the
+# safety dump the real restore takes first) is a stub, with docker and the
+# health probe stubbed too; every docker call is logged.
+
+from tests.ops_harness import BASH, run_sh_batch  # noqa: E402
+
+requires_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
+
+APPLY_SCENARIOS = {
+    "apply_no_start": True,
+    "apply_start": False,
+}
+
+
+def _stage_apply(root: Path, name: str, script: Path) -> tuple[Path, Path, Path]:
+    import shutil
+
+    sdir = scenario_dir(root, name)
+    repo = sdir / "repo"
+    (repo / "ops").mkdir(parents=True, exist_ok=True)
+    copy = repo / "ops" / script.name
+    shutil.copy(script, copy)
+    if script.suffix == ".ps1":
+        (repo / "ops" / "backup.ps1").write_text(
+            'Add-Content -LiteralPath "$ScenarioDir/calls.log" -Value ("backup " + ($args -join " "))\n'
+            'Write-Host "stub safety dump"\n', encoding="utf-8")
+    else:
+        (repo / "ops" / "backup.sh").write_text('#!/usr/bin/env bash\n'
+                                                'echo "backup $*" >> "$SCENARIO_DIR/calls.log"\n'
+                                                'echo "stub safety dump"\n',
+                                                encoding="utf-8", newline="\n")
+        # restore.sh runs it directly: on Linux and macOS it must be
+        # executable (Git Bash on Windows runs it either way).
+        (repo / "ops" / "backup.sh").chmod(0o755)
+    backup = sdir / "pseudolife_memory-20261002-000000.sql.gz"
+    backup.write_bytes(gzip.compress(b"-- dump\n"))
+    state = sdir / "pseudolife_state-20261002-000000.tgz"
+    state.write_bytes(gzip.compress(b"state"))
+    return copy, backup, state
+
+
+_APPLY_PS1_STUB = r"""
+function global:docker {
+    $a = @($args | ForEach-Object { "$_" })
+    Add-Content -LiteralPath "$ScenarioDir\calls.log" -Value ("docker " + ($a -join " "))
+    $global:LASTEXITCODE = 0
+    if ($a[0] -eq "inspect") { return "pseudolife-daemon:test" }
+    return
+}
+function global:Invoke-RestMethod {
+    Add-Content -LiteralPath "$ScenarioDir\calls.log" -Value "health"
+    return [pscustomobject]@{ status = "ok"; schema = 52; db = "ok" }
+}
+"""
+
+_APPLY_SH_STUB = """
+docker() {
+    echo "docker $*" >> "$SCENARIO_DIR/calls.log"
+    case "$1" in inspect) echo "pseudolife-daemon:test" ;; esac
+    return 0
+}
+curl() {
+    echo "health" >> "$SCENARIO_DIR/calls.log"
+    echo '{"status": "ok"}'
+}
+export -f docker curl
+export SCENARIO_DIR
+"""
+
+
+@pytest.fixture(scope="module")
+def apply_ps1_runs(tmp_path_factory):
+    if PWSH is None:
+        pytest.skip("pwsh not available")
+    root = tmp_path_factory.mktemp("restore_apply_ps1")
+    scenarios = []
+    for name, no_start in APPLY_SCENARIOS.items():
+        copy, backup, state = _stage_apply(root, name, RESTORE_PS1)
+        flag = " -NoStart -Container pgc -Db mydb -User myuser -DaemonContainer dmn" if no_start else ""
+        scenarios.append(Scenario(name, _APPLY_PS1_STUB,
+                                  f'& "{copy}" -Apply{flag} -BackupFile "{backup.as_posix()}" '
+                                  f'-StateArchive "{state.as_posix()}"'))
+    scenarios.append(Scenario("no_start_without_apply", _APPLY_PS1_STUB,
+                              f'& "{_stage_apply(root, "no_start_without_apply", RESTORE_PS1)[0]}" '
+                              f'-NoStart -BackupFile "{(root / "no_start_without_apply" / "pseudolife_memory-20261002-000000.sql.gz").as_posix()}"'))
+    return run_ps1_batch(root, scenarios)
+
+
+@pytest.fixture(scope="module")
+def apply_sh_runs(tmp_path_factory):
+    if BASH is None:
+        pytest.skip("bash not available")
+    root = tmp_path_factory.mktemp("restore_apply_sh")
+    scenarios = []
+    for name, no_start in APPLY_SCENARIOS.items():
+        copy, backup, state = _stage_apply(root, name, RESTORE_SH)
+        flag = " --no-start --container pgc --db mydb --user myuser --daemon-container dmn" if no_start else ""
+        scenarios.append(Scenario(name, _APPLY_SH_STUB,
+                                  f'bash "{copy.as_posix()}" --apply{flag} --backup-file "{backup.as_posix()}" '
+                                  f'--state-archive "{state.as_posix()}"'))
+    copy, backup, _state = _stage_apply(root, "no_start_without_apply", RESTORE_SH)
+    scenarios.append(Scenario("no_start_without_apply", _APPLY_SH_STUB,
+                              f'bash "{copy.as_posix()}" --no-start --backup-file "{backup.as_posix()}"'))
+    return run_sh_batch(root, scenarios)
+
+
+@pytest.fixture(params=["ps1", "sh"])
+def applied(request):
+    batch = request.getfixturevalue(f"apply_{request.param}_runs")
+    return lambda name: batch[name]
+
+
+def _docker_calls(res) -> list[str]:
+    return [line for line in res.lines("calls.log") if line.startswith("docker ")]
+
+
+def test_apply_no_start_restores_and_leaves_the_daemon_stopped(applied):
+    res = applied("apply_no_start")
+    calls = _docker_calls(res)
+    assert res.returncode == 0, res.detail()
+    # It restored: the dump went into the database and the state archive
+    # into /data, with the daemon stopped first.
+    assert any(c.startswith("docker stop ") for c in calls), res.detail()
+    assert any("ON_ERROR_STOP=1" in c for c in calls), res.detail()
+    assert any(c.startswith("docker run ") and "tar xzf" in c for c in calls), res.detail()
+    # ...and never started the daemon or probed its health.
+    assert not any(c.startswith("docker start ") for c in calls), res.detail()
+    assert "health" not in res.lines("calls.log"), res.detail()
+    assert "left stopped" in res.stdout + res.stderr, res.detail()
+
+
+def test_apply_without_no_start_still_starts_the_daemon(applied):
+    """Control: the default real restore is unchanged."""
+    res = applied("apply_start")
+    calls = _docker_calls(res)
+    assert res.returncode == 0, res.detail()
+    assert any(c.startswith("docker start ") for c in calls), res.detail()
+    assert "health" in res.lines("calls.log"), res.detail()
+
+
+def test_no_start_without_apply_is_refused(applied):
+    """A rehearsal never starts anything, so --no-start there is a mistake
+    (the operator meant a real restore): refused before any docker call."""
+    res = applied("no_start_without_apply")
+    assert res.returncode != 0, res.detail()
+    assert "--no-start" in res.stdout + res.stderr or "-NoStart" in res.stdout + res.stderr, res.detail()
+    assert _docker_calls(res) == [], res.detail()
+
+
+def test_the_safety_dump_backs_up_the_database_being_replaced(applied):
+    """A real restore into a non-default container, database or user must
+    take its safety dump of THAT database, not of the defaults."""
+    res = applied("apply_no_start")
+    backup = [line for line in res.lines("calls.log") if line.startswith("backup")]
+    assert len(backup) == 1, res.detail()
+    words = backup[0].split()
+    pairs = {words[i].lstrip("-").replace("-", "").lower(): words[i + 1] for i in range(1, len(words) - 1, 2)}
+    assert pairs == {"container": "pgc", "db": "mydb", "user": "myuser", "daemoncontainer": "dmn"}, res.detail()

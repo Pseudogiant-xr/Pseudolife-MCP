@@ -119,7 +119,9 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
-"approve"`, or allow it once and keep the approval). Board mail can wake an
+"approve"`, or allow it once and keep the approval); Codex hook setup
+(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
 `PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
@@ -150,8 +152,6 @@ Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
-The rebuilt console (phase 1: Observatory and the agent Board) is at
-<http://127.0.0.1:8765/ui/next/>; the rest of its views still open the classic one.
 
 The first session auto-starts the daemon, which provisions an **embedded
 PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
@@ -991,7 +991,7 @@ per-turn discipline): [the provider matrix](docs/guide/providers.md).
 **Verify:** run `claude mcp list`, `codex mcp list`, or `gemini mcp list`
 (the server should report connected), then ask the agent to *"store a memory
 that this install works"* and check it
-appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+appears in the Console's Stream view at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio (this is what the installer wires by default, for
 per-session identity)? A thin torch-free **shim** proxies stdio to the
@@ -1226,18 +1226,23 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
 **Observatory** (health, per-layer counts, the memory store's capacity meter, dream
-gauges), **Cortex** (canonical facts with provenance, version-history
-timelines, inline Accept/Discard for contested slots), **World / Lessons /
-Episodes**, **Stream** (live search with rerank/BM25 toggles and a
-ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
-can Accept/Reject merges or — for a source file and its own bare concept,
-`band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss; proposals a background dream has already judged carry a
-verdict chip — accept/reject/leave with confidence, the model's reason in
-the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
-badges, diff-preview, and atomic save).
+gauges, consolidation review), **Cortex** (canonical facts by entity with
+provenance, version-history ladders, Adopt/Discard for contested slots),
+**World / Lessons / Episodes**, **Stream** (live search with rerank/BM25
+toggles and a ranking-trace panel), **Recall** (multi-hop walks and paths
+between two entities), **Graph** (a 3D galaxy of entities with an entity page
+per star, and a table view), **Review** (the graph review queue: Accept/Reject
+merges or — for a source file and its own bare concept, `band.py` ↔ `band` —
+record an `implements` edge instead of forcing merge-or-dismiss; proposals a
+background dream has already judged carry a verdict chip — accept/reject/leave
+with confidence, the model's reason in the tooltip — as a lead, never a
+decision), **Insight** (hubs, communities and open questions from the graph
+digest), and **Settings** (every safe `config.yaml` scalar with
+live-vs-restart badges, diff-preview, and atomic save). Bookmarks into the
+pre-v3 console (`#/console`, `#/atlas`, `#/coordination`) land on the
+matching view.
 
-**Coordination** is a read-only board view: active roster/status age, reported
+The **Board** is a read-only coordination view: active roster/status age, reported
 children, park needs/resume, resource holders and FIFO queues. Pending mail
 counts are visible only for the caller's principal; the latest 100 retained
 send/read/ack/wake/expiry events omit all message bodies. This view requires
@@ -1253,15 +1258,17 @@ initializing the bank through this read.
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No build step, no CDN, fully offline —
-vanilla ES modules + vendored OFL fonts served straight from the daemon.
-Developing the UI? A fixture-backed dev server (no Postgres, no torch)
-renders the real frontend against canned data:
+prompts for it and stores it locally). No CDN, fully offline: a Svelte
+build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+and a vendored 3D engine, served straight from the daemon, so neither the
+daemon image nor a pip install needs Node. The source is in
+[`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
+build differs. Developing the UI? A fixture-backed dev server (no Postgres,
+no torch) serves the console against canned data:
 `python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
 Its payloads self-announce (`"fixtures": true` on `/health`), and the
-topbar shows a "DEMO DATA — fixture server, not a real bank" chip in
-place of the live chip, so a fixture run is never mistaken for a real
-bank.
+topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
+mistaken for a real bank.
 
 ## Capabilities at a glance
 
@@ -1283,8 +1290,8 @@ bank.
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
-| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v52 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
+| Schema version | v53 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -3031,8 +3038,8 @@ paired test, and not comparable to the ceiling's re-based 0.731), so point
 at a bigger *generic* model for faster
 dreams, not better answers. Two ways to switch:
 
-*From the Console (no restart):* the **Extractor** panel in the Cortex
-Console's config view edits the endpoint, model, timeout, and token budget
+*From the Console (no restart):* the **Extractor** group in the Cortex
+Console's Settings view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
 settings and the panel's values are ignored). The API keys (primary and
@@ -3843,7 +3850,7 @@ self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
 (see the `/dream` flow in `examples/commands/dream.md`): judge each
 candidate from its snippets, post the real relations with
-`memory_graph_review(action="propose")` — they land in the Atlas Review
+`memory_graph_review(action="propose")` — they land in the review
 queue (`proposed_link` findings) for per-item accept/reject before anything
 reaches live edges — and record clearly-distinct pairs with
 `memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
@@ -3858,7 +3865,7 @@ realize one role, so merging asserts something false and dismissing throws
 a real relationship away. Settle it with one call —
 `memory_graph_review(action="relate", src=<file>, relation="implements",
 dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
-one Relate button in the Atlas review drawer, which does the same.
+one Relate button in the Console's Review view, which does the same.
 
 **Draining the quarantine.** Quarantined edges are almost all untyped
 `related-to` co-mentions, and about half of them name a real relationship
@@ -4247,7 +4254,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v52). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v53). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -4499,7 +4506,15 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
-unchanged, a one-line reminder rides every tenth tool result. The file is
+unchanged, a one-line reminder rides every tenth tool result. A Claude Code
+subagent runs inside its parent's shim, so a tool result may be the
+subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
+`<key>.sub-<agent_id>` marker beside the digest (start to stop, ignored after
+`HOOK_CHILD_TTL`), the hint and the reminder wait and `.seen` is left alone,
+so a subagent's call never spends the parent's mail; the prompt hook still
+delivers it (the Stop hook only mail that rang), and so does the parent's
+first tool result after the subagents finish. A parent that gets no prompts
+therefore sees plain mail only once its subagents stop. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
@@ -5073,13 +5088,30 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged and prints the approval choice at the
-end of successful hook setup. A recipient running with approval policy `never`
-cannot execute a tool that still requires approval. To authorize
-unattended mailbox operations specifically, configure the installed server's
-`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
-tool's send, receive and acknowledgment actions; it does not approve file writes,
-commands or other tools. Without that choice, use the host's normal approval flow.
+Codex hook setup (`ops/setup-codex-hooks.py`, or the installer's Codex step)
+asks for the `memory_message` approval together with the hooks. Its prompt
+names it, and a yes, or `--trust yes`, sets
+`tools.memory_message.approval_mode = "approve"` on the `pseudolife-memory`
+server in Codex's user configuration, through Codex's own config writer and
+after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
+yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
+alone. The JSON report's `mailbox_approval` says which happened: `set`,
+`already`, `kept-explicit`, `declined`, or `unavailable` (no
+`pseudolife-memory` server in the user configuration, or Codex refused the
+write; `mailbox_approval_detail` gives the reason, and hook setup still
+completes). When the approval is not set, the end-of-setup notice says how to
+choose it. The reason is the doorbell: a board ring wakes a thread only when it
+has mail it needs, and a woken thread that must ask before calling
+`memory_message` stalls on that prompt. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval.
+
+The trade-off is plain: Codex approves per tool, not per action, so the same
+approval lets the thread send board mail without asking. Board mail is
+rate-limited, audited and expires, cannot grant permissions, and reaches only
+allowed principals. The approval covers that one tool; it does not approve file
+writes, commands or other tools. To set it by hand, configure the installed
+server's `tools.memory_message.approval_mode = "approve"` in Codex; without
+it, use the host's normal approval flow.
 
 ### Optional Codex live delivery
 
@@ -5164,6 +5196,8 @@ A woken task reads its mail with `memory_message receive`, so the task needs
 `memory_message` approved in Codex's tool configuration; without that
 approval a woken task stalls on an approval prompt until someone answers it
 (the 2026-09-12 validation record's complete-path test approved it explicitly).
+Hook setup sets that approval when you approve the hooks
+([Codex CLI and desktop](#codex-cli-and-desktop)).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
@@ -5796,8 +5830,11 @@ payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
 anything but a yes, let the call through. Installs without the plugin keep
 the instruction only. In Codex the same entry allows everything: a Codex
 child has a board address of its own. Claude Code
-subagents get no addresses of their own: the parent names them on its own row
-with `memory_agents(action="update", children=["review storage", "tests"])`, at
+subagents get no addresses of their own. With the plugin, its subagent hooks
+list them on the parent's row (below), and the served check-in asks a parent
+to name its subagents only when they do not appear; without it the parent
+names them with
+`memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 `{label, since}` in which the daemon stamps `since` and keeps it for a label
 the next update carries over. Omitting `children` leaves it unchanged and `[]`
@@ -7582,7 +7619,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v52**; migrations are additive
+The current Postgres meta version is **v53**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -7640,6 +7677,7 @@ The milestones:
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
+| v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -7742,6 +7780,25 @@ credentials and requires deliberate rebinds.
 
 The Python module is also callable directly with the same arguments:
 `python -m pseudolife_memory.coordination_recovery`.
+
+## A move is not a restore
+
+`pseudolife-mcp move` ([moving a bank](remote-bank.md#moving-a-bank))
+restores a backup onto another host but does not run this procedure. The
+procedure revokes restored credentials because a restored bank could be a
+second copy of a live one. A move is not a copy: it stops the source daemon
+before the final dump and fences the source database (`ALTER DATABASE <db>
+WITH ALLOW_CONNECTIONS false`) right after it, so only one live authority
+ever serves the bank's mailboxes, and the revocation would protect against
+nothing.
+
+The exemption has a limit: it keeps the mailboxes, not the sessions'
+addresses. A shim discards its saved adapter state when the bank URL
+changes, so every re-pointed session starts with a new address. Mail sent to
+an old address stays in the bank, undelivered. The move's report counts it
+per old address; to give an address back, follow `rebind` (step 5 of the
+restore procedure above). If you ever bring a moved bank's old host back alongside the
+new one, it is a second copy, and this procedure applies to it in full.
 
 ## The audit log across a restore
 
@@ -8106,7 +8163,8 @@ script does, in Codex context, through the managed connection file. The
 wake itself is Claude Code's. Codex's own wake path is the
 [doorbell](configuration.md#codex-doorbell), also on by default when a
 `codex` CLI is found; a woken task needs `memory_message` approved, or it
-stalls on a prompt. Setup approves it with the other three, and disabling it in
+stalls on a prompt (hook setup approves that tool with your consent). Setup
+approves the Stop hook with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.
@@ -8159,6 +8217,12 @@ PowerShell uses `-CodexHooks`, `-CodexHookTrust`, and `-Instructions` with
 the same values. For unattended setup, explicit `yes` authorizes scoped
 trust and the fallback; `ask` without an interactive terminal does not grant
 approval. The helper also accepts `--non-interactive` to disable prompting.
+The same approval, `yes` or a yes at the prompt (which names it), also sets
+`approval_mode = "approve"` for the `memory_message` tool, so a task the
+doorbell wakes can read its board mail without stalling on a prompt. It keeps
+any value you set yourself and approves no other tool; Codex approves per
+tool, so this also covers sending board mail
+([details](configuration.md#codex-cli-and-desktop)).
 
 ```bash
 # Full unattended setup with automatic memory approved:
@@ -8341,8 +8405,10 @@ replacing canonical facts through `memory_store` when auto-promotion is enabled.
 Hints inform a client's `default_tools_approval_mode = "writes"`; they are not
 authorization and do not override per-tool approval settings or managed policy.
 An allow-once prompt does not guarantee durable approval. Inspect any existing
-`tools.<tool>.approval_mode` override if prompts differ from the server default;
-the installer and doctor do not change approval policy.
+`tools.<tool>.approval_mode` override if prompts differ from the server default.
+The installer and doctor do not change approval policy, with one exception:
+Codex hook setup, when you approve the hooks, sets `memory_message` to
+`"approve"` unless you already chose a value for it.
 
 Codex can also filter tools **client-side, per project**: a project-scoped
 `.codex/config.toml` (loaded for trusted projects only) may register the
@@ -9150,7 +9216,7 @@ in a contender, not in `current`, when trust is low.
 Entity dedup is where an automatic graph quietly eats itself: fold
 `band.py` into `band` once and every fact attached to either becomes
 ambiguous. Merges here are **proposals**, not actions. They queue in the
-**review queue** (the Console's Atlas Review view, or
+**review queue** (the Console's Review view, or
 `memory_graph_review`), carry their evidence, and are subject to
 **merge vetoes** — name-shape rules that block a bad **fold direction** at
 filing time. Accepting or rejecting one writes an audit-stamped row in
@@ -9573,6 +9639,62 @@ In order of preference. An installer run on the daemon host that answers
 connect to it") is a local install that ends by printing a short version of
 these steps and the two sections after them.
 
+### Expose the daemon with one command
+
+On the daemon host, with Tailscale installed and logged in:
+
+```bash
+pseudolife-mcp expose tailscale
+```
+
+It runs the Tailscale Serve TCP forward described in the next section, with
+the checks around it:
+
+- It refuses unless `http://127.0.0.1:8765/health` answers `status: ok`
+  with `"auth": true`, so an unauthenticated bank is never exposed. A
+  redirect or an answer that is not the daemon's `/health` JSON is refused
+  as something other than the daemon.
+- It refuses when Tailscale is not installed or not running (`tailscale
+  up`), and when the tailnet port already serves anything other than a TCP
+  forward to `127.0.0.1:8765`, or has Funnel (public internet) switched on:
+  it never replaces another serve. If that forward is already there it
+  reports "already exposed" and changes nothing.
+- It shows the command and the client URL (`http://<tailnet-ip>:8765`) and
+  asks before running it; `--yes` skips the question, and a run with no
+  terminal and no `--yes` exits 2 without changing anything.
+- A user Tailscale does not let change the serve config is refused with
+  the fix for the OS: on Linux, `sudo tailscale set --operator=$USER` (or
+  run as root); on Windows, run it as the user logged in to Tailscale or
+  from an elevated shell; on macOS, as the user logged in to the Tailscale
+  app.
+- Afterwards it checks that the serve status shows the forward (if not, it
+  removes it again and exits 5; if the status cannot be read back, it exits
+  5 and says to check `tailscale serve status`), then fetches `<url>/health` through the
+  tailnet and compares its `bank` fingerprint with the local one. That probe
+  is advisory: a host cannot always reach its own tailnet address, so a
+  failed probe says to check from another machine with
+  `curl <url>/health` and leaves the forward in place.
+
+`pseudolife-mcp expose status` prints the client URL, or why there is none;
+`pseudolife-mcp expose off` removes the forward, and only a forward to
+`127.0.0.1:8765`. A port open to Funnel is never reported as exposed and
+never removed. All three take `--port` for a daemon on another port and
+`--json` for a machine-readable report. Exit codes: 0 done or already in
+that state; 2 usage, declined, or no terminal without `--yes`; 4 refused
+before any change; 5 the serve did not take and was undone, or its result
+could not be verified.
+
+`/health` reports the bank fingerprint as `bank`: the first 16 hex
+characters of the SHA-256 of the bank's coordination identity. It is not a
+secret; it tells two daemons' banks apart, which `version` and `schema`
+cannot. It is `null` until the daemon's storage has started and the bank
+identity exists (a freshly started daemon that has not served a call yet,
+a bank whose agent board has never been used, or a file-mode daemon), and
+in any `/health` whose database check failed; callers treat `null` as
+unknown. Once storage has started, `/health` reads the identity after a
+successful database check, at most once a minute, until it exists, then
+keeps it.
+
 ### 1. Tailscale Serve, TCP mode
 
 No certificate needed; the link is WireGuard-encrypted end to end. On the
@@ -9622,6 +9744,96 @@ Plain HTTP is acceptable only inside a private network you trust.
 - **Reverse proxy:** terminate TLS at the proxy and forward to
   `127.0.0.1:8765`. The token relaxes the `Host` check, so the proxy's
   hostname needs no further configuration.
+
+## Adding a machine: `invite` and `pair`
+
+Two commands give another machine its own identity on the bank, with no
+daemon restart and no token travelling between machines. On the daemon
+host, after [exposing it](#expose-the-daemon-with-one-command):
+
+```bash
+pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
+```
+
+On the new machine, either run the installer, answer **2** ("On another
+machine that already runs it"), give the daemon's URL, and paste the code
+where it asks for the token (or pass `--pairing-code <code>` /
+`-PairingCode <code>`), or, where the shim is already installed:
+
+```bash
+pseudolife-mcp pair http://100.64.0.2:8765 7K3Q-M9XA-2PDF
+pseudolife-mcp connect http://100.64.0.2:8765 --code 7K3Q-M9XA-2PDF   # pair, then re-point every client
+```
+
+`pair` mints the bearer token on the new machine, writes it to an
+owner-only `~/.pseudolife-mcp/<principal>.token` (never replacing an
+existing file), and sends the daemon only the token's SHA-256. The token
+never appears in a terminal, a chat, shell history or a network response.
+`--read-code` reads the code from stdin instead of the command line. When
+an answer is lost on the way back, `pair` retries; if the outcome stays
+unknown, it keeps the token file and says so (exit 5), because the code may
+be spent and that file is then the only copy of the token.
+
+What an invited machine can do: **read and write the whole bank** and use
+the agent board (unless invited with `--no-board`), with its own writer
+identity and board addresses. It cannot change the daemon's configuration:
+`POST /api/config` and `POST /api/daemon-notice` answer
+`403 {"error": "operator_principal_required"}` for a stored principal.
+Principals in `PSEUDOLIFE_MCP_TOKENS` keep every right they had.
+
+The rules:
+
+- The code is 12 characters (60 bits), single use, and expires after 15
+  minutes (`--expires 2h`, at most 24 hours). Case and dashes do not
+  matter, and `O`, `I` and `L` read as `0`, `1` and `1`.
+- A name is lowercase `[a-z0-9][a-z0-9._-]{0,63}`, never `default`,
+  `daemon` or `maintainer`, and never one already in `PSEUDOLIFE_MCP_TOKENS`
+  or `PSEUDOLIFE_MCP_TIER_MAP` (the environment always wins). `--tier
+  minimal|core|full` sets its default toolset tier; `--board` /
+  `--no-board` its board access. Re-inviting a name keeps both unless
+  given. A tier sets which tools a client sees at first, not what it may
+  call: `memory_toolset` expands any session to the full set.
+- `invite --list` shows each name, whether it is paired or pending, its
+  tier, board access and times: never a token or a code.
+  `invite --revoke laptop` takes the token away within 10 seconds, or
+  within 60 seconds at worst while the daemon cannot read its database.
+  Neither needs a running daemon, so access can be withdrawn while it is
+  down; `--bank <fingerprint>` makes them check the database is the bank
+  you mean. With a Docker install's daemon container stopped, they run
+  through `psql` in the Postgres container.
+  `invite laptop --replace` gives a paired machine a new code; its old
+  token keeps working until the new code is redeemed. A revoked name can be
+  invited again.
+- The daemon must have a token of its own (`"auth": true`): invited
+  principals do not turn authentication on. An invite also checks that
+  the database it writes is the bank the local daemon serves (`/health`'s
+  `bank`), and refuses while that is still `null`.
+- On a Docker install `invite` runs inside the daemon container, so the
+  host never handles the database password; elsewhere it uses
+  `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded Postgres.
+
+Invited principals live in the bank's `principals` table (schema v53), with
+only the SHA-256 of each token and code. A physical backup carries them; a
+logical export (`pseudolife-mcp export`) leaves them out, as it does the
+board's instance credentials. The daemon reads the table every 10 seconds
+on its own connection. If that read has failed for over 60 seconds, a
+bearer that matches nothing in the environment gets `503 {"error":
+"principals_unavailable"}` rather than 401, so a valid invited token is
+never reported as wrong. A tool call whose bearer stops resolving between
+the gate and the tool (revoked meanwhile) gets the JSON-RPC error
+`principals_unavailable` and is never run as the default principal.
+
+Redemption (`POST /api/pair`) refuses any request with an `Origin` header,
+takes only JSON bodies up to 1 KiB, answers every failure with the same
+`400 {"error": "pairing_refused"}`, and after 20 failed attempts in a
+minute answers `429` until the minute has passed. Every attempt counts
+against that budget the moment it arrives (a success is given back), at
+most two redemptions run at once, and a third answers `429` at once. A
+code for a name the environment or a reservation uses is refused without
+being spent.
+
+The sections below are the hand-made alternative: tokens in the daemon's
+environment, admitted in its configuration.
 
 ## One identity per remote client
 
@@ -9826,9 +10038,9 @@ pseudolife-mcp doctor
 
 Run it from the same environment as the registered command. The `board` line
 reads `on - token present, principal allowed` when admission worked, and
-`off - this token's principal is not in coordination.allowed_principals`
-(the daemon's `principal_not_allowed` reason) when it is missing from the
-list.
+`off - this token's principal is not in coordination.allowed_principals;
+list it there, or invite this machine with ...` (the daemon's
+`principal_not_allowed` reason) when it is missing from the list.
 
 ## Moving a client to a new daemon
 
@@ -9889,6 +10101,171 @@ and `--json` prints one machine-readable report. Exit codes: 0 done or
 already current, 1 a write failed and was rolled back, 2 usage or not
 confirmed, 3 no registration it can write (none found, or only `manual`
 ones), 4 verification refused, 5 applied but the post-apply check failed.
+
+## Moving a bank
+
+`pseudolife-mcp move` moves a Docker-tier bank to another host where the
+installer has already run from a checkout (its daemon and Postgres
+containers exist), with no lost writes. Run it on the bank's current host:
+
+```bash
+pseudolife-mcp move --to root@box --dry-run   # the plan; changes nothing
+pseudolife-mcp move --to root@box             # asks once, then moves
+```
+
+`--to` is anything `ssh` accepts (`root@box`, or a `~/.ssh/config` alias).
+Key-based ssh is required: every remote command runs as `ssh -o
+BatchMode=yes` with keepalives (`ServerAliveInterval=15`,
+`ServerAliveCountMax=4`), and nothing ever types a password. A dropped
+connection (ssh's exit 255) is always a failure, never read as an answer.
+The target must be a Linux or macOS host with a POSIX login shell and
+`curl`, `python3` and `docker` on its PATH. Its checkout is
+`~/src/Pseudolife-MCP` unless `--target-checkout` names another. The URL
+clients will use is `--target-url`, else the target's `pseudolife-mcp
+expose status`; when the target is not exposed yet, the move runs `expose
+tailscale --yes` there first.
+
+**Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
+dump, a copy and a restore of the whole bank. On Linux and macOS a closed
+terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back, and the rollback
+itself ignores Ctrl-C. On Windows, Ctrl-C and Ctrl-Break roll it back (each
+rollback step runs in its own process group, so a second Ctrl-C cannot kill
+one), but a closed console window or a dropped ssh session to the source
+ends the process with no rollback at all. Every step's progress, with the
+manual rollback for exactly what has been done so far, is written as it
+happens to `~/.pseudolife-mcp/moves/<move id>/record.json` on the source:
+after a move that ended that way, read it and run its `manual_rollback`
+lines in order.
+
+**Don't run commands that write the database directly during a move**
+(`lease break`, `board-audit redact`, `coordination-recovery`, a `psql`
+session). The move cuts such connections off before the final dump and
+fences the database right after it, but the dump has to connect first, so
+a write landing in those seconds would miss the dump.
+
+The target's PostgreSQL must be the source's major version or newer: a
+dump restores only forward, and preflight refuses an older target.
+
+The order:
+
+1. **Preflight, nothing changed.** The source is healthy and reports its
+   bank fingerprint; ssh works; the target checkout exists; the target
+   daemon is healthy, at the source's schema or newer, serving a different
+   bank, and its bank is empty (no entries, facts or invited principals).
+   `move` never merges into or overwrites a used bank. A target that is not
+   ready is refused with the install line to run there.
+2. **Plan and confirm.** Every step, with sizes and the target URL.
+   `--dry-run` stops here; a run that is not interactive needs `--yes`.
+3. **Expose the target** if needed, and check this host reaches
+   `<target-url>/health`.
+4. **Pause, then stop the source.** The target's unattended update and its
+   daemon's restart policy are paused (either could start the target's
+   daemon mid-move), and so is this host's unattended update; each only when
+   it is enabled now. Then `docker stop -t 120` the source daemon (never
+   `rm` or `down`); Postgres stays up.
+5. **Final backup, then fence.** Other connections to the source database
+   are cut off, `pg_dump` runs from the Postgres container, then at once
+   `ALTER DATABASE <db> WITH ALLOW_CONNECTIONS false`, which stops every
+   other writer (an older daemon image, `lease break`, `board-audit`), and a
+   check that nothing is still connected. Then the daemon's `/data` and a
+   manifest with per-table row counts. The files stay under
+   `~/.pseudolife-mcp/moves/<move id>/` on the source.
+6. **Copy** the three files to the target over ssh and check their SHA-256
+   there.
+7. **Restore on the target without starting it**: a resume marker is
+   written beside the copies (`<checkout>/data/move-<move id>/marker.json`,
+   outside the daemon's `/data`), then `ops/restore.sh --apply --no-start
+   --backup-file <the dump> --state-archive <the archive>` (it takes the
+   target's own safety dump first). The restored bank's identity (`meta`
+   `coordination_bank_id`) and row counts must match the source's. Then
+   `/data/move.json` is written: a daemon refuses to start while it is
+   there, so the target cannot come up outside the move.
+8. **Carry the identities.** The source container's
+   `PSEUDOLIFE_MCP_TOKEN`, `PSEUDOLIFE_MCP_TOKENS`,
+   `PSEUDOLIFE_MCP_TIER_MAP` and `PSEUDOLIFE_MCP_TOOLSET` are written into
+   the target's `ops/.env` (backed up beside itself first, its owner and
+   mode kept), over ssh stdin, never on a command line, so no client
+   anywhere needs a new token. Invited machines need nothing: they are in
+   the bank. The target's own installer-minted token is replaced; the
+   report names the files on the target that held it (found with `grep`
+   reading the token from stdin, never rewritten). `--no-keep-tokens` skips
+   this step, and the report lists every environment principal to invite
+   again.
+9. **Start the target once.** `/data/move.json` is lifted and
+   `ops/update.sh` recreates the daemon. Its `/health` `bank` fingerprint
+   must equal the source's within 180 s (a cold daemon reports null until
+   it has read its bank identity, so the move nudges it with one
+   authenticated read a minute), and `docker inspect` must show it runs
+   with each carried value (compared by SHA-256). Then the source
+   container's restart policy is set to `no` (so the refusing source never
+   crash-loops) and `/data/moved.json` is written into it (a daemon new
+   enough to read it refuses to start and names the new location). That is
+   the commit point: from here on nothing rolls back. What step 4 paused on
+   the target is restored and the resume marker is removed last; if one of
+   those fails (a dropped ssh connection, say), the move exits 5 and lists
+   each follow-up with its exact command.
+10. **Re-point this machine's clients** with `pseudolife-mcp connect
+    <target-url> --yes`.
+11. **Report**: the manual rollback, the `connect <target-url>` line for
+    every other machine's principal, board leases still held (each with its
+    `lease break` line), undelivered mail per old board address, the source
+    leftovers to retire (the backup task or cron, extractor shims, saved
+    tunnel profiles, the daemon's autostart, the tailnet serve, the
+    unattended update, left paused), and what the state archive replaced on
+    the target (`config.yaml`, and `last-backup.json` until the target's
+    first backup).
+
+**Rollback.** A failure in steps 4 to 9 undoes, in this order: the target
+daemon is stopped if it was started (and its `/data/move.json` put back),
+the target's `ops/.env`, unattended update and restart policy are restored,
+the database fence is lifted, the source's `moved.json` is removed, its
+restart policy and paused schedule are restored, and the source daemon is
+started again. The target is never left running beside a running source:
+if it cannot be stopped, the source stays down, and so it does while the
+fence or `moved.json` cannot be undone; the move then exits 6 and the
+report and the record say what to finish by hand. A target that comes
+back up after the stop (a remote `ops/update.sh` that kept going when the
+local ssh died) is stopped again, and the source starts only once the
+target reports stopped. When the gate cannot be written, the target's
+unattended update and restart policy stay paused (either could start the
+clone), and the rollback says so. The target keeps its resume marker, so
+`pseudolife-mcp move --to <target> --resume` may overwrite that
+half-restored bank on the next attempt; `--resume` refuses any bank whose
+marker names another move.
+
+**A target left gated.** While `/data/move.json` is there the target's
+daemon refuses to start, and the bank under it is a clone of the source's.
+To abandon the move there, restore the target's own pre-move safety dump
+(the one `ops/restore.sh` took first, in its `data/backups`) with
+`ops/restore.sh --apply --backup-file <that dump> --state-archive <its
+state archive>`, which replaces `/data`, gate included. Remove the gate by
+hand (`docker run --rm --volumes-from pseudolife-mcp-daemon <image> rm -f
+/data/move.json`) only to finish a move deliberately, with the source
+stopped and fenced.
+
+**Afterwards** the source is stopped and fenced, never deleted. To roll the
+move back by hand: `docker stop pseudolife-mcp-daemon` on the target, then
+gate it so its next scheduled update cannot bring it back (`docker run --rm
+--entrypoint touch --volumes-from pseudolife-mcp-daemon <image>
+/data/move.json` there); on the source, `docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres
+-c "ALTER DATABASE <db> WITH ALLOW_CONNECTIONS true"`, `docker run --rm
+--entrypoint rm --volumes-from pseudolife-mcp-daemon <image> -f
+/data/moved.json` (`docker cp` cannot delete), `docker update
+--restart=unless-stopped pseudolife-mcp-daemon`, `docker start
+pseudolife-mcp-daemon`, and `connect` back. The report prints these with
+the real names filled in.
+
+Sessions get new board addresses on the new URL; see
+[the move exemption](coordination-recovery.md#a-move-is-not-a-restore) for
+what that means for pending mail.
+
+Exit codes: 0 moved; 1 failed and rolled back (the source runs again);
+2 usage, declined, or no TTY without `--yes`; 4 preflight refused, nothing
+changed; 5 the bank moved but re-pointing this machine's clients failed
+(rerun the `connect` line it prints), or a follow-up on the target after
+the commit point failed (run the commands it lists); 6 failed and the rollback could not
+finish (finish it with the commands the report and the move record list).
+`--json` prints one report object.
 
 ## Troubleshooting
 

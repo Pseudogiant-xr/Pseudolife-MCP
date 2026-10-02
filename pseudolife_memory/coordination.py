@@ -18,7 +18,8 @@ import uuid
 from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
-from pseudolife_memory.principals import parse_token_map, resolve_principal
+from pseudolife_memory.principals import (
+    PrincipalsUnavailable, env_auth, installed_store, principal_admitted, resolve_principal)
 from pseudolife_memory.storage.coordination import (
     DAEMON_PRINCIPAL, CoordinationClockChanged, CoordinationError,
 )
@@ -61,6 +62,9 @@ _REQUIRED = {
 _INSTANCELESS = {"context", "register", "leases"}
 PUBLIC_ERROR_CODES = frozenset({
     "authentication_required", "unauthorized", "principal_not_allowed",
+    # A bearer that may be a stored principal while the daemon's view of
+    # them is not loaded or stale (a 503 at the HTTP gate).
+    "principals_unavailable",
     "instance_not_found", "invalid_credential",
     "unknown_coordination_action", "unexpected_parameter", "missing_parameter",
     "instance_authentication_required", "coordination_requires_postgres",
@@ -150,10 +154,14 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # only that it could not see them help. An install's own words for
 # its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
 # hook-instructions.md is one host's), served after the memory core. The
-# closing subagent sentence (#425) is about who may write, not when to send;
-# the -final run scored this whole constant, that sentence included, and
-# tests pin it byte for byte to evals/results/coordination-checkin-arms/
-# rules-v3-20260928.txt.
+# closing subagent sentences (#425) are about who may write, not when to
+# send. Since v50 the hooks list a Claude Code session's subagents and a
+# Codex subagent has an address of its own, so the text no longer asks a
+# parent to name its subagents by hand (that listed each one twice) or says
+# every subagent shares its parent's address (2026-10-02). The reworded
+# constant was scored against the -final one on every set (artifact
+# -subagents); tests pin it byte for byte to evals/results/coordination-
+# checkin-arms/rules-v4-20261002.txt.
 CHECKIN_TEXT = (
     "Pseudolife coordination: at the first task and on resume, use "
     "memory_agents(action=list) to check peers and memory_agents(action=update, "
@@ -169,10 +177,12 @@ CHECKIN_TEXT = (
     "status says when they expect to finish: a status line is not a queue. If "
     "the board shows it free, use it and say so in your status. Keep your "
     "status true: what you hold, what you are waiting on, when you expect to "
-    "finish. A peer may not see mail until its next turn. A subagent shares its "
-    "parent's board address, so it only reads the board (list, receive without "
-    "ack, memory_search); status, ack and send belong to the parent, which can "
-    "name its subagents with memory_agents(action=update, children=[...]).")
+    "finish. A peer may not see mail until its next turn. Subagents never send "
+    "board mail. A Claude Code subagent shares its parent's board address, so it "
+    "only reads the board (list, receive without ack, memory_search); a Codex "
+    "subagent has its own address and keeps its own status and mail. The board "
+    "lists a session's subagents by itself; name yours with "
+    "memory_agents(action=update, children=[...]) only if they do not appear.")
 # The check-in sentence the v49 park-record decision asked for (maintainer,
 # 2026-09-28). NOT served yet: CHECKIN_TEXT is pinned byte for byte to the
 # text evals/coordination_checkin_bench.py measured (#435), so this sentence
@@ -325,7 +335,7 @@ def unavailable_reason(service, headers: Mapping[str, str], *,
         principal = authenticated_principal(headers, token_map=token_map, token=token)
     except ValueError as exc:
         return str(exc)
-    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+    if not principal_admitted(cfg, principal):
         return "principal_not_allowed"
     if not getattr(service, "_db_url", None):
         return "coordination_requires_postgres"
@@ -349,13 +359,22 @@ def public_detail(exc: Exception) -> str | None:
 
 
 def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token=None) -> str:
-    """Require configured bearer auth; open-loopback naming is insufficient."""
+    """Require configured bearer auth; open-loopback naming is insufficient.
+
+    The environment's map and token (``token_map=None`` reads them), then
+    the installed stored-principal snapshot, through the one resolver. A
+    stored principal counts only when the environment configures
+    authentication: an open install keeps refusing with
+    ``authentication_required``."""
     if token_map is None:
-        token_map = parse_token_map(os.environ.get("PSEUDOLIFE_MCP_TOKENS"))
-        token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+        token_map, token = env_auth()
     if not token_map and not token:
         raise ValueError("authentication_required")
-    principal = resolve_principal(headers.get("authorization"), token_map, token)
+    try:
+        principal = resolve_principal(headers.get("authorization"), token_map, token,
+                                      installed_store())
+    except PrincipalsUnavailable:
+        raise ValueError("principals_unavailable") from None
     if principal is None:
         raise ValueError("unauthorized")
     return principal
@@ -475,7 +494,7 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
     principal = principal or authenticated_principal(headers)
     # The daemon's own sender is never a client, whatever the token map or
     # allowed_principals say: only ``daemon_notice`` speaks as it.
-    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+    if not principal_admitted(cfg, principal):
         raise ValueError("principal_not_allowed")
     if action not in _PARAMETERS:
         raise ValueError("unknown_coordination_action")
@@ -633,7 +652,7 @@ def console_snapshot(service, *, limit=50) -> dict:
         principal = request_principal()
         if principal is None:
             raise ValueError("authentication_required")
-        if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+        if not principal_admitted(cfg, principal):
             raise ValueError("principal_not_allowed")
         if getattr(service, "_storage", None) is None:
             return {"enabled": True, "available": False, "reason": "not_initialized"}

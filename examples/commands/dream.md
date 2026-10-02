@@ -62,7 +62,7 @@ leads, read the evidence, and disagree freely.
      siblings under one parent):
      `memory_graph_review(action="dismiss_pair", src=..., dst=...)` so the pair
      never resurfaces and stops occupying a top-k slot.
-   - **Unsure**: leave it — the pair stays visible for the Console's Atlas
+   - **Unsure**: leave it — the pair stays visible in the Console's Review
      queue. Do not guess.
 4. Triage the returned `merge_proposals` (near-duplicate entities, mostly from
    the write-time dedup detector). Each carries per-side `display`, `etype`,

@@ -99,6 +99,18 @@ Configuration:
     Queued runs re-read the count at every poll, so a change reaches the
     backlog at once; lowering it never stops a run that already holds a
     higher slot. A whole number from 1 to 8; the file may carry a BOM.
+``PSEUDOLIFE_SUITE_WINDOWS``, else a ``full-suite.windows`` file in the lock directory
+    ``allow`` (default) or ``refuse``: whether a full run may start on
+    native Windows. Measured 2026-10-02 on the maintainer's Windows host: a
+    full suite's hook-script tests start Git Bash processes in bursts of
+    10-32 a second, and mouse input stalled 82-347 ms in exactly those
+    seconds (none once starts fell to 0-2 a second) while CPU, memory, disk
+    and the compositor stayed normal. That host refuses and runs full suites
+    in WSL (``ops/wsl-suite.ps1``), where process creation never touches the
+    Windows console subsystem; CI's Windows job covers Windows behaviour. A
+    WSL run cannot see a Windows run's lock (checked the same day: neither
+    ``flock`` nor ``lockf`` over ``/mnt/c`` blocks on an ``msvcrt.locking``
+    lock), so a host that moves to WSL refuses Windows full runs outright.
 ``PSEUDOLIFE_SUITE_LOCK_DIR``
     Overrides ``~/.pseudolife-mcp/locks`` (the tests use a temp dir).
 ``PSEUDOLIFE_TEST_CUDA=1``
@@ -131,11 +143,14 @@ else:
 LOCK_ENV = "PSEUDOLIFE_SUITE_LOCK"
 LOCK_DIR_ENV = "PSEUDOLIFE_SUITE_LOCK_DIR"
 SLOTS_ENV = "PSEUDOLIFE_SUITE_SLOTS"
+WINDOWS_ENV = "PSEUDOLIFE_SUITE_WINDOWS"
+WINDOWS_POLICIES = ("allow", "refuse")
 CUDA_OPT_IN_ENV = "PSEUDOLIFE_TEST_CUDA"
 MODES = ("wait", "fail", "off")
 LOCK_FILE = "full-suite.lock"
 HOLDER_FILE = "full-suite.holder.json"
 SLOTS_FILE = "full-suite.slots"
+WINDOWS_FILE = "full-suite.windows"
 MAX_SLOTS = 8  # a sanity bound: each slot is a ~20 GB full suite
 QUEUE_DIR = "full-suite.queue"
 TICKET_SUFFIX = ".ticket"
@@ -270,6 +285,43 @@ def slot_count(environ, directory: Path) -> int:
         raise ValueError(f"{source}={text!r}: expected a whole number from 1 "
                          f"to {MAX_SLOTS}")
     return int(text)
+
+
+def windows_policy(environ, directory: Path) -> str:
+    """Whether a full run may start on native Windows: ``allow`` or
+    ``refuse``, from ``PSEUDOLIFE_SUITE_WINDOWS``, else the
+    ``full-suite.windows`` file in the lock directory, else ``allow``."""
+    raw, source = environ.get(WINDOWS_ENV), WINDOWS_ENV
+    if raw is None:
+        path = directory / WINDOWS_FILE
+        try:
+            raw, source = path.read_text(encoding="utf-8-sig"), str(path)
+        except FileNotFoundError:
+            return "allow"
+        except UnicodeDecodeError:
+            raise ValueError(f"{path}: not UTF-8 text (PowerShell 5.1's `>` "
+                             f"writes UTF-16; use Set-Content -Encoding ascii)") from None
+    policy = raw.strip().lower()
+    if policy not in WINDOWS_POLICIES:
+        raise ValueError(f"{source}={raw.strip()!r}: expected one of "
+                         f"{', '.join(WINDOWS_POLICIES)}")
+    return policy
+
+
+def native_windows_refusal(kind: str, environ, directory: Path, *,
+                           platform: str = os.name) -> str | None:
+    """The refusal for a full run on native Windows where the policy says
+    ``refuse``; None for any other run. Raises ``ValueError`` for a bad
+    setting, on Windows only."""
+    if kind != "full" or platform != "nt":
+        return None
+    if windows_policy(environ, directory) != "refuse":
+        return None
+    return (f"this machine runs full suites in WSL, not on native Windows "
+            f"({WINDOWS_ENV} or {directory / WINDOWS_FILE} says refuse): "
+            f"start it with `pwsh ops/wsl-suite.ps1` from the worktree. A "
+            f"targeted run is fine here. {WINDOWS_ENV}=allow runs it here "
+            f"anyway, unseen by any WSL run's lock.")
 
 
 def is_full_run(args, invocation_dir: Path, tests_root: Path, *,

@@ -1,7 +1,7 @@
 // Board helpers shared by the Observatory and the Board view.
 
-import type { BoardAgent, BoardEvent, BoardSnapshot, Lease } from "./api/types";
-import { shortId, words } from "./format";
+import type { BoardAgent, BoardChild, BoardEvent, BoardSnapshot, Lease } from "./api/types";
+import { fmtDuration, fmtNum, shortId, words } from "./format";
 
 export type Tone = "ok" | "warn" | "danger" | "canon" | "";
 
@@ -72,7 +72,9 @@ export function leaseTone(l: Lease): Tone {
 }
 
 export function leaseState(l: Lease): string {
-  if (l.expired) return "expired";
+  // The snapshot never settles leases, so an expired hold stays listed until
+  // the next lease call or prune pass hands it on.
+  if (l.expired) return "expired, awaiting settlement";
   if (!l.holder) return l.queued ? "free, queued" : "free";
   if (l.stale) return "past expected end";
   return "held";
@@ -112,4 +114,42 @@ export function eventSentence(e: BoardEvent, name: (id: string | null) => string
     default:
       return `${words(e.event)} by ${who}`;
   }
+}
+
+/**
+ * "Expected by" for a peer's status. Overdue is the server's call
+ * (`status_overdue`, decided on the daemon's clock), never the browser's;
+ * the distance is measured against the snapshot time for the same reason.
+ */
+export function expectedBy(a: BoardAgent, snapshotAt?: number | null): { text: string; overdue: boolean } {
+  const due = a.status_expires_at;
+  if (due === null || due === undefined) return { text: "not set", overdue: false };
+  const delta = snapshotAt ? due - snapshotAt : null;
+  if (a.status_overdue) {
+    return { text: delta !== null && delta < 0 ? `overdue by ${fmtDuration(-delta)}` : "overdue", overdue: true };
+  }
+  return { text: delta !== null && delta > 0 ? `in ${fmtDuration(delta)}` : "due now", overdue: false };
+}
+
+/** Whether the peer has a live adapter that can take mail now (served since v50). */
+export function adapterText(a: BoardAgent): string | null {
+  const v = (a as BoardAgent & { adapter_available?: boolean }).adapter_available;
+  if (v === undefined || v === null) return null;
+  return v ? "Live adapter available" : "No live adapter";
+}
+
+/** Unread mail: counted only for the caller's own principal's peers. */
+export function pendingText(a: BoardAgent): string {
+  if (a.pending_count === null || a.pending_count === undefined) return "Not visible to this token";
+  return a.pending_count === 0 ? "None unread" : `${fmtNum(a.pending_count)} unread`;
+}
+
+/** A child entry with an agent id was listed by the SubagentStart hook; one without, by its parent. */
+export function childSource(c: BoardChild): string {
+  return c.agent_id ? "hook reported" : "parent reported";
+}
+
+/** Waiters counted in `queued` but past the first ten the snapshot lists. */
+export function waitersOmitted(l: Lease): number {
+  return Math.max(0, (l.queued ?? 0) - (l.queue?.length ?? 0));
 }

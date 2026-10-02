@@ -413,6 +413,91 @@ def test_a_marker_left_behind_keeps_new_mail_above_it(tmp_path):
     asyncio.run(asyncio.wait_for(drive(), 5))
 
 
+def test_the_hint_waits_while_a_subagent_may_be_the_caller(tmp_path):
+    """A Claude Code subagent runs inside its parent's shim, so a tool result
+    the hint rides on may be the subagent's. Delivering there marked the
+    parent's mail shown: the parent's prompt hook and Stop hook then stayed
+    quiet about mail the parent never saw (#480 review). While the subagent
+    hook's marker beside the digest is live, the hint waits and the marker
+    file is left alone; the prompt hook (and the Stop hook, for rung mail)
+    still deliver."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        directory = tmp_path / "d"
+        daemon = _daemon_with([{"count": 2, "preview": _preview(2)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            marker = directory / "k.sub-a698026ca4ba524e9"
+            marker.write_text("")
+            # Another session's subagent holds nothing back here.
+            (directory / "other.sub-a698026ca4ba524e9").write_text("")
+            assert [instance.deliver_hint() for _ in range(
+                CoordinationAdapter.HINT_REPEAT_CALLS + 2)] == [None] * (
+                CoordinationAdapter.HINT_REPEAT_CALLS + 2)
+            assert not (directory / "k.seen").exists()
+            marker.unlink()
+            first = instance.deliver_hint()
+            assert first and "- m1 from codex" in first
+            assert (directory / "k.seen").read_text().strip() == "1"
+            # The reminder waits the same way.
+            assert [instance.deliver_hint() for _ in range(
+                CoordinationAdapter.HINT_REPEAT_CALLS - 1)] == [None] * (
+                CoordinationAdapter.HINT_REPEAT_CALLS - 1)
+            marker.write_text("")
+            assert instance.deliver_hint() is None
+            marker.unlink()
+            assert instance.deliver_hint().startswith("Coordination: 2 addressed messages")
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_subagent_marker_past_its_ttl_holds_nothing_back(tmp_path):
+    """A missed SubagentStop (a killed session, a hook that failed open)
+    leaves the marker behind; past the daemon's HOOK_CHILD_TTL it no longer
+    counts, as the daemon stops listing that child."""
+    from pseudolife_memory.coordination_adapter import SUBAGENT_MARKER_SECONDS
+    from pseudolife_memory.storage.coordination import HOOK_CHILD_TTL
+    assert SUBAGENT_MARKER_SECONDS == HOOK_CHILD_TTL
+
+    async def drive():
+        directory = tmp_path / "d"
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            marker = directory / "k.sub-a698026ca4ba524e9"
+            marker.write_text("")
+            old = time.time() - SUBAGENT_MARKER_SECONDS - 60
+            os.utime(marker, (old, old))
+            assert instance.deliver_hint() is not None
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_subagent_markers_go_with_the_digest(monkeypatch, tmp_path):
+    """The session's own markers are removed with its digest at close, and
+    the stale sweep takes any session's old ones."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+
+    async def drive():
+        directory = tmp_path / "d"
+        directory.mkdir()
+        stale = directory / "gone.sub-a698026ca4ba524e9"
+        stale.write_text("")
+        old = time.time() - CoordinationAdapter.STALE_DIGEST_SECONDS - 60
+        os.utime(stale, (old, old))
+        fresh = directory / "peer.sub-a698026ca4ba524e9"
+        fresh.write_text("")
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            assert not stale.exists() and fresh.exists()
+            (directory / "k.sub-a698026ca4ba524e9").write_text("")
+        assert not (directory / "k.sub-a698026ca4ba524e9").exists()
+        assert fresh.exists()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
 def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
     """The registry's hint is consumed once per tool call: the failure text
     for a missing adapter must not be fetched through the delivering path."""
