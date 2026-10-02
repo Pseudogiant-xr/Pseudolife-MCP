@@ -211,8 +211,11 @@ took 143 CUDA OOMs.
     per-run databases, the admin URL, reachability probes — uses that
     server. A dispatched run (`PSEUDOLIFE_SUITE_DISPATCHED`) refuses to
     start unless that address names a port other than 5433 and the machine
-    has its own lease name (`full-suite@box`). Not a fixed
-    `PSEUDOLIFE_TEST_DATABASE_URL`: that shares one database between
+    has its own lease name (`full-suite@box`), and its pytest then refuses
+    any server it would use that holds a production bank, so the live
+    bank's container on its Docker-network address (port 5432) is refused
+    too (`dispatched_live_bank_refusal` in `tests/pg_defaults.py`). Not a
+    fixed `PSEUDOLIFE_TEST_DATABASE_URL`: that shares one database between
     concurrent runs and covers only the fixtures, leaving the default
     paths on 5433.
     Sessions there run `python -m pytest tests/` natively (Linux needs no

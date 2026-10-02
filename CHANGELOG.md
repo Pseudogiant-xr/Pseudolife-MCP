@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a dispatched suite refuses the live bank at any address)
+- A full suite dispatched to the second machine could still reach that
+  machine's live bank. The launchers refused a test server on host port
+  5433, but the live bank's Postgres also answers on its container's
+  Docker-network address (port 5432), and an explicit
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_ADMIN_URL` was not
+  port-checked at all. Nothing in the suite looks such an address up, so
+  it took a misconfigured env file, but nothing refused one. A dispatched
+  run now asks every server it would use (the default admin URL and both
+  explicit URLs) for its database list before anything else connects, and
+  stops when one holds a production bank (`pseudolife_memory`, or the
+  database the exported daemon DSN named). A server that refuses the
+  connection, has no address or rejects the login is passed over; a
+  timeout, a URL naming several hosts or one that does not parse refuses,
+  and a refused run skips its exit-time bench cleanup on that server.
+  Undispatched runs are unchanged: on the Windows host the dev server is
+  the live bank's server by design.
+
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
   the maintainer's workstation. `ops/remote-suite.ps1` now runs a
