@@ -265,9 +265,10 @@ subagent runs inside its parent's shim, so a tool result may be the
 subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
 `<key>.sub-<agent_id>` marker beside the digest (start to stop, ignored after
 `HOOK_CHILD_TTL`), the hint and the reminder wait and `.seen` is left alone,
-so a subagent's call never spends the parent's mail; the prompt and Stop
-hooks still deliver it, and so does the parent's first tool result after the
-subagents finish. The file is
+so a subagent's call never spends the parent's mail; the prompt hook still
+delivers it (the Stop hook only mail that rang), and so does the parent's
+first tool result after the subagents finish. A parent that gets no prompts
+therefore sees plain mail only once its subagents stop. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude

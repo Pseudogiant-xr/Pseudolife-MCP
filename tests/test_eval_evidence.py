@@ -10481,6 +10481,31 @@ for _cid, _doc, _needle, _art, _value, _stated, _places in (
                         value=_value, stated=_stated, places=_places))
 
 
+# ── the check-in subagent rewording (evals/README.md, 2026-10-02) ──────────
+# The closing subagent sentence reworded after schema v50: arms v3 (served
+# text), new and new@aa on all three sets.
+CCB_SUB = RESULTS + "coordination-checkin-bench-checkin-rules-20261002-subagents.json"
+for _cid, _needle, _value, _stated, _places in (
+        ("ccb-sub-spend", "run valid, $4.29)", _USD, 4.29, 2),
+        ("ccb-sub-valid", "3 replicates, 576 runs", lambda d: d["summary"]["valid_runs"], 576, 0),
+        ("ccb-sub-new-v3", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3"), 0.005, 3),
+        ("ccb-sub-new-v3-lo", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 0), -0.021, 3),
+        ("ccb-sub-new-v3-hi", "New minus v3 +0.005 [-0.021, +0.036] over 192",
+         _ccb_delta("new - v3", "ci95", 1), 0.036, 3),
+        ("ccb-sub-aa", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new"), -0.016, 3),
+        ("ccb-sub-aa-lo", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 0), -0.057, 3),
+        ("ccb-sub-aa-hi", "(new@aa minus new -0.016 [-0.057, +0.021])",
+         _ccb_delta("new@aa - new", "ci95", 1), 0.021, 3),
+        ("ccb-sub-held2", "second held-out +0.021",
+         _ccb_delta("new - v3", part="heldout2"), 0.021, 3)):
+    CLAIMS.append(Claim(id=_cid, doc=EVALS, needle=_needle, artifacts=(CCB_SUB,),
+                        value=_value, stated=_stated, places=_places))
+
+
 # ── the recall seed matcher fix (CHANGELOG, 2026-09-27) ──────────────────
 # evals/seed_bench.py before and after the _mentions boundary change, plus
 # a control that patches the old matcher back in on the new tree (it

@@ -419,7 +419,8 @@ def test_the_hint_waits_while_a_subagent_may_be_the_caller(tmp_path):
     parent's mail shown: the parent's prompt hook and Stop hook then stayed
     quiet about mail the parent never saw (#480 review). While the subagent
     hook's marker beside the digest is live, the hint waits and the marker
-    file is left alone; the prompt and Stop hooks still deliver."""
+    file is left alone; the prompt hook (and the Stop hook, for rung mail)
+    still deliver."""
     async def drive():
         from pseudolife_memory.coordination_adapter import CoordinationAdapter
         directory = tmp_path / "d"
