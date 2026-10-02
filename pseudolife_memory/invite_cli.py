@@ -1,9 +1,9 @@
 """``pseudolife-mcp invite``: give another machine its own identity on this bank.
 
-    pseudolife-mcp invite <name> [--tier TIER] [--no-board] [--expires 15m]
-                                 [--replace] [--url URL] [--port 8765] [--json]
-    pseudolife-mcp invite --list [--json]
-    pseudolife-mcp invite --revoke <name> [--yes] [--json]
+    pseudolife-mcp invite <name> [--tier TIER] [--board | --no-board] [--expires 15m]
+                                 [--replace] [--url URL] [--port 8765] [--bank FP] [--json]
+    pseudolife-mcp invite --list [--bank FP] [--json]
+    pseudolife-mcp invite --revoke <name> [--yes] [--bank FP] [--json]
 
 An operator command on the daemon host. Like ``board-audit`` and ``lease
 break`` it talks to Postgres directly: access to the database is the
@@ -22,10 +22,16 @@ pseudolife-mcp-daemon python -m pseudolife_memory.cli invite ...``), after
 checking the image has this command, so the host never handles the
 database password and the name checks see the daemon's real environment.
 
-Before writing, the database's bank must be the one the daemon on
+Before an invite writes, the database's bank must be the one the daemon on
 ``127.0.0.1:<port>`` serves (``/health``'s ``bank`` fingerprint; the bench
 Postgres also holds test databases), and that daemon must report
-``"auth": true``.
+``"auth": true``. ``--revoke`` and ``--list`` need no daemon: revoking only
+narrows access, and must work while the daemon is down or degraded.
+``--bank <fingerprint>`` makes any mode confirm the database first. With
+the daemon container stopped on a Docker install, they run as plain SQL
+through ``psql`` in the ``pseudolife-mcp-postgres`` container, over its
+local socket as ``ops/restore.sh`` does (no password), and a failure there
+prints the SQL to run by hand.
 
 Names: ``[a-z0-9][a-z0-9._-]{0,63}``; never ``default``, ``daemon`` or
 ``maintainer``, nor a name already in the daemon's ``PSEUDOLIFE_MCP_TOKENS``
@@ -64,6 +70,17 @@ EXIT_USAGE = 2
 EXIT_REFUSED = 4
 
 CONTAINER = "pseudolife-mcp-daemon"
+POSTGRES_CONTAINER = "pseudolife-mcp-postgres"
+# psql inside the Postgres container, as ops/restore.sh runs it: the local
+# socket, the container's own user and database, no password.
+_PSQL = ["docker", "exec", "-i", POSTGRES_CONTAINER, "sh", "-c",
+         'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+_NOW_SQL = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
+LIST_SQL = (
+    "SELECT coalesce(json_agg(json_build_array(principal, tier, board, token_hash IS NOT NULL, "
+    f"code_hash IS NOT NULL, code_expires_at, created_at, paired_at, revoked_at, {_NOW_SQL}) "
+    "ORDER BY principal), '[]'::json) FROM public.principals;")
+BANK_SQL = "SELECT value #>> '{}' FROM public.meta WHERE key = 'coordination_bank_id';"
 DEFAULT_PORT = expose_cli.DEFAULT_PORT
 # Stored principals arrive with schema v53.
 MIN_SCHEMA = 53
@@ -83,12 +100,13 @@ def probe_health(url: str) -> dict | None:
     return expose_cli.probe_health(url, expose_cli.LOCAL_HEALTH_TIMEOUT_S)
 
 
-def run(cmd: list[str]) -> subprocess.CompletedProcess:
+def run(cmd: list[str], input: str | None = None) -> subprocess.CompletedProcess:
     """Run a command; output is captured and never contains a secret: the
-    code is drawn inside the process that prints it."""
+    code is drawn inside the process that prints it. ``input`` is stdin."""
     try:
         return subprocess.run(cmd, capture_output=True, text=True, timeout=DOCKER_TIMEOUT_S,
-                              stdin=subprocess.DEVNULL, errors="replace")
+                              input=input, stdin=None if input is not None else subprocess.DEVNULL,
+                              errors="replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(cmd, 127, "", type(exc).__name__)
 
@@ -224,6 +242,23 @@ def _daemon_check(port: int, report: _Report, *, need_auth: bool) -> tuple[dict 
     return health, None
 
 
+def revoke_sql(name: str) -> str:
+    """The revocation as plain SQL, for psql. ``name`` must be a principal
+    name ([a-z0-9._-] only), so it can stand as a literal."""
+    if not valid_principal_name(name):
+        raise ValueError("not a principal name")
+    return ("UPDATE public.principals SET revoked_at = COALESCE(revoked_at, "
+            f"{_NOW_SQL}), code_hash = NULL, code_expires_at = NULL, paired_code_hash = NULL "
+            f"WHERE principal = '{name}' RETURNING principal;")
+
+
+def _bank_refusal(bank: str | None, expected: str | None, what: str) -> str | None:
+    if bank == expected:
+        return None
+    return (f"this database holds bank {bank or '(none)'}, but {what} is bank {expected}: it is "
+            "another database. Nothing was changed")
+
+
 # ── the database path ─────────────────────────────────────────────────────────
 
 def _bank_of(conn) -> str | None:
@@ -255,10 +290,10 @@ def _local(args, report: _Report, dsn: str) -> int:
 
     from pseudolife_memory import principal_store as store
 
-    writes = not args.list
+    inviting = bool(args.name)
     health = None
-    if writes:
-        health, refusal = _daemon_check(args.port, report, need_auth=not args.revoke)
+    if inviting:
+        health, refusal = _daemon_check(args.port, report, need_auth=True)
         if refusal:
             return report.fail(EXIT_REFUSED, refusal)
     try:
@@ -269,13 +304,13 @@ def _local(args, report: _Report, dsn: str) -> int:
         conn.execute("SET search_path TO public")
         conn.execute("SET statement_timeout = '10s'")
         try:
-            if writes:
+            if inviting or args.bank:
                 bank = _bank_of(conn)
-                if bank != health.get("bank"):
-                    return report.fail(EXIT_REFUSED, (
-                        f"this database holds bank {bank or '(none)'}, but the daemon on port "
-                        f"{args.port} serves bank {health.get('bank')}: PSEUDOLIFE_MCP_DATABASE_URL "
-                        "names another database. Nothing was changed"))
+                refusal = (_bank_refusal(bank, args.bank, "--bank") if args.bank else None) or (
+                    _bank_refusal(bank, health.get("bank"),
+                                  f"the daemon on port {args.port} serves") if inviting else None)
+                if refusal:
+                    return report.fail(EXIT_REFUSED, refusal)
             if args.list:
                 return _list(report, store.list_principals(conn))
             if args.revoke:
@@ -292,20 +327,22 @@ def _local(args, report: _Report, dsn: str) -> int:
 
 def _invite(args, report: _Report, store, conn) -> int:
     note = _listed_note(args.name)
-    created = store.create_invite(conn, args.name, tier=args.tier, board=not args.no_board,
+    created = store.create_invite(conn, args.name,
+                                  tier=store.KEEP if args.tier is None else args.tier,
+                                  board=store.KEEP if args.board is None else args.board,
                                   ttl_seconds=args.expires, replace=args.replace)
     code = format_pairing_code(created["code"])
     url = args.url or exposed_url(args.port) or URL_PLACEHOLDER
     command = f"pseudolife-mcp pair {url} {code}"
     minutes = round(args.expires / 60)
     report.data.update(principal=args.name, state=created["state"], code=code,
-                       expires_at=created["expires_at"], tier=args.tier, board=not args.no_board,
-                       url=url, pair_command=command)
+                       expires_at=created["expires_at"], tier=created["tier"],
+                       board=created["board"], url=url, pair_command=command)
     what = {"new": "invited", "pending": "re-invited (the earlier code no longer works)",
             "revoked": "re-invited after its revocation",
             "paired": "given a replacement code (its current token works until the code is redeemed)"}
-    report.say(f"{args.name}: {what[created['state']]}; tier {args.tier or 'the daemon default'}, "
-               f"agent board {'off' if args.no_board else 'on'}")
+    report.say(f"{args.name}: {what[created['state']]}; tier {created['tier'] or 'the daemon default'}, "
+               f"agent board {'on' if created['board'] else 'off'}")
     report.say(f"  code     {code}   single use, expires in {minutes} min ({_when(created['expires_at'])})")
     report.say(f"  on the new machine:  {command}")
     report.say("  or run the installer there and answer 2, giving this code where it asks for the token")
@@ -355,18 +392,72 @@ def _forward(args) -> list[str]:
         out.append(args.name)
         if args.tier:
             out += ["--tier", args.tier]
-        if args.no_board:
-            out.append("--no-board")
+        if args.board is not None:
+            out.append("--board" if args.board else "--no-board")
         out += ["--expires", f"{args.expires}s"]
         if args.replace:
             out.append("--replace")
         out += ["--url", args.url or exposed_url(args.port) or URL_PLACEHOLDER]
+    if args.bank:
+        out += ["--bank", args.bank]
     if args.json:
         out.append("--json")
     return out
 
 
+def _daemon_running() -> bool:
+    proc = run(["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER])
+    return proc.returncode == 0 and (proc.stdout or "").strip() == "true"
+
+
+def _psql(sql: str) -> subprocess.CompletedProcess:
+    return run(_PSQL, input=sql + "\n")
+
+
+def _through_postgres(args, report: _Report) -> int:
+    """``--list`` / ``--revoke`` with the daemon container stopped: plain
+    SQL through psql in the Postgres container."""
+    from pseudolife_memory.principal_store import bank_fingerprint, describe_rows
+    sql = LIST_SQL if args.list else revoke_sql(args.revoke)
+
+    def by_hand(why: str) -> int:
+        return report.fail(EXIT_FAILED, (
+            f"{why}. With the Postgres container running, the same change by hand is: docker exec -i "
+            f"{POSTGRES_CONTAINER} psql -U pseudolife -d pseudolife_memory -c \"{sql}\""))
+
+    if args.bank:
+        found = _psql(BANK_SQL)
+        if found.returncode != 0:
+            return by_hand(f"psql in {POSTGRES_CONTAINER} failed (exit {found.returncode})")
+        refusal = _bank_refusal(bank_fingerprint((found.stdout or "").strip() or None), args.bank,
+                                "--bank")
+        if refusal:
+            return report.fail(EXIT_REFUSED, refusal)
+    proc = _psql(sql)
+    if proc.returncode != 0:
+        return by_hand(f"psql in {POSTGRES_CONTAINER} failed (exit {proc.returncode})")
+    output = (proc.stdout or "").strip()
+    if args.list:
+        try:
+            rows = json.loads(output.splitlines()[-1]) if output else []
+        except (ValueError, IndexError):
+            return by_hand("psql answered something that is not the list")
+        return _list(report, describe_rows(rows))
+    if args.revoke not in output.splitlines():
+        return report.fail(EXIT_REFUSED, f"no stored principal is named {args.revoke}")
+    report.data.update(principal=args.revoke, state="revoked")
+    report.say(f"{args.revoke}: revoked; the daemon stops accepting its token within 10 seconds of "
+               "starting again")
+    return report.finish(EXIT_OK)
+
+
 def _in_container(args, report: _Report) -> int:
+    if not _daemon_running():
+        if args.list or args.revoke:
+            return _through_postgres(args, report)
+        return report.fail(EXIT_REFUSED, (
+            f"the {CONTAINER} container is not running: start the daemon (an invite needs it to "
+            "report its bank), then re-run"))
     base = ["docker", "exec", CONTAINER, "python", "-m", "pseudolife_memory.cli", "invite"]
     check = run([*base, "--version-check"])
     if check.returncode != 0 or not (check.stdout or "").startswith(VERSION_LINE):
@@ -394,7 +485,11 @@ def _parser() -> argparse.ArgumentParser:
                     "database failed, 2 usage or not confirmed, 4 refused before any change.")
     parser.add_argument("name", nargs="?", help="the new machine's principal, e.g. laptop")
     parser.add_argument("--tier", choices=TIERS, help="its default toolset tier (default: the daemon's)")
-    parser.add_argument("--no-board", action="store_true", help="do not admit it to the agent board")
+    board = parser.add_mutually_exclusive_group()
+    board.add_argument("--board", dest="board", action="store_const", const=True, default=None,
+                       help="admit it to the agent board (a new principal's default)")
+    board.add_argument("--no-board", dest="board", action="store_const", const=False,
+                       help="do not admit it to the agent board")
     parser.add_argument("--expires", type=_expires, default=15 * 60,
                         help="how long the code lives: 15m (default), at most 24h")
     parser.add_argument("--replace", action="store_true",
@@ -403,6 +498,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=expose_cli._port,
                         default=int(os.environ.get("PSEUDOLIFE_MCP_PORT") or DEFAULT_PORT),
                         help=f"the local daemon's port (default: PSEUDOLIFE_MCP_PORT, else {DEFAULT_PORT})")
+    parser.add_argument("--bank", metavar="FINGERPRINT",
+                        help="refuse unless the database holds this bank (/health's bank)")
     parser.add_argument("--list", action="store_true", help="list stored principals")
     parser.add_argument("--revoke", metavar="NAME", help="revoke a stored principal")
     parser.add_argument("--yes", action="store_true", help="revoke without asking")

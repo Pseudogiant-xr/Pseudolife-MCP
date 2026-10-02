@@ -185,10 +185,18 @@ def test_the_reserved_name_check_is_load_bearing_for_the_database(bank, pg_url, 
 class _Docker:
     def __init__(self, version="pseudolife-mcp invite 1\n", code=0, stdout="invited\n"):
         self.calls = []
+        self.inputs = []
         self.version, self.code, self.stdout = version, code, stdout
+        self.running = True
+        self.psql = {"code": 0, "stdout": ""}
 
-    def __call__(self, cmd):
+    def __call__(self, cmd, input=None):
         self.calls.append(cmd)
+        self.inputs.append(input)
+        if cmd[:2] == ["docker", "inspect"]:
+            return subprocess.CompletedProcess(cmd, 0, "true\n" if self.running else "false\n", "")
+        if "pseudolife-mcp-postgres" in cmd:
+            return subprocess.CompletedProcess(cmd, self.psql["code"], self.psql["stdout"], "")
         if "--version-check" in cmd:
             if self.version is None:
                 return subprocess.CompletedProcess(cmd, 2, "", "unknown mode 'invite'")
@@ -207,7 +215,7 @@ def docker(env):
 def test_without_a_dsn_it_runs_inside_the_daemon_container(docker, capsys):
     code, out, _err = _run(capsys, "laptop", "--tier", "minimal", "--replace")
     assert code == 0 and out == "invited\n"
-    check, run = docker.calls
+    _inspect, check, run = docker.calls
     assert check == ["docker", "exec", "pseudolife-mcp-daemon", "python", "-m",
                      "pseudolife_memory.cli", "invite", "--version-check"]
     assert run == ["docker", "exec", "-i", "pseudolife-mcp-daemon", "python", "-m",
@@ -219,7 +227,7 @@ def test_an_older_image_is_refused(docker, capsys):
     docker.version = None
     code, _out, err = _run(capsys, "laptop")
     assert code == 4 and "update the daemon first" in err
-    assert len(docker.calls) == 1
+    assert len(docker.calls) == 2
 
 
 def test_revoke_is_confirmed_here_and_forwarded_with_yes(docker, env, capsys):
@@ -238,3 +246,83 @@ def test_no_database_and_no_docker_is_refused(env, capsys):
 def test_the_version_check_answers(capsys):
     assert invite_cli.main(["--version-check"]) == 0
     assert capsys.readouterr().out.startswith(invite_cli.VERSION_LINE)
+
+
+# -- review fixes (2026-10-02): revoke and list need no healthy daemon ----------------
+
+def test_revoke_and_list_work_with_the_daemon_down(bank, pg_url, capsys):
+    _run(capsys, "laptop")
+    bank["health"] = None
+    assert _run(capsys, "--list")[0] == 0
+    code, out, _err = _run(capsys, "--revoke", "laptop", "--yes")
+    assert code == 0 and "revoked" in out
+
+
+def test_bank_confirms_the_database(bank, pg_url, capsys):
+    _run(capsys, "laptop")
+    bank["health"] = None
+    code, _out, err = _run(capsys, "--revoke", "laptop", "--yes", "--bank", "ffffffffffffffff")
+    assert code == 4 and "another" in err
+    assert json.loads(_run(capsys, "--list", "--json")[1])["principals"][0]["state"] == "pending"
+    code, _out, _err = _run(capsys, "--revoke", "laptop", "--yes", "--bank",
+                            bank_fingerprint(BANK_ID))
+    assert code == 0
+
+
+def test_a_stopped_daemon_container_revokes_through_postgres(docker, capsys):
+    docker.running = False
+    docker.psql["stdout"] = "laptop\n"
+    code, out, _err = _run(capsys, "--revoke", "laptop", "--yes")
+    assert code == 0 and "revoked" in out
+    psql = docker.calls[-1]
+    assert psql[:5] == ["docker", "exec", "-i", "pseudolife-mcp-postgres", "sh"]
+    assert "UPDATE public.principals" in docker.inputs[-1] and "'laptop'" in docker.inputs[-1]
+    assert not any("pseudolife-mcp-daemon" in call and "exec" in call for call in docker.calls)
+
+
+def test_a_stopped_daemon_container_lists_through_postgres(docker, capsys):
+    docker.running = False
+    docker.psql["stdout"] = json.dumps([["laptop", "core", True, True, False, None, 1.0, 2.0, None,
+                                         3.0]]) + "\n"
+    code, out, _err = _run(capsys, "--list", "--json")
+    assert code == 0 and json.loads(out)["principals"][0]["state"] == "paired"
+
+
+def test_a_stopped_daemon_container_cannot_invite(docker, capsys):
+    docker.running = False
+    code, _out, err = _run(capsys, "laptop")
+    assert code == 4 and "not running" in err
+
+
+def test_a_failed_postgres_route_prints_the_sql_to_run(docker, capsys):
+    docker.running = False
+    docker.psql["code"] = 1
+    code, _out, err = _run(capsys, "--revoke", "laptop", "--yes")
+    assert code == 1 and "UPDATE public.principals" in err
+
+
+def test_the_postgres_route_sql_runs_as_written(bank, pg_url, capsys):
+    """The SQL the stopped-container route sends is plain SQL: run it here."""
+    import psycopg
+    _run(capsys, "laptop")
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        listed = conn.execute(invite_cli.LIST_SQL).fetchone()[0]
+        assert [row[0] for row in listed] == ["laptop"]
+        assert conn.execute(invite_cli.revoke_sql("laptop")).fetchone() == ("laptop",)
+        assert conn.execute(invite_cli.BANK_SQL).fetchone() == (BANK_ID,)
+    with pytest.raises(ValueError):
+        invite_cli.revoke_sql("x'; DROP TABLE principals; --")
+
+
+def test_re_invites_keep_the_tier_and_board_unless_given(bank, pg_url, capsys):
+    import psycopg
+    _run(capsys, "laptop", "--tier", "core", "--no-board")
+    _run(capsys, "laptop")                       # a pending re-invite
+    assert _rows(pg_url)[0][3:] == ("core", False)
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        conn.execute("UPDATE principals SET token_hash = %s, code_hash = NULL",
+                     (secret_sha256("fixture-token"),))
+    _run(capsys, "laptop", "--replace")
+    assert _rows(pg_url)[0][3:] == ("core", False)
+    _run(capsys, "laptop", "--replace", "--tier", "full", "--board")
+    assert _rows(pg_url)[0][3:] == ("full", True)

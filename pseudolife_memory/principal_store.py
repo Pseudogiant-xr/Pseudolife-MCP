@@ -429,18 +429,24 @@ class InviteRefused(Exception):
     """An invite the table's state refuses; the message is for the operator."""
 
 
+#: ``create_invite``'s default for ``tier`` and ``board``: an existing row
+#: keeps its value; a new row gets the daemon's tier and board access.
+KEEP = object()
+
+
 def new_pairing_code() -> str:
     return "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
 
 
-def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds: float,
+def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
                   replace: bool) -> dict:
     """Create or reset ``name``'s row with a new pending code and return
-    ``{"code", "expires_at", "state"}`` (``state``: the row before:
-    ``new``, ``pending``, ``revoked`` or ``paired``). The code is returned
-    once, here, and only its hash is written. A paired name needs
-    ``replace``: its old token keeps working until the new code is
-    redeemed. A revoked name is reset (token and revocation cleared)."""
+    ``{"code", "expires_at", "state", "tier", "board"}`` (``state``: the
+    row before: ``new``, ``pending``, ``revoked`` or ``paired``). The code
+    is returned once, here, and only its hash is written. A paired name
+    needs ``replace``: its old token keeps working until the new code is
+    redeemed. A revoked name is reset (token and revocation cleared). An
+    existing row keeps its tier and board access unless they are given."""
     import psycopg
 
     for _attempt in range(5):
@@ -451,8 +457,9 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                 existing = conn.execute(
                     "SELECT token_hash IS NOT NULL, revoked_at IS NOT NULL "
                     "FROM public.principals WHERE principal = %s FOR UPDATE", (name,)).fetchone()
-                params = {"name": name, "tier": tier, "board": board, "code": code_hash,
-                          "ttl": float(ttl_seconds)}
+                params = {"name": name, "code": code_hash, "ttl": float(ttl_seconds),
+                          "tier": None if tier is KEEP else tier,
+                          "board": True if board is KEEP else bool(board)}
                 if existing is None:
                     state = "new"
                     row = conn.execute(
@@ -460,7 +467,7 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                         INSERT INTO public.principals
                             (principal, tier, board, code_hash, code_expires_at, created_at)
                         VALUES (%(name)s, %(tier)s, %(board)s, %(code)s, {_NOW} + %(ttl)s, {_NOW})
-                        RETURNING code_expires_at
+                        RETURNING code_expires_at, tier, board
                         """, params).fetchone()
                 else:
                     paired, revoked = existing
@@ -473,30 +480,38 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                     # A revoked name starts again: token and revocation cleared.
                     reset = (", token_hash = NULL, paired_at = NULL, revoked_at = NULL"
                              if state == "revoked" else "")
+                    given = ("".join([", tier = %(tier)s" if tier is not KEEP else "",
+                                      ", board = %(board)s" if board is not KEEP else ""]))
                     row = conn.execute(
                         f"""
                         UPDATE public.principals
-                           SET tier = %(tier)s, board = %(board)s,
-                               code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
-                               paired_code_hash = NULL{reset}
+                           SET code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
+                               paired_code_hash = NULL{given}{reset}
                          WHERE principal = %(name)s
-                     RETURNING code_expires_at
+                     RETURNING code_expires_at, tier, board
                         """, params).fetchone()
         except psycopg.errors.UniqueViolation:
             continue    # a code-hash collision: draw again
-        return {"code": code, "expires_at": row[0], "state": state}
+        return {"code": code, "expires_at": row[0], "state": state, "tier": row[1],
+                "board": bool(row[2])}
     raise InviteRefused("could not draw an unused pairing code; try again")
 
 
 def list_principals(conn) -> list[dict]:
     """Every stored principal, for ``invite --list``: never a token or a
     code, only whether one is set and when the pending code expires."""
-    rows = conn.execute(
+    return describe_rows(conn.execute(
         f"""
         SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL,
                code_expires_at, created_at, paired_at, revoked_at, {_NOW}
           FROM public.principals ORDER BY principal
-        """).fetchall()
+        """).fetchall())
+
+
+def describe_rows(rows) -> list[dict]:
+    """``invite --list``'s view of ``(principal, tier, board, paired,
+    pending, code_expires_at, created_at, paired_at, revoked_at, now)``
+    tuples, from psycopg or from psql's JSON."""
     out = []
     for (name, tier, board, paired, pending, expires, created, paired_at, revoked, now) in rows:
         if revoked is not None:
