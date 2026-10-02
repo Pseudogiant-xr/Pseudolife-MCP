@@ -42,7 +42,13 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 _CONTROL_BODY_LIMIT = 256 * 1024
 _TEXT_BODY_LIMIT = 4 * 1024 * 1024
 _SESSION_END_BODY_LIMIT = 16 * 1024
+# A pairing body is {"code": 14 chars, "token_sha256": 64 hex}: ~100 bytes.
+_PAIR_BODY_LIMIT = 1024
 _TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
+# Routes that reconfigure the daemon or speak as it: an invited (stored)
+# principal is refused them (spec 2026-10-02, "What an invited principal
+# can do"); environment principals keep them.
+_OPERATOR_POST_PATHS = frozenset({"/api/config", "/api/daemon-notice"})
 
 
 def _body_limit(path: str) -> int:
@@ -136,6 +142,7 @@ async def _send_coordination_error(send, exc):
               else 429 if code in {"wait_capacity_exceeded", "rate_limited", "queue_full",
                                    "lease_queue_full"}
               else 500 if code in {"coordination_unavailable", "invalid_bank_identity"}
+              else 503 if code == "principals_unavailable"
               else 400)
     if status == 500:
         # Database errors can include complete rows. Neither exception messages
@@ -194,7 +201,10 @@ def build_console_app(
     paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
     ``token`` is the singular bearer (default principal); ``token_map`` maps
     per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
-    from pseudolife_memory.principals import DEFAULT_PRINCIPAL, resolve_principal
+    from pseudolife_memory.principal_store import FailureLimiter
+    from pseudolife_memory.principals import (
+        DEFAULT_PRINCIPAL, PrincipalsUnavailable, installed_store, is_stored_principal,
+        resolve_principal)
 
     token = token or None
     token_map = dict(token_map or {})
@@ -202,8 +212,12 @@ def build_console_app(
     routes = ConsoleRoutes(service)
     from pseudolife_memory.web.coordination import CoordinationHub
     coordination = CoordinationHub(service)
+    pairing_failures = FailureLimiter()
 
-    def _principal(scope) -> str | None:
+    def _resolve(scope) -> str | None:
+        """The caller's principal, ``None`` when unauthorized; raises
+        ``PrincipalsUnavailable`` when the bearer may be a stored one the
+        daemon cannot check right now (see principals.resolve_principal)."""
         if not auth_configured:
             return DEFAULT_PRINCIPAL
         # latin-1 like every other header read here: it cannot fail, and
@@ -211,10 +225,21 @@ def build_console_app(
         headers = {k.decode().lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         return resolve_principal(
-            headers.get("authorization"), token_map, token)
+            headers.get("authorization"), token_map, token, installed_store())
+
+    def _principal(scope) -> str | None:
+        """:func:`_resolve` for the always-200 hooks: a principal that
+        cannot be checked now is treated as unauthorized."""
+        try:
+            return _resolve(scope)
+        except PrincipalsUnavailable:
+            return None
 
     def _authorized(scope) -> bool:
         return _principal(scope) is not None
+
+    async def _principals_unavailable(send) -> None:
+        await _send_json(send, 503, {"error": "principals_unavailable"})
 
     def _hdr(scope, name: bytes) -> str | None:
         for k, v in scope.get("headers", []):
@@ -251,6 +276,69 @@ def build_console_app(
         if host is not None and _host_part(host) not in _LOOPBACK:
             return "forbidden_host"
         return None
+
+    async def _pair(scope, receive, send, method: str) -> None:
+        """``POST /api/pair``: redeem a pairing code for the SHA-256 of a
+        token the client minted. Every refusal is the same ``400
+        pairing_refused`` (no oracle for which codes exist) and counts
+        against a global budget of failed redemptions; past it, ``429``
+        without consulting the store. Nothing from the body or an exception
+        is ever logged or returned."""
+        if method != "POST":
+            await _send_json(send, 405, {"error": "method_not_allowed"})
+            return
+        # No browser page may reach this: every browser fetch or form post
+        # from a page carries Origin.
+        if _hdr(scope, b"origin") is not None:
+            await _send_json(send, 403, {"error": "forbidden_origin"})
+            return
+        ctype = (_hdr(scope, b"content-type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            await _send_json(send, 415, {"error": "content_type_must_be_application_json"})
+            return
+        if pairing_failures.blocked():
+            await _send_json(send, 429, {"error": "rate_limited"})
+            return
+
+        async def refused() -> None:
+            pairing_failures.failed()
+            await _send_json(send, 400, {"error": "pairing_refused"})
+
+        try:
+            raw = await _read_body(receive, max_bytes=_PAIR_BODY_LIMIT)
+        except ValueError:
+            await _send_json(send, 413, {"error": "request_too_large"})
+            return
+        from pseudolife_memory import principal_store
+        from pseudolife_memory.principals import (
+            is_sha256_hex, normalize_pairing_code, secret_sha256)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            body = None
+        code = normalize_pairing_code(body.get("code")) if isinstance(body, dict) else None
+        token_hash = body.get("token_sha256") if isinstance(body, dict) else None
+        store = installed_store()
+        dsn = getattr(service, "_db_url", None)
+        if (code is None or not is_sha256_hex(token_hash) or set(body) != {"code", "token_sha256"}
+                or not auth_configured or store is None or not dsn):
+            await refused()
+            return
+        try:
+            paired = await asyncio.get_running_loop().run_in_executor(
+                None, principal_store.redeem, dsn, secret_sha256(code), token_hash)
+        except Exception as exc:  # noqa: BLE001 - the outcome is unknown; the type only
+            logger.error("pairing redemption failed (%s)", type(exc).__name__)
+            await _send_json(send, 503, {"error": "pairing_unavailable"})
+            return
+        if paired is None:
+            await refused()
+            return
+        # Usable at once: the snapshot keeps this entry until a refresh
+        # that started after it, and drops the principal's previous hash.
+        store.add(paired)
+        await _send_json(send, 200, {"principal": paired.principal, "tier": paired.tier,
+                                     "bank": store.bank})
 
     async def app(scope, receive, send):
         if scope["type"] != "http":
@@ -412,7 +500,12 @@ def build_console_app(
             if method != "POST":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
-            if not _authorized(scope):
+            try:
+                ended_by = _resolve(scope)
+            except PrincipalsUnavailable:
+                await _principals_unavailable(send)
+                return
+            if ended_by is None:
                 await _send_json(send, 401, {
                     "error": "unauthorized",
                     "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
@@ -540,6 +633,13 @@ def build_console_app(
                               "text/plain; charset=utf-8", "no-store")
             return
 
+        # 4g) pairing-code redemption (`pseudolife-mcp pair`, spec
+        # 2026-10-02): unauthenticated by design, so it is routed before the
+        # bearer gate and refuses everything a browser could send.
+        if path == "/api/pair":
+            await _pair(scope, receive, send, method)
+            return
+
         # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)
@@ -549,7 +649,11 @@ def build_console_app(
                     "hint": "tokenless /api serves loopback browsers only; "
                             "set PSEUDOLIFE_MCP_TOKEN for remote access"})
                 return
-            principal = _principal(scope)
+            try:
+                principal = _resolve(scope)
+            except PrincipalsUnavailable:
+                await _principals_unavailable(send)
+                return
             if principal is None:
                 await _send_json(send, 401, {
                     "error": "unauthorized",
@@ -557,6 +661,12 @@ def build_console_app(
                 return
             if method not in ("GET", "POST"):
                 await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            # An invited machine reads and writes the bank and the board, but
+            # does not reconfigure the daemon or speak as it.
+            if (method == "POST" and path in _OPERATOR_POST_PATHS
+                    and is_stored_principal(principal)):
+                await _send_json(send, 403, {"error": "operator_principal_required"})
                 return
             params = _parse_query(scope)
             body: dict = {}
@@ -658,7 +768,12 @@ def build_console_app(
             return
 
         # 6) everything else -> the MCP app (token gate preserved)
-        if not _authorized(scope):
+        try:
+            caller = _resolve(scope)
+        except PrincipalsUnavailable:
+            await _principals_unavailable(send)
+            return
+        if caller is None:
             await _send_json(send, 401, {
                 "error": "unauthorized",
                 "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})

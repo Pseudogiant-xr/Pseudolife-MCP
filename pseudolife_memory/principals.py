@@ -15,18 +15,87 @@ Configuration:
   the reserved principal ``"default"``. Fully supported alongside the map;
   the map is consulted first.
 
-Pure module: no MCP SDK import, no storage.
+Principals can also be stored in the bank (``principal_store``, schema
+v53): ``pseudolife-mcp invite`` creates one and ``pseudolife-mcp pair``
+redeems its code. The daemon installs an in-memory snapshot of that table
+with :func:`install_store`, and :func:`resolve_principal` consults it after
+the environment, which always wins.
+
+Pure module: no MCP SDK import, no storage. Standard library only, so the
+client-side commands (``pair``, ``invite``'s host entry) import it from a
+shim runtime.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+import hashlib
 import hmac
 import logging
+import os
+import re
 
 logger = logging.getLogger("pseudolife-mcp.principals")
 
 #: Reserved principal for singular-token and open (no-token) installs. The
 #: default principal keeps the legacy writer path (X-PL-Writer / env).
 DEFAULT_PRINCIPAL = "default"
+
+#: The board's own sender (``storage.coordination.DAEMON_PRINCIPAL``,
+#: pinned equal by tests/test_stored_principals.py): never a client.
+DAEMON_PRINCIPAL = "daemon"
+
+#: Held for a future maintainer-passkey identity; no invite may take it.
+MAINTAINER_PRINCIPAL = "maintainer"
+
+#: Names no stored principal may take: an invite refuses them, the snapshot
+#: ignores a row that carries one, and pair never names a file after one.
+RESERVED_PRINCIPALS = frozenset({DEFAULT_PRINCIPAL, DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL})
+
+# A stored principal's name: it becomes a file name on the paired machine
+# (``~/.pseudolife-mcp/<principal>.token``), so no separator, no leading dot.
+_PRINCIPAL_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+
+# Pairing codes: 12 Crockford base32 characters (60 bits), shown as
+# XXXX-XXXX-XXXX. The alphabet leaves out I, L, O and U.
+PAIRING_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+PAIRING_CODE_LENGTH = 12
+_CODE_LOOKALIKES = str.maketrans({"O": "0", "I": "1", "L": "1"})
+
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def valid_principal_name(name) -> bool:
+    """True for a name a stored principal may carry:
+    ``[a-z0-9][a-z0-9._-]{0,63}``. Reserved names are the caller's check."""
+    return isinstance(name, str) and _PRINCIPAL_NAME.fullmatch(name) is not None
+
+
+def normalize_pairing_code(text) -> str | None:
+    """The 12-character canonical form of a typed pairing code, or ``None``
+    when it is not one. Case, dashes and surrounding whitespace are ignored,
+    and ``O`` reads as ``0``, ``I`` and ``L`` as ``1``."""
+    if not isinstance(text, str):
+        return None
+    code = text.strip().upper().replace("-", "").translate(_CODE_LOOKALIKES)
+    if len(code) != PAIRING_CODE_LENGTH or any(c not in PAIRING_CODE_ALPHABET for c in code):
+        return None
+    return code
+
+
+def format_pairing_code(code: str) -> str:
+    """``XXXX-XXXX-XXXX`` for a canonical code."""
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+
+
+def secret_sha256(value: str) -> str:
+    """Lowercase SHA-256 hex of a high-entropy secret (a bearer token or a
+    pairing code). Unsalted on purpose, like the board's instance
+    credentials: the inputs are random, so the hash is not guessable."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def is_sha256_hex(value) -> bool:
+    return isinstance(value, str) and _SHA256_HEX.fullmatch(value) is not None
 
 
 def parse_token_map(raw: str | None) -> dict[str, str]:
@@ -68,6 +137,21 @@ def parse_token_map(raw: str | None) -> dict[str, str]:
     return out
 
 
+@lru_cache(maxsize=8)
+def _env_token_map(raw: str) -> dict[str, str]:
+    return parse_token_map(raw)
+
+
+def env_auth(environ=None) -> tuple[dict[str, str], str | None]:
+    """``(token_map, singular_token)`` from ``PSEUDOLIFE_MCP_TOKENS`` and
+    ``PSEUDOLIFE_MCP_TOKEN``: the daemon's environment identities, for the
+    sites that resolve a bearer without the gate's frozen copy. Parsed once
+    per distinct value."""
+    environ = os.environ if environ is None else environ
+    return (dict(_env_token_map(environ.get("PSEUDOLIFE_MCP_TOKENS") or "")),
+            environ.get("PSEUDOLIFE_MCP_TOKEN") or None)
+
+
 def misconfigured_tokens_env(raw: str | None,
                              token_map: dict[str, str]) -> bool:
     """True when ``PSEUDOLIFE_MCP_TOKENS`` was SET but no entry survived
@@ -78,16 +162,78 @@ def misconfigured_tokens_env(raw: str | None,
     return bool((raw or "").strip()) and not token_map
 
 
+class PrincipalsUnavailable(Exception):
+    """The stored-principal snapshot has never loaded, or is older than its
+    staleness limit, and the bearer matched nothing in the environment: the
+    caller may hold a valid stored token, so this is not "unauthorized".
+    The HTTP gate answers ``503 {"error": "principals_unavailable"}``."""
+
+
+# The daemon's stored-principal snapshot (principal_store.PrincipalSnapshot),
+# installed once at startup; None everywhere else (clients, tests, a daemon
+# without Postgres), where resolution is the environment's alone.
+_STORE = None
+
+
+def install_store(store) -> None:
+    """Install (or, with ``None``, remove) the process's stored-principal
+    snapshot. Called by the daemon at startup and by tests."""
+    global _STORE
+    _STORE = store
+
+
+def installed_store():
+    return _STORE
+
+
+def principal_admitted(coordination_config, principal, *, store=None) -> bool:
+    """Whether ``principal`` may use the agent board: listed in
+    ``coordination.allowed_principals``, or a stored principal whose row has
+    ``board = true`` and is not revoked. The board's own sender is never
+    admitted. ``store`` defaults to the installed snapshot; this reads
+    memory only, never storage."""
+    if not isinstance(principal, str) or principal == DAEMON_PRINCIPAL:
+        return False
+    if principal in coordination_config.allowed_principals:
+        return True
+    store = _STORE if store is None else store
+    return store is not None and store.admitted(principal)
+
+
+def is_stored_principal(principal) -> bool:
+    """Whether ``principal`` names a principal stored in the bank (paired,
+    pending or revoked), as opposed to an environment one. Rows the
+    environment shadows are not stored principals."""
+    store = _STORE
+    return store is not None and isinstance(principal, str) and store.has(principal)
+
+
+def stored_tier(principal) -> str | None:
+    """The tier a stored principal's row sets, or ``None`` (no row, no tier,
+    no store): the toolset falls back to it after PSEUDOLIFE_MCP_TIER_MAP."""
+    store = _STORE
+    if store is None or not isinstance(principal, str):
+        return None
+    return store.tier_of(principal)
+
+
 def resolve_principal(auth_header: str | None,
                       token_map: dict[str, str],
-                      single_token: str | None) -> str | None:
+                      single_token: str | None,
+                      store=None) -> str | None:
     """Principal for an ``Authorization`` header value, or ``None`` when the
     caller is unauthorized.
 
     * No auth configured at all (open loopback mode): everyone is
-      :data:`DEFAULT_PRINCIPAL`.
+      :data:`DEFAULT_PRINCIPAL`. Stored principals do not turn
+      authentication on.
     * Bearer matches a map entry: that entry's principal.
     * Bearer matches the singular token: :data:`DEFAULT_PRINCIPAL`.
+    * Bearer's SHA-256 matches a row of ``store`` (the stored-principal
+      snapshot; callers pass :func:`installed_store`): that row's principal.
+      The environment is always consulted first. A store that is not
+      available raises :class:`PrincipalsUnavailable` for a bearer the
+      environment did not match; the lookup is a dict read, never I/O.
     * Anything else (missing/wrong scheme/unknown token): ``None``.
 
     Comparisons are constant-time (``hmac.compare_digest``).
@@ -122,4 +268,12 @@ def resolve_principal(auth_header: str | None,
             return principal
     if single_token is not None and matches(single_token):
         return DEFAULT_PRINCIPAL
+    if store is None:
+        return None
+    if not store.available():
+        raise PrincipalsUnavailable()
+    for candidate in dict.fromkeys(candidates):
+        row = store.lookup(hashlib.sha256(candidate).hexdigest())
+        if row is not None:
+            return row.principal
     return None

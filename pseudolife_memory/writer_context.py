@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import contextvars
 import os
-from functools import lru_cache
 
 # (writer_id, session_id) override; (None, None) means "not set".
 _WRITER_CTX: contextvars.ContextVar[tuple[str | None, str | None]] = (
@@ -143,21 +142,19 @@ def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]
     return (headers.get("x-pl-writer"), headers.get("x-pl-session"), transport)
 
 
-@lru_cache(maxsize=8)
-def _parsed_token_map(raw: str) -> dict[str, str]:
-    from pseudolife_memory.principals import parse_token_map
-
-    return parse_token_map(raw)
-
-
 def current_principal() -> str:
     """Principal NAME for the live request's bearer (spec 2026-08-10).
 
-    Naming, not authentication — the transport gate already rejected unknown
-    tokens, so an unmatched bearer here (the singular token, or open loopback
-    mode) is simply the default principal. Fail-open: any error resolves to
-    ``"default"``; identity resolution must never fail a request."""
-    from pseudolife_memory.principals import DEFAULT_PRINCIPAL, resolve_principal
+    The principal the transport bound, else the bearer resolved here with the
+    one resolver: the environment's map and token, then the stored-principal
+    snapshot (spec 2026-10-02). Naming, not authentication — the transport
+    gate already rejected unknown tokens, so an unmatched bearer here (the
+    singular token, or open loopback mode) is simply the default principal.
+    Fail-open: any error, including a snapshot that cannot be checked,
+    resolves to ``"default"``; identity resolution must never fail a
+    request."""
+    from pseudolife_memory.principals import (
+        DEFAULT_PRINCIPAL, env_auth, installed_store, resolve_principal)
 
     principal = _REQUEST_PRINCIPAL.get()
     if principal is not None:
@@ -165,13 +162,14 @@ def current_principal() -> str:
     try:
         headers = _http_request_headers()
         auth = headers.get("authorization") if headers is not None else None
-        raw = os.environ.get("PSEUDOLIFE_MCP_TOKENS")
-        if not auth or not raw:
+        if not auth:
             return DEFAULT_PRINCIPAL
+        token_map, token = env_auth()
         # resolve_principal compares the bytes the client sent, so a
         # non-ASCII bearer in latin-1-decoded transport headers still names
         # its principal.
-        return resolve_principal(auth, _parsed_token_map(raw), None) or DEFAULT_PRINCIPAL
+        return (resolve_principal(auth, token_map, token, installed_store())
+                or DEFAULT_PRINCIPAL)
     except Exception:  # noqa: BLE001
         return DEFAULT_PRINCIPAL
 

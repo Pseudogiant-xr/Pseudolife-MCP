@@ -154,6 +154,79 @@ Plain HTTP is acceptable only inside a private network you trust.
   `127.0.0.1:8765`. The token relaxes the `Host` check, so the proxy's
   hostname needs no further configuration.
 
+## Adding a machine: `invite` and `pair`
+
+Two commands give another machine its own identity on the bank, with no
+daemon restart and no token travelling between machines. On the daemon
+host, after [exposing it](#expose-the-daemon-with-one-command):
+
+```bash
+pseudolife-mcp invite laptop            # prints a code such as 7K3Q-M9XA-2PDF
+```
+
+On the new machine, either run the installer, answer **2** ("On another
+machine that already runs it"), give the daemon's URL, and paste the code
+where it asks for the token (or pass `--pairing-code <code>` /
+`-PairingCode <code>`), or, where the shim is already installed:
+
+```bash
+pseudolife-mcp pair http://100.64.0.2:8765 7K3Q-M9XA-2PDF
+pseudolife-mcp connect http://100.64.0.2:8765 --code 7K3Q-M9XA-2PDF   # pair, then re-point every client
+```
+
+`pair` mints the bearer token on the new machine, writes it to an
+owner-only `~/.pseudolife-mcp/<principal>.token` (never replacing an
+existing file), and sends the daemon only the token's SHA-256. The token
+never appears in a terminal, a chat, shell history or a network response.
+`--read-code` reads the code from stdin instead of the command line.
+
+What an invited machine can do: **read and write the whole bank** and use
+the agent board (unless invited with `--no-board`), with its own writer
+identity and board addresses. It cannot change the daemon's configuration:
+`POST /api/config` and `POST /api/daemon-notice` answer
+`403 {"error": "operator_principal_required"}` for a stored principal.
+Principals in `PSEUDOLIFE_MCP_TOKENS` keep every right they had.
+
+The rules:
+
+- The code is 12 characters (60 bits), single use, and expires after 15
+  minutes (`--expires 2h`, at most 24 hours). Case and dashes do not
+  matter, and `O`, `I` and `L` read as `0`, `1` and `1`.
+- A name is lowercase `[a-z0-9][a-z0-9._-]{0,63}`, never `default`,
+  `daemon` or `maintainer`, and never one already in `PSEUDOLIFE_MCP_TOKENS`
+  or `PSEUDOLIFE_MCP_TIER_MAP` (the environment always wins). `--tier
+  minimal|core|full` sets its default toolset tier.
+- `invite --list` shows each name, whether it is paired or pending, its
+  tier, board access and times: never a token or a code.
+  `invite --revoke laptop` takes the token away within 10 seconds.
+  `invite laptop --replace` gives a paired machine a new code; its old
+  token keeps working until the new code is redeemed. A revoked name can be
+  invited again.
+- The daemon must have a token of its own (`"auth": true`): invited
+  principals do not turn authentication on. `invite` also checks that the
+  database it writes is the bank the local daemon serves (`/health`'s
+  `bank`), and refuses while that is still `null`.
+- On a Docker install `invite` runs inside the daemon container, so the
+  host never handles the database password; elsewhere it uses
+  `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded Postgres.
+
+Invited principals live in the bank's `principals` table (schema v53), with
+only the SHA-256 of each token and code. A physical backup carries them; a
+logical export (`pseudolife-mcp export`) leaves them out, as it does the
+board's instance credentials. The daemon reads the table every 10 seconds
+on its own connection. If that read has failed for over 60 seconds, a
+bearer that matches nothing in the environment gets `503 {"error":
+"principals_unavailable"}` rather than 401, so a valid invited token is
+never reported as wrong.
+
+Redemption (`POST /api/pair`) refuses any request with an `Origin` header,
+takes only JSON bodies up to 1 KiB, answers every failure with the same
+`400 {"error": "pairing_refused"}`, and after 20 failed attempts in a
+minute answers `429` until the minute has passed.
+
+The sections below are the hand-made alternative: tokens in the daemon's
+environment, admitted in its configuration.
+
 ## One identity per remote client
 
 Give each remote client its own principal, so its writes, its board address
@@ -357,9 +430,9 @@ pseudolife-mcp doctor
 
 Run it from the same environment as the registered command. The `board` line
 reads `on - token present, principal allowed` when admission worked, and
-`off - this token's principal is not in coordination.allowed_principals`
-(the daemon's `principal_not_allowed` reason) when it is missing from the
-list.
+`off - this token's principal is not in coordination.allowed_principals;
+list it there, or invite this machine with ...` (the daemon's
+`principal_not_allowed` reason) when it is missing from the list.
 
 ## Moving a client to a new daemon
 
