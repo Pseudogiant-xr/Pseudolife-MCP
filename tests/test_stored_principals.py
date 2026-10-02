@@ -307,6 +307,80 @@ def test_no_admission_check_bypasses_principal_admitted():
 def test_every_bearer_resolution_consults_the_installed_store():
     import re
     calls = [(name, m.group(0)) for name, text in _package_sources() if name != "principals.py"
-             for m in re.finditer(r"resolve_principal\((?:[^()]|\([^()]*\))*\)", text)]
+             for m in re.finditer(r"resolve_principal(?:_detailed)?\((?:[^()]|\([^()]*\))*\)", text)]
     assert calls, "the resolver should have callers"
     assert [c for c in calls if "installed_store()" not in c[1]] == []
+
+
+def test_the_attempt_budget_is_counted_atomically_under_threads():
+    """Fifty simultaneous attempts: exactly the budget gets through, and a
+    refund frees exactly one."""
+    import threading
+
+    from pseudolife_memory.principal_store import FailureLimiter
+
+    budget = FailureLimiter(limit=20, clock=lambda: 1000.0)
+    barrier = threading.Barrier(50)
+    stamps = []
+
+    def attempt():
+        barrier.wait()
+        stamps.append(budget.reserve())
+
+    threads = [threading.Thread(target=attempt) for _ in range(50)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    granted = [stamp for stamp in stamps if stamp is not None]
+    assert len(granted) == 20
+    budget.refund(granted[0])
+    assert budget.reserve() is not None and budget.reserve() is None
+
+
+
+def test_row_names_are_lowercased_and_validated_before_the_shadow_check():
+    snap = PrincipalSnapshot(shadowed={"desk"}, clock=_Clock())
+    snap.refresh(lambda: ([_row("Laptop", TOKEN_A), _row("DESK", TOKEN_B),
+                           _row("../evil", "fixture-evil"), _row("Maintainer", "fixture-m")], None))
+    assert snap.lookup(secret_sha256(TOKEN_A)).principal == "laptop"
+    assert snap.has("laptop") and not snap.has("Laptop")
+    assert snap.lookup(secret_sha256(TOKEN_B)) is None and snap.shadowed_rows == ["desk", "maintainer"]
+    assert snap.lookup(secret_sha256("fixture-evil")) is None
+    assert snap.invalid_rows == ["../evil"]
+
+
+def test_the_refresher_connects_with_keepalives(monkeypatch):
+    from pseudolife_memory import principal_store
+
+    seen = {}
+
+    class Conn:
+        closed = False
+
+        def execute(self, *args, **kwargs):
+            return self
+
+    def connect(dsn, **kwargs):
+        seen.update(kwargs)
+        return Conn()
+
+    monkeypatch.setattr(principal_store, "_connect", connect)
+    monkeypatch.setattr(principal_store, "load_rows", lambda conn: ([], None))
+    refresher = principal_store.PrincipalRefresher("postgresql://fixture", PrincipalSnapshot(),
+                                                   auth_configured=True)
+    assert refresher.refresh_once()
+    assert seen["keepalives"] == 1 and seen["keepalives_idle"] == 10
+    assert seen["keepalives_interval"] == 5 and seen["keepalives_count"] == 3
+    assert seen["tcp_user_timeout"] == 30000
+
+
+def test_the_refresher_warns_about_invalid_row_names(caplog):
+    from pseudolife_memory import principal_store
+    snapshot = PrincipalSnapshot()
+    refresher = principal_store.PrincipalRefresher("postgresql://fixture", snapshot,
+                                                   auth_configured=True)
+    refresher._read = lambda: ([_row("../evil", "fixture-evil")], None)
+    with caplog.at_level("WARNING", logger="pseudolife-mcp.principals"):
+        assert refresher.refresh_once()
+    assert "'../evil'" in caplog.text and "skipped" in caplog.text

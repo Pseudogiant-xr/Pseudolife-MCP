@@ -309,3 +309,11 @@ def test_the_startup_warnings_name_principals_never_tokens(db, pg_url, caplog):
     text = caplog.text
     assert "no PSEUDOLIFE_MCP_TOKEN" in text and "'desk' is shadowed" in text
     assert TOKEN_A not in text and secret_sha256(TOKEN_A) not in text
+
+
+def test_a_shadowed_or_reserved_row_is_refused_without_spending_its_code(db, pg_url):
+    invite = _invite(db, "desk")
+    code_hash = secret_sha256(invite["code"])
+    assert store.redeem(pg_url, code_hash, secret_sha256(TOKEN_A), excluded=["desk"]) is None
+    assert db.execute("SELECT code_hash, token_hash FROM principals").fetchone() == (code_hash, None)
+    assert store.redeem(pg_url, code_hash, secret_sha256(TOKEN_A)) is not None

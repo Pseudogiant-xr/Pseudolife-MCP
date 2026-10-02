@@ -417,3 +417,54 @@ def test_the_cli_dispatches_pair_and_usage_names_it():
     proc = subprocess.run([sys.executable, "-m", "pseudolife_memory.cli", "pair", "--help"],
                           capture_output=True, text=True, timeout=60, cwd=str(ROOT))
     assert proc.returncode == 0 and "--read-code" in proc.stdout
+
+
+# -- review fixes (2026-10-02) ------------------------------------------------------
+
+@pytest.mark.parametrize("first", ["drop", 503])
+@pytest.mark.parametrize("later", [429, 400])
+def test_a_refusal_after_a_lost_response_keeps_the_file(home, daemon, capsys, first, later):
+    """Once an attempt's outcome is unknown the code may be spent, so a
+    later refusal cannot prove the token is useless: the file stays."""
+    daemon.answers = [first, later]
+    code, out, err = run(capsys, daemon.url, CODE)
+    assert code == 5
+    [kept] = token_files(home)
+    assert str(kept) in err and "only copy" in err
+    assert len(daemon.posts()) == 2
+
+
+def test_a_remote_plain_http_url_is_warned_about(home, capsys, monkeypatch):
+    monkeypatch.setattr(pair_cli, "probe_health", lambda url, timeout=None: None)
+    code, report, text = run_json(capsys, "http://100.64.0.2:8765", CODE)
+    assert code == 4
+    assert any("plain HTTP" in line for line in report["warnings"])
+    code, _out, err = run(capsys, "http://100.64.0.2:8765", CODE)
+    assert "plain HTTP" in err
+
+
+def test_a_loopback_url_is_not_warned_about(home, daemon, capsys):
+    code, report, _text = run_json(capsys, daemon.url, CODE)
+    assert code == 0 and not any("plain HTTP" in line for line in report["warnings"])
+
+
+def test_a_link_whose_old_name_cannot_be_removed_names_both_files(home, daemon, capsys,
+                                                                   monkeypatch):
+    """POSIX move: the hard link worked but the pairing name could not be
+    removed, so two files hold the token; both are named."""
+    monkeypatch.setattr(pair_cli, "_POSIX_MOVE", True)
+    real_unlink = os.unlink
+
+    def unlink(path, *args, **kwargs):
+        if "pairing-" in os.fspath(path):
+            raise PermissionError("fixture")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(pair_cli.os, "unlink", unlink)
+    code, report, _text = run_json(capsys, daemon.url, CODE)
+    assert code == 0
+    files = token_files(home)
+    assert bank_dir(home) / "laptop.token" in files and len(files) == 2
+    assert report["token_file"] == str(bank_dir(home) / "laptop.token")
+    warning = " ".join(report["warnings"])
+    assert all(str(path) in warning for path in files)

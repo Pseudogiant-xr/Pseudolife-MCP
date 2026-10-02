@@ -147,14 +147,17 @@ def current_principal() -> str:
 
     The principal the transport bound, else the bearer resolved here with the
     one resolver: the environment's map and token, then the stored-principal
-    snapshot (spec 2026-10-02). Naming, not authentication — the transport
-    gate already rejected unknown tokens, so an unmatched bearer here (the
-    singular token, or open loopback mode) is simply the default principal.
-    Fail-open: any error, including a snapshot that cannot be checked,
-    resolves to ``"default"``; identity resolution must never fail a
-    request."""
+    snapshot (spec 2026-10-02). Naming, not authentication: no bearer, the
+    singular token, or open loopback mode is the default principal.
+
+    Fails closed for a presented bearer that does not resolve while
+    authentication is configured (a snapshot that cannot be checked, or a
+    row revoked since the gate): it raises ``PrincipalsUnavailable`` rather
+    than naming the caller ``default``, whose X-PL-Writer would then be
+    honoured (security review, 2026-10-02). Any other error still resolves
+    to ``"default"``."""
     from pseudolife_memory.principals import (
-        DEFAULT_PRINCIPAL, env_auth, installed_store, resolve_principal)
+        DEFAULT_PRINCIPAL, PrincipalsUnavailable, env_auth, installed_store, resolve_principal)
 
     principal = _REQUEST_PRINCIPAL.get()
     if principal is not None:
@@ -168,10 +171,14 @@ def current_principal() -> str:
         # resolve_principal compares the bytes the client sent, so a
         # non-ASCII bearer in latin-1-decoded transport headers still names
         # its principal.
-        return (resolve_principal(auth, token_map, token, installed_store())
-                or DEFAULT_PRINCIPAL)
+        resolved = resolve_principal(auth, token_map, token, installed_store())
+    except PrincipalsUnavailable:
+        raise
     except Exception:  # noqa: BLE001
         return DEFAULT_PRINCIPAL
+    if resolved is None and (token_map or token):
+        raise PrincipalsUnavailable()
+    return resolved or DEFAULT_PRINCIPAL
 
 
 def request_principal() -> str | None:

@@ -34,6 +34,7 @@ from typing import Callable, Iterable
 
 from pseudolife_memory.principals import (
     PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH, RESERVED_PRINCIPALS, secret_sha256,
+    valid_principal_name,
 )
 
 logger = logging.getLogger("pseudolife-mcp.principals")
@@ -53,6 +54,13 @@ DEFAULT_CODE_TTL_S = 15 * 60
 MAX_CODE_TTL_S = 24 * 3600
 
 _TIERS = ("minimal", "core", "full")
+# The refresher's connection notices a dead peer in well under the 60 s
+# staleness limit instead of waiting on the OS default (hours): libpq
+# keepalive probes after 10 s idle, every 5 s, three tries, and a 30 s cap
+# on unacknowledged writes (where the platform has TCP_USER_TIMEOUT; libpq
+# ignores it elsewhere). Design bounds from the 2026-10-02 review.
+_KEEPALIVES = {"keepalives": 1, "keepalives_idle": 10, "keepalives_interval": 5,
+               "keepalives_count": 3, "tcp_user_timeout": 30000}
 _NOW = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
 
 
@@ -97,6 +105,7 @@ class PrincipalSnapshot:
         self._seq = 0
         self._loaded_at: float | None = None
         self._shadowed_rows: list[str] = []
+        self._invalid_rows: list[str] = []
         self.bank: str | None = None
 
     # -- maintenance -------------------------------------------------------
@@ -113,26 +122,31 @@ class PrincipalSnapshot:
             self._pending = {name: entry for name, entry in self._pending.items()
                              if entry[0] > started_seq}
             merged: dict[str, StoredPrincipal] = {}
-            shadowed = set()
+            shadowed, invalid = set(), set()
             for row in rows:
-                if row.principal in self._shadowed:
-                    shadowed.add(row.principal)
+                normal = _normal(row)
+                if normal is None:
+                    invalid.add(str(row.principal))
                     continue
-                merged[row.principal] = _clean(row)
+                if normal.principal in self._shadowed:
+                    shadowed.add(normal.principal)
+                    continue
+                merged[normal.principal] = normal
             for _seq, row in self._pending.values():
                 merged[row.principal] = row
             self._rows = merged
             self._rebuild()
             self._shadowed_rows = sorted(shadowed)
+            self._invalid_rows = sorted(invalid)
             self._loaded_at = started_at
             self.bank = bank
 
     def add(self, row: StoredPrincipal) -> None:
         """A redemption that just committed: visible at once, replacing the
         principal's previous token hash (``invite --replace``)."""
-        if row.principal in self._shadowed:
+        row = _normal(row)
+        if row is None or row.principal in self._shadowed:
             return
-        row = _clean(row)
         with self._lock:
             self._seq += 1
             self._pending[row.principal] = (self._seq, row)
@@ -169,26 +183,44 @@ class PrincipalSnapshot:
         return None if row is None or row.revoked else row.tier
 
     @property
+    def excluded_names(self) -> frozenset[str]:
+        """Names a redemption must not pair: the environment's and the
+        reserved ones. A row carrying one would be ignored anyway, so its
+        code is refused rather than spent."""
+        return self._shadowed
+
+    @property
     def shadowed_rows(self) -> list[str]:
         with self._lock:
             return list(self._shadowed_rows)
+
+    @property
+    def invalid_rows(self) -> list[str]:
+        """Rows skipped because their name is not a principal name."""
+        with self._lock:
+            return list(self._invalid_rows)
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._rows)
 
 
-def _clean(row: StoredPrincipal) -> StoredPrincipal:
-    if row.tier is None or row.tier in _TIERS:
-        return row
-    return StoredPrincipal(row.principal, row.token_hash, None, row.board, row.revoked)
+def _normal(row: StoredPrincipal) -> StoredPrincipal | None:
+    """The row with its name lowercased and its tier on the ladder (or
+    none), or ``None`` when the name is not a principal name: such a row is
+    skipped before the shadowing and reservation checks, never trusted."""
+    name = row.principal.strip().lower() if isinstance(row.principal, str) else None
+    if not valid_principal_name(name):
+        return None
+    tier = row.tier if row.tier is None or row.tier in _TIERS else None
+    return StoredPrincipal(name, row.token_hash, tier, row.board, row.revoked)
 
 
 # -- the database side ---------------------------------------------------------
 
-def _connect(dsn: str, *, autocommit: bool):
+def _connect(dsn: str, *, autocommit: bool, **options):
     from pseudolife_memory.storage.postgres import connect_retrying_local_ports
-    return connect_retrying_local_ports(dsn, connect_timeout=5, autocommit=autocommit)
+    return connect_retrying_local_ports(dsn, connect_timeout=5, autocommit=autocommit, **options)
 
 
 def load_rows(conn) -> tuple[list[StoredPrincipal], str | None]:
@@ -235,12 +267,13 @@ class PrincipalRefresher:
         self._conn = None
         self._failing = False
         self._warned = False
+        self._warned_invalid: set[str] = set()
         self._stop = threading.Event()
         self.thread: threading.Thread | None = None
 
     def _read(self):
         if self._conn is None or self._conn.closed:
-            self._conn = _connect(self._dsn, autocommit=True)
+            self._conn = _connect(self._dsn, autocommit=True, **_KEEPALIVES)
             self._conn.execute("SET statement_timeout = '5s'")
         return load_rows(self._conn)
 
@@ -266,6 +299,11 @@ class PrincipalRefresher:
         if not self._warned:
             self._warned = True
             self._startup_warnings()
+        for name in self._snapshot.invalid_rows:
+            if name not in self._warned_invalid:
+                self._warned_invalid.add(name)
+                logger.warning("stored principal %r is not a principal name "
+                               "([a-z0-9][a-z0-9._-]{0,63}): skipped", name)
         return True
 
     def _startup_warnings(self) -> None:
@@ -295,10 +333,20 @@ class PrincipalRefresher:
         self._stop.set()
 
 
+# Redemptions in flight at once (security review, 2026-10-02): each opens
+# a database connection, so a burst of bad codes must not fan out across
+# the shared executor. Two lets a client's retry run beside one slow
+# attempt; anything beyond is answered 429 at once. A design bound, not a
+# measurement.
+REDEMPTION_SLOTS = 2
+
+
 class FailureLimiter:
     """The endpoint's global budget of failed redemptions: at most ``limit``
-    in any ``window`` seconds, after which :meth:`blocked` is true and the
-    endpoint answers 429 without consulting the store."""
+    in any ``window`` seconds. Every attempt is counted atomically before it
+    goes near the store (:meth:`reserve`), so concurrent bad codes cannot
+    all slip under the budget; a success, or an attempt that never reached
+    the store, is given back (:meth:`refund`)."""
 
     def __init__(self, limit: int = FAILED_REDEMPTIONS_PER_MINUTE, window: float = 60.0,
                  clock: Callable[[], float] | None = None):
@@ -312,19 +360,52 @@ class FailureLimiter:
         while self._failures and now - self._failures[0] >= self._window:
             self._failures.popleft()
 
-    def blocked(self) -> bool:
-        with self._lock:
-            self._trim(self._clock())
-            return len(self._failures) >= self._limit
-
-    def failed(self) -> None:
+    def reserve(self) -> float | None:
+        """Count one attempt and return its stamp, or ``None`` when the
+        budget is spent (answer 429)."""
         with self._lock:
             now = self._clock()
             self._trim(now)
+            if len(self._failures) >= self._limit:
+                return None
             self._failures.append(now)
+            return now
+
+    def refund(self, stamp: float) -> None:
+        """Give back an attempt that succeeded or never reached the store."""
+        with self._lock:
+            try:
+                self._failures.remove(stamp)
+            except ValueError:
+                pass    # already aged out of the window
 
 
-def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
+class RedemptionGate:
+    """At most ``slots`` redemptions in flight; a full gate is a refusal
+    (429), never a queue. Redemptions run on the gate's own executor, so
+    they never take threads from the daemon's shared pool."""
+
+    def __init__(self, slots: int = REDEMPTION_SLOTS):
+        from concurrent.futures import ThreadPoolExecutor
+        self._slots = slots
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self.executor = ThreadPoolExecutor(max_workers=slots, thread_name_prefix="pl-pairing")
+
+    def try_enter(self) -> bool:
+        with self._lock:
+            if self._in_flight >= self._slots:
+                return False
+            self._in_flight += 1
+            return True
+
+    def leave(self) -> None:
+        with self._lock:
+            self._in_flight -= 1
+
+
+def redeem(dsn: str, code_hash: str, token_hash: str, *,
+           excluded: Iterable[str] = ()) -> StoredPrincipal | None:
     """Redeem a pairing code: the matching pending row takes ``token_hash``
     and the code is spent, in one conditional UPDATE on the database clock,
     so two concurrent redeemers cannot both win. ``None`` is a refusal of
@@ -333,7 +414,9 @@ def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
     A repeat with the same code and the same token hash within
     :data:`RETRY_WINDOW_S` of the pairing returns the same row: only the
     client that minted the token knows that hash, so a lost response is
-    recoverable and nothing else is. Database errors propagate."""
+    recoverable and nothing else is. A row named in ``excluded`` (a name
+    the environment or a reservation already uses) is refused without
+    spending its code. Database errors propagate."""
     import psycopg
 
     with _connect(dsn, autocommit=False) as conn:
@@ -345,8 +428,10 @@ def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
                    SET token_hash = %(token)s, paired_at = {_NOW},
                        paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL
                  WHERE code_hash = %(code)s AND code_expires_at > {_NOW} AND revoked_at IS NULL
+                   AND NOT (principal = ANY(%(excluded)s))
              RETURNING principal, tier, board
-                """, {"token": token_hash, "code": code_hash}).fetchone()
+                """, {"token": token_hash, "code": code_hash,
+                      "excluded": sorted(excluded)}).fetchone()
         except psycopg.errors.UniqueViolation:
             conn.rollback()
             return None
@@ -375,18 +460,24 @@ class InviteRefused(Exception):
     """An invite the table's state refuses; the message is for the operator."""
 
 
+#: ``create_invite``'s default for ``tier`` and ``board``: an existing row
+#: keeps its value; a new row gets the daemon's tier and board access.
+KEEP = object()
+
+
 def new_pairing_code() -> str:
     return "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
 
 
-def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds: float,
+def create_invite(conn, name: str, *, tier=KEEP, board=KEEP, ttl_seconds: float,
                   replace: bool) -> dict:
     """Create or reset ``name``'s row with a new pending code and return
-    ``{"code", "expires_at", "state"}`` (``state``: the row before:
-    ``new``, ``pending``, ``revoked`` or ``paired``). The code is returned
-    once, here, and only its hash is written. A paired name needs
-    ``replace``: its old token keeps working until the new code is
-    redeemed. A revoked name is reset (token and revocation cleared)."""
+    ``{"code", "expires_at", "state", "tier", "board"}`` (``state``: the
+    row before: ``new``, ``pending``, ``revoked`` or ``paired``). The code
+    is returned once, here, and only its hash is written. A paired name
+    needs ``replace``: its old token keeps working until the new code is
+    redeemed. A revoked name is reset (token and revocation cleared). An
+    existing row keeps its tier and board access unless they are given."""
     import psycopg
 
     for _attempt in range(5):
@@ -397,8 +488,9 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                 existing = conn.execute(
                     "SELECT token_hash IS NOT NULL, revoked_at IS NOT NULL "
                     "FROM public.principals WHERE principal = %s FOR UPDATE", (name,)).fetchone()
-                params = {"name": name, "tier": tier, "board": board, "code": code_hash,
-                          "ttl": float(ttl_seconds)}
+                params = {"name": name, "code": code_hash, "ttl": float(ttl_seconds),
+                          "tier": None if tier is KEEP else tier,
+                          "board": True if board is KEEP else bool(board)}
                 if existing is None:
                     state = "new"
                     row = conn.execute(
@@ -406,7 +498,7 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                         INSERT INTO public.principals
                             (principal, tier, board, code_hash, code_expires_at, created_at)
                         VALUES (%(name)s, %(tier)s, %(board)s, %(code)s, {_NOW} + %(ttl)s, {_NOW})
-                        RETURNING code_expires_at
+                        RETURNING code_expires_at, tier, board
                         """, params).fetchone()
                 else:
                     paired, revoked = existing
@@ -419,30 +511,38 @@ def create_invite(conn, name: str, *, tier: str | None, board: bool, ttl_seconds
                     # A revoked name starts again: token and revocation cleared.
                     reset = (", token_hash = NULL, paired_at = NULL, revoked_at = NULL"
                              if state == "revoked" else "")
+                    given = ("".join([", tier = %(tier)s" if tier is not KEEP else "",
+                                      ", board = %(board)s" if board is not KEEP else ""]))
                     row = conn.execute(
                         f"""
                         UPDATE public.principals
-                           SET tier = %(tier)s, board = %(board)s,
-                               code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
-                               paired_code_hash = NULL{reset}
+                           SET code_hash = %(code)s, code_expires_at = {_NOW} + %(ttl)s,
+                               paired_code_hash = NULL{given}{reset}
                          WHERE principal = %(name)s
-                     RETURNING code_expires_at
+                     RETURNING code_expires_at, tier, board
                         """, params).fetchone()
         except psycopg.errors.UniqueViolation:
             continue    # a code-hash collision: draw again
-        return {"code": code, "expires_at": row[0], "state": state}
+        return {"code": code, "expires_at": row[0], "state": state, "tier": row[1],
+                "board": bool(row[2])}
     raise InviteRefused("could not draw an unused pairing code; try again")
 
 
 def list_principals(conn) -> list[dict]:
     """Every stored principal, for ``invite --list``: never a token or a
     code, only whether one is set and when the pending code expires."""
-    rows = conn.execute(
+    return describe_rows(conn.execute(
         f"""
         SELECT principal, tier, board, token_hash IS NOT NULL, code_hash IS NOT NULL,
                code_expires_at, created_at, paired_at, revoked_at, {_NOW}
           FROM public.principals ORDER BY principal
-        """).fetchall()
+        """).fetchall())
+
+
+def describe_rows(rows) -> list[dict]:
+    """``invite --list``'s view of ``(principal, tier, board, paired,
+    pending, code_expires_at, created_at, paired_at, revoked_at, now)``
+    tuples, from psycopg or from psql's JSON."""
     out = []
     for (name, tier, board, paired, pending, expires, created, paired_at, revoked, now) in rows:
         if revoked is not None:

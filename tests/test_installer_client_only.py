@@ -1345,3 +1345,17 @@ def test_preflight_checks_the_venv_the_shim_runtime_needs(bash, tmp_path, venv_e
         assert "sudo apt install python3-venv" in lines[warned + 1]
     [pipx] = [line for line in lines if re.search(r"(OK|WARN)\S*\s+pipx", line)]
     assert "fallback" in pipx and "preferred" not in proc.stdout
+
+
+
+def test_the_pairing_code_help_says_the_prompt_keeps_it_off_the_command_line():
+    """Security review, 2026-10-02: a code passed as a flag sits in shell
+    history and the process list; the help says the prompt avoids that."""
+    sh = (ROOT / "ops" / "install.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "ops" / "install.ps1").read_text(encoding="utf-8")
+    usage = sh.split("# >>> usage >>>", 1)[1].split("# <<< usage <<<", 1)[0]
+    sh_help = usage.split("--pairing-code <code>", 1)[1].split("# One token file", 1)[0]
+    ps_help = ps.split("# -PairingCode <code>:", 1)[1].split("\n#\n", 1)[0]
+    for text in (sh_help, ps_help):
+        flat = " ".join(line.lstrip("# ").strip() for line in text.splitlines())
+        assert "off the command line" in flat, flat

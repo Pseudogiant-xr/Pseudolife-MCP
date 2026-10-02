@@ -53,8 +53,9 @@ def redeemed(monkeypatch):
     state = {"calls": [], "result": StoredPrincipal("laptop", TOKEN_HASH, "core", True, False),
              "threads": []}
 
-    def fake(dsn, code_hash, token_hash):
+    def fake(dsn, code_hash, token_hash, *, excluded=()):
         state["calls"].append((code_hash, token_hash))
+        state["excluded"] = set(excluded)
         state["threads"].append(threading.current_thread().name)
         result = state["result"]
         if isinstance(result, Exception):
@@ -321,3 +322,110 @@ def test_the_board_check_in_names_the_reason(unloaded):
                                              headers=_auth(STORED_TOKEN))
     assert status == 200 and out == b""
     assert headers[b"x-pl-board"] == b"off; reason=principals_unavailable"
+
+
+# -- review fixes (2026-10-02) ---------------------------------------------------
+
+def test_a_deeply_nested_body_is_the_same_refusal_and_counts(snapshot, redeemed):
+    app = _app()
+    for _ in range(20):
+        status, _, out = _pair(app, body=b"[" * 1001)
+        assert (status, out) == (400, b'{"error": "pairing_refused"}')
+    assert _pair(app)[0] == 429
+    assert redeemed["calls"] == []
+
+
+def test_the_redemption_is_told_which_names_it_may_not_pair(snapshot, redeemed):
+    app = build_console_app(stub_mcp, None, lambda: {}, FixtureService(),
+                            token_map={"fixture-env-token": "desk"})
+    snap = PrincipalSnapshot(shadowed={"desk"})
+    snap.refresh(lambda: ([], None))
+    install_store(snap)
+    assert _pair(app)[0] == 200
+    assert {"desk", "default", "daemon", "maintainer"} <= redeemed["excluded"]
+
+
+def test_a_success_refunds_its_attempt(snapshot, redeemed):
+    app = _app()
+    redeemed["result"] = None
+    for _ in range(19):
+        assert _pair(app)[0] == 400
+    redeemed["result"] = StoredPrincipal("laptop", TOKEN_HASH, None, True, False)
+    assert _pair(app)[0] == 200
+    redeemed["result"] = None
+    assert _pair(app)[0] == 400          # the 20th failure still fits
+    assert _pair(app)[0] == 429
+
+
+def _drive_concurrently(app, count, release_after=0.5):
+    """``count`` simultaneous redemptions on one event loop."""
+    import asyncio
+
+    async def one():
+        scope = {"type": "http", "method": "POST", "path": "/api/pair", "query_string": b"",
+                 "headers": [JSON]}
+        sent = {"status": None}
+
+        async def receive():
+            return {"type": "http.request", "body": _body(), "more_body": False}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                sent["status"] = message["status"]
+
+        await app(scope, receive, send)
+        return sent["status"]
+
+    async def run():
+        return await asyncio.gather(*(one() for _ in range(count)))
+
+    return asyncio.run(run())
+
+
+def test_concurrent_attempts_never_pass_the_budget_or_the_gate(snapshot, monkeypatch):
+    lock = threading.Lock()
+    state = {"in_flight": 0, "peak": 0, "calls": 0}
+    release = threading.Event()
+
+    def slow(dsn, code_hash, token_hash, *, excluded=()):
+        with lock:
+            state["calls"] += 1
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+        release.wait(5)
+        with lock:
+            state["in_flight"] -= 1
+        return None
+
+    monkeypatch.setattr(principal_store, "redeem", slow)
+    timer = threading.Timer(1.0, release.set)
+    timer.start()
+    try:
+        statuses = _drive_concurrently(_app(), 40)
+    finally:
+        release.set()
+        timer.cancel()
+    # Two slots in flight, and a full gate refuses rather than queues: the
+    # other 38 never reach the store.
+    assert state["peak"] <= 2
+    assert state["calls"] <= 2
+    assert set(statuses) <= {400, 429} and statuses.count(429) >= 38
+
+
+def test_the_operator_refusal_uses_the_resolvers_own_answer(snapshot, monkeypatch):
+    from pseudolife_memory import principals
+    _stored(snapshot)
+    # A second lookup by name would answer "not stored" here; the gate must
+    # not need one.
+    monkeypatch.setattr(principals, "is_stored_principal", lambda principal: False)
+    status, out = call(_app(), "POST", "/api/config", headers=_auth(STORED_TOKEN), body=b"{}")
+    assert status == 403 and json.loads(out) == {"error": "operator_principal_required"}
+
+
+@pytest.mark.parametrize("bearer", [STORED_TOKEN, "fixture-random"])
+def test_the_session_start_hook_still_answers_an_unresolvable_bearer(unloaded, bearer):
+    """Naming now refuses an unresolvable bearer; the always-200 hook
+    must still answer it with the public instructions."""
+    status, out = call(_app(), "GET", "/api/hook/session-start", headers=_auth(bearer),
+                       query="session_id=fixture-session")
+    assert status == 200 and out

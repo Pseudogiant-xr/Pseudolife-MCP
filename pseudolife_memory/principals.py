@@ -217,12 +217,29 @@ def stored_tier(principal) -> str | None:
     return store.tier_of(principal)
 
 
+#: Where :func:`resolve_principal_detailed` found the principal.
+SOURCE_OPEN = "open"
+SOURCE_ENVIRONMENT = "environment"
+SOURCE_STORE = "store"
+
+
 def resolve_principal(auth_header: str | None,
                       token_map: dict[str, str],
                       single_token: str | None,
                       store=None) -> str | None:
-    """Principal for an ``Authorization`` header value, or ``None`` when the
-    caller is unauthorized.
+    """The principal :func:`resolve_principal_detailed` resolves, without
+    its source."""
+    return resolve_principal_detailed(auth_header, token_map, single_token, store)[0]
+
+
+def resolve_principal_detailed(auth_header: str | None,
+                               token_map: dict[str, str],
+                               single_token: str | None,
+                               store=None) -> tuple[str | None, str | None]:
+    """``(principal, source)`` for an ``Authorization`` header value:
+    ``(None, None)`` when the caller is unauthorized. ``source`` is
+    :data:`SOURCE_OPEN`, :data:`SOURCE_ENVIRONMENT` or :data:`SOURCE_STORE`,
+    so a gate can tell a stored principal by how it authenticated.
 
     * No auth configured at all (open loopback mode): everyone is
       :data:`DEFAULT_PRINCIPAL`. Stored principals do not turn
@@ -239,15 +256,15 @@ def resolve_principal(auth_header: str | None,
     Comparisons are constant-time (``hmac.compare_digest``).
     """
     if not token_map and single_token is None:
-        return DEFAULT_PRINCIPAL
+        return DEFAULT_PRINCIPAL, SOURCE_OPEN
     if not auth_header:
-        return None
+        return None, None
     scheme, _, presented = auth_header.partition(" ")
     # HTTP whitespace only: str.strip() would also drop NBSP/NEL, which is
     # how latin-1 text renders the last byte of UTF-8 "à" (C3 A0) or "ą" (C4 85).
     presented = presented.strip(" \t")
     if scheme.lower() != "bearer" or not presented:
-        return None
+        return None, None
     # Compare bytes: compare_digest raises TypeError on non-ASCII str, which
     # would 500 the gate instead of 401ing (review 2026-08-10, finding 1).
     # HTTP header text is usually latin-1-decoded (Starlette, the daemon's
@@ -265,15 +282,15 @@ def resolve_principal(auth_header: str | None,
 
     for token, principal in token_map.items():
         if matches(token):
-            return principal
+            return principal, SOURCE_ENVIRONMENT
     if single_token is not None and matches(single_token):
-        return DEFAULT_PRINCIPAL
+        return DEFAULT_PRINCIPAL, SOURCE_ENVIRONMENT
     if store is None:
-        return None
+        return None, None
     if not store.available():
         raise PrincipalsUnavailable()
     for candidate in dict.fromkeys(candidates):
         row = store.lookup(hashlib.sha256(candidate).hexdigest())
         if row is not None:
-            return row.principal
-    return None
+            return row.principal, SOURCE_STORE
+    return None, None
