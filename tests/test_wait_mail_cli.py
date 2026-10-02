@@ -58,9 +58,18 @@ def digests(tmp_path, monkeypatch):
 
 
 def _write(path, watermark, body=""):
-    """Replace the file atomically, the way the adapter writes it."""
+    """Replace the file atomically, the way the adapter writes it. On Windows
+    the replace is refused while the waiter has the file open for a read;
+    the adapter then writes again on its next heartbeat, so this retries
+    (a 2026-10-02 local run lost a timer write to WinError 5 here)."""
     temp = path.with_name(path.name + ".tmp")
     temp.write_bytes(f"{watermark}\n{body}".encode("utf-8"))
+    for _ in range(100):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            time.sleep(0.01)
     os.replace(temp, path)
 
 
