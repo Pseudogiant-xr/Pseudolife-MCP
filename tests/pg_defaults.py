@@ -433,7 +433,7 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
     try:
         settings = []
         test_url = env.get("PSEUDOLIFE_TEST_DATABASE_URL")
-        if test_url:  # first, so a server it shares is asked its way
+        if test_url:  # first: an admin URL equal to its own is asked its way
             settings.append(("PSEUDOLIFE_TEST_DATABASE_URL", test_url))
         settings += [("PSEUDOLIFE_TEST_PG_HOST_PORT", default_admin_url(env, env_file)),
                      ("PSEUDOLIFE_BENCH_ADMIN_URL", bench_admin_url(env, env_file))]
@@ -441,23 +441,25 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
             admin = RedactedUrl(conninfo_with_dbname(url, "postgres"))
             own = [RedactedUrl(url)] if setting == "PSEUDOLIFE_TEST_DATABASE_URL" else []
             targets.setdefault(admin, (setting, list(dict.fromkeys([*own, admin]))))
-        parsed = {url: conninfo_to_dict(url)
-                  for _, urls in targets.values() for url in urls}
+        parsed = {urls[0]: conninfo_to_dict(urls[0]) for _, urls in targets.values()}
     except Exception:  # noqa: BLE001 - never echo a credential-bearing value
         return (f"{prefix}: a PostgreSQL URL among PSEUDOLIFE_TEST_DATABASE_URL "
                 f"and PSEUDOLIFE_BENCH_ADMIN_URL does not parse; value withheld")
     for setting, urls in targets.values():
         where = f"{setting} ({urls[0].host})"
         parts = parsed[urls[0]]
-        # libpq takes any parameter the URL leaves out from the environment.
+        # libpq takes any parameter the URL leaves out from the environment;
+        # the refusal names whichever of the two has to change.
         if parts.get("service") or env.get("PGSERVICE"):
-            return (f"{prefix}: {where} takes its server from a service file, "
+            source = where if parts.get("service") else f"PGSERVICE, used by {where},"
+            return (f"{prefix}: {source} takes its server from a service file, "
                     f"which this check cannot see; name one test server instead")
-        host = parts.get("host") or env.get("PGHOST") or ""
-        hostaddr = parts.get("hostaddr") or env.get("PGHOSTADDR") or ""
-        if "," in host or "," in hostaddr:
-            return (f"{prefix}: {where} names several hosts, and only the first "
-                    f"to answer could be checked; name one test server")
+        for key, variable in (("host", "PGHOST"), ("hostaddr", "PGHOSTADDR")):
+            value = parts.get(key) or env.get(variable) or ""
+            if "," in value:
+                source = where if parts.get(key) else f"{variable}, used by {where},"
+                return (f"{prefix}: {source} names several hosts, and only the "
+                        f"first to answer could be checked; name one test server")
         names = None
         failure = None
         for url in urls:
@@ -469,7 +471,8 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
             except Exception as exc:  # noqa: BLE001 - classified, never re-raised
                 if is_server_unavailable(exc) and not _timed_out(exc):
                     break  # no server there: nothing to ask through another database
-                if _database_missing(exc) or is_auth_failure(exc):
+                # Another database may answer; none left to ask clears nothing.
+                if is_auth_failure(exc) or (_database_missing(exc) and url != urls[-1]):
                     continue
                 failure = (exc, url)
                 break

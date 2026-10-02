@@ -1010,7 +1010,6 @@ def test_a_dispatched_run_refuses_a_url_that_does_not_parse():
     assert "s3cret" not in refusal
 
 
-
 # -- hardening after #532's review (2026-10-03) ----------------------------------
 
 def test_a_dispatched_run_asks_through_the_test_urls_own_database():
@@ -1022,7 +1021,7 @@ def test_a_dispatched_run_asks_through_the_test_urls_own_database():
         "10.0.0.7:5432": ["postgres", "pseudolife_memory", "pseudolife_memory_test_1"]})
     env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
     refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
-    assert refusal is not None and "pseudolife_memory" in refusal
+    assert refusal is not None and "holds the production bank" in refusal
 
 
 def test_a_dispatched_run_falls_back_to_postgres_when_the_test_database_is_new():
@@ -1033,46 +1032,63 @@ def test_a_dispatched_run_falls_back_to_postgres_when_the_test_database_is_new()
         "10.0.0.7:5432": ["postgres", "pseudolife_memory"]})
     env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
     refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
-    assert refusal is not None and "pseudolife_memory" in refusal
+    assert refusal is not None and "holds the production bank" in refusal
     assert server.urls[-1].endswith("/postgres")
 
 
-@pytest.mark.parametrize(("url", "extra"), [
-    ("postgresql://pseudolife:s3cret@10.0.0.8:5434/fixed?service=suite", {}),
-    ("dbname=fixed user=pseudolife password=s3cret", {"PGSERVICE": "suite"}),
-    ("dbname=fixed user=pseudolife password=s3cret", {"PGHOST": "10.0.0.8,10.0.0.7"}),
+def test_a_dispatched_run_refuses_a_server_with_no_database_to_ask():
+    # Neither the test database nor postgres exists: nothing was cleared.
+    missing = psycopg.OperationalError('FATAL:  database "x" does not exist')
+    server = _CatalogServer({"10.0.0.7:5432": missing})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "could not check" in refusal
+    server = _CatalogServer({pg_defaults.DEV_HOST_PORT: missing})
+    refusal = pg_defaults.dispatched_live_bank_refusal(_DISPATCHED, Path("absent"), connect=server)
+    assert refusal is not None and "could not check" in refusal
+
+
+@pytest.mark.parametrize(("url", "extra", "expected"), [
+    ("postgresql://pseudolife:s3cret@10.0.0.8:5434/fixed?service=suite", {},
+     "PSEUDOLIFE_TEST_DATABASE_URL"),
+    ("dbname=fixed user=pseudolife password=s3cret", {"PGSERVICE": "suite"}, "PGSERVICE"),
+    ("dbname=fixed user=pseudolife password=s3cret", {"PGHOST": "10.0.0.8,10.0.0.7"},
+     "PGHOST"),
     ("dbname=fixed user=pseudolife password=s3cret port=5434",
-     {"PGHOSTADDR": "10.0.0.8,10.0.0.7"}),
+     {"PGHOSTADDR": "10.0.0.8,10.0.0.7"}, "PGHOSTADDR"),
 ])
-def test_a_dispatched_run_refuses_hosts_it_cannot_see_in_the_url(url, extra, monkeypatch):
+def test_a_dispatched_run_refuses_hosts_it_cannot_see_in_the_url(url, extra, expected):
     # libpq reads a service file, or a host list from PGHOST, only at connect
-    # time: the URL alone does not show which servers it may reach.
-    for name in ("PGSERVICE", "PGHOST", "PGHOSTADDR"):
-        monkeypatch.delenv(name, raising=False)
-    for name, value in extra.items():
-        monkeypatch.setenv(name, value)
+    # time: the URL alone does not show which servers it may reach. The
+    # refusal names the setting that has to change.
     env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": url, **extra}
     refusal = pg_defaults.dispatched_live_bank_refusal(
         env, Path("absent"), connect=_CatalogServer({}))
     assert refusal is not None
-    assert "several hosts" in refusal or "service" in refusal
+    assert ("service file" if "SERVICE" in expected or "service=" in url
+            else "several hosts") in refusal
+    assert expected in refusal
     assert "s3cret" not in refusal
 
 
 def test_conftest_checks_again_once_it_holds_the_suite_lock(tmp_path):
     # A server that refused the first check (a container restarting) may be
-    # up by the time a queued run gets the lock.
+    # up by the time a queued run gets the lock. A refusal there still
+    # releases the lock, without timing the next run's expected end.
     import subprocess
     import sys
 
+    marker = tmp_path / "released"
     plugin = [
         'from tests import pg_defaults, suite_lock',
         "state = {'locked': False}",
-        'real_take = suite_lock.take_for_session',
         'def take(*a, **k):',
         "    state['locked'] = True",
-        '    return real_take(*a, **k)',
+        "    return 'held'",
         'suite_lock.take_for_session = take',
+        'def release(held, record):',
+        f'    open({str(marker)!r}, "w").write(f"{{held}} {{record}}")',
+        'suite_lock.release = release',
         'def refusal(*a, **k):',
         "    return 'refusing a dispatched run: late' if state['locked'] else None",
         'pg_defaults.dispatched_live_bank_refusal = refusal',
@@ -1093,3 +1109,4 @@ def test_conftest_checks_again_once_it_holds_the_suite_lock(tmp_path):
         cwd=root, env=env, capture_output=True, text=True, timeout=120)
     assert run.returncode == 4, run.stdout[-2000:] + run.stderr[-2000:]
     assert "refusing a dispatched run: late" in run.stderr + run.stdout
+    assert marker.read_text(encoding="utf-8") == "held False"
