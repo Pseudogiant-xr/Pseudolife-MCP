@@ -375,13 +375,28 @@ def full_run_password_preflight(kind: str,
             f"{fix}. Targeted runs still start.")
 
 
+def _timed_out(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return (isinstance(exc, TimeoutError) or "timeout" in text or "timed out" in text
+            or getattr(exc, "errno", None) in (errno.ETIMEDOUT, 10060))
+
+
+def _database_missing(exc: BaseException) -> bool:
+    if getattr(exc, "sqlstate", None) == "3D000":  # invalid_catalog_name
+        return True
+    text = str(exc).lower()
+    return "database" in text and "does not exist" in text
+
+
 def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
                                  env_file: Path | None = None, *,
                                  connect=None) -> str | None:
     """For a run dispatched to a second machine (``PSEUDOLIFE_SUITE_DISPATCHED``):
     the refusal message when a server the suite would use holds a production
     bank, else ``None``. Undispatched runs are not checked: on the Windows host
-    the dev server is the live bank's server by design.
+    the dev server is the live bank's server by design. conftest asks twice,
+    before the run queues for the suite lock and again once it holds it, since
+    a server that refused the first connection may be up by then.
 
     The launchers refuse ``PSEUDOLIFE_TEST_PG_HOST_PORT`` on port 5433, the live
     bank's on the homelab box, but that server also answers on its container's
@@ -389,12 +404,18 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
     URL is not port-checked at all (2026-10-03). The suite's connections come
     from the default admin URL, ``PSEUDOLIFE_TEST_DATABASE_URL`` and the bench
     admin URL, so each distinct server among them is asked for its database
-    list; one holding a production bank (``pseudolife_memory``, or the database
-    the exported daemon DSN named) is the live bank's server, under whatever
-    address. A refused connection or an unknown host is passed over, since the
+    list (``pg_database`` is shared, so any database shows it): the explicit
+    test URL through its own database, which its tests and daemons use, then
+    through ``postgres`` when that one is missing or will not have the login;
+    the others through ``postgres``, as their consumers connect. One holding a
+    production bank (``pseudolife_memory``, or the database the exported daemon
+    DSN named) is the live bank's server, under whatever address. A refused
+    connection, an unknown host or a rejected login is passed over, since the
     suite cannot write there either; anything else refuses, as the server could
-    not be cleared: a timeout (a slow server is still a server), a URL naming
-    several hosts (only the first to answer would be checked), a URL that does
+    not be cleared: a database missing with none left to ask, a timeout (a
+    slow server is still a server), a URL whose
+    hosts it cannot see (several hosts, of which only the first to answer
+    would be checked, or a service file read at connect time), a URL that does
     not parse. Messages name the setting and never carry a password.
     """
     env = os.environ if env is None else env
@@ -409,38 +430,60 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
     from pseudolife_memory.storage.schema import is_production_database
 
     prefix = "refusing a dispatched run"
-    targets: dict[str, str] = {}
+    targets: dict[str, tuple[str, list[str]]] = {}
     try:
-        settings = [("PSEUDOLIFE_TEST_PG_HOST_PORT", default_admin_url(env, env_file)),
-                    ("PSEUDOLIFE_BENCH_ADMIN_URL",
-                     conninfo_with_dbname(bench_admin_url(env, env_file), "postgres"))]
-        if env.get("PSEUDOLIFE_TEST_DATABASE_URL"):
-            settings.append(("PSEUDOLIFE_TEST_DATABASE_URL", conninfo_with_dbname(
-                env["PSEUDOLIFE_TEST_DATABASE_URL"], "postgres")))
+        settings = []
+        test_url = env.get("PSEUDOLIFE_TEST_DATABASE_URL")
+        if test_url:  # first: an admin URL equal to its own is asked its way
+            settings.append(("PSEUDOLIFE_TEST_DATABASE_URL", test_url))
+        settings += [("PSEUDOLIFE_TEST_PG_HOST_PORT", default_admin_url(env, env_file)),
+                     ("PSEUDOLIFE_BENCH_ADMIN_URL", bench_admin_url(env, env_file))]
         for setting, url in settings:
-            targets.setdefault(RedactedUrl(url), setting)
-        hosts = {url: conninfo_to_dict(url) for url in targets}
+            admin = RedactedUrl(conninfo_with_dbname(url, "postgres"))
+            own = [RedactedUrl(url)] if setting == "PSEUDOLIFE_TEST_DATABASE_URL" else []
+            targets.setdefault(admin, (setting, list(dict.fromkeys([*own, admin]))))
+        parsed = {urls[0]: conninfo_to_dict(urls[0]) for _, urls in targets.values()}
     except Exception:  # noqa: BLE001 - never echo a credential-bearing value
         return (f"{prefix}: a PostgreSQL URL among PSEUDOLIFE_TEST_DATABASE_URL "
                 f"and PSEUDOLIFE_BENCH_ADMIN_URL does not parse; value withheld")
-    for url, setting in targets.items():
-        where = f"{setting} ({url.host})"
-        parts = hosts[url]
-        if "," in (parts.get("host") or "") + (parts.get("hostaddr") or ""):
-            return (f"{prefix}: {where} names several hosts, and only the first "
-                    f"to answer could be checked; name one test server")
-        try:
-            with connect(url, connect_timeout=3) as conn:
-                names = [row[0] for row in
-                         conn.execute("SELECT datname FROM pg_database").fetchall()]
-        except Exception as exc:  # noqa: BLE001 - classified, never re-raised
-            text = str(exc).lower()
-            timed_out = isinstance(exc, TimeoutError) or "timeout" in text                 or "timed out" in text                 or getattr(exc, "errno", None) in (errno.ETIMEDOUT, 10060)
-            if is_auth_failure(exc) or (is_server_unavailable(exc) and not timed_out):
-                continue
+    for setting, urls in targets.values():
+        where = f"{setting} ({urls[0].host})"
+        parts = parsed[urls[0]]
+        # libpq takes any parameter the URL leaves out from the environment;
+        # the refusal names whichever of the two has to change.
+        if parts.get("service") or env.get("PGSERVICE"):
+            source = where if parts.get("service") else f"PGSERVICE, used by {where},"
+            return (f"{prefix}: {source} takes its server from a service file, "
+                    f"which this check cannot see; name one test server instead")
+        for key, variable in (("host", "PGHOST"), ("hostaddr", "PGHOSTADDR")):
+            value = parts.get(key) or env.get(variable) or ""
+            if "," in value:
+                source = where if parts.get(key) else f"{variable}, used by {where},"
+                return (f"{prefix}: {source} names several hosts, and only the "
+                        f"first to answer could be checked; name one test server")
+        names = None
+        failure = None
+        for url in urls:
+            try:
+                with connect(url, connect_timeout=3) as conn:
+                    names = [row[0] for row in
+                             conn.execute("SELECT datname FROM pg_database").fetchall()]
+                break
+            except Exception as exc:  # noqa: BLE001 - classified, never re-raised
+                if is_server_unavailable(exc) and not _timed_out(exc):
+                    break  # no server there: nothing to ask through another database
+                # A missing database moves on while another is left to ask,
+                # and is refused when it was the last; a rejected login is
+                # passed over either way.
+                if is_auth_failure(exc) or (_database_missing(exc) and url != urls[-1]):
+                    continue
+                failure = (exc, url)
+                break
+        if failure is not None:
+            exc, url = failure
             return (f"{prefix}: could not check that the Postgres at {where} is "
                     f"not the live bank's server ({redacted_error_text(exc, url)})")
-        live = [name for name in names if is_production_database(name)]
+        live = [name for name in names or () if is_production_database(name)]
         if live:
             return (f"{prefix}: the Postgres at {where} holds the production "
                     f"bank {live[0]!r}, so it is the live bank's server under "
