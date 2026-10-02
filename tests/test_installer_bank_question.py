@@ -48,11 +48,12 @@ QUESTION = "Where does the memory bank live?"
 def _ask_sh(shell: _Shell, answers: list[str] | None, *, daemon_url: str = "",
             client_only: str = "", token_file: str = "", read_token: str = "",
             extractor: str = "", no_token: str = "", clients: str = "claude", then: str = "",
-            extra_env: dict[str, str] | None = None):
+            extra_env: dict[str, str] | None = None, pairing_code: str | None = None):
     """The question, then the mode block, as the script runs them.
     ``answers``: the replies, one per question asked, at a stand-in
     terminal (None: the stock check, and stdin here is no terminal)."""
-    body = (f"DAEMON_URL='{_sh_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
+    body = "" if pairing_code is None else f"PAIRING_CODE='{_sh_q(pairing_code)}'\n"
+    body += (f"DAEMON_URL='{_sh_q(daemon_url)}'\nCLIENT_ONLY='{client_only}'\n"
             f"TOKEN_FILE='{_sh_q(token_file)}'\nREAD_TOKEN='{read_token}'\n"
             f"EXTRACTOR='{extractor}'\nEXTRACTOR_URL='' MODEL='' SHIM_PORT=0 NO_TOKEN='{no_token}'\n"
             "TRANSPORT=shim\n" + _sh_block("bank location"))
@@ -300,8 +301,9 @@ def _ask_ps(ps: _PowerShell, answers: list[str] | None, *, daemon_url: str = "",
             client_only: bool = False, token_file: str = "", read_token: bool = False,
             extractor: str = "", no_token: bool = False, clients: tuple[str, ...] = ("claude",),
             then: str = "", extra_env: dict[str, str] | None = None,
-            stdin_text: str | None = None):
-    body = (f"$DaemonUrl = '{_ps_q(daemon_url)}'\n"
+            stdin_text: str | None = None, pairing_code: str | None = None):
+    body = "" if pairing_code is None else f"$PairingCode = '{_ps_q(pairing_code)}'\n"
+    body += (f"$DaemonUrl = '{_ps_q(daemon_url)}'\n"
             f"$ClientOnly = [switch]${'true' if client_only else 'false'}\n"
             f"$ReadToken = [switch]${'true' if read_token else 'false'}\n"
             f"$TokenFile = '{_ps_q(token_file)}'\n$Extractor = '{extractor}'\n"
@@ -564,40 +566,254 @@ def test_the_question_comes_after_the_banner_and_before_the_agents():
 
 # -- option 3: the exposure steps ---------------------------------------------------
 
-def test_a_shared_bank_ends_with_the_exposure_and_principal_steps():
+def test_a_shared_bank_ends_with_the_expose_and_invite_commands():
+    """Two commands, expose then invite per joining machine, whose code the
+    other machine gives to option 2 (or to pair); the hand steps stay in
+    the guide."""
     sh = _heredoc_payload(_marker_block(SH, "shared bank notes"))
     ps = _heredoc_payload(_marker_block(PS, "shared bank notes"))
     assert sh == ps
     joined = "\n".join(sh)
-    # Tailscale Serve in TCP mode first, as docs/guide/remote-bank.md orders them.
-    assert "tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765" in joined
-    for needle in ('"auth": true', "PSEUDOLIFE_MCP_TOKENS", "PSEUDOLIFE_MCP_TIER_MAP",
-                   "coordination.allowed_principals", "docs/guide/remote-bank.md"):
+    assert joined.index("pseudolife-mcp expose tailscale") < joined.index(
+        "pseudolife-mcp invite <machine>")
+    for needle in ("answer 2", "pseudolife-mcp pair <url> <code>", "docs/guide/remote-bank.md"):
         assert needle in joined, needle
+    # The hand steps are the guide's now, not the summary's.
+    for gone in ("tailscale serve --bg", "PSEUDOLIFE_MCP_TOKENS", "allowed_principals"):
+        assert gone not in joined, gone
     for line in sh:
         assert len(line) <= 78 and all(0x20 <= ord(c) <= 0x7E for c in line), line
-    guide = (ROOT / "docs" / "guide" / "remote-bank.md").read_text(encoding="utf-8")
-    assert "tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765" in guide
 
 
 @BASH
 def test_the_shared_bank_notes_print(bash, tmp_path):
     proc = _Shell(bash, tmp_path).run(_sh_block("shared bank notes") + "show_shared_bank_notes\n")
     assert proc.returncode == 0, proc.stderr
-    assert "tailscale serve --bg --tcp=8765" in proc.stdout
+    assert "pseudolife-mcp expose tailscale" in proc.stdout
+    assert "pseudolife-mcp invite <machine>" in proc.stdout
 
 
 def test_ps_the_shared_bank_notes_print(tmp_path):
     proc = _PowerShell(tmp_path).run(_ps_block("shared bank notes") + "Show-SharedBankNotes\n")
     assert proc.returncode == 0, _output(proc)
-    assert "tailscale serve --bg --tcp=8765" in _output(proc)
+    assert "pseudolife-mcp expose tailscale" in _output(proc)
+    assert "pseudolife-mcp invite <machine>" in _output(proc)
 
 
 def test_the_summary_prints_them_only_for_a_shared_bank():
     sh_summary = SH.split("# ── 13.", 1)[1]
     ps_summary = PS.split("# -- 13.", 1)[1]
-    assert 'if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi' in sh_summary
-    assert 'if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }' in ps_summary
+    sh_notes = 'if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi'
+    ps_notes = 'if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }'
+    assert sh_notes in sh_summary
+    assert ps_notes in ps_summary
+    # The offer to run expose follows the notes that explain it.
+    sh_offer = 'if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi'
+    ps_offer = 'if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }'
+    assert sh_summary.index(sh_notes) < sh_summary.index(sh_offer)
+    assert ps_summary.index(ps_notes) < ps_summary.index(ps_offer)
+
+
+EXPOSE_SHIM = ("printf 'shim|%s\\n' \"$*\" >>\"$CALL_LOG\"\n"
+               "exit \"${FAKE_EXPOSE_EXIT:-0}\"\n")
+
+
+def _offer_sh(shell: _Shell, answers: list[str] | None, *, shim_ok: bool = True,
+              expose_exit: int = 0):
+    """The expose offer at the end of an option-3 install. ``answers``: the
+    replies at a stand-in terminal (None: the stock check, no terminal)."""
+    shim = shell.bin / "fake-shim"
+    _stub(shim, EXPOSE_SHIM)
+    body = (_sh_block("bank location") + _sh_block("shared bank notes")
+            + (f"ensure_shim() {{ SHIM_OK=1; SHIM_PATH='{shell.path(shim)}'; }}\n" if shim_ok
+               else "ensure_shim() { SHIM_OK=''; SHIM_PATH=''; }\n"))
+    if answers is not None:
+        replies = shell.tmp / "answers.txt"
+        replies.write_bytes("".join(answer + "\n" for answer in answers).encode("utf-8"))
+        body += (f"exec 3<'{shell.path(replies)}'\n"
+                 "bank_can_ask() { return 0; }\n"
+                 "bank_read() { printf 'ASKED: %s\\n' \"$1\"; BANK_REPLY=''\n"
+                 "    IFS= read -r BANK_REPLY <&3 || [ -n \"$BANK_REPLY\" ] || return 1; }\n")
+    proc = shell.run(body + "offer_shared_bank_expose\necho CONTINUED\n",
+                     extra_env={"FAKE_EXPOSE_EXIT": str(expose_exit)})
+    return proc, [call for call in shell.logged() if call.startswith("shim|")]
+
+
+@pytest.mark.parametrize("answer", ["", "n", "no", "N", "later"])
+@BASH
+def test_the_expose_offer_defaults_to_no(bash, tmp_path, answer):
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), [answer])
+    assert proc.returncode == 0, proc.stderr
+    [asked] = _asked(proc)
+    assert "pseudolife-mcp expose tailscale" in asked and "[y/N]" in asked
+    assert "tailnet" in asked
+    assert calls == []
+    assert "CONTINUED" in proc.stdout
+
+
+@pytest.mark.parametrize("answer", ["y", "Y", "yes", " yes "])
+@BASH
+def test_a_yes_runs_expose_which_asks_for_itself(bash, tmp_path, answer):
+    """Without --yes: expose shows its own plan and asks before it changes
+    the host's tailnet serve."""
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), [answer])
+    assert proc.returncode == 0, proc.stderr
+    assert calls == ["shim|expose tailscale"]
+    assert "CONTINUED" in proc.stdout
+
+
+@BASH
+def test_without_a_terminal_expose_is_not_offered(bash, tmp_path):
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), None)
+    assert proc.returncode == 0, proc.stderr
+    assert "expose tailscale now" not in proc.stdout + proc.stderr
+    assert calls == []
+    assert "CONTINUED" in proc.stdout
+
+
+@BASH
+def test_end_of_input_at_the_expose_offer_is_a_no(bash, tmp_path):
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), [])
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+
+
+@BASH
+def test_a_failed_expose_does_not_fail_the_finished_install(bash, tmp_path):
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), ["y"], expose_exit=4)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == ["shim|expose tailscale"]
+    assert "expose tailscale exited 4" in proc.stderr
+    assert "CONTINUED" in proc.stdout
+
+
+@BASH
+def test_expose_without_a_shim_says_how_to_run_it_later(bash, tmp_path):
+    proc, calls = _offer_sh(_Shell(bash, tmp_path), ["y"], shim_ok=False)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert "pseudolife-mcp expose tailscale" in proc.stderr
+    assert "CONTINUED" in proc.stdout
+
+
+PS_EXPOSE_SHIM = """function global:fake-shim {{
+    Add-Content -LiteralPath '{calls}' -Value ('shim|' + (@($args) -join ' '))
+    $global:LASTEXITCODE = [int]$env:FAKE_EXPOSE_EXIT
+}}
+"""
+
+
+def _offer_ps(ps: _PowerShell, answers: list[str] | None, *, shim_ok: bool = True,
+              expose_exit: int = 0):
+    ensure = ("function Install-ShimOnce { $script:shimInstallPath = 'fake-shim'; return $true }\n"
+              if shim_ok else
+              "function Install-ShimOnce { $script:shimInstallPath = $null; return $false }\n")
+    body = (f"$interactive = ${'false' if answers is None else 'true'}\n"
+            + PS_EXPOSE_SHIM.format(calls=_ps_q(ps.calls)) + _ps_block("bank location")
+            + _ps_block("shared bank notes") + ensure)
+    if answers is not None:
+        queued = ", ".join(f"'{_ps_q(answer)}'" for answer in answers)
+        body += (f"$script:fixtureAnswers = [Collections.Queue]::new([string[]]@({queued}))\n"
+                 "function Read-BankAnswer([string]$Prompt) {\n"
+                 "    Write-Host \"ASKED: $Prompt\"\n"
+                 "    if ($script:fixtureAnswers.Count -eq 0) { return $null }\n"
+                 "    return $script:fixtureAnswers.Dequeue()\n}\n")
+    proc = ps.run(body + "Invoke-SharedBankExposeOffer\nWrite-Output 'CONTINUED'\n",
+                  extra_env={"FAKE_EXPOSE_EXIT": str(expose_exit)})
+    return proc, [call for call in ps.logged() if call.startswith("shim|")]
+
+
+@pytest.mark.parametrize("answer", ["", "n", "no", "N", "later"])
+def test_ps_the_expose_offer_defaults_to_no(tmp_path, answer):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), [answer])
+    assert proc.returncode == 0, _output(proc)
+    [asked] = _asked(proc)
+    assert "pseudolife-mcp expose tailscale" in asked and "[y/N]" in asked
+    assert "tailnet" in asked
+    assert calls == []
+    assert "CONTINUED" in _lines(proc)
+
+
+@pytest.mark.parametrize("answer", ["y", "Y", "yes", " yes "])
+def test_ps_a_yes_runs_expose_which_asks_for_itself(tmp_path, answer):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), [answer])
+    assert proc.returncode == 0, _output(proc)
+    assert calls == ["shim|expose tailscale"]
+    assert "CONTINUED" in _lines(proc)
+
+
+def test_ps_without_a_terminal_expose_is_not_offered(tmp_path):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), None)
+    assert proc.returncode == 0, _output(proc)
+    assert "expose tailscale now" not in _output(proc)
+    assert calls == []
+    assert "CONTINUED" in _lines(proc)
+
+
+def test_ps_end_of_input_at_the_expose_offer_is_a_no(tmp_path):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), [])
+    assert proc.returncode == 0, _output(proc)
+    assert calls == []
+
+
+def test_ps_a_failed_expose_does_not_fail_the_finished_install(tmp_path):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), ["y"], expose_exit=4)
+    assert proc.returncode == 0, _output(proc)
+    assert calls == ["shim|expose tailscale"]
+    assert "expose tailscale exited 4" in _output(proc)
+    assert "CONTINUED" in _lines(proc)
+
+
+def test_ps_expose_without_a_shim_says_how_to_run_it_later(tmp_path):
+    proc, calls = _offer_ps(_PowerShell(tmp_path), ["y"], shim_ok=False)
+    assert proc.returncode == 0, _output(proc)
+    assert calls == []
+    assert "pseudolife-mcp expose tailscale" in _output(proc)
+    assert "CONTINUED" in _lines(proc)
+
+
+# -- option 2: a pairing code in place of the token ----------------------------------
+
+def test_the_token_menu_offers_a_pairing_code_in_both_installers():
+    for text in (_marker_block(SH, "bank location"), _marker_block(PS, "bank location")):
+        joined = "\n".join(text)
+        assert "The daemon's bearer token, or a pairing code from pseudolife-mcp invite:" in joined
+        assert "1) Paste it now: it makes a new owner-only token file (default)" in joined
+        assert "2) The token is already in a token file on this machine" in joined
+
+
+@BASH
+def test_a_pairing_code_flag_asks_only_for_the_url_and_where_to_write(bash, tmp_path):
+    """--pairing-code means "another machine", as --token-file does, and its
+    token goes to a new file: the URL, then the file (Enter = the default),
+    never the paste-or-file menu."""
+    shell = _Shell(bash, tmp_path)
+    proc = _ask_sh(shell, [REMOTE, ""], then="choose_bank_token\n",
+                   extra_env={"PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/other.token"},
+                   pairing_code="7KQ2-MX4P-9TZC")
+    assert proc.returncode == 0, proc.stderr
+    assert len(_asked(proc)) == 2
+    assert "URL" in _asked(proc)[0] and "~/.pseudolife-mcp/claude-code.token" in _asked(proc)[1]
+    assert QUESTION not in proc.stdout
+    assert (f"BANK=remote\nCLIENT_ONLY=1\nDAEMON_URL={REMOTE}\n"
+            f"TOKEN_FILE={shell.path(shell.home)}/.pseudolife-mcp/claude-code.token\n"
+            "READ_TOKEN=\n") in proc.stdout
+    assert "7KQ2" not in proc.stdout + proc.stderr
+
+
+def test_ps_a_pairing_code_parameter_asks_only_for_the_url_and_where_to_write(tmp_path):
+    ps = _PowerShell(tmp_path)
+    proc = _ask_ps(ps, [REMOTE, ""], then="Invoke-BankTokenQuestion\n",
+                   extra_env={"PSEUDOLIFE_MCP_TOKEN_FILE": "/fixture/other.token"},
+                   pairing_code="7KQ2-MX4P-9TZC")
+    assert proc.returncode == 0, _output(proc)
+    assert len(_asked(proc)) == 2
+    assert "URL" in _asked(proc)[0] and "~/.pseudolife-mcp/claude-code.token" in _asked(proc)[1]
+    assert QUESTION not in _output(proc)
+    [line] = [line for line in _lines(proc) if line.startswith("TOKEN_FILE=")]
+    assert Path(line[len("TOKEN_FILE="):]) == ps.home / ".pseudolife-mcp" / "claude-code.token"
+    assert "READ_TOKEN=False" in _lines(proc)
+    assert "7KQ2" not in _output(proc)
 
 
 # -- client-only: connect re-points existing registrations ----------------------------
@@ -1045,7 +1261,21 @@ def test_connect_runs_before_the_codex_credential_setup_in_both_installers():
             < PS.index("# -- 11. wire into selected MCP clients"))
 
 
-CLAUDE_EXISTING = "Type: stdio\nCommand: pseudolife-mcp\nEnvironment:\n  PSEUDOLIFE_MCP_NO_SPAWN=1"
+def test_pairing_runs_after_the_preflight_and_right_before_connect_in_both_installers():
+    """A pairing code is redeemed once the preflight has checked the daemon,
+    and immediately before connect, the first step that reads the token file
+    pair creates; it runs whether or not connect has a client to check."""
+    sh_pair = "\n[ -z \"${PAIRING_CODE:-}\" ] || pair_with_code\n"
+    sh_connect = "[ -z \"${CLIENT_ONLY:-}\" ] || connect_existing_registrations\n"
+    assert SH.index("\n    client_only_preflight\n") < SH.index(sh_pair)
+    assert sh_pair + sh_connect in SH
+    ps_pair = "\nif ($PairingCode) { Invoke-ClientOnlyPair }\n"
+    ps_connect = "if ($ClientOnly) { Invoke-ClientOnlyConnect }\n"
+    assert PS.index("\n    Invoke-ClientOnlyPreflight\n") < PS.index(ps_pair)
+    assert ps_pair + ps_connect in PS
+
+
+CLAUDE_EXISTING ="Type: stdio\nCommand: pseudolife-mcp\nEnvironment:\n  PSEUDOLIFE_MCP_NO_SPAWN=1"
 
 
 @pytest.mark.parametrize("checked,says", [

@@ -6,65 +6,136 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-10-02 — `pseudolife-mcp move` verification)
-- Writing `moved.json` on the source is the commit point: a failure after it
-  (restoring the target's restart policy or unattended update, removing the
-  resume marker, an ssh drop included) exits 5 with each follow-up's exact
-  command and never rolls a moved bank back.
-- The rollback checks the target reports stopped before the source starts,
-  stopping it again if a remote `update.sh` brought it back; when it cannot
-  write the target's gate, it leaves the target's update and restart policy
-  paused. The gate is set only once `restore.sh` has begun replacing the
-  bank (read from its output; an unreadable outcome counts as replaced).
-- The manual rollback lists only the steps the move has done, re-gates the
-  target before the source starts, and the unfinished-move refusal says how
-  to abandon (restore the target's own safety dump) or finish a move.
-- Windows: Ctrl-Break rolls back too, rollback steps run in their own
-  process group, and the guide says a closed window ends a move with no
-  rollback. `on-failure:N` restart policies keep their count; an unreadable
-  target timer is reported.
+### Added (2026-10-02 — `invite` and `pair`: a new machine joins a bank with one short code; schema v53)
+- `pseudolife-mcp invite <machine>` on the daemon host gives another machine
+  its own principal, admitted to the agent board, with no daemon restart and
+  no hand edits of `ops/.env` or `config.yaml`. It prints a single-use
+  12-character pairing code that expires after 15 minutes (`--expires`, at
+  most 24 hours), and the line to run on the new machine. `--tier`,
+  `--no-board`, `--replace` (a new code for a paired machine; its old token
+  works until it is redeemed), `--list` (never a token or a code) and
+  `--revoke` (effective within 10 seconds). Names are lowercase
+  `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name
+  in `PSEUDOLIFE_MCP_TOKENS` or `PSEUDOLIFE_MCP_TIER_MAP` are refused. It
+  refuses a daemon without `"auth": true`, and a database whose bank is not
+  the one the local daemon's `/health` reports. On a Docker install it runs
+  inside the daemon container after checking the image has the command.
+- `pseudolife-mcp pair <url> <code>` on the new machine mints the bearer
+  token there, writes it to an owner-only `~/.pseudolife-mcp/<principal>.token`
+  (never replacing a file), and sends the daemon only its SHA-256: the token
+  never appears in a terminal, a chat, shell history or a network response.
+  A lost response is retried and answered again; a refused code removes the
+  file; an unknown outcome keeps it and says so. `--read-code` reads the code
+  from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
+  confirmation (never in `--dry-run`, never for a plan with nothing to
+  re-point) and re-points the clients at the new file.
+- `POST /api/pair` redeems a code with one conditional UPDATE on the
+  database clock, so a code is single use under concurrency. It refuses any
+  request with an `Origin` header, takes only JSON up to 1 KiB, answers every
+  failure with the same `400 {"error": "pairing_refused"}`, holds pairing at
+  `429` after 20 failed attempts in a minute without consulting the store,
+  and never logs the body.
+- The installers' option 2 accepts a pairing code where it asks for the
+  token (and `--pairing-code` / `-PairingCode`), and option 3 prints
+  `expose tailscale` and `invite <machine>` instead of the hand steps,
+  offering to run `expose tailscale` at the end (default no).
+- `pseudolife-mcp expose tailscale` now names `pseudolife-mcp invite
+  <machine>` as the next step.
 
-### Fixed (2026-10-02 — `pseudolife-mcp move` review)
-- A dropped ssh connection (exit 255) is always a failure: it was read as
-  "the target's ops/.env is missing", which overwrote the file with no
-  backup and let the rollback delete it. The env read tells present,
-  missing and error apart, and the replaced file keeps its owner and mode.
-- SIGTERM and SIGHUP roll the move back like Ctrl-C, and the rollback
-  ignores Ctrl-C; every progress flag, with the manual rollback, is written
-  to the move record as it flips. A rollback that cannot finish exits 6.
-- The resume marker lives on the target host outside `/data` (the state
-  restore replaced it), and is removed last. The target's unattended update
-  and restart policy are paused for the move, and `/data/move.json` keeps
-  the restored target from starting outside it (the daemon refuses to start
-  while it exists). The source's restart policy is set to `no` once moved.
-- The restored bank identity is compared in Postgres before the start; the
-  fingerprint wait has a 180 s deadline with a nudge a minute; the target's
-  running environment is checked against the carried values by SHA-256.
-- Connections to the source database are cut off before the dump, and the
-  fence fails if any are still there. ssh keepalives, `docker stop -t 120`,
-  a target tool check, and the report names the target's files that held
-  its replaced token. `ops/restore.*` take their safety dump of the
-  database being replaced.
+### Changed (2026-10-02 — stored principals in the bank; schema v53)
+- Schema v53: a `principals` table holds each invited machine's name, the
+  SHA-256 of its token (once paired) and of a pending code, its tier, its
+  board access and its times. Neither a token nor a code is stored in
+  plaintext. Excluded from logical exports (`EXCLUDED_TABLES`, like the
+  board's instance credentials); a physical backup carries it.
+- Every bearer is resolved by one resolver: the environment's
+  `PSEUDOLIFE_MCP_TOKENS` and `PSEUDOLIFE_MCP_TOKEN` first (they always win),
+  then an in-memory snapshot of the table keyed by token hash. The daemon
+  refreshes the snapshot every 10 s on its own connection, never under the
+  service or coordination lock and never on the event loop; a redemption is
+  visible at once. The HTTP gate, `/mcp` tool calls (resolved inside the
+  transport wrap from the request's own headers, so handshake-era requests
+  on the session manager's task group see it too), the board and its hooks
+  all use it, and the toolset tier falls back to the stored tier after
+  `PSEUDOLIFE_MCP_TIER_MAP`. An open daemon still refuses the board with
+  `authentication_required`.
+- Board admission goes through one helper, `principal_admitted`: listed in
+  `coordination.allowed_principals`, or a stored principal with board
+  access that is not revoked (`coordination-recovery rebind` reads the
+  restored bank's table the same way). `is_stored_principal` is exposed
+  beside it.
+- A stored principal is refused `POST /api/config` and `POST
+  /api/daemon-notice` with `403 {"error": "operator_principal_required"}`;
+  environment principals keep both.
+- When the snapshot has never loaded or is older than 60 s, a bearer that
+  matches nothing in the environment gets `503 {"error":
+  "principals_unavailable"}` instead of 401; the always-200 hooks treat it
+  as unauthorized, and the board check-in names the reason. The daemon warns
+  at startup when the table has rows but no authentication is configured,
+  and when a stored name is shadowed by the environment.
+
+### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
+- `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
+  Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
+  tcp://127.0.0.1:<port>`). It refuses a daemon whose `/health` does not
+  report `"auth": true` (a redirect or a non-JSON answer on the port is not
+  the daemon), a Tailscale that is not installed or not running, and a
+  tailnet port that already serves anything else or has Funnel (public
+  internet) on; it shows the command and client URL and asks first
+  (`--yes` skips the question, no terminal without it exits 2). A
+  permission refusal names the fix for the OS (Linux:
+  `sudo tailscale set --operator=$USER`). A serve the status does not show
+  afterwards is removed again (exit 5), and a status that cannot be read
+  back is reported for checking rather than undone (exit 5); the probe of `<url>/health` through
+  the tailnet is advisory and never rolls back. `expose off` removes only a
+  forward to `127.0.0.1:<port>`, and `expose status` prints the client URL.
+  Standard library only, so it runs from a shim runtime. Guide:
+  `docs/guide/remote-bank.md`.
+- `/health` reports `bank`: the first 16 hex characters of the SHA-256 of
+  the coordination bank id, so two daemons' banks can be told apart. It is
+  `null` until storage has started and the id exists; `/health` never
+  starts storage for it, reads the meta row only after its database ping
+  succeeded (so a stalled database costs no second connect timeout), on
+  its own short-lived connection (never the service lock), at most once a
+  minute while it is absent, and caches it once found. The cache is dropped
+  when a reconnect finds that another writer held the bank.
 
 ### Added (2026-10-02 — `pseudolife-mcp move`)
 - `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
-  Docker-tier checkout host over key-based ssh with no lost writes: it stops
-  the source daemon, takes the final backup from the stopped container (dump,
-  `/data` archive, manifest with per-table row counts), fences the source
-  database (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), copies the
-  files with a SHA-256 check, restores on the target without starting it,
-  compares the row counts, carries the environment identities into the
-  target's `ops/.env` over ssh stdin, starts the target once, checks its
-  `/health` bank fingerprint, and re-points this machine's clients. A failure
+  Docker-tier checkout host over key-based ssh with no lost writes. It stops
+  the source daemon, cuts off any other connection to its database, takes
+  the final backup from the stopped container (dump, `/data` archive,
+  manifest with per-table row counts), and fences the source database
+  (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), which stops a daemon
+  of any version. It copies the files with a SHA-256 check, restores on the
+  target without starting it, compares the row counts and the bank identity
+  in Postgres, carries the environment identities into the target's
+  `ops/.env` over ssh stdin (keeping the file's owner and mode), starts the
+  target once, checks its running environment and its `/health` bank
+  fingerprint, and re-points this machine's clients.
+- Writing `moved.json` on the source is the commit point. A failure before it
   rolls back in a fixed order that never leaves the target running beside
-  the source; `--resume` takes over only this move's half-restored bank. The
-  report lists the manual rollback, every other machine's `connect` line,
-  held leases, undelivered mail and the source leftovers to retire. The
-  source is stopped and fenced, never deleted.
+  the source: the target is stopped, gated and confirmed stopped before the
+  source starts. A failure after it never rolls a moved bank back; it exits 5
+  with each follow-up's exact command. SIGTERM, SIGHUP and Ctrl-Break roll
+  back like Ctrl-C, and the rollback ignores them; every progress flag, with
+  the manual rollback, is written to the move record as it flips. A rollback
+  that cannot finish exits 6. `--resume` takes over only this move's
+  half-restored bank, through a marker kept on the target host outside
+  `/data`.
+- The target's unattended update and restart policy are paused for the move,
+  and the source's restart policy is set to `no` once moved. The report lists
+  the manual rollback, every other machine's `connect` line, held leases,
+  undelivered mail, the target's files that held its replaced token, and the
+  source leftovers to retire. The source is stopped and fenced, never
+  deleted.
 - `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
-  that leaves the daemon stopped (refused without `--apply` / `-Apply`).
-- The daemon refuses to start when its data dir holds `moved.json`, naming
-  the bank's new location.
+  that leaves the daemon stopped (refused without `--apply` / `-Apply`). The
+  restore scripts' safety dump now covers the database being replaced
+  (`--container/--db/--user` are passed through).
+- The daemon refuses to start when its data dir holds `moved.json` (naming
+  the bank's new location) or `move.json` (an unfinished move: the bank is a
+  clone of the source, and the message says how to abandon or finish it).
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory

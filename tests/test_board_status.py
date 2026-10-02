@@ -62,6 +62,7 @@ def test_board_is_on_where_the_daemon_serves_the_checkin():
     ("authentication_required", "no bearer token configured"),
     ("principal_not_allowed", "coordination.allowed_principals"),
     ("coordination_requires_postgres", "PostgreSQL"),
+    ("principals_unavailable", "invited machines"),
 ])
 def test_board_off_line_names_the_daemons_reason(reason, expected):
     with _Daemon(f"off; reason={reason}") as daemon:
@@ -70,6 +71,13 @@ def test_board_off_line_names_the_daemons_reason(reason, expected):
     assert line.startswith("off - ")
     assert expected in line
     assert "fixture-token" not in line
+
+
+def test_an_unlisted_principal_is_told_about_invite():
+    with _Daemon("off; reason=principal_not_allowed") as daemon:
+        line = board_status(daemon.url, "fixture-token")[1]
+    assert "coordination.allowed_principals" in line
+    assert "pseudolife-mcp invite <machine>" in line
 
 
 def test_board_off_without_a_token_never_asks_the_daemon():

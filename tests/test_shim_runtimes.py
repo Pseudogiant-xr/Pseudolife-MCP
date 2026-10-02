@@ -1154,6 +1154,8 @@ _CLIENT_ENTRY_MODULES = (
     "pseudolife_memory.briefing_cli", "pseudolife_memory.update_cli", "pseudolife_memory.client_updates",
     "pseudolife_memory.unattended_update", "pseudolife_memory.release_check", "pseudolife_memory.runtimes",
     "pseudolife_memory.connect_cli", "pseudolife_memory.client_config", "pseudolife_memory.codex_connection",
+    "pseudolife_memory.expose_cli", "pseudolife_memory.pair_cli",
+    "pseudolife_memory.invite_cli",
     "pseudolife_memory.move_cli",
 )
 
