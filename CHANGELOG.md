@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a revoked token is told so, not to retry)
+- An invited machine whose token was revoked between the daemon's gate and
+  the tool got the same refusal as a daemon that cannot check tokens at all
+  (`principals_unavailable`, -32003). The shim then said "retry shortly",
+  and the retry met the gate's 401. The daemon now keeps -32003 for a
+  table it cannot check and refuses a bearer it checked and no longer
+  finds with `unauthorized` (-32004, data `{"status": 401, "error":
+  "unauthorized"}`). The shim reports that exact refusal as
+  `authentication_required` with `operation_outcome: not_dispatched`: the
+  token is no longer accepted and no tool ran. Anything inexact still
+  keeps the unknown-outcome warning. Both halves deploy together: the
+  daemon and the client step (`ops/update.ps1 -All`).
+- `board_status.reason_hint()` is the public way to read a refusal
+  reason's plain-language line, which the shim uses in place of a
+  private table. The remote-bank guide asks reverse proxies to pass the
+  daemon's error responses through unchanged, since a rewritten 503
+  refusal reads as an operation that may have completed.
+
 ### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
 - Codex hook setup could fail as a whole on the optional `memory_message`
   approval step it promised never to fail on. `ops/setup-codex-hooks.py`
