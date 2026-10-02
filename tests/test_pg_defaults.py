@@ -845,7 +845,8 @@ _BRIDGE_ADMIN = "postgresql://pseudolife:s3cret@10.0.0.7:5432/postgres"
 
 class _CatalogServer:
     """A fake psycopg.connect: each host:port answers with its database list,
-    or raises. Records every address it was asked for."""
+    or raises; a ``host:port/dbname`` key answers for that database alone.
+    Records every address it was asked for."""
 
     def __init__(self, servers: dict[str, object]):
         self.servers = servers
@@ -859,7 +860,8 @@ class _CatalogServer:
         address = f"{parts['host']}:{parts['port']}"
         self.asked.append(address)
         self.urls.append(str(url))
-        answer = self.servers.get(address, ["postgres", "template0", "template1"])
+        answer = self.servers.get(f"{address}/{parts.get('dbname')}", self.servers.get(
+            address, ["postgres", "template0", "template1"]))
         if isinstance(answer, BaseException):
             raise answer
         names = answer
@@ -895,7 +897,9 @@ def test_a_dispatched_run_asks_every_distinct_server_and_passes_test_servers():
     assert pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server) is None
     assert sorted(server.asked) == sorted(
         [pg_defaults.DEV_HOST_PORT, "10.0.0.8:5434", "10.0.0.9:5434"])
-    assert all(str(url).endswith("/postgres") for url in server.urls)
+    # The test URL through its own database, the others through postgres.
+    assert sorted(url.rpartition("/")[2] for url in server.urls) == [
+        "fixed", "postgres", "postgres"]
 
 
 def test_a_dispatched_run_asks_a_server_named_twice_once():
@@ -1004,3 +1008,88 @@ def test_a_dispatched_run_refuses_a_url_that_does_not_parse():
         env, Path("absent"), connect=_CatalogServer({}))
     assert refusal is not None and "does not parse" in refusal
     assert "s3cret" not in refusal
+
+
+
+# -- hardening after #532's review (2026-10-03) ----------------------------------
+
+def test_a_dispatched_run_asks_through_the_test_urls_own_database():
+    # pg_hba may let the role into its test database and not into postgres;
+    # the tests and daemons connect to the test database, so ask there.
+    server = _CatalogServer({
+        "10.0.0.7:5432/postgres": psycopg.OperationalError(
+            'FATAL:  no pg_hba.conf entry for host "10.0.0.2", database "postgres"'),
+        "10.0.0.7:5432": ["postgres", "pseudolife_memory", "pseudolife_memory_test_1"]})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "pseudolife_memory" in refusal
+
+
+def test_a_dispatched_run_falls_back_to_postgres_when_the_test_database_is_new():
+    # The explicit URL's database need not exist yet (pg_url provisions it).
+    server = _CatalogServer({
+        "10.0.0.7:5432/pseudolife_memory_test_1": psycopg.OperationalError(
+            'FATAL:  database "pseudolife_memory_test_1" does not exist'),
+        "10.0.0.7:5432": ["postgres", "pseudolife_memory"]})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "pseudolife_memory" in refusal
+    assert server.urls[-1].endswith("/postgres")
+
+
+@pytest.mark.parametrize(("url", "extra"), [
+    ("postgresql://pseudolife:s3cret@10.0.0.8:5434/fixed?service=suite", {}),
+    ("dbname=fixed user=pseudolife password=s3cret", {"PGSERVICE": "suite"}),
+    ("dbname=fixed user=pseudolife password=s3cret", {"PGHOST": "10.0.0.8,10.0.0.7"}),
+    ("dbname=fixed user=pseudolife password=s3cret port=5434",
+     {"PGHOSTADDR": "10.0.0.8,10.0.0.7"}),
+])
+def test_a_dispatched_run_refuses_hosts_it_cannot_see_in_the_url(url, extra, monkeypatch):
+    # libpq reads a service file, or a host list from PGHOST, only at connect
+    # time: the URL alone does not show which servers it may reach.
+    for name in ("PGSERVICE", "PGHOST", "PGHOSTADDR"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in extra.items():
+        monkeypatch.setenv(name, value)
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": url, **extra}
+    refusal = pg_defaults.dispatched_live_bank_refusal(
+        env, Path("absent"), connect=_CatalogServer({}))
+    assert refusal is not None
+    assert "several hosts" in refusal or "service" in refusal
+    assert "s3cret" not in refusal
+
+
+def test_conftest_checks_again_once_it_holds_the_suite_lock(tmp_path):
+    # A server that refused the first check (a container restarting) may be
+    # up by the time a queued run gets the lock.
+    import subprocess
+    import sys
+
+    plugin = [
+        'from tests import pg_defaults, suite_lock',
+        "state = {'locked': False}",
+        'real_take = suite_lock.take_for_session',
+        'def take(*a, **k):',
+        "    state['locked'] = True",
+        '    return real_take(*a, **k)',
+        'suite_lock.take_for_session = take',
+        'def refusal(*a, **k):',
+        "    return 'refusing a dispatched run: late' if state['locked'] else None",
+        'pg_defaults.dispatched_live_bank_refusal = refusal',
+    ]
+    (tmp_path / "late_live_bank.py").write_text(
+        "".join(f"{line}{chr(10)}" for line in plugin), encoding="utf-8")
+    root = str(pg_defaults.ENV_FILE.parent.parent)
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("PSEUDOLIFE_TEST_", "PSEUDOLIFE_BENCH_", "_PSEUDOLIFE_BENCH_",
+                                "PYTEST_"))}
+    env.update(PSEUDOLIFE_SUITE_DISPATCHED="1", PSEUDOLIFE_TEST_PG_HOST_PORT="127.0.0.1:9",
+               PSEUDOLIFE_SUITE_LOCK="off",
+               PSEUDOLIFE_BENCH_DB="pseudolife_memory_bench_wiring_test",
+               PYTHONPATH=os.pathsep.join([root, str(tmp_path)]))
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "--co", "-q", "-p", "no:cacheprovider",
+         "-p", "late_live_bank", "tests/test_pg_defaults.py"],
+        cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 4, run.stdout[-2000:] + run.stderr[-2000:]
+    assert "refusing a dispatched run: late" in run.stderr + run.stdout
