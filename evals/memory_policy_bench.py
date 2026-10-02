@@ -1628,10 +1628,15 @@ def client_cost(client: dict) -> dict:
 def scrub_record(rec: dict, canary: str | None) -> None:
     """No canary, no absolute path, no user name leaves the work directory."""
     text = json.dumps(rec)
-    bad = [s for s in (canary, str(Path.home()), Path.home().name,
+    bad = [s for s in (canary, str(Path.home()),
                        str(Path.home()).replace("\\", "\\\\")) if s]
     for s in bad:
         text = text.replace(s, "<redacted>")
+    # The user name only as a whole word: a short one ("dev") is part of
+    # ordinary words. A JSON escape such as \n before it is a boundary too.
+    if name := Path.home().name:
+        text = re.sub(rf"(?:(?<!\w)|(?<=\\[nrt])){re.escape(name)}(?!\w)",
+                      "<redacted>", text)
     rec.clear()
     rec.update(json.loads(text))
 

@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-02 — bench records keep words that contain the user name)
+- The memory-policy and coordination check-in benches redact the OS user name
+  from each saved record only as a whole word. A short name such as `dev`
+  used to be replaced inside ordinary words, so `device` was saved as
+  `<redacted>ice`. Home paths and the canary are still removed wherever they
+  appear.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender

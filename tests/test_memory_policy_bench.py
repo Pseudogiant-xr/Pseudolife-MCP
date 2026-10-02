@@ -153,6 +153,17 @@ def test_scrub_removes_canary_and_home_path(tmp_path, monkeypatch):
     assert "stg-secret" not in text and "alice" not in text
 
 
+def test_scrub_redacts_a_short_user_name_only_as_a_whole_word(tmp_path, monkeypatch):
+    # A user named "dev" must not turn "device" into "<redacted>ice".
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "dev"))
+    rec = {"a": "device developer dev_box", "b": "ran by dev, as dev's user",
+           "c": "first line\ndev"}
+    mb.scrub_record(rec, None)
+    assert rec == {"a": "device developer dev_box",
+                   "b": "ran by <redacted>, as <redacted>'s user",
+                   "c": "first line\n<redacted>"}
+
+
 # ── validity ───────────────────────────────────────────────────────────────
 
 PROMPT = "Fill in the Region line in docs/RUNBOOK.md, please, for the production deploy."
