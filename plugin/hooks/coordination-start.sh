@@ -185,10 +185,31 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     esac
     # A resumed, compacted or cleared conversation lost the coordination
     # digest it saw; clearing the marker makes the next prompt hook print
-    # the current one afresh.
+    # the current one afresh. A ring marker at or below the discarded
+    # marker was for mail already shown; without the marker it would read
+    # as unseen, and the Stop hook and wait-mail would wake the session on
+    # later plain mail. A ring past it stays: the next prompt shows its mail.
     case "$SRC" in
         resume|compact|clear)
-            [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null
+            if [ -n "$KEY" ]; then
+                SEEN_AT="" RING_AT=""
+                if [ -f "$DIGEST_DIR/$KEY.seen" ] && [ -f "$DIGEST_DIR/$KEY.ring" ] &&
+                        [ ! -L "$DIGEST_DIR/$KEY.ring" ]; then
+                    IFS= read -r SEEN_AT < "$DIGEST_DIR/$KEY.seen" 2>/dev/null
+                    IFS= read -r RING_AT < "$DIGEST_DIR/$KEY.ring" 2>/dev/null
+                    SEEN_AT=${SEEN_AT//[$'\r\n ']/}
+                    RING_AT=${RING_AT//[$'\r\n ']/}
+                    case "$SEEN_AT$RING_AT" in
+                        *[!0123456789]*) ;;
+                        *) if [ -n "$SEEN_AT" ] && [ -n "$RING_AT" ] &&
+                                   [ "${#SEEN_AT}" -le 12 ] && [ "${#RING_AT}" -le 12 ] &&
+                                   [ $((10#$RING_AT)) -le $((10#$SEEN_AT)) ]; then
+                               rm -f "$DIGEST_DIR/$KEY.ring" 2>/dev/null
+                           fi ;;
+                    esac
+                fi
+                rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null
+            fi
             ;;
     esac
 fi

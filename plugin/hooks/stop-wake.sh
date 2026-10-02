@@ -30,8 +30,9 @@
 # an acknowledgement changing the digest: none of these ring. Mail the
 # session already saw (through the prompt hook, the tool-result hint or an
 # earlier wake) does not fire again at the next turn end; SessionStart
-# clears .seen on resume and compact, so a pending ring can wake the session
-# once more after those. Firing prints first, then advances
+# clears .seen on resume, compact and clear and drops with it a ring at or
+# below the value it discarded, so only a ring the session had not yet
+# seen can wake it after those. Firing prints first, then advances
 # .seen, so those paths stay quiet about it, then appends a "wait" line to
 # the ledger with the ring's reason. A marker that cannot advance means no
 # wake at all: it would otherwise fire again at every turn end.

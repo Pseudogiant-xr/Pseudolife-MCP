@@ -477,11 +477,14 @@ def test_after_clear_the_process_record_maps_the_new_id_to_the_shims_file(
 def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
         reason, digests, tmp_path, monkeypatch, capsysbinary):
     """The actual Claude hooks hand the shim's key to a new session, and the
-    waiter and prompt hook agree which delivery marker belongs to that key."""
+    waiter and prompt hook agree which delivery marker belongs to that key.
+    The ring is past the discarded marker, so it is still live; a ring at or
+    below it is dropped with it (see
+    test_a_ring_taken_before_a_restart_never_fires_on_later_plain_mail)."""
     spawn, current = "fixture-session", f"after-{reason}"
     digest = _digest(digests, spawn)
-    _write(digest, 2, MAIL)
-    _ring(digest, 2)
+    _write(digest, 3, MAIL)
+    _ring(digest, 3)
     _seen(digest).write_text("2\n")
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_DIGEST_DIR": str(digests),
@@ -511,7 +514,7 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
     monkeypatch.setenv("CLAUDE_PID", str(os.getpid()))
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == MAIL.encode()
-    assert _seen(digest).read_text().strip() == "2"
+    assert _seen(digest).read_text().strip() == "3"
     assert MAIL.strip() not in hook("coordination-prompt.sh", current)
     assert run_wait_mail(["--timeout", "0.1", *FAST]) == 3
     assert capsysbinary.readouterr().out == b""
@@ -549,6 +552,34 @@ def test_prompt_hook_and_waiter_share_the_marker_in_both_hook_runtimes(
     assert capsysbinary.readouterr().out == newer.encode()
     assert _seen(digest).read_text().strip() == "4"
     assert newer.strip() not in prompt()
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("source", ["resume", "compact", "clear"])
+def test_a_ring_taken_before_a_restart_never_fires_on_later_plain_mail(
+        shell, source, digests, tmp_path, capsysbinary):
+    """SessionStart drops ``.seen`` on resume, compact and clear; a ring
+    marker it left behind would read as unseen, and plain mail arriving
+    later would end the wait (#522 review). The hook drops the ring the
+    discarded marker covered."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _ring(digest, 3, "rung urgent")
+    _seen(digest).write_text("3\n")
+    env = isolated_env(tmp_path / "hook-home")
+    env.update({"PSEUDOLIFE_DIGEST_DIR": str(digests),
+                "CLAUDE_PLUGIN_ROOT": str(ROOT / "plugin"),
+                "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9"})
+    payload = json.dumps({"session_id": "fixture-session", "source": source})
+    if shell == "bash":
+        bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env)
+    else:
+        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
+                 input=payload, env=env)
+    assert not _seen(digest).exists()
+    _write(digest, 4, MAIL + "- 1 more pending\n")
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
 
 
 def test_resolver_uses_the_record_only_under_its_own_guards(digests, tmp_path):

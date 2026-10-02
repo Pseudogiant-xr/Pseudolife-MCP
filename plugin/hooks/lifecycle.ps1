@@ -331,9 +331,26 @@ if ($Event -eq 'CoordinationPrompt') {
 if ($Event -eq 'CoordinationStart') {
     if ($startReason -in 'resume', 'compact', 'clear' -and $sessionId) {
     # A resumed or compacted session lost the digest it saw; clearing the
-    # marker makes the next prompt print the current one afresh.
+    # marker makes the next prompt print the current one afresh. A ring
+    # marker at or below the discarded marker was for mail already shown;
+    # without the marker it would read as unseen, and the Stop hook and
+    # wait-mail would wake the session on later plain mail. A ring past it
+    # stays: the next prompt shows its mail.
     try {
         $seenPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.seen')
+        $ringPath = [IO.Path]::ChangeExtension($seenPath, '.ring')
+        if ((Test-Path -LiteralPath $seenPath -PathType Leaf) -and
+                (Test-Path -LiteralPath $ringPath -PathType Leaf) -and
+                -not ((Get-Item -LiteralPath $ringPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $seenAt = ([IO.File]::ReadAllLines($seenPath) | Select-Object -First 1) -replace '[\r\n ]', ''
+            $ringAt = ([IO.File]::ReadAllLines($ringPath) | Select-Object -First 1) -replace '[\r\n ]', ''
+            if ($seenAt -cmatch '^[0-9]{1,12}\z' -and $ringAt -cmatch '^[0-9]{1,12}\z' -and
+                    [int64]$ringAt -le [int64]$seenAt) {
+                Remove-Item -LiteralPath $ringPath -Force
+            }
+        }
+    } catch {}
+    try {
         if (Test-Path -LiteralPath $seenPath -PathType Leaf) { Remove-Item -LiteralPath $seenPath -Force }
     } catch {}
     }

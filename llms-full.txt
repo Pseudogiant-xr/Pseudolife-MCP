@@ -6128,7 +6128,10 @@ also capped (below, and by the daemon's `wake` caps under
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
   written, the hook does not wake at all. SessionStart clears `.seen` on
-  resume and compact, so a pending ring can wake the session once more.
+  resume, compact and clear, and with it a ring marker at or below the
+  value it discarded: that ring was for mail the session already saw, and
+  without `.seen` it would wake the session on later plain mail. A ring
+  past that value is still pending and can wake the session once more.
 - At most 20 wakes per session in any hour, the same figure the daemon now
   applies per recipient before it decides a ring. A ring over the hook's
   cap waits for the window to free up; it is delayed, not dropped.

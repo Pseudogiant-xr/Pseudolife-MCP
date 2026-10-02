@@ -804,6 +804,31 @@ def test_session_start_on_resume_or_compact_forces_a_fresh_digest(shell, source,
     assert seen.exists() is kept
 
 
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("source,restarted", [("compact", True), ("resume", True), ("clear", True),
+                                              ("startup", False)])
+@pytest.mark.parametrize("ring_at,live", [("3", False), ("2", False), ("4", True)])
+def test_session_start_drops_a_ring_the_discarded_marker_already_covered(
+        shell, source, restarted, ring_at, live, tmp_path):
+    """Without its ``.seen`` marker, a ring for mail the session already saw
+    reads as unseen, and the Stop hook and wait-mail would wake the session
+    on later plain mail. A ring past the marker is still live and stays:
+    the next prompt shows its mail."""
+    env, key = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"
+    directory = _write_digest(tmp_path, key, 4, BODY)
+    (directory / f"{key}.seen").write_text("3\n")
+    ring = directory / f"{key}.ring"
+    ring.write_text(f"{ring_at}\nrung urgent\n")
+    payload = json.dumps({"session_id": "fixture-session", "source": source})
+    if shell == "bash":
+        bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env)
+    else:
+        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
+                 input=payload, env=env)
+    assert ring.exists() is (live or not restarted)
+
+
 # --- Claude Code: the digest key survives /clear and in-session /resume -----
 #
 # Claude Code keeps a stdio MCP server's CLAUDE_CODE_SESSION_ID for the life
