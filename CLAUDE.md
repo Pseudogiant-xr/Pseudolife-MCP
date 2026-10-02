@@ -337,8 +337,8 @@ three lists, its menus and the `-Extractor` ValidateSet), the `Claude
 models:` / `OpenAI models:` help text of the shims' autostart scripts
 (`ops/install-shim-autostart.*`, `ops/install-codex-shim-autostart.*`), the
 "Extractor modes and dreamer models" section of `docs/guide/dreaming.md`,
-the Console's `DREAMER_MODELS` (`pseudolife_memory/web/static/js/views/
-console.js`), the Extractor panel's `extractor_model_override` suggestions
+the Console's `DREAMER_MODELS` (`frontend/src/lib/dreamer.ts`), the
+Extractor panel's `extractor_model_override` suggestions
 (`pseudolife_memory/web/config_io.py`) and both shims' `/models` lists
 (`evals/claude_shim.py`, `evals/codex_shim.py`). The lists are the menu, not
 a gate: a CLI shim mode passes a model id they do not hold to the shim
@@ -502,7 +502,7 @@ the same thing with the same word.
   survives (re-derived from current evidence at review time); a veto is a
   name-shape rule that blocks a bad fold at filing.
 - **review queue** — pending graph proposals awaiting accept/reject (the
-  Console's Atlas Review view).
+  Console's Review view).
 - **quarantine** — overloaded; qualify it: *serving-side* quarantine is the
   `stale_policy` that withholds a stale value; *consolidation* quarantine is
   the two-man rule parking low-trust dream claims as contenders.
@@ -519,4 +519,4 @@ the same thing with the same word.
   the toolset tier.
 - **Console** — the web UI (Cortex Console). The **System Atlas**
   (`docs/atlas/`) is the hand-curated *codebase* architecture map — distinct
-  from the Console's Atlas view, which visualizes the memory bank's graph.
+  from the Console's Graph view, which visualizes the memory bank's graph.

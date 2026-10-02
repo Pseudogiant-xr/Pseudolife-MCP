@@ -113,6 +113,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own short-lived connection (never the service lock), at most once a
   minute while it is absent, and caches it once found. The cache is dropped
   when a reconnect finds that another writer held the bank.
+### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
+- `/ui/` now serves the rebuilt console, with every view native: Observatory,
+  Cortex, World, Lessons, Stream, Recall, Graph, Review, Insight, Board,
+  Episodes and Settings. The classic vanilla-JS console
+  (`pseudolife_memory/web/static/js`, `css`, `fonts`) is removed and
+  `/ui/next/` is gone; old `/ui/#/...` bookmarks land on the matching view
+  (`#/console` opens Settings, `#/atlas` the Graph, `#/coordination` the
+  Board). Nothing the classic console could do was dropped: every read,
+  every write and its confirmation step was ported, and the graph review
+  queue, formerly a drawer inside the Graph view, is now its own Review view.
+- A review decision answered with HTTP 200 `{"error": ...}` is now reported
+  as a refusal; the classic console counted it as done.
+- `GET /api/config` adds `saved` to a restart-required knob whose value in
+  `config.yaml` differs from the running one, and Settings measures edits
+  against it: a restart knob saved by mistake can be put back from the
+  console (typing the old value used to look like no change), and the row
+  says which value the next start will use.
+- The content column is centred on wide windows. On phones, touch screens
+  get ~44 px controls and 16 px form text (no zoom on focus), the topbar
+  drops the squeezed view-jump field, and the More tab marks a view that has
+  no tab of its own.
+- The build (Vite base `/ui/`) is committed under
+  `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
+  `frontend/public/vendor/` and is copied into the build unchanged.
+- CI gains a `frontend` job: type check, unit tests (vitest, which replace
+  the node-based tests over the classic sources), and a rebuild that must
+  match the committed output. `.gitattributes` checks the console's sources
+  out with LF on every OS so a Windows build reproduces the CI one.
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory

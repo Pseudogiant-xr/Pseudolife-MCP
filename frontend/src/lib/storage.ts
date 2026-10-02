@@ -1,5 +1,5 @@
-// localStorage wrappers. Keys are shared with the classic console, so one
-// token and one theme choice work in both. Storage can be unavailable
+// localStorage wrappers. The keys are the ones the console has always used,
+// so a stored token and theme survive upgrades. Storage can be unavailable
 // (private window, blocked site data): every access is guarded.
 
 export const TOKEN_KEY = "pl_token";

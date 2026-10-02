@@ -129,7 +129,7 @@ in a contender, not in `current`, when trust is low.
 Entity dedup is where an automatic graph quietly eats itself: fold
 `band.py` into `band` once and every fact attached to either becomes
 ambiguous. Merges here are **proposals**, not actions. They queue in the
-**review queue** (the Console's Atlas Review view, or
+**review queue** (the Console's Review view, or
 `memory_graph_review`), carry their evidence, and are subject to
 **merge vetoes** — name-shape rules that block a bad **fold direction** at
 filing time. Accepting or rejecting one writes an audit-stamped row in

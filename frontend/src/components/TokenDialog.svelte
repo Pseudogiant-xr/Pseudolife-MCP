@@ -1,8 +1,8 @@
 <script lang="ts">
-  // Stores the bearer token under localStorage "pl_token", the same key the
-  // classic console reads, so one token works in both consoles.
+  // Stores the bearer token under localStorage "pl_token".
   import { readKey, TOKEN_KEY } from "../lib/storage";
   import { saveToken, ui } from "../lib/state.svelte";
+  import { toast } from "../lib/overlay.svelte";
 
   let dialog: HTMLDialogElement | undefined = $state();
   let value = $state("");
@@ -23,12 +23,14 @@
     e.preventDefault();
     saveToken(value);
     ui.tokenOpen = false;
+    toast(value.trim() ? "Token saved" : "Token removed");
   }
 
   function clearToken() {
     value = "";
     saveToken("");
     ui.tokenOpen = false;
+    toast("Token forgotten");
   }
 </script>
 
@@ -44,7 +46,7 @@
     <h2 id="token-title" class="panel-title">Bearer token</h2>
     <p class="caption">
       The daemon's token (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS). It stays in this
-      browser's local storage and the classic console uses the same one.
+      browser's local storage.
     </p>
     <label for="token-input" class="field-label">Token</label>
     <div class="field">
