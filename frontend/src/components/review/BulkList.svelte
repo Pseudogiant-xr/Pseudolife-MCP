@@ -190,4 +190,13 @@
     flex-wrap: wrap;
     gap: 8px;
   }
+  @media (pointer: coarse) {
+    input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+    }
+    .ev {
+      height: 36px;
+    }
+  }
 </style>

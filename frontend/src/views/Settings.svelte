@@ -370,4 +370,9 @@
       border-radius: 20px;
     }
   }
+  @media (pointer: coarse) {
+    .index-item {
+      height: 36px;
+    }
+  }
 </style>

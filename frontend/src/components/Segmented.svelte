@@ -111,4 +111,11 @@
   .on .n {
     color: var(--ink-3);
   }
+  @media (pointer: coarse) {
+    .seg button,
+    .seg.sm button {
+      height: 36px;
+      padding: 0 14px;
+    }
+  }
 </style>

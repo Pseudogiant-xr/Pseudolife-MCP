@@ -580,4 +580,9 @@
       max-width: none;
     }
   }
+  @media (pointer: coarse) {
+    .examples .btn {
+      min-height: 40px;
+    }
+  }
 </style>

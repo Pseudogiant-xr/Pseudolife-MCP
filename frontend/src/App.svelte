@@ -94,7 +94,7 @@
   </div>
 
   <main class="main">
-    <Topbar {title} {subtitle} />
+    <Topbar {title} {subtitle} full={FULL_BLEED.has(ui.route)} />
     <div class="content" class:full={FULL_BLEED.has(ui.route)}>
       {#if View}
         {#key ui.route}
@@ -193,6 +193,9 @@
     padding: 26px 28px 40px;
     max-width: 1240px;
     width: 100%;
+    /* Centred in the space beside the sidebar, so a wide window has even
+       margins instead of an empty right side. */
+    margin-inline: auto;
   }
   .content.full {
     max-width: none;

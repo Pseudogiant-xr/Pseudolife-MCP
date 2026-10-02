@@ -413,4 +413,10 @@
       flex: 1 1 100%;
     }
   }
+  @media (pointer: coarse) {
+    .scope .select {
+      height: 42px;
+      font-size: 16px;
+    }
+  }
 </style>

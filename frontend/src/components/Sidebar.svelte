@@ -256,4 +256,12 @@
   .foot-btn:hover {
     color: var(--ink);
   }
+  @media (pointer: coarse) {
+    .nav-link {
+      height: 44px;
+    }
+    .foot-btn {
+      height: 44px;
+    }
+  }
 </style>

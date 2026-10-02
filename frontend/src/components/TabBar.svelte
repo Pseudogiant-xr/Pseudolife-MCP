@@ -8,6 +8,8 @@
   const tabs = ["observatory", "cortex", "stream", "board"]
     .map((id) => findNav(id))
     .filter((n): n is NavItem => n !== undefined);
+  // On a view that has no tab of its own, More is where you are.
+  const elsewhere = $derived(!tabs.some((t) => t.id === ui.route));
 </script>
 
 <nav class="tabbar" aria-label="Tabs">
@@ -21,12 +23,14 @@
   <button
     type="button"
     class="tab"
+    class:current={elsewhere}
     aria-expanded={ui.drawerOpen}
     aria-controls="drawer"
     onclick={() => (ui.drawerOpen = true)}
   >
     <Icon name="more" size={22} />
     <span>More</span>
+    {#if elsewhere}<span class="sr-only">, current view {findNav(ui.route)?.label ?? ""}</span>{/if}
   </button>
 </nav>
 

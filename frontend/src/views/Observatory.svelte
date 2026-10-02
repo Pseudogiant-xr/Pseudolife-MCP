@@ -1092,6 +1092,13 @@
       width: min(400px, 100%);
     }
   }
+  @media (max-width: 560px) {
+    /* Under the headline on a phone: a band, not a second screen, so the
+       counts stay near the top. */
+    .hero :global(.hero-art) {
+      width: min(230px, 100%);
+    }
+  }
   @media (max-width: 720px) {
     .col {
       border-left: 0;

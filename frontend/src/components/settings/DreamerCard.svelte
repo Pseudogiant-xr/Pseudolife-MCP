@@ -312,4 +312,12 @@
     max-width: 82ch;
     line-height: 1.55;
   }
+  @media (pointer: coarse) {
+    .pills button {
+      height: 40px;
+    }
+    .custom .input {
+      height: 42px;
+    }
+  }
 </style>

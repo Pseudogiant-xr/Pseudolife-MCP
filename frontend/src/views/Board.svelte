@@ -862,4 +862,11 @@
       overflow-x: auto;
     }
   }
+  @media (pointer: coarse) {
+    .segmented button,
+    .segmented.small button {
+      height: 36px;
+      padding: 0 14px;
+    }
+  }
 </style>

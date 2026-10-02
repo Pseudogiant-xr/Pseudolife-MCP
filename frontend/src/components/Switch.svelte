@@ -70,4 +70,9 @@
       transition: left 0.14s ease;
     }
   }
+  @media (pointer: coarse) {
+    .switch {
+      height: 40px;
+    }
+  }
 </style>

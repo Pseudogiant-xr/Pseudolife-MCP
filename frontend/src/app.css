@@ -568,6 +568,31 @@ p {
   font-size: 12px;
 }
 
+/* Touch screens: controls reach the ~44 px finger target the platform
+   guidelines ask for; a mouse keeps the compact desktop sizes. */
+@media (pointer: coarse) {
+  .btn {
+    height: 44px;
+  }
+  .btn-sm {
+    height: 40px;
+    padding: 0 16px;
+  }
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .input,
+  .select {
+    height: 42px;
+    /* 16 px stops iOS from zooming the page when a field takes focus. */
+    font-size: 16px;
+  }
+  .textarea {
+    font-size: 16px;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .btn,
   .icon-btn,

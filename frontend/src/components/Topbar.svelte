@@ -3,7 +3,7 @@
   import { matchNav } from "../lib/nav";
   import { navigate, refresh, store } from "../lib/state.svelte";
 
-  let { title, subtitle }: { title: string; subtitle: string } = $props();
+  let { title, subtitle, full = false }: { title: string; subtitle: string; full?: boolean } = $props();
 
   let query = $state("");
   let miss = $state("");
@@ -33,7 +33,7 @@
   }
 </script>
 
-<header class="topbar">
+<header class="topbar" class:full>
   <h1 class="title">{title}</h1>
   {#if subtitle}<span class="subtitle">{subtitle}</span>{/if}
   {#if fixtures}
@@ -73,11 +73,17 @@
     align-items: center;
     gap: 14px;
     height: 54px;
-    padding: 0 28px;
+    /* The bar spans the window; its contents line up with the centred
+       1240 px content column below (App.svelte .content). */
+    padding: 0 max(28px, calc((100% - 1240px) / 2 + 28px));
     background: var(--bar);
     -webkit-backdrop-filter: blur(24px) saturate(1.4);
     backdrop-filter: blur(24px) saturate(1.4);
     border-bottom: 1px solid var(--side-border);
+  }
+  /* A full-bleed view (the Graph) uses the whole width; so does its bar. */
+  .topbar.full {
+    padding: 0 28px;
   }
   .title {
     font-size: 15px;
@@ -151,7 +157,8 @@
     }
   }
   @media (max-width: 860px) {
-    .topbar {
+    .topbar,
+    .topbar.full {
       padding: 0 16px;
     }
     .subtitle {
@@ -167,6 +174,14 @@
     }
     .demo-tail {
       display: none;
+    }
+    /* The tab bar and its More drawer navigate on a phone; a squeezed jump
+       field there only crowds the title. */
+    .search {
+      display: none;
+    }
+    .icon-btn {
+      margin-left: auto;
     }
   }
 </style>
