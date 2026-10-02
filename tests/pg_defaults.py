@@ -24,6 +24,34 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
+def _in_wsl() -> bool:
+    import platform
+
+    return sys.platform == "linux" and "microsoft" in platform.uname().release.lower()
+
+
+# Per-run databases are named after the run's pid, and a run drops the ones
+# whose pid is gone. Windows and WSL share the dev server but not a process
+# table, so on 2026-10-02 a Windows pytest session dropped a running WSL
+# suite's database mid-run (78 setup errors). A run inside WSL tags its
+# names ("wsl<pid>"); each run prunes only names of its own namespace.
+PID_NAMESPACE = "wsl" if _in_wsl() else ""
+
+
+def run_suffix(pid: int | None = None, *, namespace: str | None = None) -> str:
+    """The suffix of this run's private database names."""
+    ns = PID_NAMESPACE if namespace is None else namespace
+    return f"{ns}{os.getpid() if pid is None else pid}"
+
+
+def own_run_pid(suffix: str, *, namespace: str | None = None) -> int | None:
+    """The pid a database-name suffix names, when it is a run of this
+    process namespace; None for another namespace's run or any other name."""
+    ns = PID_NAMESPACE if namespace is None else namespace
+    rest = suffix[len(ns):] if suffix.startswith(ns) else ""
+    return int(rest) if rest.isascii() and rest.isdigit() else None
+
+
 COMPOSE_DEFAULT_PASSWORD = "pseudolife"
 DEV_HOST_PORT = "127.0.0.1:5433"
 DEV_ROLE = "pseudolife"

@@ -56,6 +56,7 @@ from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
 # into silent skips. An operator's own bench value is left alone.
 from tests.pg_defaults import (  # noqa: E402
     ENV_FILE, bench_admin_url, conninfo_with_dbname, full_run_password_preflight,
+    run_suffix,
 )
 
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
@@ -176,7 +177,9 @@ def bench_db_autopin(environ) -> str | None:
     if current is not None and current != environ.get(
             "_PSEUDOLIFE_BENCH_DB_AUTOPIN"):
         return None
-    return f"pseudolife_memory_bench_{os.getpid()}"
+    # run_suffix: tagged inside WSL, so a Windows run's pruning never drops
+    # it (tests/pg_defaults.py, PID_NAMESPACE).
+    return f"pseudolife_memory_bench_{run_suffix()}"
 
 
 _bench_pin = bench_db_autopin(os.environ)
@@ -374,11 +377,23 @@ def pytest_configure(config: pytest.Config) -> None:
     # (2026-09-27, twice), holding the machine's one slot for a gate that
     # gated nothing. A targeted run gets one line and goes on, as it did.
     #
+    # A machine whose lock directory says so refuses a full run on native
+    # Windows before anything else (PSEUDOLIFE_SUITE_WINDOWS, else
+    # full-suite.windows): it runs full suites in WSL, whose lock a Windows
+    # run cannot see. tests/suite_lock.py carries the measurement.
+    #
     # The board mirrors the lock as the lease `full-suite` (holder, queue,
     # expected end, a notice to the peers concerned), built only for a full
     # run past that preflight, before the fingerprint, so its module is part
     # of it.
     def preflight(kind: str) -> None:
+        try:
+            refusal = suite_lock.native_windows_refusal(
+                kind, os.environ, suite_lock.lock_dir(os.environ))
+        except ValueError as exc:
+            raise pytest.UsageError(str(exc)) from None
+        if refusal:
+            raise pytest.UsageError(refusal)
         refusal = full_run_password_preflight(kind)
         if refusal:
             raise pytest.UsageError(refusal)

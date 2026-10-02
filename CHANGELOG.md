@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
+- On the maintainer's Windows host, a full test suite made the mouse stutter.
+  Its hook-script tests start Git Bash processes in bursts of 10-32 a
+  second, and mouse input stalled 82-347 ms in exactly those seconds while
+  CPU, memory, disk and the compositor stayed normal. `ops/wsl-suite.ps1`
+  now runs a checkout's suite inside WSL instead, where starting a process
+  never touches the Windows console. It tests the checkout's committed HEAD
+  from a copy on WSL's own filesystem, fetched through a mirror so only new
+  objects cross `/mnt/c`: Linux git cannot read a Windows worktree, and a
+  run over `/mnt/c` roughly doubled driver (DPC) work on the host's first
+  CPU. A checkout with uncommitted changes is refused. It keeps a uv
+  environment per checkout (CPU torch, as CI), forwards the board bearer so
+  the run still shows as the `full-suite` lease, and returns pytest's exit
+  code. `ops/wsl-suite.sh` is its Linux half and works from any Linux shell.
+- A lock taken in WSL cannot see one taken on Windows, so a host that moves
+  to WSL needs Windows full runs stopped. The suite lock gains a per-machine
+  setting: `PSEUDOLIFE_SUITE_WINDOWS`, else a `full-suite.windows` file in
+  the lock directory, `allow` (the default) or `refuse`. With `refuse`, a
+  full run on native Windows exits before it queues and names the launcher.
+  Targeted runs and CI are unaffected.
+- A test run names its private databases after its pid and drops those
+  whose pid is gone. Windows and WSL share the dev Postgres but not a
+  process table, so a Windows pytest session dropped a running WSL suite's
+  database mid-run (78 setup errors, 2026-10-02). A run inside WSL now tags
+  its names (`pseudolife_memory_test_wsl<pid>`), and each run prunes only
+  its own namespace's.
+- `AGENTS.md` is now tracked and points every coding agent to `CLAUDE.md`,
+  so Codex sessions get the same conventions as Claude Code.
+
 ### Added (2026-10-02 — `invite` and `pair`: a new machine joins a bank with one short code; schema v53)
 - `pseudolife-mcp invite <machine>` on the daemon host gives another machine
   its own principal, admitted to the agent board, with no daemon restart and
@@ -83,6 +112,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as unauthorized, and the board check-in names the reason. The daemon warns
   at startup when the table has rows but no authentication is configured,
   and when a stored name is shadowed by the environment.
+
 ### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
 - A Codex thread woken by board mail could stall on an approval prompt,
   because hook setup left the `memory_message` tool unapproved and only
