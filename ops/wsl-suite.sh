@@ -39,8 +39,11 @@ set -euo pipefail
 # there (review of #528, 2026-10-03) — and only under that machine's own
 # suite lease, so the first machine's gates do not hold off for it.
 if [[ -n "${PSEUDOLIFE_SUITE_DISPATCHED:-}" ]]; then
-    server="${PSEUDOLIFE_TEST_PG_HOST_PORT:-}"
-    if [[ -z "$server" || "${server##*:}" == "5433" ]]; then
+    # Stripped and compared as a number, as pg_defaults reads it: '05433'
+    # and '5433 ' both reach 5433 (re-review of #528, 2026-10-03).
+    server="$(printf '%s' "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}" | tr -d '[:space:]')"
+    port="${server##*:}"
+    if [[ "$server" != *:* || ! "$port" =~ ^[0-9]+$ ]] || (( 10#$port == 5433 )); then
         echo "wsl-suite: a dispatched run needs PSEUDOLIFE_TEST_PG_HOST_PORT set to a test server other than port 5433 (got '${server}'); refusing" >&2
         exit 2
     fi

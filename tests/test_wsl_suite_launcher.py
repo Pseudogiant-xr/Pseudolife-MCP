@@ -49,8 +49,14 @@ def _run(tmp_path: Path, *, lease_file: str | None = None, **env: str | None):
     {"PSEUDOLIFE_TEST_DATABASE_URL": "postgresql://u:p@127.0.0.1:5434/fixed"},
     {"PSEUDOLIFE_TEST_PG_HOST_PORT": "127.0.0.1:5433"},
     {"PSEUDOLIFE_TEST_PG_HOST_PORT": "localhost:5433"},
+    # pg_defaults strips the value and int()s the port, so both reach 5433
+    # (re-review of #528, 2026-10-03): the guard compares the number.
+    {"PSEUDOLIFE_TEST_PG_HOST_PORT": "127.0.0.1:05433"},
+    {"PSEUDOLIFE_TEST_PG_HOST_PORT": "127.0.0.1:5433 "},
+    {"PSEUDOLIFE_TEST_PG_HOST_PORT": "127.0.0.1:"},
     {},
-], ids=["url-only", "default-port", "default-port-by-name", "nothing"])
+], ids=["url-only", "default-port", "default-port-by-name", "zero-padded-port",
+        "trailing-space", "no-port", "nothing"])
 def test_a_dispatched_run_needs_a_test_server_off_5433(tmp_path, env):
     proc = _run(tmp_path, lease_file="full-suite@box\n",
                 PSEUDOLIFE_SUITE_DISPATCHED="1", **env)
