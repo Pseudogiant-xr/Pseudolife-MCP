@@ -1156,6 +1156,7 @@ _CLIENT_ENTRY_MODULES = (
     "pseudolife_memory.connect_cli", "pseudolife_memory.client_config", "pseudolife_memory.codex_connection",
     "pseudolife_memory.expose_cli", "pseudolife_memory.pair_cli",
     "pseudolife_memory.invite_cli",
+    "pseudolife_memory.move_cli",
 )
 
 

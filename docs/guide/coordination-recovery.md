@@ -61,6 +61,25 @@ credentials and requires deliberate rebinds.
 The Python module is also callable directly with the same arguments:
 `python -m pseudolife_memory.coordination_recovery`.
 
+## A move is not a restore
+
+`pseudolife-mcp move` ([moving a bank](remote-bank.md#moving-a-bank))
+restores a backup onto another host but does not run this procedure. The
+procedure revokes restored credentials because a restored bank could be a
+second copy of a live one. A move is not a copy: it stops the source daemon
+before the final dump and fences the source database (`ALTER DATABASE <db>
+WITH ALLOW_CONNECTIONS false`) right after it, so only one live authority
+ever serves the bank's mailboxes, and the revocation would protect against
+nothing.
+
+The exemption has a limit: it keeps the mailboxes, not the sessions'
+addresses. A shim discards its saved adapter state when the bank URL
+changes, so every re-pointed session starts with a new address. Mail sent to
+an old address stays in the bank, undelivered. The move's report counts it
+per old address; to give an address back, follow `rebind` (step 5 of the
+restore procedure above). If you ever bring a moved bank's old host back alongside the
+new one, it is a second copy, and this procedure applies to it in full.
+
 ## The audit log across a restore
 
 The board's [audit log](configuration.md#audit-log) (`coordination_events`,

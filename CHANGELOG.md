@@ -26,6 +26,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pseudolife-mcp lease check` maps a suite lease to the local lock only
   when it is this machine's own name.
 
+### Fixed (2026-10-02 — a ring marker the filesystem refused is written later)
+- The shim took a daemon ring as handled before writing its `<key>.ring`
+  marker. When the write failed (on Windows, a reader holding the marker
+  open refuses the replace), nothing retried it, and the daemon's repeat
+  of the same ring was dropped as a duplicate, so the Stop hook and
+  `pseudolife-mcp wait-mail` slept through it (wait-mail until its 4 h
+  timeout). The shim now writes a refused marker again at each heartbeat,
+  for the digest watermark the ring was for, while that mail is pending
+  and unshown. It drops the marker once the mailbox is empty, once a hint
+  or prompt hook has shown the mail (`.seen`), or when a newer ring
+  replaces it. A ring's `ring_at` stagger is unchanged.
+- A `pseudolife-mcp wait-mail --session-id <thread>` waiter on a Codex
+  thread counted as a listener only while the Codex doorbell was healthy:
+  once the doorbell turned itself off (a CLI failure), the shim reported
+  the doorbell's state alone, the daemon answered `no_path` and the waiter
+  slept to its timeout. The waiter's lease now arms the ring either way.
+  With the doorbell off from the start (`PSEUDOLIFE_CODEX_DOORBELL=0`, or
+  no codex CLI found) a Codex thread still declares no ring path, so
+  wait-mail there only times out; the configuration guide says so.
+
 ### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
 - On the maintainer's Windows host, a full test suite made the mouse stutter.
   Its hook-script tests start Git Bash processes in bursts of 10-32 a
@@ -243,6 +263,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own short-lived connection (never the service lock), at most once a
   minute while it is absent, and caches it once found. The cache is dropped
   when a reconnect finds that another writer held the bank.
+
+### Added (2026-10-02 — `pseudolife-mcp move`)
+- `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
+  Docker-tier checkout host over key-based ssh with no lost writes. It stops
+  the source daemon, cuts off any other connection to its database, takes
+  the final backup from the stopped container (dump, `/data` archive,
+  manifest with per-table row counts), and fences the source database
+  (`ALTER DATABASE ... WITH ALLOW_CONNECTIONS false`), which stops a daemon
+  of any version. It copies the files with a SHA-256 check, restores on the
+  target without starting it, compares the row counts and the bank identity
+  in Postgres, carries the environment identities into the target's
+  `ops/.env` over ssh stdin (keeping the file's owner and mode), starts the
+  target once, checks its running environment and its `/health` bank
+  fingerprint, and re-points this machine's clients.
+- Writing `moved.json` on the source is the commit point. A failure before it
+  rolls back in a fixed order that never leaves the target running beside
+  the source: the target is stopped, gated and confirmed stopped before the
+  source starts. A failure after it never rolls a moved bank back; it exits 5
+  with each follow-up's exact command. SIGTERM, SIGHUP and Ctrl-Break roll
+  back like Ctrl-C, and the rollback ignores them; every progress flag, with
+  the manual rollback, is written to the move record as it flips. A rollback
+  that cannot finish exits 6. `--resume` takes over only this move's
+  half-restored bank, through a marker kept on the target host outside
+  `/data`.
+- The target's unattended update and restart policy are paused for the move,
+  and the source's restart policy is set to `no` once moved. The report lists
+  the manual rollback, every other machine's `connect` line, held leases,
+  undelivered mail, the target's files that held its replaced token, and the
+  source leftovers to retire. The source is stopped and fenced, never
+  deleted.
+- Preflight refuses a target whose PostgreSQL major version is older than
+  the source's, since a plain dump restores only forward. The move's
+  directories, which hold the dump, the state archive and the move record,
+  are owner-only on both hosts.
+- `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
+  that leaves the daemon stopped (refused without `--apply` / `-Apply`). The
+  restore scripts' safety dump now covers the database being replaced
+  (`--container/--db/--user` are passed through).
+- The daemon refuses to start when its data dir holds `moved.json` (naming
+  the bank's new location) or `move.json` (an unfinished move: the bank is a
+  clone of the source, and the message says how to abandon or finish it).
 
 ### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
 - `/ui/` now serves the rebuilt console, with every view native: Observatory,
