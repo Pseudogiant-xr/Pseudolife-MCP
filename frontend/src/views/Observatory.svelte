@@ -1,8 +1,19 @@
 <script lang="ts">
   import HeroArt from "../components/HeroArt.svelte";
   import ErrorState from "../components/ErrorState.svelte";
+  import ConsolidationDrawer from "../components/observatory/ConsolidationDrawer.svelte";
+  import ObservatoryDetails from "../components/observatory/ObservatoryDetails.svelte";
   import { api, ApiError } from "../lib/api/client";
+  import { streamApi, type ConfigResponse, type SourceCount } from "../lib/api/stream";
   import type { RecentEntry } from "../lib/api/types";
+  import {
+    extractorChip,
+    gaugePct,
+    IDLE_SECONDS_KNOB,
+    knobNumber,
+    MIN_BATCH_KNOB,
+    type ExtractorStatus,
+  } from "../lib/consolidation";
   import {
     agentName,
     agentTone,
@@ -22,14 +33,21 @@
     shortId,
     words,
   } from "../lib/format";
-  import { classicHref } from "../lib/nav";
+  import { describeDreamRun } from "../lib/dream";
+  import { confirm } from "../lib/overlay.svelte";
   import { loadBoard, refresh, store, ui } from "../lib/state.svelte";
 
   // ---- data ----------------------------------------------------------------
   const ov = $derived(store.overview.data);
   const counts = $derived(ov?.counts);
   const stats = $derived(ov?.stats);
-  const dream = $derived(ov?.dream);
+  // /api/overview swallows a dream_status failure into {}: that is unknown,
+  // not healthy, so an empty object reads as unavailable.
+  const dream = $derived(ov?.dream && Object.keys(ov.dream).length ? ov.dream : undefined);
+  const dreamUnknown = $derived(!!ov && !dream);
+  // The stall tracker counts a dream the fallback served as a soft stall:
+  // dreams still run, so it is a warning, not "failing".
+  const fallbackStall = $derived(dream?.stall?.reason === "served_by_fallback");
   const loop = $derived(ov?.loop);
   const health = $derived(ov?.health);
   const rq = $derived(dream?.review_queue);
@@ -48,11 +66,39 @@
     }
   }
 
+  // Top sources and the dream thresholds: a failure costs only their panel.
+  let sources = $state<SourceCount[] | null>(null);
+  let sourcesFailed = $state(false);
+  let config = $state<ConfigResponse | null>(null);
+
+  async function loadSources() {
+    try {
+      sources = (await streamApi.sources()).sources ?? [];
+      sourcesFailed = false;
+    } catch {
+      sourcesFailed = true;
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      config = await streamApi.config();
+    } catch {
+      config = null;
+    }
+  }
+
   $effect(() => {
     void ui.tick;
     void loadBoard();
     void loadRecent();
+    void loadSources();
+    void loadConfig();
   });
+
+  const minBatch = $derived(knobNumber(config, MIN_BATCH_KNOB));
+  const idleThreshold = $derived(knobNumber(config, IDLE_SECONDS_KNOB));
+  let reviewOpen = $state(false);
 
   // A clock for relative times; ages re-render once a minute.
   let now = $state(Date.now());
@@ -65,7 +111,9 @@
   const status = $derived.by(() => {
     if (!ov) return null;
     if (health?.status && health.status !== "ok") return { tone: "danger", text: `Daemon ${health.status}` };
-    if (dream?.stall) return { tone: "danger", text: "Dreams are stalled" };
+    if (dream?.stall && !fallbackStall) return { tone: "danger", text: "Dreams are stalled" };
+    if (dream?.stall) return { tone: "warn", text: "Dreaming on the fallback" };
+    if (dreamUnknown) return { tone: "warn", text: "Dream status unavailable" };
     if (dream?.error) return { tone: "warn", text: "Dream tracking failed" };
     if (reasons.length) return { tone: "warn", text: "The review queue needs attention" };
     if ((health?.persist_errors ?? 0) > 0) return { tone: "warn", text: "Persist errors reported" };
@@ -75,7 +123,9 @@
   const headline = $derived.by(() => {
     if (!ov) return "";
     if (health?.status && health.status !== "ok") return "The daemon reports a problem.";
-    if (dream?.stall) return "Awake, but dreams are failing.";
+    if (dream?.stall && !fallbackStall) return "Awake, but dreams are failing.";
+    if (dream?.stall) return "Awake, dreaming on the fallback.";
+    if (dreamUnknown) return "Awake, but dream status is unavailable.";
     if (dream?.error) return "Awake, but dream tracking failed.";
     const backlog = dream?.backlog;
     if (backlog === undefined) return "Awake.";
@@ -103,8 +153,13 @@
     if (dream?.stall) {
       const since = fmtDuration(now / 1000 - dream.stall.since);
       const why = dream.stall.reason ? `, ${words(dream.stall.reason)}` : "";
-      s.push(`Dreams have been failing for ${since}${why}.`);
+      s.push(
+        fallbackStall
+          ? `The primary extractor has been failing for ${since}; the fallback is serving dreams.`
+          : `Dreams have been failing for ${since}${why}.`,
+      );
     }
+    if (dreamUnknown) s.push("The daemon could not report dream status, so the backlog is unknown.");
     if (dream?.idle_seconds && dream.idle_seconds >= 60) {
       s.push(`The bank has been idle for ${fmtDuration(dream.idle_seconds)}.`);
     }
@@ -119,10 +174,11 @@
   });
 
   const chips = $derived.by(() => {
-    const c: { text: string; tone: string }[] = [];
+    const c: { text: string; tone: string; title?: string }[] = [];
     if (health?.storage) c.push({ text: health.storage, tone: "" });
     if (stats?.preset) c.push({ text: `preset ${stats.preset}`, tone: "" });
-    if (dream?.extractor_mode) c.push({ text: `extractor ${dream.extractor_mode}`, tone: "" });
+    const ex = extractorChip(dream as ExtractorStatus | undefined);
+    if (ex) c.push(ex);
     if (reasons.length) c.push({ text: `review attention ${reasons.length}`, tone: "warn" });
     if (health?.fixtures) c.push({ text: "fixture data", tone: "warn" });
     return c;
@@ -135,32 +191,19 @@
 
   async function runDream() {
     if (dreaming) return;
+    const ok = await confirm({
+      title: "Run a dream now?",
+      message:
+        "Consolidates the unconsolidated backlog into canonical facts with the configured extractor. It may take a while on CPU.",
+      confirmLabel: "Run the dream",
+    });
+    if (!ok || dreaming) return;
     dreaming = true;
     dreamMsg = "";
     try {
-      const r = await api.dreamRun();
-      if (r.error) {
-        dreamTone = "danger";
-        dreamMsg = `The dream did not run: ${r.error}`;
-      } else if (r.skipped) {
-        dreamTone = "warn";
-        dreamMsg = `The dream was skipped: ${words(r.skipped)}.`;
-      } else if (!r.pulled) {
-        dreamTone = "ok";
-        dreamMsg = "Nothing was waiting, so the dream pulled no memories.";
-      } else {
-        const parts = [
-          plural(r.pulled, "memory", "memories") + " pulled",
-          r.claims !== undefined ? plural(r.claims, "claim") : "",
-          r.inserted !== undefined ? `${fmtNum(r.inserted)} new` : "",
-          r.confirmed !== undefined ? `${fmtNum(r.confirmed)} confirmed` : "",
-          r.contested !== undefined ? `${fmtNum(r.contested)} contested` : "",
-          r.superseded !== undefined ? `${fmtNum(r.superseded)} superseded` : "",
-        ].filter(Boolean);
-        const by = r.extractor ? ` with the ${r.extractor} extractor` : "";
-        dreamTone = "ok";
-        dreamMsg = `The dream finished${by}: ${parts.join(", ")}.`;
-      }
+      const outcome = describeDreamRun(await api.dreamRun());
+      dreamTone = outcome.tone;
+      dreamMsg = outcome.message;
       refresh();
     } catch (e) {
       const ex = explainError(e instanceof ApiError ? e : new ApiError(0, "client_error", null), "The dream");
@@ -202,7 +245,7 @@
         value: counts?.entries,
         sub: dream?.error ? "backlog unknown" : dream?.backlog !== undefined ? `${fmtNum(dream.backlog)} since the last dream` : "",
         subTone: "",
-        href: classicHref("stream"),
+        href: "#/stream",
       },
       {
         label: "Facts",
@@ -210,7 +253,7 @@
         value: counts?.facts,
         sub: counts?.facts_contested ? `${fmtNum(counts.facts_contested)} contested` : counts ? "none contested" : "",
         subTone: counts?.facts_contested ? "contested" : "",
-        href: classicHref("cortex"),
+        href: "#/cortex",
       },
       {
         label: "World",
@@ -218,7 +261,7 @@
         value: counts?.world,
         sub: counts?.world_stale ? `${fmtNum(counts.world_stale)} stale` : counts ? "none stale" : "",
         subTone: counts?.world_stale ? "warn" : "",
-        href: classicHref("world"),
+        href: "#/world",
       },
       {
         label: "Lessons",
@@ -226,7 +269,7 @@
         value: counts?.lessons,
         sub: loop?.last_lesson_at ? `last distilled ${fmtRelative(loop.last_lesson_at, now)}` : "",
         subTone: "",
-        href: classicHref("lessons"),
+        href: "#/lessons",
       },
       {
         label: "Episodes",
@@ -234,7 +277,7 @@
         value: counts?.episodes,
         sub: loop?.sessions !== undefined && window ? `${plural(loop.sessions, "session")} in ${window} days` : "",
         subTone: "",
-        href: classicHref("episodes"),
+        href: "#/episodes",
       },
       {
         label: "Peers",
@@ -258,7 +301,7 @@
 
   const dreamState = $derived.by(() => {
     if (!dream) return null;
-    if (dream.stall) return { tone: "danger", text: "stalled" };
+    if (dream.stall) return fallbackStall ? { tone: "warn", text: "on the fallback" } : { tone: "danger", text: "stalled" };
     if (dream.error) return { tone: "warn", text: "tracking failed" };
     if (dream.would_fire) return { tone: "warn", text: "due on the next sweep" };
     return { tone: "ok", text: "waiting" };
@@ -297,6 +340,26 @@
     return c;
   });
 
+  // Ratios the daemon's loop_health serves beyond the shared LoopHealth type.
+  const perSession = $derived.by(() => {
+    const l = loop as
+      | (typeof loop & { stores_per_session?: number | null; outcomes_per_session?: number | null; root_episodes?: number | null })
+      | undefined;
+    if (!l?.available) return "";
+    const s = l.stores_per_session;
+    const o = l.outcomes_per_session;
+    if ((s === null || s === undefined) && (o === null || o === undefined)) return "";
+    const parts = [
+      s !== null && s !== undefined ? `${fmtDecimal(s, 1)} stores` : "",
+      o !== null && o !== undefined ? `${fmtDecimal(o, 1)} outcomes` : "",
+    ].filter(Boolean);
+    const roots =
+      l.sessions !== undefined && l.root_episodes !== null && l.root_episodes !== undefined
+        ? ` ${plural(l.sessions, "session")} of ${plural(l.root_episodes, "root episode")}; idle shim roots are not sessions.`
+        : "";
+    return `${parts.join(" and ")} per session.${roots}`;
+  });
+
   // ---- board and recent -----------------------------------------------------
   const boardProblem = $derived.by(() => {
     if (store.board.error) return explainError(store.board.error, "The board");
@@ -331,7 +394,7 @@
         {#if chips.length}
           <div class="chips">
             {#each chips as c (c.text)}
-              <span class="chip chip-lg {c.tone}">{#if c.tone}<span class="dot {c.tone}" aria-hidden="true"></span>{/if}{c.text}</span>
+              <span class="chip chip-lg {c.tone}" title={c.title}>{#if c.tone}<span class="dot {c.tone}" aria-hidden="true"></span>{/if}{c.text}</span>
             {/each}
           </div>
         {/if}
@@ -339,7 +402,7 @@
           <button type="button" class="btn btn-primary" onclick={runDream} disabled={dreaming} aria-busy={dreaming}>
             {dreaming ? "Dreaming" : "Run a dream now"}
           </button>
-          <a class="btn btn-secondary" href={classicHref("graph")}>Open the review queue</a>
+          <a class="btn btn-secondary" href="#/review">Open the review queue</a>
         </div>
         <p class="dream-msg {dreamTone}" role="status" aria-live="polite">{dreamMsg}</p>
       </div>
@@ -427,10 +490,20 @@
             <div class="tile">
               <span class="tile-label">Backlog</span>
               <span class="tile-value num">{dream.backlog !== undefined ? fmtNum(dream.backlog) : ""}</span>
+              {#if minBatch !== null}
+                {@const g = gaugePct(dream.backlog, minBatch)}
+                {#if g !== null}<span class="track gauge" aria-hidden="true"><span style:width="{g}%"></span></span>{/if}
+                <span class="tile-sub">due at {fmtNum(minBatch)}</span>
+              {/if}
             </div>
             <div class="tile">
               <span class="tile-label">Idle</span>
               <span class="tile-value">{dream.idle_seconds !== undefined ? fmtDuration(dream.idle_seconds) : ""}</span>
+              {#if idleThreshold !== null}
+                {@const g = gaugePct(dream.idle_seconds, idleThreshold)}
+                {#if g !== null}<span class="track gauge" aria-hidden="true"><span style:width="{g}%"></span></span>{/if}
+                <span class="tile-sub">or after {fmtDuration(idleThreshold)}</span>
+              {/if}
             </div>
             <div class="tile">
               <span class="tile-label">Digests pending</span>
@@ -476,6 +549,9 @@
         {:else}
           <p class="unavailable">Dream status is unavailable.</p>
         {/if}
+        <div class="dream-actions">
+          <button type="button" class="btn btn-secondary btn-sm" onclick={() => (reviewOpen = true)}>Review consolidation</button>
+        </div>
       </div>
 
       <div class="col">
@@ -520,11 +596,14 @@
               {#each outcomeChips as c (c)}<span class="chip">{c}</span>{/each}
             </div>
           {/if}
+          {#if perSession}<p class="caption">{perSession}</p>{/if}
         {:else}
           <p class="unavailable">The learning loop is unavailable on this daemon.</p>
         {/if}
       </div>
     </section>
+
+    <ObservatoryDetails {counts} {stats} {health} {sources} {sourcesFailed} />
 
     <!-- board and recent writes -->
     <section class="panel cols" aria-label="Activity">
@@ -573,7 +652,7 @@
       <div class="col">
         <div class="panel-head">
           <h3 class="panel-title">Recent writes</h3>
-          <a class="head-link" href={classicHref("stream")}>Open the stream</a>
+          <a class="head-link" href="#/stream">Open the stream</a>
         </div>
         {#if recentError}
           <p class="unavailable">{explainError(recentError, "Recent writes").title}.</p>
@@ -583,7 +662,8 @@
           <p class="unavailable">Nothing has been written yet.</p>
         {:else}
           <ul class="list">
-            {#each recent as e (e.id)}
+            <!-- An entry not yet persisted has a null id. -->
+            {#each recent as e, i (e.id ?? `t${i}`)}
               <li class="write-row">
                 <span class="mono src {sourceTone(e.source)}">{e.source ?? "memory"}</span>
                 <span class="ellipsis" title={e.text}>{e.text}</span>
@@ -596,6 +676,8 @@
     </section>
   {/if}
 </div>
+
+<ConsolidationDrawer bind:open={reviewOpen} />
 
 <style>
   .page {
@@ -876,6 +958,19 @@
     letter-spacing: -0.02em;
     line-height: 1.1;
   }
+  .tile .gauge {
+    height: 4px;
+    margin-top: 6px;
+  }
+  .tile-sub {
+    font-size: 11px;
+    color: var(--ink-4);
+  }
+  .dream-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
   .tile-value.na {
     font-size: 13px;
     font-weight: 500;
@@ -995,6 +1090,13 @@
     .hero :global(.hero-art) {
       justify-self: center;
       width: min(400px, 100%);
+    }
+  }
+  @media (max-width: 560px) {
+    /* Under the headline on a phone: a band, not a second screen, so the
+       counts stay near the top. */
+    .hero :global(.hero-art) {
+      width: min(230px, 100%);
     }
   }
   @media (max-width: 720px) {

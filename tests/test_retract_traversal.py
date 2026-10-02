@@ -954,16 +954,15 @@ def test_the_console_renders_the_flag_on_every_fact_view():
     change). A caution that shows on one fact list and not the next is worse
     than none, so one shared badge serves all three.
 
-    Asserted on the badge helper and its CALL SITES, not on the string
-    ``re_verify`` — that appears in prose comments too, so a grep for it
-    would stay green with the rendering deleted."""
+    Asserted on the shared chip component and its CALL SITES, not on the
+    string ``re_verify`` — that appears in prose comments too, so a grep for
+    it would stay green with the rendering deleted."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web"
-          / "static" / "js")
-    shared = (js / "components.js").read_text(encoding="utf-8")
-    assert "export function reVerifyBadge" in shared
-    assert "f.re_verify" in shared and "f.re_verify_reason" in shared
-    for view in ("stream.js", "cortex.js", "recall.js"):
-        src = (js / "views" / view).read_text(encoding="utf-8")
-        assert "reVerifyBadge" in src.split("import", 1)[-1], view
-        assert "reVerifyBadge(f)" in src, view
+    src_root = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    shared = (src_root / "components" / "ReVerifyChip.svelte").read_text(encoding="utf-8")
+    assert "fact.re_verify" in shared and "fact.re_verify_reason" in shared
+    for view in ("Stream", "Cortex", "Recall"):
+        files = [src_root / "views" / f"{view}.svelte",
+                 *(src_root / "components" / view.lower()).glob("*.svelte")]
+        uses = [f for f in files if f.is_file() and "<ReVerifyChip" in f.read_text(encoding="utf-8")]
+        assert uses, f"the {view} view no longer renders ReVerifyChip on its facts"

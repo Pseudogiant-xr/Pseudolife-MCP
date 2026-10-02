@@ -5264,12 +5264,11 @@ class MemoryService(DreamOps):
                        if p.get("source") == "dream-low-confidence"][:cap]
             if not pending:
                 return {"considered": 0, "retyped": 0, "settled": 0}
-            entries = self._storage.load_entries()
+            entries = self._storage.load_entry_texts()
             known = [(r["name"], r["description"])
                      for r in self._graph.load_relations()
                      if r["name"] not in ("prefers", "avoids")]
-            names = [r["name"] for r in self._graph.load_relations()
-                     if r["name"] not in ("prefers", "avoids")]
+            names = [name for name, _ in known]
         retyped = settled = 0
         for p in pending:
             texts = gc.shared_mention_entries(entries, p["src"], p["dst"])

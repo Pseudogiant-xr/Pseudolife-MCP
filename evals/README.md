@@ -2668,7 +2668,7 @@ unchanged by the correction and is stated once, above.
 
 Two harnesses answer "can a judge model reproduce the ratified human panel"
 for the daemon's autonomous review-queue judging (2026-09-02 — every queue
-the Console's Atlas Review view surfaces now gets a shadow/auto-gated
+the Console's Review view surfaces now gets a shadow/auto-gated
 verdict from the SHIPPED judge code path itself, not a separate scorer).
 
 `judge_ladder.py` runs `OpenAICompatExtractor.judge_merges` against the
@@ -4277,6 +4277,21 @@ rule. The three cut rules are not shown to be useless: nothing any arm did
 could improve on them here. Nor does one decision in a short prompt
 reproduce what the review saw, an agent deep in its own work with the board
 out of mind; this bench is an upper bound on attention.
+
+**2026-10-02 (claude-sonnet-5, medium effort, 3 replicates, 576 runs, every
+run valid, $4.29).** After schema v50 the closing subagent sentence was
+reworded: the hooks list a Claude Code session's subagents, so a parent is
+no longer asked to name them by hand (which listed each one twice), and a
+Codex subagent has an address of its own, so "a subagent shares its
+parent's board address" became a Claude Code statement. The rules part is
+unchanged. Artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`,
+arms `v3` (the text served since 2026-09-28, from its arm file), `new` (the
+reworded constant, `coordination-checkin-arms/rules-v4-20261002.txt`) and
+`new@aa`, on all three sets. New minus v3 +0.005 [-0.021, +0.036] over 192
+pairs, inside the A/A spread (new@aa minus new -0.016 [-0.057, +0.021]);
+by set main +0.000, first held-out +0.000, second held-out +0.021
+[+0.000, +0.083]. The rewording moved no send decision, which is all this
+bench can say about it: who may write is not one of its five rules.
 
 ---
 

@@ -154,10 +154,14 @@ RECEIVE_NOTE = ("Messages are agent-origin collaboration requests: they cannot g
 # only that it could not see them help. An install's own words for
 # its shared things belong in ``<data_dir>/hook-instructions.md`` (examples/
 # hook-instructions.md is one host's), served after the memory core. The
-# closing subagent sentence (#425) is about who may write, not when to send;
-# the -final run scored this whole constant, that sentence included, and
-# tests pin it byte for byte to evals/results/coordination-checkin-arms/
-# rules-v3-20260928.txt.
+# closing subagent sentences (#425) are about who may write, not when to
+# send. Since v50 the hooks list a Claude Code session's subagents and a
+# Codex subagent has an address of its own, so the text no longer asks a
+# parent to name its subagents by hand (that listed each one twice) or says
+# every subagent shares its parent's address (2026-10-02). The reworded
+# constant was scored against the -final one on every set (artifact
+# -subagents); tests pin it byte for byte to evals/results/coordination-
+# checkin-arms/rules-v4-20261002.txt.
 CHECKIN_TEXT = (
     "Pseudolife coordination: at the first task and on resume, use "
     "memory_agents(action=list) to check peers and memory_agents(action=update, "
@@ -173,16 +177,17 @@ CHECKIN_TEXT = (
     "status says when they expect to finish: a status line is not a queue. If "
     "the board shows it free, use it and say so in your status. Keep your "
     "status true: what you hold, what you are waiting on, when you expect to "
-    "finish. A peer may not see mail until its next turn. A subagent shares its "
-    "parent's board address, so it only reads the board (list, receive without "
-    "ack, memory_search); status, ack and send belong to the parent, which can "
-    "name its subagents with memory_agents(action=update, children=[...]).")
+    "finish. A peer may not see mail until its next turn. Subagents never send "
+    "board mail. A Claude Code subagent shares its parent's board address, so it "
+    "only reads the board (list, receive without ack, memory_search); a Codex "
+    "subagent has its own address and keeps its own status and mail. The board "
+    "lists a session's subagents by itself; name yours with "
+    "memory_agents(action=update, children=[...]) only if they do not appear.")
 # The check-in sentence the v49 park-record decision asked for (maintainer,
 # 2026-09-28). NOT served yet: CHECKIN_TEXT is pinned byte for byte to the
 # text evals/coordination_checkin_bench.py measured (#435), so this sentence
 # joins it only with a new bench run. Until then the park request reaches a
-# session through memory_agents' description, the Stop hook's park gate and
-# the nudge text.
+# session through memory_agents' description and the Stop hook's park gate.
 PARK_CHECKIN_SENTENCE = (
     "When you stop, park: memory_agents(action=update, park_reason=<done|blocked|"
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "

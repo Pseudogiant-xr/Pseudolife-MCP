@@ -69,7 +69,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    field fails in the suite rather than mid-CI.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
-   then open the wheel — Console static assets present (33 files under
+   then open the wheel — Console build present (index.html, assets/ and vendor/ under
    `web/static/`), no stray top-level dirs, the `mcp-name` marker in METADATA,
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers

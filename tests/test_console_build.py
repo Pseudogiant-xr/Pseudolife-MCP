@@ -1,0 +1,86 @@
+"""Guards over the committed build of the Cortex Console.
+
+The Vite/Svelte source lives in ``frontend/``; its build output is committed
+under ``pseudolife_memory/web/static/`` because the Python wheel ships
+``static/**`` and neither the daemon image nor a pip install has Node. The
+daemon serves that directory at ``/ui/``. These tests pin the parts of the
+output the daemon relies on, so a missing or mis-based build fails here
+rather than as a blank page. They do not compare the build with
+``frontend/src``: CI's ``frontend`` job rebuilds and diffs it.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "pseudolife_memory" / "web" / "static"
+FRONTEND = ROOT / "frontend"
+
+
+def test_console_build_is_committed():
+    index = STATIC / "index.html"
+    assert index.is_file(), "frontend build missing: run `npm run build` in frontend/"
+    html = index.read_text(encoding="utf-8")
+    # Vite's base must be the daemon's mount point or every asset 404s.
+    refs = re.findall(r'(?:src|href)="/ui/([^"]+)"', html)
+    assert refs, "built index.html does not reference /ui/ assets"
+    for ref in refs:
+        assert (STATIC / ref).is_file(), f"index.html references a missing asset: {ref}"
+    assert "<title>Cortex Console</title>" in html
+
+
+def test_classic_console_is_gone():
+    """The vanilla-JS console was retired; nothing may still load it."""
+    for old in ("js", "css", "fonts"):
+        assert not (STATIC / old).exists(), f"static/{old}/ is a leftover of the retired console"
+    assert not (ROOT / "tests" / "js").exists()
+
+
+def test_console_build_loads_nothing_remote():
+    """The console must work offline: fonts and the 3D engine are vendored."""
+    text = "\n".join(p.read_text(encoding="utf-8", errors="ignore")
+                     for p in STATIC.rglob("*") if p.suffix in {".html", ".css", ".js"})
+    for host in ("fonts.googleapis.com", "fonts.gstatic.com", "cdn.jsdelivr.net",
+                 "unpkg.com", "cdnjs.cloudflare.com", "esm.sh", "skypack.dev"):
+        assert host not in text, f"built console references {host}"
+
+
+def test_console_source_declares_base_and_outdir():
+    config = next(FRONTEND.glob("vite.config.*"), None)
+    assert config is not None, "frontend/vite.config.* missing"
+    src = config.read_text(encoding="utf-8")
+    assert re.search(r'^\s*base:\s*"/ui/",', src, re.M), "vite base must be /ui/"
+    assert re.search(r'^\s*outDir:\s*"\.\./pseudolife_memory/web/static",', src, re.M), \
+        "vite outDir must be pseudolife_memory/web/static"
+    assert re.search(r"^\s*sourcemap:\s*false,", src, re.M), \
+        "source maps would ship local paths in the wheel"
+
+
+def test_console_build_ships_no_source_maps():
+    assert not list(STATIC.rglob("*.map")), "source maps are committed under static/"
+    for p in STATIC.rglob("*.js"):
+        assert "sourceMappingURL" not in p.read_text(encoding="utf-8", errors="ignore"), p.name
+
+
+def test_console_font_urls_resolve():
+    for css in STATIC.rglob("*.css"):
+        text = css.read_text(encoding="utf-8", errors="ignore")
+        for ref in re.findall(r"url\(/ui/([^)\"']+)\)", text):
+            assert (STATIC / ref).is_file(), f"{css.name} references a missing file: {ref}"
+
+
+def test_vendored_galaxy_bundle_ships_with_its_licences():
+    """The 3D graph engine is a vendored, licence-audited bundle copied into
+    the build unchanged from frontend/public/vendor/."""
+    src = FRONTEND / "public" / "vendor" / "galaxy.bundle.js"
+    out = STATIC / "vendor" / "galaxy.bundle.js"
+    assert src.is_file() and out.is_file()
+    assert src.read_bytes() == out.read_bytes(), "the build altered the vendored bundle"
+    tail = out.read_text(encoding="utf-8", errors="ignore")[-20_000:]
+    assert "Bundled license information" in tail and "Three.js Authors" in tail, \
+        "the bundle's end-of-file licence comments are missing"
+    assert (FRONTEND / "public" / "vendor" / "README.md").is_file(), \
+        "the bundle's provenance and licence audit live in vendor/README.md"
+    assert (STATIC / "assets" / "Geist-LICENSE.txt").is_file(), "the Geist font licence must ship"

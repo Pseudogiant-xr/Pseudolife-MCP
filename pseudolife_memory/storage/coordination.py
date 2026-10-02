@@ -148,7 +148,8 @@ MAX_PARK_CLEAR_BY = 120
 MAX_CLEARS = 120
 # A park must not withhold mail forever once its clearer is gone: a new
 # park without ``park_expires`` expires after PARK_DEFAULT_TTL, and none may
-# be set past PARK_MAX_TTL; an expired park is an idle session (nudged).
+# be set past PARK_MAX_TTL; an expired park is an idle session, which only
+# urgent mail rings.
 # Starting values from the board orchestrator's review of PR #433
 # (2026-09-28), awaiting the maintainer, not measurements: 12 h covers one
 # overnight run, a week the longest lease a session may hold.
@@ -324,7 +325,6 @@ class WakePolicy:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
-    nudge_interval_seconds: int = 3600
 
     @classmethod
     def from_config(cls, config) -> "WakePolicy":
@@ -1535,6 +1535,8 @@ class CoordinationStore:
             "JOIN visible_mail v ON v.message_id=ids.id) ELSE 0 END AS expired_count "
             "FROM candidates e) SELECT * FROM timeline ORDER BY seq DESC LIMIT 101",
             (principal, principal, principal, principal, principal))
+        # ``nudged`` is no longer decided (2026-10-02) but stays displayable
+        # for sends logged before then.
         details = {"hinted", "not_needed", "rung", "withheld", "nudged", "no_path", "capped",
                    "pull", "delivery"}
         result["events"] = [{**dict(r), "detail": r["detail"] if r["detail"] in details else None}
@@ -1843,20 +1845,32 @@ class CoordinationStore:
             # work-area claims, so a page of claims never hides them.
             + " ORDER BY l.name LIKE 'claim:%%', l.name LIMIT %s",
             ((name,) if name is not None else ()) + (limit + 1,))
+        page = rows[:limit]
+        names = [row["name"] for row in page]
+        queues = {name: [] for name in names}
+        counts = {}
+        if names:
+            # Bound each queue before joining its labels; the truncated lease
+            # page's extra row does not need a queue read.
+            waiters = self._all(
+                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
+                "FROM unnest(%s::text[]) AS wanted(name) CROSS JOIN LATERAL "
+                "(SELECT agent_id,enqueued_at,purpose,ticket FROM coordination_lease_waiters "
+                "WHERE name=wanted.name ORDER BY ticket LIMIT %s) w "
+                "LEFT JOIN coordination_agents a ON a.agent_id=w.agent_id "
+                "ORDER BY wanted.name,w.ticket", (names, LEASE_LIST_QUEUE))
+            for waiter in waiters:
+                queues[waiter.pop("name")].append(dict(waiter))
+            counts = {row["name"]: row["n"] for row in self._all(
+                "SELECT name,count(*) AS n FROM coordination_lease_waiters "
+                "WHERE name=ANY(%s::text[]) GROUP BY name", (names,))}
         leases = []
-        for row in rows[:limit]:
-            queue = self._all(
-                "SELECT w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
-                "FROM coordination_lease_waiters w LEFT JOIN coordination_agents a "
-                "ON a.agent_id=w.agent_id WHERE w.name=%s ORDER BY w.ticket LIMIT %s",
-                (row["name"], LEASE_LIST_QUEUE))
-            queued = self._one("SELECT count(*) AS n FROM coordination_lease_waiters "
-                               "WHERE name=%s", (row["name"],))["n"]
+        for row in page:
             leases.append({
                 "name": row["name"], "holder": self._holder(row), "fence": row["fence"],
                 "expires_at": row["expires_at"], "expected_end": row["expected_end"],
                 "stale": row["expected_end"] is not None and now > row["expected_end"],
-                "queued": queued, "queue": [dict(w) for w in queue]})
+                "queued": counts.get(row["name"], 0), "queue": queues[row["name"]]})
         return {"leases": leases, "truncated": len(rows) > limit}
 
     def break_lease(self, name):
@@ -2028,12 +2042,15 @@ class CoordinationStore:
         """Offer the newest pending ring; the adapter deduplicates its identity.
         Queued mail retains a stable offer until acknowledgment or expiry,
         covering lost handoffs and replacement attachments. Other rings
-        repeat only for one heartbeat interval."""
+        repeat only for one heartbeat interval. Only ``rung`` rows are
+        offered: a ``nudged`` row decided before 2026-10-02 (regular mail
+        never wakes) is history, never served."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
         if self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
             "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
+            "AND decision='rung' "
             "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
             "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
             "AND m.acknowledged_at IS NULL AND m.expires_at>%s)", (now, agent_id, agent_id, now))
@@ -2042,6 +2059,7 @@ class CoordinationStore:
             "coalesce(m.wake->>'queued'='true',false) AS queued FROM coordination_wakes w "
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
+            "AND w.decision='rung' "
             "AND w.served_at IS NOT NULL AND m.acknowledged_at IS NULL AND m.expires_at>%s",
             (agent_id, now))
         if not rows:
@@ -2093,11 +2111,15 @@ class CoordinationStore:
         given up, ``_lease_clearer``), ``park_clear_by`` is ``anyone``,
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
-        the need so the sender knows what would wake it; idle with no park,
-        ``nudged`` at most once per ``nudge_interval_seconds``, else
-        ``capped``. Every ring is bounded per recipient per hour and by the
-        nightly total, and rings from one sender's burst are staggered by
-        ``fan_out_stagger_seconds``. Chatter never rings."""
+        the need so the sender knows what would wake it; idle with no park
+        (or a lapsed one), ``rung`` for ``urgent`` (within the same urgent
+        cap), else ``not_needed`` with reason ``no_park``: the session is
+        waiting on nobody, so the mail waits for its next turn. Regular
+        mail never wakes (maintainer decision 2026-10-02, retiring the
+        hourly ``nudged`` ring; rows decided ``nudged`` before then are
+        history, never served). Every ring is bounded per recipient per
+        hour and by the nightly total, and rings from one sender's burst
+        are staggered by ``fan_out_stagger_seconds``. Chatter never rings."""
         policy = self.wake
         park = self._live_park(recipient, now)
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
@@ -2124,22 +2146,25 @@ class CoordinationStore:
             elif clears is not None and _need_matches(clears, park["park_needs"]):
                 how = "clears"
             elif urgent:
-                sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
-                                 "sender_agent_id=%s AND urgent AND created_at>%s",
-                                 (sender["agent_id"], hour))["n"]
-                if sent >= policy.urgent_per_sender_per_hour:
-                    return {"decision": "capped", "reason": "urgent_sender_hour", **need}
                 how = "urgent"
             if how is None:
                 return {"decision": "withheld", "reason": "need_not_cleared", **need}
-            decision, reason = "rung", how
+        elif urgent:
+            # Waiting on nobody, but the sender says it cannot wait
+            # (maintainer decision 2026-10-02): a ring like any other.
+            how = "urgent"
         else:
-            nudged = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
-                               "recipient_agent_id=%s AND decision='nudged' AND created_at>%s",
-                               (recipient["agent_id"], now - policy.nudge_interval_seconds))["n"]
-            if nudged:
-                return {"decision": "capped", "reason": "nudge_hour"}
-            decision, reason = "nudged", "no_park"
+            # Waiting on nobody: plain mail, or clears with no need to
+            # clear, never rings; it waits for the session's next turn
+            # (maintainer decision 2026-10-02).
+            return {"decision": "not_needed", "reason": "no_park"}
+        if how == "urgent":
+            sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                             "sender_agent_id=%s AND urgent AND created_at>%s",
+                             (sender["agent_id"], hour))["n"]
+            if sent >= policy.urgent_per_sender_per_hour:
+                return {"decision": "capped", "reason": "urgent_sender_hour", **need}
+        decision, reason = "rung", how
         counts = self._one(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
             "count(*) FILTER (WHERE created_at>%s) AS night,"
@@ -2587,11 +2612,13 @@ class CoordinationStore:
         """Page pending mail. ``for_delivery`` is the adapter's live path: it
         skips messages whose attempts are exhausted, and (v49) messages the
         daemon decided not to ring: every message it yields becomes a turn in
-        a live-channel recipient, so it carries only mail decided ``rung``,
-        ``nudged`` or ``hinted`` (and mail from before v49, which has no
-        decision), and never the daemon's notices, which are context for
-        the next turn rather than a turn of their own. An explicit receive
-        still returns all of it. The first
+        a live-channel recipient, so it carries only mail decided ``rung``
+        or ``hinted`` (and mail from before v49, which has no decision),
+        and never the daemon's notices, which are context for the next
+        turn rather than a turn of their own. Mail decided ``nudged``
+        before 2026-10-02 (regular mail never wakes), immediately or
+        queued behind a ``no_path`` receipt, is skipped too. An explicit
+        receive still returns all of it. The first
         time a message is served, by either path, its ``first_read_at`` is
         stamped and a ``read`` event logged; a replay of unacknowledged mail
         writes nothing."""
@@ -2609,8 +2636,12 @@ class CoordinationStore:
             if seq > row["next_sequence"]:
                 raise CoordinationError("invalid_cursor", "cursor_ahead")
         attempt_clause = (" AND attempts<%s AND sender_principal<>%s AND (wake IS NULL OR "
-                          "wake->>'decision' IN ('rung','nudged','hinted') OR "
-                          "wake->>'queued'='true')" if for_delivery else "")
+                          "wake->>'decision' IN ('rung','hinted') OR "
+                          "(wake->>'queued'='true' AND NOT EXISTS (SELECT 1 FROM "
+                          "coordination_wakes w WHERE w.recipient_agent_id="
+                          "coordination_messages.recipient_agent_id AND "
+                          "w.message_id=coordination_messages.message_id AND "
+                          "w.decision='nudged')))" if for_delivery else "")
         now = self.clock()
         params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
                   + [limit])
