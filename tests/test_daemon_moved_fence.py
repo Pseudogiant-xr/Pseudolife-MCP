@@ -68,3 +68,15 @@ def test_an_unfinished_move_into_this_bank_refuses_too(tmp_path):
     message = daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)})
     assert message is not None
     assert "20261002-120000-0a1b2c3d" in message and "move.json" in message
+
+
+def test_the_unfinished_move_refusal_says_how_to_finish_or_abandon_it(tmp_path):
+    """The bank under the gate is a clone of the source's: abandoning the
+    move means restoring the target's own pre-move safety dump (which
+    replaces /data, gate included); a plain rm is only for finishing the move
+    deliberately, and it has to work on a stopped container."""
+    (tmp_path / "move.json").write_text("{}", encoding="utf-8")
+    message = daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)})
+    assert "docker run --rm --volumes-from pseudolife-mcp-daemon <image> rm -f /data/move.json" in message
+    assert "clone" in message
+    assert "restore.sh --apply" in message and "--state-archive" in message

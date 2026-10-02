@@ -397,9 +397,14 @@ def moved_refusal(environ) -> str | None:
             record = None
         move_id = record.get("move_id") if isinstance(record, dict) else None
         return (f"an unfinished pseudolife-mcp move{' ' + move_id if isinstance(move_id, str) else ''} "
-                f"is restoring into this bank ({incoming}); refusing to start. Let the move finish "
-                f"(it starts this daemon itself), or rerun it with --resume. To abandon the move, "
-                f"make sure the source daemon is the one serving the bank, then remove {incoming}.")
+                f"is restoring into this bank ({incoming}); refusing to start. The bank here is a clone "
+                f"of the move's source, which may still be serving it. Let the move finish (it starts "
+                f"this daemon itself), or rerun it with --resume. To abandon the move, restore this "
+                f"host's own pre-move safety dump from data/backups with ops/restore.sh --apply "
+                f"--backup-file <dump> --state-archive <archive>, which replaces /data and this gate "
+                f"with it. Remove the gate by hand only to finish the move deliberately, with the "
+                f"source stopped and fenced: docker run --rm --volumes-from pseudolife-mcp-daemon "
+                f"<image> rm -f /data/move.json")
     marker = Path(data_dir) / MOVED_MARKER
     if not marker.exists():
         return None
