@@ -1807,7 +1807,7 @@ def test_coordination_prompt_records_only_exact_doorbell_arrival(tmp_path, platf
     launched = tmp_path / "helper-launched"
     runner.write_text(f"from pathlib import Path\nPath({str(launched)!r}).write_text('yes')\n"
                       "from pseudolife_memory.cli import main\nmain()\n", encoding="utf-8")
-    if platform_hook == "windows":
+    if platform_hook == "windows" and os.name == "nt":
         launcher = tmp_path / "consume.cmd"
         launcher.write_text(f'@"{sys.executable}" "{runner}" %*\r\n', encoding="utf-8")
     else:
