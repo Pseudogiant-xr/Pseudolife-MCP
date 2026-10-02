@@ -5,11 +5,13 @@
   import type { Knob } from "../../lib/api/config";
   import {
     atDefault,
+    baseValue,
     draftFromValue,
     fmtKnobValue,
     hasDefault,
     numberStep,
     pathTail,
+    pendingRestart,
     rangeText,
     type Draft,
     type Drafts,
@@ -33,7 +35,7 @@
   const helpId = $derived(`knob-${slug}-help`);
   const errId = $derived(`knob-${slug}-err`);
   const listId = $derived(`knob-${slug}-list`);
-  const draft = $derived(Object.hasOwn(drafts, knob.path) ? drafts[knob.path] : draftFromValue(knob, knob.value));
+  const draft = $derived(Object.hasOwn(drafts, knob.path) ? drafts[knob.path] : draftFromValue(knob, baseValue(knob)));
   const describedBy = $derived([knob.help ? helpId : "", row.state === "invalid" ? errId : ""].filter(Boolean).join(" ") || undefined);
   const range = $derived(rangeText(knob));
   // A live value outside the options still shows as itself, not as the first option.
@@ -61,6 +63,12 @@
       {/if}
       {#if row.state === "edited"}<span class="chip chip-prose edited-chip">edited</span>{/if}
     </p>
+    {#if pendingRestart(knob)}
+      <p class="pending">
+        Saved as {fmtKnobValue(knob, knob.saved)} for the next restart; the daemon is still running with
+        {fmtKnobValue(knob, knob.value)}.
+      </p>
+    {/if}
   </div>
 
   <div class="ctrl">
@@ -174,6 +182,13 @@
   .label {
     font-size: 13.5px;
     font-weight: 600;
+  }
+  .pending {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--warn);
+    max-width: 68ch;
+    overflow-wrap: anywhere;
   }
   .help {
     color: var(--ink-3);

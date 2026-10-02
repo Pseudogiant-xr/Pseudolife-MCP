@@ -8,6 +8,22 @@
 
 import type { ConfigWriteResult, Knob, KnobGroup } from "./api/config";
 
+/**
+ * What an edit is measured against: the value saved in config.yaml for a
+ * restart knob that was changed but not yet applied (the server sends it as
+ * `saved`), else the running value. Measuring a restart knob against its
+ * running value made a mistaken save impossible to undo: typing the old
+ * value back looked like no change.
+ */
+export function baseValue(knob: Knob): unknown {
+  return Object.hasOwn(knob, "saved") ? knob.saved : knob.value;
+}
+
+/** A restart knob whose saved value waits for the next daemon start. */
+export function pendingRestart(knob: Knob): boolean {
+  return Object.hasOwn(knob, "saved");
+}
+
 export type Draft = string | boolean;
 export type Drafts = Record<string, Draft>;
 
@@ -96,7 +112,7 @@ export function draftFromValue(knob: Knob, value: unknown): Draft {
 
 /** What a knob's control shows: its draft, else the live value. */
 export function controlDraft(knob: Knob, drafts: Drafts): Draft {
-  return Object.hasOwn(drafts, knob.path) ? drafts[knob.path] : draftFromValue(knob, knob.value);
+  return Object.hasOwn(drafts, knob.path) ? drafts[knob.path] : draftFromValue(knob, baseValue(knob));
 }
 
 export type RowState = { state: "clean" } | { state: "edited"; value: unknown } | { state: "invalid"; message: string };
@@ -106,7 +122,7 @@ export function rowState(knob: Knob, drafts: Drafts): RowState {
   if (!Object.hasOwn(drafts, knob.path)) return { state: "clean" };
   const c = coerce(knob, drafts[knob.path]);
   if (c.kind === "invalid") return { state: "invalid", message: c.message };
-  if (c.kind === "none" || sameValue(knob, c.value, knob.value)) return { state: "clean" };
+  if (c.kind === "none" || sameValue(knob, c.value, baseValue(knob))) return { state: "clean" };
   return { state: "edited", value: c.value };
 }
 
@@ -165,7 +181,7 @@ export function diffRows(edits: Edit[]): DiffRow[] {
   return edits.map((e) => ({
     path: e.knob.path,
     label: e.knob.label || e.knob.path,
-    old: fmtKnobValue(e.knob, e.knob.value),
+    old: fmtKnobValue(e.knob, baseValue(e.knob)),
     new: fmtKnobValue(e.knob, e.value),
     restart: e.knob.restart === true,
   }));
@@ -186,7 +202,7 @@ export function atDefault(knob: Knob, drafts: Drafts): boolean {
 export function withDraft(drafts: Drafts, knob: Knob, draft: Draft): Drafts {
   const next = { ...drafts };
   const c = coerce(knob, draft);
-  if (c.kind === "value" && sameValue(knob, c.value, knob.value) && draft === draftFromValue(knob, knob.value)) {
+  if (c.kind === "value" && sameValue(knob, c.value, baseValue(knob)) && draft === draftFromValue(knob, baseValue(knob))) {
     delete next[knob.path];
   } else {
     next[knob.path] = draft;

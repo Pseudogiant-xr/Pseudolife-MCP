@@ -18,6 +18,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   queue, formerly a drawer inside the Graph view, is now its own Review view.
 - A review decision answered with HTTP 200 `{"error": ...}` is now reported
   as a refusal; the classic console counted it as done.
+- `GET /api/config` adds `saved` to a restart-required knob whose value in
+  `config.yaml` differs from the running one, and Settings measures edits
+  against it: a restart knob saved by mistake can be put back from the
+  console (typing the old value used to look like no change), and the row
+  says which value the next start will use.
 - The build (Vite base `/ui/`) is committed under
   `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
   `frontend/public/vendor/` and is copied into the build unchanged.

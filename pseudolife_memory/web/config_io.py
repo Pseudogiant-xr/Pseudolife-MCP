@@ -764,9 +764,40 @@ def config_path_for(service: Any) -> Path:
     return Path(getattr(service, "data_dir", ".")) / "config.yaml"
 
 
+_MISSING = object()
+
+
+def _nested_get(d: Any, path: str) -> Any:
+    cur = d
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return _MISSING
+        cur = cur[part]
+    return cur
+
+
+def _saved_file(service: Any) -> dict[str, Any]:
+    """config.yaml as last written, or {} when absent or unreadable (the read
+    must still answer; the file's problems surface at the next boot)."""
+    path = config_path_for(service)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def read_config(service: Any) -> dict[str, Any]:
-    """Effective knob values + metadata, grouped for the UI."""
+    """Effective knob values + metadata, grouped for the UI.
+
+    A restart knob is persisted by write_config but not applied, so its
+    ``value`` (the running one) alone hides what the next start will use, and
+    an editor comparing against it cannot undo a mistaken save. Such a knob
+    also carries ``saved``: the value in config.yaml, when it differs.
+    """
     cfg = service.config
+    saved_file = _saved_file(service)
     groups: dict[str, list[dict]] = {}
     for knob in KNOBS:
         try:
@@ -778,6 +809,15 @@ def read_config(service: Any) -> dict[str, Any]:
             "options", "restart", "help", "format", "suggestions")
             if knob.get(k) is not None}
         item["value"] = current
+        if knob.get("restart"):
+            saved = _nested_get(saved_file, knob["path"])
+            if saved is not _MISSING:
+                try:
+                    saved = _coerce(knob, saved)
+                except (TypeError, ValueError):
+                    saved = _MISSING     # the next boot refuses it, not ours to show
+            if saved is not _MISSING and saved != current:
+                item["saved"] = saved
         groups.setdefault(knob["group"], []).append(item)
     return {
         "config_path": str(config_path_for(service)),

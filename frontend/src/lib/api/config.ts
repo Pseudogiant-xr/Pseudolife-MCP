@@ -24,6 +24,9 @@ export interface Knob {
   suggestions?: string[];
   /** The live effective value in the running daemon (may be null). */
   value: unknown;
+  /** Restart knobs only: the value saved in config.yaml for the next start,
+   *  present when it differs from the running `value`. */
+  saved?: unknown;
 }
 
 export interface KnobGroup {

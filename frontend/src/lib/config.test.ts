@@ -136,6 +136,20 @@ describe("dirty detection against the live value", () => {
     expect(rowState(urlK, { [urlK.path]: "" })).toEqual({ state: "edited", value: null });
   });
 
+  it("a restart knob saved but not applied is measured against the saved value", () => {
+    // Saved 30 by mistake; the daemon still runs 20 until it restarts.
+    const pending: Knob = { ...restartK, value: 20, saved: 30 };
+    expect(controlDraft(pending, {})).toBe("30");
+    // Typing 20 back is the undo: a real edit, sent as 20.
+    expect(rowState(pending, { [pending.path]: "20" })).toEqual({ state: "edited", value: 20 });
+    expect(rowState(pending, { [pending.path]: "30" })).toEqual({ state: "clean" });
+    // The review shows the file's value as the one being replaced.
+    const rows = diffRows([{ knob: pending, value: 20 }]);
+    expect(rows[0]).toMatchObject({ old: "30", new: "20" });
+    // Without a saved value nothing changes.
+    expect(rowState(restartK, { [restartK.path]: "20" })).toEqual({ state: "clean" });
+  });
+
   it("a bool or enum flip is an edit; flipping back is clean", () => {
     expect(rowState(boolK, { [boolK.path]: true })).toEqual({ state: "edited", value: true });
     expect(rowState(boolK, { [boolK.path]: false })).toEqual({ state: "clean" });
