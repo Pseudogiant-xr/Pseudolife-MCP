@@ -191,7 +191,7 @@ took 143 CUDA OOMs.
   `examples/hook-instructions.md`.
 - **A park record does not keep a wake listener alive.** Claude Code's Stop
   watcher expires after 59 minutes. For a longer wait, arm one main-session
-  background `pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail
+  background `pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring
   or timeout; in Codex, use the doorbell where the host supports it. Without
   a durable host path, say `next-turn-only` in the park/status and tell the
   maintainer when an urgent dependency cannot wait. Inspect send receipts:

@@ -4617,7 +4617,11 @@ acceptance still needs a separately isolated supported-client session.
 Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
 MCP can start a turn in a session that has gone idle, so the host has to.
 `pseudolife-mcp wait-mail` gives the host something to wake on: it blocks until
-the digest above shows mail nothing has shown yet, prints it and exits.
+the daemon rings this session for mail nothing has shown yet, prints the mail
+and exits. Plain mail never ends the wait (maintainer decision 2026-10-02):
+the daemon rings a parked session for mail that clears its need, or any
+idle session for `urgent` mail ([the wake decision](#park-records-and-the-wake-decision)),
+so park before you wait.
 
 ```sh
 pseudolife-mcp wait-mail [--session-id ID | --digest PATH] [--timeout SECONDS] [--interval SECONDS]
@@ -4631,21 +4635,32 @@ applies); `--digest` names the file outright and accepts only a digest's own
 process if one exists and its second line confirms it for the current session
 (the SHA-256 of its id); without one, a waiter armed after `/clear` finds no
 digest. It needs no daemon connection, token or
-network. Each check is a file `stat` (every 2 s by default); the file is read
-only after the adapter rewrites it. It fires when the watermark is past the
-shared `.seen` marker and the digest lists pending mail, so mail that arrived
-while the agent was busy fires at once and mail a prompt hook or tool-result
-hint already showed does not. On firing it prints the digest body verbatim on
-stdout, agent-origin framing included, then advances `.seen` so the hook and
-hint do not repeat it, and appends a `wait` line to `ledger.log`. Exit codes:
-`0` new mail; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
+network. Each check is a `stat` of the digest and of the `<key>.ring` marker
+beside it (every 2 s by default); the files are read only after the adapter
+rewrites one. It reads the ring marker the way the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) does: the
+adapter writes it when the daemon decides a ring (line 1 the digest
+watermark the ring is for, line 2 the decision and reason), and only a
+regular file holding a `rung` decision counts. It fires when that marker's
+watermark is past the shared `.seen` marker, the digest's watermark is past
+it too and the digest lists pending mail. So a ring that arrived while the
+agent was busy fires at once, while a ring whose mail a prompt hook,
+tool-result hint or earlier wake already showed does not, and plain mail
+keeps it waiting (the mail is still pending at the next turn). On firing it
+prints the digest body verbatim on stdout, agent-origin framing included,
+then advances `.seen` to the digest's watermark so neither the hook, the
+hint nor a re-arm repeats it, and appends a `wait` line to `ledger.log` whose
+sixth column is the ring's decision and reason. Exit codes:
+`0` a ring; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
 wait on — no session id, no digest file (the adapter writes it when it
 attaches: at shim start in Claude Code, on a thread's first `memory_*` call in
 Codex), a file that disappeared because the shim exited, a file that cannot be
 inspected when armed (a later read error is retried), a
 stdout that cannot take the mail (left unmarked), or a bad argument.
 Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
-heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
+heartbeat and writes the ring marker at the ring's `ring_at`, so a waiter
+fires up to about 22 s after a send rings (later for a staggered fan-out
+burst). It also rewrites
 an unchanged digest every hour, without moving the watermark, so the day-old
 sweep another adapter runs at start never takes a long-idle session's file.
 
@@ -4671,7 +4686,7 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 
 The Stop hook alone watches for at most 59 minutes. A park record can outlive
 that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail or the
+`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
 four-hour timeout. Where Codex supports its doorbell, that is its durable host
 path. Where the host provides neither path, record `next-turn-only` in the
 park or status: a durable park is not evidence of a durable listener.
@@ -5902,8 +5917,8 @@ nightly and stagger caps as every ring. An active recipient is `hinted`,
 urgent or not. From v49 until then an idle session that had not parked
 was rung at most hourly (`nudged`) with a request to park; that ring is
 gone. A `nudged`
-row decided before a daemon update is kept for `history` and
-`board-audit stats`, but is never served to an adapter, and its mail is
+row decided before a daemon update is kept for the Console's coordination
+timeline and `board-audit stats`, but is never served to an adapter, and its mail is
 never delivered through a live channel. A retry of the same `request_id`
 repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
@@ -6148,7 +6163,7 @@ also capped (below, and by the daemon's `wake` caps under
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
   longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after mail or its four-hour timeout; without that, its mail appears
+  re-armed after a ring or its four-hour timeout; without that, its mail appears
   on its next prompt and the ring listener expires. The watcher
   also stops when Claude Code exits: at once on Linux and macOS, and within
   a minute on Windows, where it lists the process through `ps -W` at arm

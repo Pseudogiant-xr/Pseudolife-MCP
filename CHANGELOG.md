@@ -7,9 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed (2026-10-02 — plain mail never wakes an unparked session)
-- Plain mail to an idle session that has not parked no longer wakes it.
-  Before, such a session was rung at most once an hour (`nudged`) and
-  asked to record a park. Now a parked session rings only for mail that
+- Plain mail to an idle session that has not parked no longer wakes it,
+  through the Claude Code Stop hook, the Codex doorbell or
+  `pseudolife-mcp wait-mail`. Before, such a session was rung at most once
+  an hour (`nudged`) and asked to record a park, and `wait-mail` woke on
+  any new mail at all. Now a parked session rings only for mail that
   plausibly clears its need: the sender is its clearer (or just released
   the lease it waits on), it accepts `anyone`, the message's `clears`
   names the need, or `urgent`. An idle session that has not parked rings
@@ -19,11 +21,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to an unparked session answers `not_needed` with reason `no_park` and
   waits for its next turn; an active session is `hinted`, urgent or not
   (maintainer decisions 2026-10-02).
+- `pseudolife-mcp wait-mail` follows the same rule: it returns only when
+  the daemon rings the session. It reads the `<key>.ring` marker the Stop
+  hook reads, under the same rule (a `rung` ring past `.seen`, with unshown
+  mail in the digest), and plain mail keeps it waiting; that mail is still
+  pending at the next turn. Exit codes are unchanged (0 now means a ring),
+  and its `wait` ledger line gains the ring as a sixth column. A session
+  that relies on it is woken only when parked with a need the mail clears,
+  or by `urgent` mail.
 - A `nudged` ring decided before the update is never served to an adapter
-  and its mail is never delivered through a live channel; `history` and
-  `board-audit stats` still show it. The shim ignores a `nudged` wake from
-  an older daemon, and the Stop hook fires only on a `rung` marker. The
-  Codex doorbell and the Stop hook no longer append a park request.
+  and its mail is never delivered through a live channel; the Console's
+  coordination timeline and `board-audit stats` still show it. The shim
+  ignores a `nudged` wake from an older daemon, and the Stop hook fires
+  only on a `rung` marker. The Codex doorbell and the Stop hook no longer
+  append a park request.
 - `coordination.wake.nudge_interval_seconds` is retired. A config.yaml
   that still sets it loads as before and the key does nothing; `/health`
   and `pseudolife-mcp doctor` no longer report it. The change is under
