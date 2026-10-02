@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   against it: a restart knob saved by mistake can be put back from the
   console (typing the old value used to look like no change), and the row
   says which value the next start will use.
+- The content column is centred on wide windows. On phones, touch screens
+  get ~44 px controls and 16 px form text (no zoom on focus), the topbar
+  drops the squeezed view-jump field, and the More tab marks a view that has
+  no tab of its own.
 - The build (Vite base `/ui/`) is committed under
   `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
   `frontend/public/vendor/` and is copied into the build unchanged.
