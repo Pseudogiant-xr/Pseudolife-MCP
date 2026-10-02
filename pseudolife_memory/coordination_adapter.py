@@ -199,9 +199,13 @@ class CoordinationAdapter:
         # on at ``ring_at``; ``_ring_offer`` is the same ring for the Codex
         # doorbell, which takes it through ``ring_due`` once it is due. The
         # ``.agent`` file names this address for the hook's park gate.
+        # ``_ring_unwritten`` is a due ring whose marker the filesystem
+        # refused, with its watermark; each heartbeat writes it again while
+        # that mail is pending and unshown.
         self._ring_timer = None
         self._ring_offer = None
         self._last_ring = None
+        self._ring_unwritten = None
         self._agent_written = None
         # Whether a ring reaches this session without a live channel: the
         # Stop hook reads ``.ring`` beside the digest, the Codex doorbell
@@ -334,6 +338,7 @@ class CoordinationAdapter:
         if ring == self._last_ring:
             return  # the same ring, repeated on a retried heartbeat's answer
         self._last_ring = ring
+        self._ring_unwritten = None   # superseded by the newer ring
         # The offer names the digest watermark it rings for.
         self._ring_offer = (*ring, self._digest_watermark)
         if self._ring_timer is not None:
@@ -345,17 +350,26 @@ class CoordinationAdapter:
         except RuntimeError:
             self._write_ring(ring)
 
-    def _write_ring(self, ring) -> None:
+    def _write_ring(self, ring, watermark=None) -> None:
         """Write ``<key>.ring``: the digest watermark the ring is for, then
         the decision and reason; the Stop hook fires on a ring past its
         ``.seen`` marker."""
         self._ring_timer = None
         if self._closing or self.digest_path is None:
             return
+        if watermark is None:
+            watermark = self._digest_watermark
         decision, reason, _ = ring
-        body = f"{self._digest_watermark}\n{decision} {reason}\n"
+        body = f"{watermark}\n{decision} {reason}\n"
         if self._write_private(self._ring_path(), body):
-            self._ledger("ring", self._digest_watermark, len(body), f"{decision} {reason}")
+            self._ring_unwritten = None
+            self._ledger("ring", watermark, len(body), f"{decision} {reason}")
+        else:
+            # A reader holding the marker open on Windows refuses the
+            # replace. ``_last_ring`` already took this ring, so the
+            # daemon's repeat of it is dropped: the heartbeat retries, for
+            # the watermark this attempt named.
+            self._ring_unwritten = (ring, watermark)
 
     def _write_agent(self) -> None:
         """Name this address beside the digest for the Stop hook's park
@@ -411,10 +425,21 @@ class CoordinationAdapter:
         self._refresh_digest()
         if not self._pending_count:
             self._ring_offer = None   # nothing left to ring for
+            self._ring_unwritten = None
         # After the digest, so the ring marker names the watermark that
         # lists the rung mail.
         self._write_agent()
+        # A newer ring in this answer replaces a refused one before the
+        # retry, so the newer ring's ``ring_at`` stagger holds.
         self._note_wake(result)
+        if self._ring_unwritten is not None:
+            ring, watermark = self._ring_unwritten
+            if self._read_seen() >= watermark:
+                # A hint or the prompt hook already showed the rung mail; a
+                # later digest change must not ring on it.
+                self._ring_unwritten = None
+            else:
+                self._write_ring(ring, watermark)
         observer = self.mailbox_observer
         if observer is not None:
             try:
@@ -518,12 +543,17 @@ class CoordinationAdapter:
     def _ring_armed_until(self) -> float:
         if not self.ring_path:
             return 0.0
+        # Either listener arms the ring: the marker a waiter reads is written
+        # for every rung ring, so a waiter's lease still counts once the
+        # doorbell has turned itself off.
+        lease = armed_until(self.digest_path)
         if callable(self.ring_listener):
             try:
-                return time.time() + LEASE_SECONDS if self.ring_listener() else 0.0
+                if self.ring_listener():
+                    return max(lease, time.time() + LEASE_SECONDS)
             except Exception:
-                return 0.0
-        return armed_until(self.digest_path)
+                pass
+        return lease
 
     def _read_seen(self) -> int:
         seen = self._delivered_watermark

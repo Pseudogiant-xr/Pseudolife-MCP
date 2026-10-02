@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-02 — a ring marker the filesystem refused is written later)
+- The shim took a daemon ring as handled before writing its `<key>.ring`
+  marker. When the write failed (on Windows, a reader holding the marker
+  open refuses the replace), nothing retried it, and the daemon's repeat
+  of the same ring was dropped as a duplicate, so the Stop hook and
+  `pseudolife-mcp wait-mail` slept through it (wait-mail until its 4 h
+  timeout). The shim now writes a refused marker again at each heartbeat,
+  for the digest watermark the ring was for, while that mail is pending
+  and unshown. It drops the marker once the mailbox is empty, once a hint
+  or prompt hook has shown the mail (`.seen`), or when a newer ring
+  replaces it. A ring's `ring_at` stagger is unchanged.
+- A `pseudolife-mcp wait-mail --session-id <thread>` waiter on a Codex
+  thread counted as a listener only while the Codex doorbell was healthy:
+  once the doorbell turned itself off (a CLI failure), the shim reported
+  the doorbell's state alone, the daemon answered `no_path` and the waiter
+  slept to its timeout. The waiter's lease now arms the ring either way.
+  With the doorbell off from the start (`PSEUDOLIFE_CODEX_DOORBELL=0`, or
+  no codex CLI found) a Codex thread still declares no ring path, so
+  wait-mail there only times out; the configuration guide says so.
+
 ### Fixed (2026-10-02 — principal admission errors through the shim)
 - The stdio shim preserves the daemon's structured `principals_unavailable`
   admission refusal through both HTTP transports. Only the exact JSON-RPC
