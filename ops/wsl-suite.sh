@@ -55,6 +55,16 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
         exit 2
     fi
     root="$base/work/$name"
+    mkdir -p "$base/work"
+    # One run at a time per test copy: a second run of the same checkout
+    # would check out and clean under the first. The descriptor passes to
+    # pytest through exec, so the lock lasts the run; Python's subprocesses
+    # close it, so a leaked test daemon cannot keep it.
+    exec 9>"$root.lock"
+    if ! flock -n 9; then
+        echo "wsl-suite: another run is using the test copy of $name; waiting" >&2
+        flock 9
+    fi
     if [[ ! -d "$root/.git" ]]; then
         mkdir -p "$base/work"
         git clone --quiet --shared --no-checkout "$mirror" "$root"

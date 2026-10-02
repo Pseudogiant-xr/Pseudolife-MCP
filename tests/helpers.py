@@ -101,6 +101,17 @@ def pg_reachable(url: str, timeout: float = 3.0) -> bool:
         ) from None
 
 
+def private_bank_name(base: str, label: str) -> str:
+    """``base`` with ``label`` inserted before the run's pid suffix, which
+    stays last (``..._<label>_123``, or ``..._<label>_wsl123`` inside WSL;
+    see pg_defaults.PID_NAMESPACE), so pruning still reads the pid; a base
+    without one gets ``_<label>`` appended."""
+    pattern = r"_((?:wsl)?\d+)$"
+    if re.search(pattern, base):
+        return re.sub(pattern, rf"_{label}_\1", base)
+    return f"{base}_{label}"
+
+
 @contextmanager
 def private_bank(url: str, label: str):
     """A private database on the test server, for a daemon of its own.
@@ -119,9 +130,7 @@ def private_bank(url: str, label: str):
     from tests.pg_defaults import (
         RedactedUrl, conninfo_dbname, conninfo_with_dbname)
 
-    base = conninfo_dbname(url)
-    name = (re.sub(r"_(\d+)$", rf"_{label}_\1", base)
-            if re.search(r"_\d+$", base) else f"{base}_{label}")
+    name = private_bank_name(conninfo_dbname(url), label)
     admin = RedactedUrl(conninfo_with_dbname(url, "postgres"))
     with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
         conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')

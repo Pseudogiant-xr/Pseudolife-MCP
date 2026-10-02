@@ -45,6 +45,18 @@ def test_a_run_inside_wsl_tags_its_database_names():
         assert pg_defaults.own_run_pid(other, namespace="wsl") is None
 
 
+def test_a_private_bank_keeps_the_runs_suffix_last_so_pruning_finds_it():
+    from tests.helpers import private_bank_name
+
+    assert private_bank_name("pseudolife_memory_test_123", "shim") == \
+        "pseudolife_memory_test_shim_123"
+    assert private_bank_name("pseudolife_memory_test_wsl123", "shim") == \
+        "pseudolife_memory_test_shim_wsl123"
+    assert private_bank_name("ci_fixed_db", "shim") == "ci_fixed_db_shim"
+    suffix = private_bank_name("pseudolife_memory_test_wsl123", "shim").rsplit("_", 1)[1]
+    assert pg_defaults.own_run_pid(suffix, namespace="wsl") == 123
+
+
 class _PruneConn:
     def __init__(self, names):
         self.names, self.dropped = names, []

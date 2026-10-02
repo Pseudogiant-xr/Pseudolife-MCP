@@ -182,6 +182,10 @@ took 143 CUDA OOMs.
   `lease check full-suite` sees it through the board only (its local-lock
   line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
   with the lock, so it is never a way to start a Windows full run here.
+  Rebase a branch onto master before its first WSL run: code from before
+  the WSL database-name tag (2026-10-02) names its databases after a WSL
+  pid that Windows runs cannot see, and any Windows pytest session drops
+  them mid-run.
 - **Two machines, one full suite each** (maintainer decision 2026-10-02):
   the Windows host (WSL) and the maintainer's homelab box each allow one
   full suite, so two can run at once — never two on one machine. From the
@@ -201,11 +205,14 @@ took 143 CUDA OOMs.
     check full-suite` on the Windows host, `lease check full-suite@box` on
     the box. A suite on the other machine does not load yours.
   - **On the box, suites never touch the live bank's Postgres** (5433):
-    `dev`'s shells source `~/.config/pseudolife-suite/env`, which points
-    `PSEUDOLIFE_TEST_DATABASE_URL` at the separate test server on 5434.
+    the suite user's shells source `~/.config/pseudolife-suite/env`, which
+    points `PSEUDOLIFE_TEST_DATABASE_URL` at the separate test server on
+    5434, and a dispatched run refuses to start without that variable.
     Sessions there run `python -m pytest tests/` natively (Linux needs no
     WSL), under the same one-suite lock. Dispatched runs add a systemd
-    `MemoryMax=16G` scope, since the box also serves the live daemon.
+    `MemoryMax=16G` scope, since the box also serves the live daemon, which
+    needs password-free sudo that may preserve the environment
+    (`NOPASSWD:SETENV:` for `systemd-run`, or `NOPASSWD: ALL`).
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot
