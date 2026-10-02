@@ -2039,3 +2039,77 @@ def test_codex_legacy_grant_requires_retained_current_park_audit_evidence(store,
     assert answer["wake"]["decision"] == "attention"
     assert answer["wake"]["reason"] == "no_steer_path"
     assert store.storage.conn.execute("SELECT served_at FROM coordination_wakes").fetchone()[0] is None
+
+
+@pytest.mark.parametrize("transition", ["done", "unparked", "refined", "acked", "expired"])
+def test_retained_codex_offer_cannot_queue_after_authoritative_withdrawal(store, tmp_path, monkeypatch, transition):
+    import asyncio
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    from tests.test_codex_doorbell import THREAD, _stub, _calls, _settle
+    monkeypatch.setenv('PSEUDOLIFE_DIGEST_DIR', str(tmp_path))
+    sender = store.register('alice')
+    recipient = store.register('alice', capabilities={'codex': False, 'ring': True})
+    store.test_time[0] = 1999.0
+    store.update(*creds(recipient), park_reason='blocked', park_needs='the review',
+                 park_clear_by='maintainer')
+    store.test_time[0] = 2000.0
+    sent = store.send(*creds(sender), to=recipient['agent_id'], text='urgent dependency',
+                      request_id='authorized-park', urgent=True,
+                      expires_at=2003.0 if transition == 'expired' else None)
+    store.test_time[0] = 2001.0
+    attached = store.attach(*creds(recipient), attachment_id='current-shim', ring=True,
+                            ring_armed_until=2061.0)
+    assert attached['wake']['decision'] == 'rung'
+    command, log = _stub(tmp_path)
+
+    async def drive():
+        now = [0.0]
+        adapter = CoordinationAdapter('http://127.0.0.1:1', 'fixture-token',
+            state_path=tmp_path / 'unused-state.json', delivery_transport='codex',
+            digest_path=tmp_path / 'digest.txt')
+        adapter._update_pending_count(attached)
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        bell.watch(THREAD, adapter)
+        try:
+            # Cancellation can prevent the attaching call's hint from being shown.
+            store.test_time[0] = 2002.0
+            if transition == 'done':
+                store.update(*creds(recipient), park_reason='done')
+            elif transition == 'unparked':
+                store.update(*creds(recipient), status='working again')
+            elif transition == 'refined':
+                store.update(*creds(recipient), park_needs='a different review')
+            elif transition == 'acked':
+                store.ack(*creds(recipient), message_id=sent['message_id'])
+            plain = store.send(*creds(sender), to=recipient['agent_id'], text='ordinary follow-up',
+                               request_id='after-transition')
+            assert plain['wake']['decision'] in {'not_needed', 'hinted', 'withheld'}
+            store.test_time[0] = 2042.0
+            answer = store.heartbeat(*creds(recipient), attachment_id='current-shim',
+                generation=attached['generation'], ring_armed_until=2102.0)
+            now[0] = 60.0
+            adapter._update_pending_count(answer)
+            await _settle(bell)
+            assert answer['wake'] is None or answer['wake']['decision'] == 'attention'
+            assert not _calls(log), 'withdrawn current-park authorization must not create a fresh native queue'
+            assert adapter.ring_due() is None
+            assert not (tmp_path / 'digest.ring').exists()
+            if transition == 'refined':
+                # A new grant for the current need may still legitimately ring.
+                store.test_time[0] = 2043.0
+                fresh = store.send(*creds(sender), to=recipient['agent_id'], text='new urgent dependency',
+                                   request_id='current-park', urgent=True)
+                assert fresh['wake']['decision'] == 'rung'
+                store.test_time[0] = 2044.0
+                current = store.heartbeat(*creds(recipient), attachment_id='current-shim',
+                    generation=attached['generation'], ring_armed_until=2104.0)
+                now[0] = 120.0
+                adapter._update_pending_count(current)
+                await _settle(bell)
+                assert len(_calls(log)) == 1
+        finally:
+            await bell.aclose()
+            if adapter._ring_timer is not None:
+                adapter._ring_timer.cancel()
+    asyncio.run(drive())

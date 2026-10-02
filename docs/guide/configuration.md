@@ -971,6 +971,10 @@ Hook setup sets that approval when you approve the hooks
   Clearing, expiry or refinement invalidates the old grant, even when clock
   stamps repeat or go backwards. Missing audit evidence stays pending for
   pull/hints; serving does not rewrite the grant or spend its caps again.
+  Each attach or heartbeat replaces the adapter's ring authorization. A
+  withdrawn or malformed offer clears its retained offer, delayed write and
+  refused-marker retry, with best-effort removal of an existing ring marker.
+  Withdrawal does not resolve a notice already submitted to the native queue.
 - **What it says.** Queued text is a user message, so it contains only fixed
   agent-origin instructions, a pending count and a system-generated opaque
   nonce. Peer text, sender labels and message IDs never enter that notice.

@@ -21,6 +21,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is cleared, expires or is refined. Serving requires retained audit ordering
   proving the grant follows the unchanged current park; missing evidence
   stays pending for pull/hints. Historical grant and cap records are retained.
+- When an attach or heartbeat withdraws a Codex ring, the adapter drops its
+  retained offer, cancels delayed writes and refused-marker retries, and
+  removes its ring marker. An already accepted native notice stays unresolved
+  until its exact prompt-hook receipt; repeated valid grants stay deduplicated.
 - An ambiguous bridge failure no longer queues an alternate notice. Current
   desktop queued-notice prompt-hook emission remains unverified; missing
   exact receipts retain pending state. The client hooks must be updated to

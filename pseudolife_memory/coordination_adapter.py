@@ -320,22 +320,36 @@ class CoordinationAdapter:
         self._ring_offer = None
         return offer[0], offer[1]
 
+    def _withdraw_ring(self) -> None:
+        """Withdraw local authorization, never an outstanding native notice."""
+        self._ring_offer = None
+        self._ring_unwritten = None
+        if self._ring_timer is not None:
+            self._ring_timer.cancel()
+            self._ring_timer = None
+        path = self._ring_path()
+        if path is not None:
+            with suppress(OSError):
+                path.unlink()
+
     def _note_wake(self, result) -> None:
-        """Take a ``wake`` off an attach or heartbeat answer. Anything but a
-        well-formed ``rung`` ring is ignored: a daemon from before v49 sends
-        none, one from before 2026-10-02 may still send ``nudged`` (an idle
-        session that never parked; regular mail never wakes now), and
-        nothing here may ring on a guess."""
+        """Take the current authorization off an attach or heartbeat answer.
+        A missing or invalid Codex ring withdraws its offer and marker paths;
+        old non-Codex daemons retain their offer-lapsed retry contract.
+        Nothing here may ring on a guess."""
+        codex = "codex" in self._registration["capabilities"]
         wake = result.get("wake")
         if not isinstance(wake, dict):
+            if codex:
+                self._withdraw_ring()
             return
         decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
-        if (decision == "attention" and "codex" in self._registration["capabilities"]
+        if (decision == "attention" and codex
                 and isinstance(reason, str) and type(ring_at) in (int, float)
                 and math.isfinite(ring_at)):
             attention = (reason, float(ring_at))
             self._attention_pending = True
-            self._ring_offer = None
+            self._withdraw_ring()
             if attention != self._last_attention:
                 self._last_attention = attention
                 self._ledger("attention", self._digest_watermark, 0,
@@ -345,6 +359,8 @@ class CoordinationAdapter:
         if (decision != "rung" or not isinstance(reason, str)
                 or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
                 or not math.isfinite(ring_at)):
+            if codex:
+                self._withdraw_ring()
             return
         reason = "".join(c for c in " ".join(reason.split())[:60]
                          if c.isalnum() or c in " _-") or "unknown"

@@ -1479,3 +1479,44 @@ def test_fifo_pending_record_is_rejected_without_blocking(tmp_path):
     result = subprocess.run([sys.executable, "-c", code], capture_output=True,
                             text=True, timeout=3)
     assert result.returncode == 0 and result.stdout.strip() == "False"
+
+
+def test_authoritative_wake_withdrawal_does_not_resolve_an_accepted_native_notice(tmp_path, monkeypatch):
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    from tests.test_coordination_adapter import _preview
+
+    monkeypatch.setenv("PSEUDOLIFE_DIGEST_DIR", str(tmp_path))
+    command, log = _stub(tmp_path)
+
+    async def drive():
+        now = [0.0]
+        adapter = CoordinationAdapter("http://127.0.0.1:1", "fixture-token",
+            state_path=tmp_path / "unused-state.json", delivery_transport="codex",
+            digest_path=tmp_path / "digest.txt")
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        bell.watch(THREAD, adapter)
+        try:
+            now[0] = 60.0
+            adapter._update_pending_count({"pending_count": 1, "pending_preview": _preview("m1"),
+                "wake": {"decision": "rung", "reason": "urgent", "ring_at": 0.0}})
+            await _settle(bell)
+            assert len(_calls(log)) == 1
+            pending = bell._bells[THREAD].pending_notice
+            record = pending.path.read_bytes()
+            now[0] = 120.0
+            adapter._update_pending_count({"pending_count": 2, "pending_preview": _preview("m1", "m2"),
+                                          "wake": None})
+            await _settle(bell)
+            assert bell._bells[THREAD].outstanding
+            assert pending.path.read_bytes() == record
+            assert not pending.resolved()
+            now[0] = 180.0
+            adapter._update_pending_count({"pending_count": 3, "pending_preview": _preview("m1", "m2", "m3"),
+                "wake": {"decision": "rung", "reason": "urgent", "ring_at": 1.0}})
+            await _settle(bell)
+            assert len(_calls(log)) == 1
+        finally:
+            await bell.aclose()
+            if adapter._ring_timer is not None:
+                adapter._ring_timer.cancel()
+    asyncio.run(drive())
