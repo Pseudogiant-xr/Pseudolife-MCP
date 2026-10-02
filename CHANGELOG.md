@@ -12,10 +12,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   second, and mouse input stalled 82-347 ms in exactly those seconds while
   CPU, memory, disk and the compositor stayed normal. `ops/wsl-suite.ps1`
   now runs a checkout's suite inside WSL instead, where starting a process
-  never touches the Windows console. It keeps a uv environment per checkout
-  (CPU torch, as CI), forwards the board bearer so the run still shows as
-  the `full-suite` lease, and returns pytest's exit code. `ops/wsl-suite.sh`
-  is its Linux half and works from any Linux shell.
+  never touches the Windows console. It tests the checkout's committed HEAD
+  from a copy on WSL's own filesystem, fetched through a mirror so only new
+  objects cross `/mnt/c`: Linux git cannot read a Windows worktree, and a
+  run over `/mnt/c` roughly doubled driver (DPC) work on the host's first
+  CPU. A checkout with uncommitted changes is refused. It keeps a uv
+  environment per checkout (CPU torch, as CI), forwards the board bearer so
+  the run still shows as the `full-suite` lease, and returns pytest's exit
+  code. `ops/wsl-suite.sh` is its Linux half and works from any Linux shell.
 - A lock taken in WSL cannot see one taken on Windows, so a host that moves
   to WSL needs Windows full runs stopped. The suite lock gains a per-machine
   setting: `PSEUDOLIFE_SUITE_WINDOWS`, else a `full-suite.windows` file in

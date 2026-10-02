@@ -173,7 +173,9 @@ took 143 CUDA OOMs.
   (`PSEUDOLIFE_SUITE_WINDOWS=refuse|allow` overrides it; `allow` only for a
   deliberate run with no WSL suite going). Targeted runs on Windows are
   unaffected, and CI's Windows job covers Windows-only behaviour. The
-  launcher keeps a uv environment per checkout under `~/.venvs/pseudolife`
+  launcher tests the worktree's committed HEAD from a copy on WSL's own
+  filesystem (it refuses uncommitted changes to tracked files: commit
+  first), keeps a uv environment per checkout under `~/.venvs/pseudolife`
   in WSL, needs the worktree's `ops/.env` like any run and the models in
   WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and forwards the
   bearer, so the run still shows as the `full-suite` lease; from Windows,
