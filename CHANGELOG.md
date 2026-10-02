@@ -6,6 +6,77 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
+- Codex hook setup could fail as a whole on the optional `memory_message`
+  approval step it promised never to fail on. `ops/setup-codex-hooks.py`
+  caught only Codex's refusals there, so an `OSError` (a `config.toml`
+  locked by another process on Windows, a permission error, or Codex
+  exiting mid-write) escaped to the outer handler and reported the hooks
+  unavailable. The step now reports the approval `unavailable`, naming
+  only the error type, and setup finishes ready. Closing the Codex
+  connection no longer raises when Codex has already exited with a request
+  still buffered (`pseudolife_memory/codex_connection.py`), which would
+  otherwise have re-raised the pipe error on the way out. Other unexpected
+  errors still reach setup's own handler, and the required hook trust
+  step still fails setup when it cannot back up `config.toml`.
+
+### Fixed (2026-10-03 — eval benches inside WSL no longer lose their database to a Windows test run)
+- Three eval harnesses still named their private databases with a bare
+  pid: `evals/epistemic_bench.py` (`pseudolife_memory_bench_<pid>`),
+  `evals/coordination_audit_volume.py`
+  (`pseudolife_memory_bench_audit_<pid>`) and
+  `evals/coordination_bench.py`. The test suite prunes
+  `pseudolife_memory_bench_*` databases whose pid is gone, and a WSL pid
+  is invisible to Windows, so a Windows pytest session could drop a bench
+  running in WSL mid-run, as it did a WSL suite's on 2026-10-02. They now
+  use the test fixtures' run suffix (`wsl<pid>` inside WSL), which a
+  Windows run's pruner leaves alone; the epistemic bench's drop guard
+  follows the same name. The benches keep importing the helper from
+  `tests/pg_defaults.py`, as two of them already did.
+- WSL detection no longer depends on the kernel release saying
+  "microsoft": `WSL_DISTRO_NAME`, `WSL_INTEROP` or a `WSLInterop*` binfmt
+  entry also count, so a custom WSL kernel still tags its database names.
+
+### Fixed (2026-10-03 — a token the daemon cannot check is reported as such)
+- When the daemon cannot check invited machines' tokens (its database is
+  not answering), it refuses the request before any tool runs: a
+  `principals_unavailable` 503 from its HTTP gate, or JSON-RPC error
+  -32003 after admission. When the refusal came after the tool call was
+  sent, the stdio shim reported it as "the memory operation may have
+  completed" (`operation_outcome: unknown`). It also replaced the
+  refusal's data with a generic `protocol` or `service_unavailable`
+  classification, and sent the 503 as -32603. The shim now answers -32003
+  with `classification: principals_unavailable`,
+  `operation_outcome: not_dispatched` (no tool ran), the daemon's
+  `status`/`error` data, and the same hint `doctor` prints. Only the
+  daemon's exact refusal counts: a small JSON body for the very request
+  that failed, or the exact JSON-RPC error. Anything that merely resembles
+  it keeps the unknown-outcome warning. The shim is a client install:
+  deploy with the client step (`ops/update.ps1 -All`).
+- The Console explained an invited machine's 403 on an operator-only
+  action (`operator_principal_required`: saving the config or the daemon
+  notice) as "a tokenless daemon serves loopback browsers only", and a 503
+  `principals_unavailable` as a bare HTTP code. Each now has its own
+  explanation.
+
+### Fixed (2026-10-03 — a dispatched suite refuses the live bank at any address)
+- A full suite dispatched to the second machine could still reach that
+  machine's live bank. The launchers refused a test server on host port
+  5433, but the live bank's Postgres also answers on its container's
+  Docker-network address (port 5432), and an explicit
+  `PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_BENCH_ADMIN_URL` was not
+  port-checked at all. Nothing in the suite looks such an address up, so
+  it took a misconfigured env file, but nothing refused one. A dispatched
+  run now asks every server it would use (the default admin URL and both
+  explicit URLs) for its database list before anything else connects, and
+  stops when one holds a production bank (`pseudolife_memory`, or the
+  database the exported daemon DSN named). A server that refuses the
+  connection, has no address or rejects the login is passed over; a
+  timeout, a URL naming several hosts or one that does not parse refuses,
+  and a refused run skips its exit-time bench cleanup on that server.
+  Undispatched runs are unchanged: on the Windows host the dev server is
+  the live bank's server by design.
+
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
   the maintainer's workstation. `ops/remote-suite.ps1` now runs a

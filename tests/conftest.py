@@ -362,6 +362,22 @@ def pytest_configure(config: pytest.Config) -> None:
             "so the test/bench reset guard cannot identify the production "
             "bank. Unset it — the suite never needs it — or add dbname=.")
 
+    # Then, on a run dispatched to a second machine, refuse a server that
+    # holds a production bank under any address (tests/pg_defaults.py,
+    # dispatched_live_bank_refusal). Once, in the process that started the
+    # run: xdist workers inherit its settings.
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        from tests.pg_defaults import dispatched_live_bank_refusal
+
+        refusal = dispatched_live_bank_refusal()
+        if refusal:
+            # The exit-time bench drop would connect to the refused server.
+            if _bench_pin is not None:
+                import atexit
+
+                atexit.unregister(_drop_run_bench_db)
+            raise pytest.UsageError(refusal)
+
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
     # What it read from the checkout by now (this file, its imports, and
