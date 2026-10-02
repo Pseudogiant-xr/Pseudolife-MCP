@@ -513,7 +513,8 @@ guide records this exemption and its limit next to the procedure.
 
 Exit codes: 0 moved; 1 failed and rolled back (source running again);
 2 usage or declined; 4 preflight refused, nothing changed; 5 the bank moved
-but a later step (re-pointing, final checks) failed.
+but a later step (re-pointing, final checks) failed; 6 failed and the
+rollback could not finish (the error and the move record say what is left).
 
 ## Where the code lives
 

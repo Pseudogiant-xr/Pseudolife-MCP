@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-02 — `pseudolife-mcp move` review)
+- A dropped ssh connection (exit 255) is always a failure: it was read as
+  "the target's ops/.env is missing", which overwrote the file with no
+  backup and let the rollback delete it. The env read tells present,
+  missing and error apart, and the replaced file keeps its owner and mode.
+- SIGTERM and SIGHUP roll the move back like Ctrl-C, and the rollback
+  ignores Ctrl-C; every progress flag, with the manual rollback, is written
+  to the move record as it flips. A rollback that cannot finish exits 6.
+- The resume marker lives on the target host outside `/data` (the state
+  restore replaced it), and is removed last. The target's unattended update
+  and restart policy are paused for the move, and `/data/move.json` keeps
+  the restored target from starting outside it (the daemon refuses to start
+  while it exists). The source's restart policy is set to `no` once moved.
+- The restored bank identity is compared in Postgres before the start; the
+  fingerprint wait has a 180 s deadline with a nudge a minute; the target's
+  running environment is checked against the carried values by SHA-256.
+- Connections to the source database are cut off before the dump, and the
+  fence fails if any are still there. ssh keepalives, `docker stop -t 120`,
+  a target tool check, and the report names the target's files that held
+  its replaced token. `ops/restore.*` take their safety dump of the
+  database being replaced.
+
 ### Added (2026-10-02 — `pseudolife-mcp move`)
 - `pseudolife-mcp move --to <ssh-target>` moves a Docker-tier bank to another
   Docker-tier checkout host over key-based ssh with no lost writes: it stops

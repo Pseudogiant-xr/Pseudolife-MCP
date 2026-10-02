@@ -7,7 +7,10 @@ small model of both hosts (:class:`World`): it answers each command from
 the model's state, changes the state the way the real command would, and
 records every call, so a test can assert what ran, in what order, and what
 never ran. A failure is injected by naming a substring of the command that
-should fail.
+should fail (or a predicate over the call); ``fail255`` makes ssh itself
+fail on that call, the way a dropped connection does. The target's ``/data``
+volume is modelled apart from its host files, and the fake ``restore.sh``
+wipes it, as the real state restore does.
 
 The PG-backed test at the end checks the fence itself against the bench
 Postgres: a database with ``ALLOW_CONNECTIONS false`` refuses a new
@@ -20,6 +23,7 @@ import hashlib
 import io
 import json
 import os
+import signal
 import tarfile
 from pathlib import Path
 
@@ -33,6 +37,8 @@ TARGET_URL = "http://100.64.0.9:8765"
 LOCAL = "http://127.0.0.1:8765"
 SOURCE_BANK = "a" * 16
 TARGET_BANK = "b" * 16
+SOURCE_META = '"5f0c6a0e-1111-4222-8333-944444444444"'
+TARGET_META = '"5f0c6a0e-9999-4888-8777-966666666666"'
 SOURCE_TOKEN = "src-singular-token-0123456789abcdef"
 LAPTOP_TOKEN = "laptop-token-0123456789abcdef0123"
 CI_TOKEN = "ci-token-fedcba9876543210fedcba98"
@@ -40,6 +46,8 @@ TARGET_OLD_TOKEN = "target-installer-token-5555555555"
 SOURCE_PG_PASSWORD = "pgsecret-source-1234"
 TARGET_PG_PASSWORD = "pgsecret-target-5678"
 SECRETS = (SOURCE_TOKEN, LAPTOP_TOKEN, CI_TOKEN, TARGET_OLD_TOKEN, SOURCE_PG_PASSWORD, TARGET_PG_PASSWORD)
+SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
+REGISTRATION = "/root/.pseudolife-mcp/default.token"
 
 SOURCE_ENV = [
     f"PSEUDOLIFE_MCP_DATABASE_URL=postgresql://pseudolife:{SOURCE_PG_PASSWORD}@pseudolife-pg:5432/pseudolife_memory",
@@ -79,14 +87,13 @@ def _tar(members: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
-def _plain_tar(members: dict[str, bytes]) -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w") as tar:
-        for name, data in members.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-    return buffer.getvalue()
+def _env_from_dotenv(text: str) -> list[str]:
+    env = dict(item.split("=", 1) for item in TARGET_ENV)
+    for line in text.splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            env[key.strip()] = value.strip().strip("'")
+    return [f"{k}={v}" for k, v in env.items()]
 
 
 class Call:
@@ -98,26 +105,43 @@ class Call:
     @property
     def remote(self) -> str | None:
         """The remote command of an ``ssh`` call, else ``None``."""
-        if self.argv[:3] == ["ssh", "-o", "BatchMode=yes"] and len(self.argv) == 5:
-            return self.argv[4]
+        if self.argv[:len(SSH)] == SSH and len(self.argv) == len(SSH) + 2:
+            return self.argv[-1]
         return None
 
     def __repr__(self):
         return f"Call({self.text!r})"
 
 
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += max(seconds, 0.5)
+
+
 class World:
     """Both hosts, as far as a move can see them."""
 
-    def __init__(self, *, fail=(), target_empty=True, exposed=True, target_schema=52,
+    def __init__(self, *, fail=(), fail255=(), target_empty=True, exposed=True, target_schema=52,
                  target_bank=TARGET_BANK, source_bank=SOURCE_BANK, bank_after_start=SOURCE_BANK,
-                 count_override=None, corrupt_copy=False, marker=None, connect_exit=0,
-                 checkout=True, ssh_ok=True, source_healthy=True, source_docker=True,
-                 target_healthy=True, expose_exit=0, stop_target_fails=False,
-                 tar_members=None):
+                 bank_appears_at=None, count_override=None, corrupt_copy=False, markers=None,
+                 connect_exit=0, connect_reply=None, checkout=True, posix=True, source_healthy=True,
+                 source_docker=True, target_healthy=True, expose_exit=0, stop_target_fails=False,
+                 tar_members=None, target_pg_running="true", target_meta_after=SOURCE_META,
+                 target_up_after_start=True, env_mismatch=False, still_running_after_stop=False,
+                 stop_exit_code=0, lingering_backends=0, target_timer="enabled", source_timer="enabled",
+                 source_policy="unless-stopped", target_policy="unless-stopped", grep_hits=(REGISTRATION,),
+                 dotenv=TARGET_DOTENV, hooks=None):
         self.fail = tuple(fail)
+        self.fail255 = tuple(fail255)
         self.calls: list[Call] = []
-        self.gets: list[tuple[str, bool]] = []
+        self.gets: list[tuple[str, bool, float]] = []
+        self.clock = Clock()
         self.source_running = True
         self.source_healthy = source_healthy
         self.source_docker = source_docker
@@ -130,25 +154,44 @@ class World:
         self.target_bank = target_bank
         self.source_bank = source_bank
         self.bank_after_start = bank_after_start
+        self.bank_appears_at = bank_appears_at
+        self.started_at = None
         self.target_restored = False
-        self.marker = marker
-        self.files: dict[str, bytes] = {}
-        self.dotenv = TARGET_DOTENV
+        self.markers = dict(markers or {})          # host path -> marker dict
+        self.files: dict[str, bytes] = {}           # target host files
+        self.data_files: dict[str, bytes] = {"/data/config.yaml": b"target\n"}   # target /data volume
+        self.dotenv = dotenv
         self.exposed = exposed
         self.count_override = count_override or {}
         self.corrupt_copy = corrupt_copy
         self.connect_exit = connect_exit
+        self.connect_reply = connect_reply
         self.checkout = checkout
-        self.ssh_ok = ssh_ok
+        self.posix = posix
         self.expose_exit = expose_exit
         self.stop_target_fails = stop_target_fails
         self.tar_members = tar_members if tar_members is not None else {
             "./config.yaml": b"memory: {}\n", "./last-backup.json": b"{}\n"}
+        self.target_pg_running = target_pg_running
+        self.target_meta_after = target_meta_after
+        self.target_up_after_start = target_up_after_start
+        self.env_mismatch = env_mismatch
+        self.still_running_after_stop = still_running_after_stop
+        self.stop_exit_code = stop_exit_code
+        self.lingering_backends = lingering_backends
+        self.target_timer = target_timer
+        self.source_timer = source_timer
+        self.source_policy = source_policy
+        self.target_policy = target_policy
+        self.grep_hits = tuple(grep_hits)
+        self.hooks = hooks or {}
+        self.target_live_env = list(TARGET_ENV)
         self.overlap = False   # ever a running target beside a running source on the moved bank
 
     # -- helpers ---------------------------------------------------------
-    def failing(self, text: str) -> bool:
-        return any(needle in text for needle in self.fail)
+    @staticmethod
+    def _matches(needles, call) -> bool:
+        return any(needle(call) if callable(needle) else needle in call.text for needle in needles)
 
     def _check_overlap(self):
         if self.source_running and self.target_running and self.target_restored:
@@ -158,22 +201,33 @@ class World:
     def run(self, argv, stdin=None):
         call = Call([str(a) for a in argv], stdin)
         self.calls.append(call)
-        if self.failing(call.text):
+        for needle, hook in self.hooks.items():
+            if needle in call.text:
+                hook(self, call)
+        if call.remote is not None and self._matches(self.fail255, call):
+            return 255, b"", b"Connection to box closed by remote host."
+        if self._matches(self.fail, call):
             return 1, b"", b"injected failure"
         if call.remote is not None:
             return self.remote(call.remote, stdin)
         return self.local(call.argv, stdin)
 
     def get_json(self, url, token=None):
-        self.gets.append((url, token is not None))
+        self.gets.append((url, token is not None, self.clock.now))
         if url == LOCAL + "/health":
             if not (self.source_running and self.source_healthy):
                 return None
             return {"status": "ok", "schema": 52, "auth": True, "bank": self.source_bank, "version": "0.15.0"}
         if url == TARGET_URL + "/health":
-            if not self.target_running or self.failing("GET " + url):
+            if not self.target_running or self._matches(self.fail, Call(["GET", url], None)):
                 return None
-            bank = self.bank_after_start if self.target_restored else self.target_bank
+            if self.target_restored and not self.target_up_after_start:
+                return None
+            bank = self.target_bank
+            if self.target_restored:
+                bank = self.bank_after_start
+                if self.bank_appears_at is not None and self.clock.now - self.started_at < self.bank_appears_at:
+                    bank = None
             return {"status": "ok", "schema": self.target_schema, "auth": True, "bank": bank}
         if url == TARGET_URL + "/api/stats":
             return {"entries": 2}
@@ -186,14 +240,19 @@ class World:
                 if not self.source_docker:
                     return 1, b"", b"Error: No such container: pseudolife-mcp-daemon"
                 return 0, json.dumps([{"Config": {"Env": SOURCE_ENV, "Image": "pseudolife-daemon:0.15.0"},
-                                       "State": {"Running": self.source_running}}]).encode(), b""
-            return 0, (b"true\n" if self.source_running else b"false\n"), b""
+                                       "State": {"Running": self.source_running},
+                                       "HostConfig": {"RestartPolicy": {"Name": self.source_policy}}}]).encode(), b""
+            running = self.source_running or self.still_running_after_stop
+            return 0, f"{'true' if running else 'false'} {0 if running else self.stop_exit_code}\n".encode(), b""
         if argv[:2] == ["docker", "stop"]:
             self.source_running = False
             return 0, b"", b""
         if argv[:2] == ["docker", "start"]:
             self.source_running = True
             self._check_overlap()
+            return 0, b"", b""
+        if argv[:2] == ["docker", "update"]:
+            self.source_policy = argv[2].split("=", 1)[1]
             return 0, b"", b""
         if argv[:3] == ["docker", "exec", "pseudolife-mcp-postgres"]:
             if "pg_dump" in argv:
@@ -209,6 +268,10 @@ class World:
                 return 0, b"t\n", b""
             elif "FROM principals" in sql:
                 return 0, b"laptop\nphone\n", b""
+            elif "coordination_bank_id" in sql:
+                return 0, (SOURCE_META + "\n").encode(), b""
+            elif "count(*) FROM pg_stat_activity" in sql:
+                return 0, f"{self.lingering_backends}\n".encode(), b""
             return 0, b"", b""
         if argv[:3] == ["docker", "exec", "pseudolife-mcp-daemon"] and "du" in argv:
             return 0, b"2048\t/data\n", b""
@@ -221,32 +284,60 @@ class World:
             self.moved = True
             return 0, b"", b""
         if "connect" in argv:
-            return self.connect_exit, json.dumps({"exit": self.connect_exit, "rows": []}).encode(), b""
-        if argv[0] in ("systemctl", "schtasks"):
+            reply = self.connect_reply if self.connect_reply is not None else {"exit": self.connect_exit, "rows": []}
+            return self.connect_exit, json.dumps(reply).encode(), b""
+        if argv[:3] == ["systemctl", "--user", "is-enabled"]:
+            return (0 if self.source_timer == "enabled" else 1), f"{self.source_timer}\n".encode(), b""
+        if argv[:3] == ["systemctl", "--user", "disable"]:
+            self.source_timer = "disabled"
+            return 0, b"", b""
+        if argv[:3] == ["systemctl", "--user", "enable"]:
+            self.source_timer = "enabled"
+            return 0, b"", b""
+        if argv[:2] == ["schtasks", "/Query"]:
+            enabled = "true" if self.source_timer == "enabled" else "false"
+            return 0, f"<Task><Settings><Enabled>{enabled}</Enabled></Settings></Task>".encode(), b""
+        if argv[:2] == ["schtasks", "/Change"]:
+            self.source_timer = "enabled" if "/ENABLE" in argv else "disabled"
             return 0, b"", b""
         raise AssertionError(f"unexpected local command: {text}")
 
     def remote(self, cmd, stdin):
-        if not self.ssh_ok:
-            return 255, b"", b"Permission denied (publickey)."
+        remote_dir = None
         if cmd == "true":
             return 0, b"", b""
-        if cmd.startswith("test -e"):
-            return (0 if self.dotenv is not None else 1), b"", b""
+        if cmd.startswith("command -v curl"):
+            return (0 if self.posix else 127), b"", b""
         if cmd.startswith("test -f"):
             return (0 if self.checkout else 1), b"", b""
         if cmd.startswith("grep -q -- --no-start"):
             return 0, b"", b""
+        if cmd.startswith("grep -lsF -f -"):
+            if stdin and TARGET_OLD_TOKEN.encode() in stdin:
+                return 0, "".join(f"{hit}\n" for hit in self.grep_hits).encode(), b""
+            return 1, b"", b""
         if cmd.startswith("docker inspect --type container pseudolife-mcp-daemon"):
-            return 0, json.dumps([{"Config": {"Env": TARGET_ENV, "Image": "pseudolife-daemon:0.15.0"},
-                                   "State": {"Running": self.target_running}}]).encode(), b""
+            return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0"},
+                                   "State": {"Running": self.target_running},
+                                   "HostConfig": {"RestartPolicy": {"Name": self.target_policy}}}]).encode(), b""
         if cmd.startswith("docker inspect -f"):
-            return 0, b"true\n", b""
+            return 0, f"{self.target_pg_running}\n".encode(), b""
         if cmd.startswith("curl -fsS"):
             if not (self.target_running and self.target_healthy):
                 return 7, b"", b"connection refused"
             return 0, json.dumps({"status": "ok", "schema": self.target_schema, "auth": True,
                                   "bank": self.target_bank}).encode(), b""
+        if cmd.startswith("systemctl --user is-enabled"):
+            return (0 if self.target_timer == "enabled" else 1), f"{self.target_timer}\n".encode(), b""
+        if cmd.startswith("systemctl --user disable"):
+            self.target_timer = "disabled"
+            return 0, b"", b""
+        if cmd.startswith("systemctl --user enable"):
+            self.target_timer = "enabled"
+            return 0, b"", b""
+        if cmd.startswith("docker update --restart="):
+            self.target_policy = cmd.split()[2].split("=", 1)[1]
+            return 0, b"", b""
         if "expose status" in cmd:
             body = {"exposed": True, "url": TARGET_URL} if self.exposed else {"exposed": False, "url": None}
             return 0, json.dumps(body).encode(), b""
@@ -258,10 +349,14 @@ class World:
         if cmd.startswith("mkdir -p"):
             return 0, b"", b""
         if cmd.startswith("cat > "):
+            path = cmd[len("cat > "):]
             data = stdin or b""
+            if path.endswith("/marker.json"):
+                self.markers[path] = json.loads(data.decode())
+                return 0, b"", b""
             if self.corrupt_copy:
                 data = data + b"x"
-            self.files[cmd[len("cat > "):]] = data
+            self.files[path] = data
             return 0, b"", b""
         if cmd.startswith("sha256sum"):
             path = cmd.split()[1]
@@ -269,18 +364,25 @@ class World:
             if data is None:
                 return 1, b"", b"no such file"
             return 0, f"{hashlib.sha256(data).hexdigest()}  {path}\n".encode(), b""
-        if cmd.startswith("docker cp pseudolife-mcp-daemon:/data/move.json -"):
-            if self.marker is None:
-                return 1, b"", b"Error: Could not find the file /data/move.json"
-            return 0, _plain_tar({"move.json": json.dumps(self.marker).encode()}), b""
+        if cmd.startswith("cat ") and "marker.json" in cmd:
+            if not self.markers:
+                return 1, b"", b""
+            return 0, "".join(json.dumps(m) + "\n" for m in self.markers.values()).encode(), b""
         if "cat > /data/move.json" in cmd:
-            self.marker = json.loads(stdin.decode())
+            self.data_files["/data/move.json"] = stdin or b""
+            return 0, b"", b""
+        if cmd.startswith("docker run --rm --entrypoint rm") and "/data/move.json" in cmd:
+            self.data_files.pop("/data/move.json", None)
             return 0, b"", b""
         if "ops/restore.sh" in cmd:
             self.target_running = False
             self.target_restored = True
             self.target_empty = False
+            self.data_files = {"/data/config.yaml": b"memory: {}\n", "/data/last-backup.json": b"{}\n"}
             return 0, b"==> Restore complete; the daemon was left stopped (--no-start).\n", b""
+        if "coordination_bank_id" in cmd:
+            meta = self.target_meta_after if self.target_restored else TARGET_META
+            return 0, (meta + "\n").encode(), b""
         if "UNION ALL" in cmd:
             if not self.target_restored:
                 return 0, b"", b""
@@ -294,20 +396,30 @@ class World:
             return 0, b"full-suite|laptop\n", b""
         if "coordination_messages" in cmd:
             return 0, b"0123456789abcdef0123456789abcdef|3\n", b""
-        if cmd.startswith("cat "):
+        if cmd.startswith("if [ -e"):
+            if self.dotenv is None:
+                return 3, b"", b""
             return 0, self.dotenv.encode(), b""
-        if cmd.startswith("cp -p "):
-            return 0, b"", b""
-        if cmd.startswith("umask 077"):
+        if "&& mv -f" in cmd:
             self.dotenv = (stdin or b"").decode()
-            self.files[cmd.split()[-1]] = stdin or b""   # ... && mv -f <tmp> <env>
+            self.files[cmd.split()[-1]] = stdin or b""
+            return 0, b"", b""
+        if cmd.startswith("cp -p "):
             return 0, b"", b""
         if "ops/update.sh" in cmd:
             self.target_running = True
+            self.started_at = self.clock.now
+            self.target_live_env = _env_from_dotenv(self.dotenv or "")
+            if self.env_mismatch:
+                self.target_live_env = [e for e in self.target_live_env if not e.startswith("PSEUDOLIFE_MCP_TOKEN=")]
+                self.target_live_env.append("PSEUDOLIFE_MCP_TOKEN=something-else")
             self._check_overlap()
             return 0, b"", b""
-        if cmd == "docker exec pseudolife-mcp-daemon rm -f /data/move.json":
-            self.marker = None
+        if cmd.startswith("rm -f ") and cmd.endswith("/marker.json"):
+            self.markers.pop(cmd[len("rm -f "):], None)
+            return 0, b"", b""
+        if cmd.startswith("rm -f ") and cmd.endswith("ops/.env"):
+            self.dotenv = None
             return 0, b"", b""
         if cmd == "docker stop pseudolife-mcp-daemon":
             if self.stop_target_fails:
@@ -341,13 +453,16 @@ class FakeLock:
         return False
 
 
-def mover(world, tmp_path, *, schedule=None, interactive=False, answer=True, platform="linux", **options):
+SCHEDULE = {"where": "unit", "time": "03:30", "url": LOCAL}
+
+
+def mover(world, tmp_path, *, schedule=SCHEDULE, interactive=False, answer=True, platform="linux", **options):
     opts = move_cli.Options(target=TARGET, checkout=CHECKOUT, yes=options.pop("yes", True),
-                            health_retries=3, health_delay=0, **options)
+                            health_delay=2.0, **options)
     return move_cli.Mover(opts, FakeRunner(world), detect_schedule=lambda: schedule,
                           interactive=lambda: interactive, ask=lambda question: answer,
-                          sleep=lambda s: None, data_dir=tmp_path / "home", lock=FakeLock,
-                          platform=platform)
+                          sleep=world.clock.sleep, clock=world.clock, data_dir=tmp_path / "home",
+                          lock=FakeLock, platform=platform)
 
 
 def run_move(world, tmp_path, **kw):
@@ -365,27 +480,26 @@ def first(world, needle) -> int:
     return index(world, lambda c: needle in c.text)
 
 
-MUTATING = ("docker stop", "docker start", "docker run", "ALTER DATABASE", "pg_dump", "pg_terminate_backend",
-            "bash ops/restore.sh", "bash ops/update.sh", "cat > ", "expose tailscale", " connect ",
-            "systemctl", "schtasks", "rm -f", "mkdir", "cp -p", "umask")
+def remote_is(prefix):
+    return lambda c: c.remote is not None and c.remote.startswith(prefix)
+
+
+def local_is(*argv):
+    return lambda c: c.remote is None and c.argv[:len(argv)] == list(argv)
+
+
+def is_env_write(c) -> bool:
+    return c.remote is not None and "&& mv -f" in c.remote and "ops/.env" in c.remote
+
+
+MUTATING = ("docker stop", "docker start", "docker run", "docker update", "docker cp", "ALTER DATABASE",
+            "pg_dump", "pg_terminate_backend", "bash ops/restore.sh", "bash ops/update.sh", "cat > ",
+            "expose tailscale", " connect ", "systemctl --user disable", "systemctl --user enable",
+            "schtasks /Change", "rm -f", "mkdir", "cp -p", "mv -f")
 
 
 def mutating_calls(world):
-    out = []
-    for call in world.calls:
-        text = call.text
-        if any(word in text for word in MUTATING):
-            out.append(call)
-        elif text.startswith("docker cp") and "move.json -" not in text:
-            out.append(call)
-        elif call.remote and call.remote.startswith("docker cp") and "move.json -" not in call.remote:
-            out.append(call)
-    return out
-
-
-@pytest.fixture(autouse=True)
-def _quiet(capsys):
-    yield
+    return [call for call in world.calls if any(word in call.text for word in MUTATING)]
 
 
 # ── the whole move ───────────────────────────────────────────────────────────
@@ -393,38 +507,56 @@ def _quiet(capsys):
 def test_a_move_runs_every_step_in_order_and_reports(tmp_path, capsys):
     world = World()
     code = run_move(world, tmp_path, as_json=True)
-    out = capsys.readouterr().out
-    report = json.loads(out)
+    report = json.loads(capsys.readouterr().out)
     assert code == 0, report
     assert report["exit"] == 0
-    stop = first(world, "docker stop pseudolife-mcp-daemon")
-    dump = first(world, "pg_dump")
-    fence = first(world, "ALLOW_CONNECTIONS false")
-    state = index(world, lambda c: c.argv[:2] == ["docker", "run"] and "tar" in c.argv)
-    copy = first(world, "cat > ~/src/Pseudolife-MCP/data/move-")
-    restore = first(world, "bash ops/restore.sh")
-    compare = first(world, "UNION ALL")
-    env = first(world, "umask 077")
-    update = first(world, "bash ops/update.sh")
-    unmark = first(world, "rm -f /data/move.json")
-    moved = index(world, lambda c: c.argv[:2] == ["docker", "cp"] and c.argv[-1].endswith(":/data/moved.json"))
-    connect = index(world, lambda c: "connect" in c.argv)
-    assert -1 not in (stop, dump, fence, state, copy, restore, compare, env, update, unmark, moved, connect)
-    assert stop < dump < fence < state < copy < restore < compare < env < update < unmark < moved < connect
-    # The source is stopped (never removed), fenced, and marked moved.
+    steps = [
+        index(world, remote_is("systemctl --user disable")),          # the target's own update paused
+        index(world, remote_is("docker update --restart=no")),        # ... and its autostart
+        index(world, local_is("systemctl", "--user", "disable")),     # the source's schedule
+        index(world, local_is("docker", "stop")),
+        index(world, lambda c: "pg_terminate_backend" in c.text),    # writers cut off before the dump
+        first(world, "pg_dump"),
+        first(world, "ALLOW_CONNECTIONS false"),
+        first(world, "count(*) FROM pg_stat_activity"),
+        index(world, lambda c: c.argv[:2] == ["docker", "run"] and "tar" in c.argv),
+        first(world, f"cat > {CHECKOUT}/data/move-"),
+        index(world, lambda c: c.remote is not None and c.remote.endswith("/marker.json")
+              and c.remote.startswith("cat > ")),
+        first(world, "bash ops/restore.sh"),
+        index(world, lambda c: c.remote is not None and "coordination_bank_id" in c.remote),
+        first(world, "UNION ALL"),
+        index(world, lambda c: c.remote is not None and "cat > /data/move.json" in c.remote),
+        index(world, is_env_write),
+        index(world, remote_is("docker run --rm --entrypoint rm")),  # the /data gate lifted
+        first(world, "bash ops/update.sh"),
+        index(world, lambda c: c.remote is not None and c.remote.startswith("docker inspect --type container")
+              and world.calls.index(c) > first(world, "bash ops/update.sh")),
+        index(world, remote_is("systemctl --user enable")),           # the target's update as it was
+        index(world, local_is("docker", "update", "--restart=no")),  # the source never restarts itself
+        index(world, lambda c: c.argv[:2] == ["docker", "cp"] and c.argv[-1].endswith(":/data/moved.json")),
+        index(world, lambda c: c.remote is not None and c.remote.startswith("rm -f ")
+              and c.remote.endswith("/marker.json")),
+        index(world, lambda c: "connect" in c.argv),
+    ]
+    assert -1 not in steps, steps
+    assert steps == sorted(steps), steps
     assert not world.source_running and world.fenced and world.moved
+    assert world.source_policy == "no"
+    assert world.target_timer == "enabled" and world.target_policy == "unless-stopped"
+    assert world.source_timer == "disabled"                          # left paused: a leftover to retire
     assert not any(c.argv[:2] == ["docker", "rm"] or " down" in c.text for c in world.calls)
-    # The target restore names the dump and never starts the daemon itself.
-    restore_cmd = world.calls[restore].remote
+    stop = world.calls[index(world, local_is("docker", "stop"))]
+    assert stop.argv == ["docker", "stop", "-t", "120", "pseudolife-mcp-daemon"]
+    restore_cmd = world.calls[first(world, "bash ops/restore.sh")].remote
     assert "--apply --no-start" in restore_cmd and "--backup-file" in restore_cmd
     assert "--state-archive" in restore_cmd
-    # The marker was removed after the bank check and the target runs the source's bank.
-    assert world.marker is None and world.target_running
-    assert not world.overlap
-    assert world.calls[connect].argv[-3:] == [TARGET_URL, "--yes", "--json"]
+    assert world.markers == {} and "/data/move.json" not in world.data_files
+    assert world.target_running and not world.overlap
+    assert world.calls[steps[-1]].argv[-3:] == [TARGET_URL, "--yes", "--json"]
 
 
-def test_the_report_lists_rollback_principals_leases_mail_and_leftovers(tmp_path, capsys):
+def test_the_report_lists_rollback_principals_leases_mail_registrations_and_leftovers(tmp_path, capsys):
     world = World()
     assert run_move(world, tmp_path, as_json=True) == 0
     report = json.loads(capsys.readouterr().out)["report"]
@@ -432,6 +564,7 @@ def test_the_report_lists_rollback_principals_leases_mail_and_leftovers(tmp_path
     assert f"ssh {TARGET} docker stop pseudolife-mcp-daemon" in rollback
     assert "ALLOW_CONNECTIONS true" in rollback
     assert "--volumes-from pseudolife-mcp-daemon" in rollback and "/data/moved.json" in rollback
+    assert "docker update --restart=unless-stopped pseudolife-mcp-daemon" in rollback
     assert "docker start pseudolife-mcp-daemon" in rollback
     principals = {p["principal"]: p for p in report["principals"]}
     assert {"default", "laptop", "ci", "phone"} <= set(principals)
@@ -442,12 +575,22 @@ def test_the_report_lists_rollback_principals_leases_mail_and_leftovers(tmp_path
                                          "pseudolife_memory.cli lease break full-suite"}]
     assert report["mail"]["addresses"] == [{"agent_id": "0123456789abcdef0123456789abcdef", "pending": 3}]
     assert "coordination-recovery rebind" in report["mail"]["pointer"]
+    assert report["target_registrations"] == [REGISTRATION]
     leftovers = " ".join(item["what"] + " " + item["command"] for item in report["leftovers"])
     for needle in ("backup", "extractor", "tunnel", "autostart", "expose off", "update --unschedule"):
         assert needle in leftovers, needle
     replaced = " ".join(report["replaced_on_target"])
     assert "config.yaml" in replaced and "last-backup.json" in replaced
-    assert any("installer" in note for note in report["notes"])
+    assert any("installer" in note and REGISTRATION in note for note in report["notes"])
+
+
+def test_the_manual_rollback_quotes_work_in_every_shell(tmp_path, capsys):
+    world = World()
+    assert run_move(world, tmp_path, as_json=True) == 0
+    rollback = json.loads(capsys.readouterr().out)["report"]["rollback"]
+    psql = next(line for line in rollback if "ALLOW_CONNECTIONS true" in line)
+    assert psql.endswith('-c "ALTER DATABASE pseudolife_memory WITH ALLOW_CONNECTIONS true"'), psql
+    assert psql.count('"') == 2 and "'" not in psql
 
 
 def test_text_output_names_the_rollback_and_the_next_steps(tmp_path, capsys):
@@ -457,41 +600,22 @@ def test_text_output_names_the_rollback_and_the_next_steps(tmp_path, capsys):
     assert "ALLOW_CONNECTIONS true" in out
     assert f"pseudolife-mcp connect {TARGET_URL}" in out
     assert "lease break full-suite" in out
+    assert REGISTRATION in out
 
 
-def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
-    world = World()
-    assert run_move(world, tmp_path, as_json=True) == 0
-    for call in world.calls:
-        for secret in SECRETS:
-            assert secret not in call.text, (secret, call)
-    # The carried identities did reach the target, over stdin.
-    env_write = next(c for c in world.calls if c.remote and c.remote.startswith("umask 077"))
-    written = env_write.stdin.decode()
-    assert f"PSEUDOLIFE_MCP_TOKEN={SOURCE_TOKEN}" in written
-    assert f"PSEUDOLIFE_MCP_TOKENS={LAPTOP_TOKEN}:laptop,{CI_TOKEN}:ci" in written
-    assert "PSEUDOLIFE_MCP_TIER_MAP=laptop:core,ci:minimal" in written
-    assert TARGET_OLD_TOKEN not in written
-    assert f"POSTGRES_PASSWORD={TARGET_PG_PASSWORD}" in written
-    assert "\r" not in written
-    # ...and the JSON report carries none of them either.
-    out = capsys.readouterr().out
-    for secret in SECRETS:
-        assert secret not in out
-
-
-def test_every_remote_command_is_batch_mode_ssh(tmp_path):
+def test_every_remote_command_is_batch_mode_ssh_with_keepalives(tmp_path):
     world = World()
     assert run_move(world, tmp_path) == 0
     for call in world.calls:
         if call.argv[0] == "ssh":
-            assert call.argv[:4] == ["ssh", "-o", "BatchMode=yes", TARGET] and len(call.argv) == 5, call
+            assert call.argv[:len(SSH) + 1] == SSH + [TARGET] and len(call.argv) == len(SSH) + 2, call
 
 
 def test_files_are_hash_checked_on_the_target(tmp_path):
     world = World()
     assert run_move(world, tmp_path) == 0
-    copies = [c for c in world.calls if c.remote and c.remote.startswith("cat > ")]
+    copies = [c for c in world.calls if c.remote and c.remote.startswith("cat > ")
+              and not c.remote.endswith("/marker.json")]
     assert len(copies) == 3
     for copy in copies:
         path = copy.remote[len("cat > "):]
@@ -501,34 +625,84 @@ def test_files_are_hash_checked_on_the_target(tmp_path):
 def test_the_manifest_carries_per_table_row_counts(tmp_path):
     world = World()
     assert run_move(world, tmp_path) == 0
-    manifest_copy = next(c for c in world.calls if c.remote and c.remote.endswith("manifest.json"))
+    manifest_copy = next(c for c in world.calls if c.remote and c.remote.startswith("cat > ")
+                         and c.remote.endswith("manifest.json"))
     manifest = json.loads(manifest_copy.stdin)
     assert manifest["tables"] == DUMP_COUNTS
     assert manifest["source_bank"] == SOURCE_BANK
 
 
+def test_the_target_env_is_replaced_in_place_keeping_its_owner_and_mode(tmp_path):
+    world = World()
+    assert run_move(world, tmp_path) == 0
+    write = next(c for c in world.calls if is_env_write(c))
+    env = f"{CHECKOUT}/ops/.env"
+    temporary = write.remote.split()[3]
+    assert temporary.startswith(f"{env}.move-"), write.remote
+    # A copy of the original (cp -p keeps its owner and mode) is overwritten
+    # in place, then renamed over it.
+    assert write.remote == f"cp -p {env} {temporary} && cat > {temporary} && mv -f {temporary} {env}"
+
+
+# ── secrets ──────────────────────────────────────────────────────────────────
+
+def _scan_for_secrets(world, out: str, err: str):
+    for call in world.calls:
+        for secret in SECRETS:
+            assert secret not in call.text, (secret, call)
+    for secret in SECRETS:
+        assert secret not in out, secret
+        assert secret not in err, secret
+
+
+def test_no_token_or_password_ever_appears_in_a_command_line(tmp_path, capsys):
+    world = World()
+    assert run_move(world, tmp_path, as_json=True) == 0
+    captured = capsys.readouterr()
+    _scan_for_secrets(world, captured.out, captured.err)
+    env_write = next(c for c in world.calls if is_env_write(c))
+    written = env_write.stdin.decode()
+    assert f"PSEUDOLIFE_MCP_TOKEN={SOURCE_TOKEN}" in written
+    assert f"PSEUDOLIFE_MCP_TOKENS={LAPTOP_TOKEN}:laptop,{CI_TOKEN}:ci" in written
+    assert "PSEUDOLIFE_MCP_TIER_MAP=laptop:core,ci:minimal" in written
+    assert TARGET_OLD_TOKEN not in written
+    assert f"POSTGRES_PASSWORD={TARGET_PG_PASSWORD}" in written
+    assert "\r" not in written
+    grep = next(c for c in world.calls if c.remote and c.remote.startswith("grep -lsF -f -"))
+    assert TARGET_OLD_TOKEN.encode() in grep.stdin
+
+
 # ── preflight: refused, nothing changed ──────────────────────────────────────
 
-@pytest.mark.parametrize("world_kw, needle", [
-    ({"source_healthy": False}, "/health"),
-    ({"source_docker": False}, "Docker"),
-    ({"source_bank": None}, "fingerprint"),
-    ({"ssh_ok": False}, "ssh"),
-    ({"checkout": False}, "install"),
-    ({"target_healthy": False}, "target daemon"),
-    ({"target_schema": 40}, "schema"),
-    ({"target_bank": SOURCE_BANK}, "same bank"),
-    ({"target_empty": False}, "not empty"),
-])
-def test_preflight_refusals_exit_4_and_change_nothing(tmp_path, capsys, world_kw, needle):
+PREFLIGHT_CASES = {
+    "source_unhealthy": ({"source_healthy": False}, "/health"),
+    "source_not_docker": ({"source_docker": False}, "Docker"),
+    "source_no_fingerprint": ({"source_bank": None}, "fingerprint"),
+    "ssh": ({"fail255": ("true",)}, "ssh"),
+    "not_posix": ({"posix": False}, "Linux or macOS"),
+    "checkout": ({"checkout": False}, "install"),
+    "checkout_ssh_drop": ({"fail255": ("test -f",)}, "ssh"),
+    "target_postgres_down": ({"target_pg_running": "false"}, "postgres"),
+    "target_unhealthy": ({"target_healthy": False}, "target daemon"),
+    "target_schema": ({"target_schema": 40}, "schema"),
+    "same_bank": ({"target_bank": SOURCE_BANK}, "same bank"),
+    "not_empty": ({"target_empty": False}, "not empty"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(PREFLIGHT_CASES))
+def test_preflight_refusals_exit_4_and_change_nothing(tmp_path, capsys, case):
+    world_kw, needle = PREFLIGHT_CASES[case]
     world = World(**world_kw)
     code = run_move(world, tmp_path, as_json=True)
-    report = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
     assert code == 4, report
     assert needle.lower() in report["error"].lower(), report["error"]
     assert mutating_calls(world) == []
     assert world.source_running and not world.fenced
     assert not (tmp_path / "home" / "moves").exists()
+    _scan_for_secrets(world, captured.out, captured.err)
 
 
 def test_a_null_target_fingerprint_counts_as_different(tmp_path):
@@ -537,7 +711,9 @@ def test_a_null_target_fingerprint_counts_as_different(tmp_path):
 
 
 def test_a_non_empty_target_with_a_marker_points_at_resume(tmp_path, capsys):
-    world = World(target_empty=False, marker={"move_id": "20261001-000000-00000000", "source_bank": SOURCE_BANK})
+    world = World(target_empty=False,
+                  markers={f"{CHECKOUT}/data/move-x/marker.json": {"move_id": "20261001-000000-00000000",
+                                                                   "source_bank": SOURCE_BANK}})
     assert run_move(world, tmp_path, as_json=True) == 4
     assert "--resume" in json.loads(capsys.readouterr().out)["error"]
 
@@ -546,15 +722,15 @@ def test_a_non_empty_target_with_a_marker_points_at_resume(tmp_path, capsys):
 
 def test_dry_run_prints_the_plan_and_runs_only_read_only_commands(tmp_path, capsys):
     world = World(exposed=False)
-    code = run_move(world, tmp_path, dry_run=True, yes=False, schedule={"where": "x", "time": "03:30",
-                                                                        "url": LOCAL})
+    code = run_move(world, tmp_path, dry_run=True, yes=False)
     out = capsys.readouterr().out
     assert code == 0
     assert mutating_calls(world) == [], mutating_calls(world)
-    assert "expose tailscale" in out          # the target is not exposed: the plan says so
-    assert "pg_dump" in out or "final backup" in out.lower()
-    assert "10.0 MiB" in out                   # the database size
+    assert "expose tailscale" in out
+    assert "pg_dump" in out
+    assert "10.0 MiB" in out
     assert "unattended update" in out.lower()
+    assert "tmux" in out or "nohup" in out
     assert not (tmp_path / "home" / "moves").exists()
 
 
@@ -584,7 +760,7 @@ def test_an_unexposed_target_is_exposed_before_the_source_stops(tmp_path):
     world = World(exposed=False)
     assert run_move(world, tmp_path) == 0
     expose = index(world, lambda c: c.remote is not None and "expose tailscale --yes" in c.remote)
-    stop = first(world, "docker stop pseudolife-mcp-daemon")
+    stop = index(world, local_is("docker", "stop"))
     assert -1 < expose < stop
 
 
@@ -593,13 +769,13 @@ def test_an_expose_refusal_stops_before_the_source_is_touched(tmp_path, capsys):
     code = run_move(world, tmp_path, as_json=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 4 and "operator" in report["error"]
-    assert world.source_running and not any(c.text.startswith("docker stop") for c in world.calls)
+    assert world.source_running and index(world, local_is("docker", "stop")) == -1
 
 
 def test_an_unreachable_target_url_stops_before_the_source_is_touched(tmp_path):
     world = World(fail=(f"GET {TARGET_URL}/health",))
     assert run_move(world, tmp_path) == 4
-    assert world.source_running and not any(c.text.startswith("docker stop") for c in world.calls)
+    assert world.source_running and index(world, local_is("docker", "stop")) == -1
 
 
 def test_an_explicit_target_url_skips_the_exposure_read(tmp_path):
@@ -608,17 +784,36 @@ def test_an_explicit_target_url_skips_the_exposure_read(tmp_path):
     assert not any(c.remote and "expose" in c.remote for c in world.calls)
 
 
-# ── failures in steps 5-9 roll back, in order ────────────────────────────────
+# ── failures in steps 4-9 roll back, in order ────────────────────────────────
+
+def _env_backup(c) -> bool:
+    return c.remote is not None and c.remote.startswith("cp -p") and len(c.remote.split()) == 4 \
+        and c.remote.split()[3].split("/")[-1].startswith(".env.pre-move-")
+
 
 ROLLBACK_CASES = {
+    # name: (fail needle, what the rollback undoes)
+    # (Before the source stops, nothing on it needs undoing: no schedule to
+    # resume, no daemon to start.)
+    "target_timer_pause": (remote_is("systemctl --user disable"),
+                           {"target_started": False, "env": False, "fenced": False, "moved": False,
+                            "resume": False, "start": False}),
+    "schedule_pause": (local_is("systemctl", "--user", "disable"),
+                       {"target_started": False, "env": False, "fenced": False, "moved": False,
+                        "start": False}),
+    "docker_stop": (local_is("docker", "stop"),
+                    {"target_started": False, "env": False, "fenced": False, "moved": False}),
     "pg_dump": ("pg_dump", {"target_started": False, "env": False, "fenced": False, "moved": False}),
     "fence": ("ALLOW_CONNECTIONS false", {"target_started": False, "env": False, "fenced": True, "moved": False}),
     "state_archive": ("czf -", {"target_started": False, "env": False, "fenced": True, "moved": False}),
-    "copy": ("cat > ~/src", {"target_started": False, "env": False, "fenced": True, "moved": False}),
+    "copy": (f"cat > {CHECKOUT}/data/move-", {"target_started": False, "env": False, "fenced": True,
+                                              "moved": False}),
+    "marker": (lambda c: c.remote is not None and c.remote.startswith("cat > ") and c.remote.endswith("marker.json"),
+               {"target_started": False, "env": False, "fenced": True, "moved": False}),
     "restore": ("bash ops/restore.sh", {"target_started": False, "env": False, "fenced": True, "moved": False}),
-    "env_write": ("umask 077", {"target_started": False, "env": True, "fenced": True, "moved": False}),
+    "env_backup": (_env_backup, {"target_started": False, "env": False, "fenced": True, "moved": False}),
+    "env_write": (is_env_write, {"target_started": False, "env": True, "fenced": True, "moved": False}),
     "update": ("bash ops/update.sh", {"target_started": True, "env": True, "fenced": True, "moved": False}),
-    "unmark": ("rm -f /data/move.json", {"target_started": True, "env": True, "fenced": True, "moved": False}),
     "moved_marker": (":/data/moved.json", {"target_started": True, "env": True, "fenced": True, "moved": True}),
 }
 
@@ -627,10 +822,10 @@ ROLLBACK_CASES = {
 def test_a_failure_rolls_back_in_order_and_restarts_the_source(tmp_path, capsys, case):
     needle, expect = ROLLBACK_CASES[case]
     world = World(fail=(needle,))
-    code = run_move(world, tmp_path, as_json=True, schedule={"where": "unit", "time": "03:30", "url": LOCAL})
-    report = json.loads(capsys.readouterr().out)
-    assert code == 1, report
-    failed_at = first(world, needle)
+    code = run_move(world, tmp_path)
+    captured = capsys.readouterr()
+    assert code == 1, captured.err
+    failed_at = index(world, needle if callable(needle) else (lambda c: needle in c.text))
     after = world.calls[failed_at + 1:]
     texts = [c.text for c in after]
 
@@ -642,18 +837,77 @@ def test_a_failure_rolls_back_in_order_and_restarts_the_source(tmp_path, capsys,
                      and ".pre-move-" in c.remote.split()[2])
     lift = at(lambda c: "ALLOW_CONNECTIONS true" in c.text)
     unmoved = at(lambda c: c.argv[:2] == ["docker", "run"] and "rm" in c.argv and "/data/moved.json" in c.argv)
-    resume = at(lambda c: c.argv[:2] == ["systemctl", "--user"] and "enable" in c.argv)
-    start = at(lambda c: c.argv[:2] == ["docker", "start"])
+    resume = at(local_is("systemctl", "--user", "enable"))
+    start = at(local_is("docker", "start"))
     assert (stop_target is not None) == expect["target_started"], texts
     assert (env_restore is not None) == expect["env"], texts
     assert (lift is not None) == expect["fenced"], texts
     assert (unmoved is not None) == expect["moved"], texts
-    assert resume is not None and start is not None, texts
+    assert (resume is not None) == expect.get("resume", True), texts
+    assert (start is not None) == expect.get("start", True), texts
     order = [i for i in (stop_target, env_restore, lift, unmoved, resume, start) if i is not None]
     assert order == sorted(order), texts
     assert world.source_running and not world.fenced and not world.moved
+    assert world.source_policy == "unless-stopped" and world.source_timer == "enabled"
+    assert world.target_timer == "enabled" and world.target_policy == "unless-stopped"
     assert not world.overlap
-    assert report["rollback"], report
+    _scan_for_secrets(world, captured.out, captured.err)
+
+
+def test_the_rollback_report_is_in_the_json(tmp_path, capsys):
+    world = World(fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path, as_json=True) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert [step["ok"] for step in report["rollback"]] and all(step["ok"] for step in report["rollback"])
+
+
+def test_a_container_still_running_after_stop_rolls_back(tmp_path):
+    world = World(still_running_after_stop=True)
+    assert run_move(world, tmp_path) == 1
+    assert first(world, "pg_dump") == -1
+
+
+def test_a_daemon_killed_at_the_stop_timeout_is_reported(tmp_path, capsys):
+    world = World(stop_exit_code=137)
+    assert run_move(world, tmp_path, as_json=True) == 0
+    warnings = json.loads(capsys.readouterr().out)["warnings"]
+    assert any("137" in w for w in warnings), warnings
+
+
+def test_a_dropped_ssh_connection_never_counts_as_a_missing_env_file(tmp_path):
+    """Exit 255 is ssh's own failure, not the remote command's answer: the
+    move stops instead of treating the target's ops/.env as absent, writing
+    the carried keys over it with no backup and removing it on rollback."""
+    world = World(fail255=(lambda c: c.remote is not None and c.remote.startswith("if [ -e"),))
+    assert run_move(world, tmp_path) == 1
+    assert not any(is_env_write(c) for c in world.calls)
+    assert not any(c.remote and c.remote.startswith("rm -f") and "ops/.env" in c.remote for c in world.calls)
+    assert world.dotenv == TARGET_DOTENV
+    assert world.source_running and not world.fenced
+
+
+def test_a_missing_target_env_is_written_owner_only_and_removed_on_rollback(tmp_path):
+    world = World(dotenv=None, fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path) == 1
+    write = next(c for c in world.calls if is_env_write(c))
+    assert write.remote.startswith("umask 077 && cat > ")
+    assert any(c.remote and c.remote.startswith("rm -f") and c.remote.endswith("ops/.env") for c in world.calls)
+
+
+def test_an_unreadable_target_env_is_never_replaced_or_removed(tmp_path):
+    world = World(fail=(lambda c: c.remote is not None and c.remote.startswith("if [ -e"),))
+    assert run_move(world, tmp_path) == 1
+    assert not any(is_env_write(c) for c in world.calls)
+    assert not any(c.remote and c.remote.startswith("rm -f") and "ops/.env" in c.remote for c in world.calls)
+    assert world.source_running and not world.fenced
+
+
+def test_lingering_backends_after_the_fence_fail_the_step(tmp_path, capsys):
+    world = World(lingering_backends=2)
+    assert run_move(world, tmp_path, as_json=True) == 1
+    assert "pg_stat_activity" in json.loads(capsys.readouterr().out)["error"]
+    assert index(world, lambda c: c.argv[:2] == ["docker", "run"] and "tar" in c.argv) == -1
+    assert world.source_running and not world.fenced
 
 
 def test_a_hash_mismatch_on_the_target_rolls_back(tmp_path):
@@ -671,15 +925,73 @@ def test_a_row_count_mismatch_rolls_back_before_the_target_starts(tmp_path, caps
     assert world.source_running and not world.fenced
 
 
+def test_a_restored_bank_identity_that_differs_rolls_back_before_the_start(tmp_path, capsys):
+    world = World(target_meta_after=TARGET_META)
+    assert run_move(world, tmp_path, as_json=True) == 1
+    assert "coordination_bank_id" in json.loads(capsys.readouterr().out)["error"]
+    assert first(world, "bash ops/update.sh") == -1
+
+
+def test_the_restored_target_cannot_start_outside_the_move(tmp_path):
+    """Between the restore and the move's own start, the target's /data
+    holds move.json, which a daemon refuses to start on; the rollback puts
+    it back after stopping a target it had started."""
+    seen = {}
+
+    def at_update(world, call):
+        seen["gate_before_update"] = "/data/move.json" in world.data_files
+
+    world = World(fail=("bash ops/update.sh",), hooks={"bash ops/update.sh": at_update})
+    assert run_move(world, tmp_path) == 1
+    assert seen == {"gate_before_update": False}   # lifted just before the move's own start
+    assert "/data/move.json" in world.data_files    # and back once the rollback stopped the target
+    stop = index(world, lambda c: c.remote == "docker stop pseudolife-mcp-daemon")
+    gate = index(world, lambda c: c.remote is not None and "cat > /data/move.json" in c.remote
+                 and world.calls.index(c) > stop)
+    assert -1 < stop < gate
+
+
 def test_a_target_reporting_another_bank_after_start_rolls_back(tmp_path):
-    world = World(bank_after_start=None)
+    world = World(bank_after_start=TARGET_BANK)
     assert run_move(world, tmp_path) == 1
     assert world.source_running and not world.target_running
     stop_target = index(world, lambda c: c.remote == "docker stop pseudolife-mcp-daemon")
-    start_source = index(world, lambda c: c.argv[:2] == ["docker", "start"])
+    start_source = index(world, local_is("docker", "start"))
     assert -1 < stop_target < start_source
-    # The marker stays, so --resume may take this half-restored bank over.
-    assert world.marker is not None
+    # The resume marker survives, outside /data.
+    assert len(world.markers) == 1
+
+
+def test_health_never_coming_up_after_the_start_fails_after_the_deadline(tmp_path):
+    world = World(target_up_after_start=False)
+    assert run_move(world, tmp_path) == 1
+    started = world.started_at
+    last_poll = max(t for url, _token, t in world.gets if url == f"{TARGET_URL}/health")
+    assert last_poll - started >= 180
+    assert world.source_running and not world.target_running
+
+
+def test_a_slow_fingerprint_is_waited_for_with_a_nudge_a_minute(tmp_path):
+    world = World(bank_appears_at=130)
+    assert run_move(world, tmp_path) == 0
+    nudges = [t for url, token, t in world.gets if url == f"{TARGET_URL}/api/stats"]
+    assert len(nudges) >= 2 and all(b - a >= 60 for a, b in zip(nudges, nudges[1:]))
+    assert all(token for url, token, _t in world.gets if url.endswith("/api/stats"))
+
+
+def test_a_null_fingerprint_until_the_deadline_rolls_back(tmp_path):
+    world = World(bank_after_start=None)
+    assert run_move(world, tmp_path) == 1
+    assert world.source_running
+
+
+def test_a_carried_value_the_target_did_not_take_rolls_back(tmp_path, capsys):
+    world = World(env_mismatch=True)
+    assert run_move(world, tmp_path, as_json=True) == 1
+    captured = capsys.readouterr()
+    assert "PSEUDOLIFE_MCP_TOKEN" in json.loads(captured.out)["error"]
+    assert world.source_running and not world.target_running
+    _scan_for_secrets(world, captured.out, captured.err)
 
 
 def test_a_state_archive_holding_a_marker_is_refused(tmp_path):
@@ -692,25 +1004,90 @@ def test_when_the_target_cannot_be_stopped_the_source_stays_down(tmp_path, capsy
     world = World(fail=("bash ops/update.sh",), stop_target_fails=True)
     code = run_move(world, tmp_path, as_json=True)
     report = json.loads(capsys.readouterr().out)
-    assert code == 1
-    assert not any(c.argv[:2] == ["docker", "start"] for c in world.calls)
+    assert code == 6
+    assert index(world, local_is("docker", "start")) == -1
     assert not world.source_running
     assert "incomplete" in report["error"].lower()
 
 
-def test_the_schedule_is_paused_before_the_stop_and_stays_paused_after_a_move(tmp_path):
-    world = World()
-    assert run_move(world, tmp_path, schedule={"where": "unit", "time": "03:30", "url": LOCAL}) == 0
-    pause = index(world, lambda c: c.argv[:2] == ["systemctl", "--user"] and "disable" in c.argv)
-    stop = first(world, "docker stop pseudolife-mcp-daemon")
-    assert -1 < pause < stop
-    assert index(world, lambda c: c.argv[:2] == ["systemctl", "--user"] and "enable" in c.argv) == -1
+def test_a_fence_that_cannot_be_lifted_keeps_the_source_down(tmp_path, capsys):
+    world = World(fail=("bash ops/restore.sh", "ALLOW_CONNECTIONS true"))
+    assert run_move(world, tmp_path, as_json=True) == 6
+    assert index(world, local_is("docker", "start")) == -1
+    assert world.fenced and not world.source_running
 
 
-def test_the_windows_schedule_is_paused_with_schtasks(tmp_path):
+def test_a_moved_marker_that_cannot_be_removed_keeps_the_source_down(tmp_path):
+    world = World(fail=(":/data/moved.json",
+                        lambda c: c.argv[:2] == ["docker", "run"] and "/data/moved.json" in c.argv))
+    assert run_move(world, tmp_path) == 6
+    assert index(world, local_is("docker", "start")) == -1
+    assert not world.source_running
+
+
+# ── kills and the record ─────────────────────────────────────────────────────
+
+def test_a_sigterm_during_the_move_rolls_back_with_sigint_ignored(tmp_path):
+    seen = {}
+
+    def terminate(world, call):
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler), handler
+        handler(signal.SIGTERM, None)
+
+    def at_start(world, call):
+        seen["sigint"] = signal.getsignal(signal.SIGINT)
+
+    world = World(hooks={"bash ops/restore.sh": terminate, "docker start": at_start})
+    before = signal.getsignal(signal.SIGTERM)
+    move = mover(world, tmp_path, as_json=True)
+    assert move.run() == 1
+    assert "interrupted by SIGTERM" in move.data["error"]
+    assert seen["sigint"] is signal.SIG_IGN
+    assert world.source_running and not world.fenced
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGHUP"), reason="no SIGHUP on this platform")
+def test_a_sighup_during_the_move_rolls_back(tmp_path):
+    def hangup(world, call):
+        signal.getsignal(signal.SIGHUP)(signal.SIGHUP, None)
+
+    world = World(hooks={"pg_dump": hangup})
+    assert run_move(world, tmp_path) == 1
+    assert world.source_running
+
+
+def test_the_record_holds_the_progress_and_the_manual_rollback_as_it_goes(tmp_path):
+    snapshots = {}
+
+    def at_fence(world, call):
+        records = list((tmp_path / "home" / "moves").glob("*/record.json"))
+        snapshots["record"] = json.loads(records[0].read_text())
+
+    world = World(hooks={"ALLOW_CONNECTIONS false": at_fence})
+    assert run_move(world, tmp_path) == 0
+    record = snapshots["record"]
+    assert record["flags"]["source_stopped"] is True and record["flags"]["fenced"] is True
+    assert record["flags"]["target_started"] is False
+    assert any("ALLOW_CONNECTIONS true" in line for line in record["manual_rollback"])
+
+
+# ── schedules and restart policies ───────────────────────────────────────────
+
+def test_a_disabled_schedule_or_timer_is_left_alone(tmp_path):
+    world = World(source_timer="disabled", target_timer="disabled", fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path) == 1
+    assert index(world, local_is("systemctl", "--user", "enable")) == -1
+    assert index(world, local_is("systemctl", "--user", "disable")) == -1
+    assert index(world, remote_is("systemctl --user enable")) == -1
+    assert world.source_timer == "disabled" and world.target_timer == "disabled"
+
+
+def test_the_windows_schedule_is_queried_then_paused_with_schtasks(tmp_path):
     world = World()
-    assert run_move(world, tmp_path, platform="win32",
-                    schedule={"where": "task", "time": "03:30", "url": LOCAL}) == 0
+    assert run_move(world, tmp_path, platform="win32") == 0
+    assert any(c.argv[:2] == ["schtasks", "/Query"] for c in world.calls)
     assert any(c.argv[:2] == ["schtasks", "/Change"] and "/DISABLE" in c.argv for c in world.calls)
 
 
@@ -723,7 +1100,14 @@ def test_a_failed_repoint_exits_5_without_rolling_back(tmp_path, capsys):
     assert code == 5
     assert f"pseudolife-mcp connect {TARGET_URL}" in report["error"]
     assert not world.source_running and world.fenced and world.moved
-    assert not any(c.argv[:2] == ["docker", "start"] for c in world.calls)
+    assert index(world, local_is("docker", "start")) == -1
+
+
+def test_a_connect_reply_that_is_not_an_object_still_reports(tmp_path, capsys):
+    world = World(connect_exit=1, connect_reply=["unexpected"])
+    code = run_move(world, tmp_path, as_json=True)
+    report = json.loads(capsys.readouterr().out)
+    assert code == 5 and report["report"]["rollback"]
 
 
 def test_no_registration_to_repoint_is_not_a_failure(tmp_path):
@@ -735,7 +1119,7 @@ def test_no_keep_tokens_writes_no_env_and_lists_who_to_reinvite(tmp_path, capsys
     world = World()
     assert run_move(world, tmp_path, keep_tokens=False, as_json=True) == 0
     report = json.loads(capsys.readouterr().out)["report"]
-    assert not any(c.remote and c.remote.startswith("umask 077") for c in world.calls)
+    assert not any(is_env_write(c) for c in world.calls)
     reinvite = {p["principal"] for p in report["reinvite"]}
     assert reinvite == {"default", "laptop", "ci"}
     assert all("pseudolife-mcp invite" in p["line"] for p in report["reinvite"])
@@ -750,6 +1134,10 @@ def _record(tmp_path, move_id, bank=SOURCE_BANK):
                                                        "source_bank": bank, "state": "rolled_back"}))
 
 
+def _marker(move_id, bank=SOURCE_BANK):
+    return {f"{CHECKOUT}/data/move-{move_id}/marker.json": {"move_id": move_id, "source_bank": bank}}
+
+
 def test_resume_is_refused_without_a_marker(tmp_path, capsys):
     world = World(target_empty=False)
     assert run_move(world, tmp_path, resume=True, as_json=True) == 4
@@ -757,30 +1145,30 @@ def test_resume_is_refused_without_a_marker(tmp_path, capsys):
     assert mutating_calls(world) == []
 
 
-def test_resume_is_refused_over_another_moves_marker(tmp_path, capsys):
+def test_resume_is_refused_over_another_moves_marker(tmp_path):
     _record(tmp_path, "20261001-000000-11111111")
-    world = World(target_empty=False, marker={"move_id": "20261001-000000-22222222", "source_bank": SOURCE_BANK})
-    assert run_move(world, tmp_path, resume=True, as_json=True) == 4
+    world = World(target_empty=False, markers=_marker("20261001-000000-22222222"))
+    assert run_move(world, tmp_path, resume=True) == 4
     assert mutating_calls(world) == []
 
 
 def test_resume_is_refused_over_a_marker_from_another_source(tmp_path):
     _record(tmp_path, "20261001-000000-11111111")
-    world = World(target_empty=False, marker={"move_id": "20261001-000000-11111111", "source_bank": "c" * 16})
+    world = World(target_empty=False, markers=_marker("20261001-000000-11111111", bank="c" * 16))
     assert run_move(world, tmp_path, resume=True) == 4
 
 
 def test_resume_takes_over_this_moves_half_restored_bank(tmp_path, capsys):
     move_id = "20261001-000000-11111111"
     _record(tmp_path, move_id)
-    world = World(target_empty=False, target_healthy=False,
-                  marker={"move_id": move_id, "source_bank": SOURCE_BANK})
+    world = World(target_empty=False, target_healthy=False, markers=_marker(move_id))
     world.target_running = False
     code = run_move(world, tmp_path, resume=True, as_json=True)
     report = json.loads(capsys.readouterr().out)
     assert code == 0, report
     assert report["move_id"] == move_id
     assert first(world, f"data/move-{move_id}") > -1
+    assert world.markers == {}
 
 
 # ── pieces ───────────────────────────────────────────────────────────────────
@@ -862,14 +1250,3 @@ def test_a_fenced_database_refuses_new_connections_until_lifted():
     finally:
         with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-
-
-def test_an_unreadable_target_env_is_never_replaced_or_removed(tmp_path):
-    """It holds the target's Postgres password and volume names: when it
-    exists but cannot be read, the move stops (and rolls back) without
-    writing the carried keys over it, and the rollback does not delete it."""
-    world = World(fail=(f"cat {CHECKOUT}/ops/.env",))
-    assert run_move(world, tmp_path) == 1
-    assert not any(c.remote and c.remote.startswith("umask 077") for c in world.calls)
-    assert not any(c.remote and c.remote.startswith("rm -f") and "ops/.env" in c.remote for c in world.calls)
-    assert world.source_running and not world.fenced
