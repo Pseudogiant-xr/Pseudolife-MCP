@@ -595,6 +595,25 @@ def test_the_volume_harness_counts_one_row_per_logged_mutation(pg_conn, pg_url):
     assert measure(pg_url, audit=False, **workload)["events_total"] == 0
 
 
+def test_the_volume_harness_runs_as_a_script_with_an_explicit_admin_url(tmp_path):
+    """Script mode puts evals/, not the repository, on sys.path; the scratch
+    database's name comes from tests.pg_defaults, so an explicit --admin-url
+    must still reach the server rather than die on the import."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / "evals" / "coordination_audit_volume.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), "--out", str(tmp_path / "out.json"),
+         "--admin-url", "postgresql://u:p@127.0.0.1:1/postgres?connect_timeout=2"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    assert proc.returncode != 0
+    assert "ModuleNotFoundError" not in proc.stderr, proc.stderr[-2000:]
+    # A connection failure (refused on Linux, a timeout on Windows).
+    assert proc.stderr.strip().splitlines()[-1].startswith("psycopg."), proc.stderr[-2000:]
+
+
 def test_the_volume_harness_refuses_a_database_that_is_not_scratch(pg_conn, pg_url, monkeypatch):
     """The bench server also holds the production bank, and the harness
     truncates the board it replays into."""

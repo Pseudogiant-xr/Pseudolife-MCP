@@ -168,9 +168,11 @@ def main(argv=None) -> int:
     out = Path(args.out)
     if out.exists():
         parser.error(f"{out} exists; results are never overwritten")
+    # tests.pg_defaults also names the scratch database, so a script-mode run
+    # needs the repository importable whether or not --admin-url is given.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     admin_url = args.admin_url
     if admin_url is None:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from tests.pg_defaults import bench_admin_url
         admin_url = bench_admin_url()
     workload = {"agents": args.agents, "messages": args.messages,
