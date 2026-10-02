@@ -169,6 +169,13 @@ class PrincipalSnapshot:
         return None if row is None or row.revoked else row.tier
 
     @property
+    def excluded_names(self) -> frozenset[str]:
+        """Names a redemption must not pair: the environment's and the
+        reserved ones. A row carrying one would be ignored anyway, so its
+        code is refused rather than spent."""
+        return self._shadowed
+
+    @property
     def shadowed_rows(self) -> list[str]:
         with self._lock:
             return list(self._shadowed_rows)
@@ -295,10 +302,20 @@ class PrincipalRefresher:
         self._stop.set()
 
 
+# Redemptions in flight at once (security review, 2026-10-02): each opens
+# a database connection, so a burst of bad codes must not fan out across
+# the shared executor. Two lets a client's retry run beside one slow
+# attempt; anything beyond is answered 429 at once. A design bound, not a
+# measurement.
+REDEMPTION_SLOTS = 2
+
+
 class FailureLimiter:
     """The endpoint's global budget of failed redemptions: at most ``limit``
-    in any ``window`` seconds, after which :meth:`blocked` is true and the
-    endpoint answers 429 without consulting the store."""
+    in any ``window`` seconds. Every attempt is counted atomically before it
+    goes near the store (:meth:`reserve`), so concurrent bad codes cannot
+    all slip under the budget; a success, or an attempt that never reached
+    the store, is given back (:meth:`refund`)."""
 
     def __init__(self, limit: int = FAILED_REDEMPTIONS_PER_MINUTE, window: float = 60.0,
                  clock: Callable[[], float] | None = None):
@@ -312,19 +329,52 @@ class FailureLimiter:
         while self._failures and now - self._failures[0] >= self._window:
             self._failures.popleft()
 
-    def blocked(self) -> bool:
-        with self._lock:
-            self._trim(self._clock())
-            return len(self._failures) >= self._limit
-
-    def failed(self) -> None:
+    def reserve(self) -> float | None:
+        """Count one attempt and return its stamp, or ``None`` when the
+        budget is spent (answer 429)."""
         with self._lock:
             now = self._clock()
             self._trim(now)
+            if len(self._failures) >= self._limit:
+                return None
             self._failures.append(now)
+            return now
+
+    def refund(self, stamp: float) -> None:
+        """Give back an attempt that succeeded or never reached the store."""
+        with self._lock:
+            try:
+                self._failures.remove(stamp)
+            except ValueError:
+                pass    # already aged out of the window
 
 
-def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
+class RedemptionGate:
+    """At most ``slots`` redemptions in flight; a full gate is a refusal
+    (429), never a queue. Redemptions run on the gate's own executor, so
+    they never take threads from the daemon's shared pool."""
+
+    def __init__(self, slots: int = REDEMPTION_SLOTS):
+        from concurrent.futures import ThreadPoolExecutor
+        self._slots = slots
+        self._lock = threading.Lock()
+        self._in_flight = 0
+        self.executor = ThreadPoolExecutor(max_workers=slots, thread_name_prefix="pl-pairing")
+
+    def try_enter(self) -> bool:
+        with self._lock:
+            if self._in_flight >= self._slots:
+                return False
+            self._in_flight += 1
+            return True
+
+    def leave(self) -> None:
+        with self._lock:
+            self._in_flight -= 1
+
+
+def redeem(dsn: str, code_hash: str, token_hash: str, *,
+           excluded: Iterable[str] = ()) -> StoredPrincipal | None:
     """Redeem a pairing code: the matching pending row takes ``token_hash``
     and the code is spent, in one conditional UPDATE on the database clock,
     so two concurrent redeemers cannot both win. ``None`` is a refusal of
@@ -333,7 +383,9 @@ def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
     A repeat with the same code and the same token hash within
     :data:`RETRY_WINDOW_S` of the pairing returns the same row: only the
     client that minted the token knows that hash, so a lost response is
-    recoverable and nothing else is. Database errors propagate."""
+    recoverable and nothing else is. A row named in ``excluded`` (a name
+    the environment or a reservation already uses) is refused without
+    spending its code. Database errors propagate."""
     import psycopg
 
     with _connect(dsn, autocommit=False) as conn:
@@ -345,8 +397,10 @@ def redeem(dsn: str, code_hash: str, token_hash: str) -> StoredPrincipal | None:
                    SET token_hash = %(token)s, paired_at = {_NOW},
                        paired_code_hash = code_hash, code_hash = NULL, code_expires_at = NULL
                  WHERE code_hash = %(code)s AND code_expires_at > {_NOW} AND revoked_at IS NULL
+                   AND NOT (principal = ANY(%(excluded)s))
              RETURNING principal, tier, board
-                """, {"token": token_hash, "code": code_hash}).fetchone()
+                """, {"token": token_hash, "code": code_hash,
+                      "excluded": sorted(excluded)}).fetchone()
         except psycopg.errors.UniqueViolation:
             conn.rollback()
             return None

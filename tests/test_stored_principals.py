@@ -307,6 +307,32 @@ def test_no_admission_check_bypasses_principal_admitted():
 def test_every_bearer_resolution_consults_the_installed_store():
     import re
     calls = [(name, m.group(0)) for name, text in _package_sources() if name != "principals.py"
-             for m in re.finditer(r"resolve_principal\((?:[^()]|\([^()]*\))*\)", text)]
+             for m in re.finditer(r"resolve_principal(?:_detailed)?\((?:[^()]|\([^()]*\))*\)", text)]
     assert calls, "the resolver should have callers"
     assert [c for c in calls if "installed_store()" not in c[1]] == []
+
+
+def test_the_attempt_budget_is_counted_atomically_under_threads():
+    """Fifty simultaneous attempts: exactly the budget gets through, and a
+    refund frees exactly one."""
+    import threading
+
+    from pseudolife_memory.principal_store import FailureLimiter
+
+    budget = FailureLimiter(limit=20, clock=lambda: 1000.0)
+    barrier = threading.Barrier(50)
+    stamps = []
+
+    def attempt():
+        barrier.wait()
+        stamps.append(budget.reserve())
+
+    threads = [threading.Thread(target=attempt) for _ in range(50)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    granted = [stamp for stamp in stamps if stamp is not None]
+    assert len(granted) == 20
+    budget.refund(granted[0])
+    assert budget.reserve() is not None and budget.reserve() is None
