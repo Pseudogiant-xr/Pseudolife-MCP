@@ -336,3 +336,51 @@ def test_the_attempt_budget_is_counted_atomically_under_threads():
     assert len(granted) == 20
     budget.refund(granted[0])
     assert budget.reserve() is not None and budget.reserve() is None
+
+
+
+def test_row_names_are_lowercased_and_validated_before_the_shadow_check():
+    snap = PrincipalSnapshot(shadowed={"desk"}, clock=_Clock())
+    snap.refresh(lambda: ([_row("Laptop", TOKEN_A), _row("DESK", TOKEN_B),
+                           _row("../evil", "fixture-evil"), _row("Maintainer", "fixture-m")], None))
+    assert snap.lookup(secret_sha256(TOKEN_A)).principal == "laptop"
+    assert snap.has("laptop") and not snap.has("Laptop")
+    assert snap.lookup(secret_sha256(TOKEN_B)) is None and snap.shadowed_rows == ["desk", "maintainer"]
+    assert snap.lookup(secret_sha256("fixture-evil")) is None
+    assert snap.invalid_rows == ["../evil"]
+
+
+def test_the_refresher_connects_with_keepalives(monkeypatch):
+    from pseudolife_memory import principal_store
+
+    seen = {}
+
+    class Conn:
+        closed = False
+
+        def execute(self, *args, **kwargs):
+            return self
+
+    def connect(dsn, **kwargs):
+        seen.update(kwargs)
+        return Conn()
+
+    monkeypatch.setattr(principal_store, "_connect", connect)
+    monkeypatch.setattr(principal_store, "load_rows", lambda conn: ([], None))
+    refresher = principal_store.PrincipalRefresher("postgresql://fixture", PrincipalSnapshot(),
+                                                   auth_configured=True)
+    assert refresher.refresh_once()
+    assert seen["keepalives"] == 1 and seen["keepalives_idle"] == 10
+    assert seen["keepalives_interval"] == 5 and seen["keepalives_count"] == 3
+    assert seen["tcp_user_timeout"] == 30000
+
+
+def test_the_refresher_warns_about_invalid_row_names(caplog):
+    from pseudolife_memory import principal_store
+    snapshot = PrincipalSnapshot()
+    refresher = principal_store.PrincipalRefresher("postgresql://fixture", snapshot,
+                                                   auth_configured=True)
+    refresher._read = lambda: ([_row("../evil", "fixture-evil")], None)
+    with caplog.at_level("WARNING", logger="pseudolife-mcp.principals"):
+        assert refresher.refresh_once()
+    assert "'../evil'" in caplog.text and "skipped" in caplog.text

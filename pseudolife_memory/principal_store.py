@@ -34,6 +34,7 @@ from typing import Callable, Iterable
 
 from pseudolife_memory.principals import (
     PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH, RESERVED_PRINCIPALS, secret_sha256,
+    valid_principal_name,
 )
 
 logger = logging.getLogger("pseudolife-mcp.principals")
@@ -53,6 +54,13 @@ DEFAULT_CODE_TTL_S = 15 * 60
 MAX_CODE_TTL_S = 24 * 3600
 
 _TIERS = ("minimal", "core", "full")
+# The refresher's connection notices a dead peer in well under the 60 s
+# staleness limit instead of waiting on the OS default (hours): libpq
+# keepalive probes after 10 s idle, every 5 s, three tries, and a 30 s cap
+# on unacknowledged writes (where the platform has TCP_USER_TIMEOUT; libpq
+# ignores it elsewhere). Design bounds from the 2026-10-02 review.
+_KEEPALIVES = {"keepalives": 1, "keepalives_idle": 10, "keepalives_interval": 5,
+               "keepalives_count": 3, "tcp_user_timeout": 30000}
 _NOW = "EXTRACT(EPOCH FROM clock_timestamp())::double precision"
 
 
@@ -97,6 +105,7 @@ class PrincipalSnapshot:
         self._seq = 0
         self._loaded_at: float | None = None
         self._shadowed_rows: list[str] = []
+        self._invalid_rows: list[str] = []
         self.bank: str | None = None
 
     # -- maintenance -------------------------------------------------------
@@ -113,26 +122,31 @@ class PrincipalSnapshot:
             self._pending = {name: entry for name, entry in self._pending.items()
                              if entry[0] > started_seq}
             merged: dict[str, StoredPrincipal] = {}
-            shadowed = set()
+            shadowed, invalid = set(), set()
             for row in rows:
-                if row.principal in self._shadowed:
-                    shadowed.add(row.principal)
+                normal = _normal(row)
+                if normal is None:
+                    invalid.add(str(row.principal))
                     continue
-                merged[row.principal] = _clean(row)
+                if normal.principal in self._shadowed:
+                    shadowed.add(normal.principal)
+                    continue
+                merged[normal.principal] = normal
             for _seq, row in self._pending.values():
                 merged[row.principal] = row
             self._rows = merged
             self._rebuild()
             self._shadowed_rows = sorted(shadowed)
+            self._invalid_rows = sorted(invalid)
             self._loaded_at = started_at
             self.bank = bank
 
     def add(self, row: StoredPrincipal) -> None:
         """A redemption that just committed: visible at once, replacing the
         principal's previous token hash (``invite --replace``)."""
-        if row.principal in self._shadowed:
+        row = _normal(row)
+        if row is None or row.principal in self._shadowed:
             return
-        row = _clean(row)
         with self._lock:
             self._seq += 1
             self._pending[row.principal] = (self._seq, row)
@@ -180,22 +194,33 @@ class PrincipalSnapshot:
         with self._lock:
             return list(self._shadowed_rows)
 
+    @property
+    def invalid_rows(self) -> list[str]:
+        """Rows skipped because their name is not a principal name."""
+        with self._lock:
+            return list(self._invalid_rows)
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._rows)
 
 
-def _clean(row: StoredPrincipal) -> StoredPrincipal:
-    if row.tier is None or row.tier in _TIERS:
-        return row
-    return StoredPrincipal(row.principal, row.token_hash, None, row.board, row.revoked)
+def _normal(row: StoredPrincipal) -> StoredPrincipal | None:
+    """The row with its name lowercased and its tier on the ladder (or
+    none), or ``None`` when the name is not a principal name: such a row is
+    skipped before the shadowing and reservation checks, never trusted."""
+    name = row.principal.strip().lower() if isinstance(row.principal, str) else None
+    if not valid_principal_name(name):
+        return None
+    tier = row.tier if row.tier is None or row.tier in _TIERS else None
+    return StoredPrincipal(name, row.token_hash, tier, row.board, row.revoked)
 
 
 # -- the database side ---------------------------------------------------------
 
-def _connect(dsn: str, *, autocommit: bool):
+def _connect(dsn: str, *, autocommit: bool, **options):
     from pseudolife_memory.storage.postgres import connect_retrying_local_ports
-    return connect_retrying_local_ports(dsn, connect_timeout=5, autocommit=autocommit)
+    return connect_retrying_local_ports(dsn, connect_timeout=5, autocommit=autocommit, **options)
 
 
 def load_rows(conn) -> tuple[list[StoredPrincipal], str | None]:
@@ -242,12 +267,13 @@ class PrincipalRefresher:
         self._conn = None
         self._failing = False
         self._warned = False
+        self._warned_invalid: set[str] = set()
         self._stop = threading.Event()
         self.thread: threading.Thread | None = None
 
     def _read(self):
         if self._conn is None or self._conn.closed:
-            self._conn = _connect(self._dsn, autocommit=True)
+            self._conn = _connect(self._dsn, autocommit=True, **_KEEPALIVES)
             self._conn.execute("SET statement_timeout = '5s'")
         return load_rows(self._conn)
 
@@ -273,6 +299,11 @@ class PrincipalRefresher:
         if not self._warned:
             self._warned = True
             self._startup_warnings()
+        for name in self._snapshot.invalid_rows:
+            if name not in self._warned_invalid:
+                self._warned_invalid.add(name)
+                logger.warning("stored principal %r is not a principal name "
+                               "([a-z0-9][a-z0-9._-]{0,63}): skipped", name)
         return True
 
     def _startup_warnings(self) -> None:

@@ -78,7 +78,8 @@
 #                                    (default ~/.pseudolife-mcp/<client>.token;
 #                                    it must not exist yet). An interactive
 #                                    run also takes a code pasted where it
-#                                    asks for the token
+#                                    asks for the token, which keeps it off
+#                                    the command line (and shell history)
 # One token file is one principal: every client a run wires shares it. For
 # per-client attribution on the board, run the installer once per client,
 # each run with that client's own token file.
