@@ -24,6 +24,7 @@ import io
 import json
 import os
 import signal
+import stat
 import tarfile
 from pathlib import Path
 
@@ -142,7 +143,10 @@ class World:
                  target_up_after_start=True, env_mismatch=False, still_running_after_stop=False,
                  stop_exit_code=0, lingering_backends=0, target_timer="enabled", source_timer="enabled",
                  source_policy="unless-stopped", target_policy="unless-stopped", grep_hits=(REGISTRATION,),
-                 dotenv=TARGET_DOTENV, hooks=None, target_respawns=0, restore_fails_after_drop=False):
+                 dotenv=TARGET_DOTENV, hooks=None, target_respawns=0, restore_fails_after_drop=False,
+                 source_pg="170006", target_pg="170006"):
+        self.source_pg = source_pg
+        self.target_pg = target_pg
         self.fail = tuple(fail)
         self.fail255 = tuple(fail255)
         self.calls: list[Call] = []
@@ -276,6 +280,8 @@ class World:
                 return 0, b"t\n", b""
             elif "FROM principals" in sql:
                 return 0, b"laptop\nphone\n", b""
+            elif "server_version_num" in sql:
+                return 0, f"{self.source_pg}\n".encode(), b""
             elif "coordination_bank_id" in sql:
                 return 0, (SOURCE_META + "\n").encode(), b""
             elif "count(*) FROM pg_stat_activity" in sql:
@@ -386,6 +392,8 @@ class World:
         if cmd.startswith("docker run --rm --entrypoint rm") and "/data/move.json" in cmd:
             self.data_files.pop("/data/move.json", None)
             return 0, b"", b""
+        if "server_version_num" in cmd:
+            return 0, f"{self.target_pg}\n".encode(), b""
         if "ops/restore.sh" in cmd and self.restore_fails_after_drop:
             self.target_running = False
             self.target_restored = True
@@ -705,6 +713,8 @@ PREFLIGHT_CASES = {
     "target_postgres_down": ({"target_pg_running": "false"}, "postgres"),
     "target_unhealthy": ({"target_healthy": False}, "target daemon"),
     "target_schema": ({"target_schema": 40}, "schema"),
+    "target_postgres_older": ({"source_pg": "180001", "target_pg": "160004"}, "older than the source"),
+    "postgres_version_unreadable": ({"target_pg": ""}, "server version"),
     "same_bank": ({"target_bank": SOURCE_BANK}, "same bank"),
     "not_empty": ({"target_empty": False}, "not empty"),
 }
@@ -723,6 +733,24 @@ def test_preflight_refusals_exit_4_and_change_nothing(tmp_path, capsys, case):
     assert world.source_running and not world.fenced
     assert not (tmp_path / "home" / "moves").exists()
     _scan_for_secrets(world, captured.out, captured.err)
+
+
+def test_move_directories_are_owner_only_on_both_hosts(tmp_path):
+    # They hold the bank's dump, its state archive (config.yaml included)
+    # and the move record: no other user on either host may read them.
+    world = World()
+    assert run_move(world, tmp_path) == 0
+    made = [c.remote for c in world.calls if c.remote and c.remote.startswith("mkdir -p")]
+    assert made and all("-m 700" in cmd and "chmod 700" in cmd for cmd in made), made
+    if os.name == "posix":
+        moves = tmp_path / "home" / "moves"
+        assert stat.S_IMODE(moves.stat().st_mode) == 0o700
+        assert all(stat.S_IMODE(d.stat().st_mode) == 0o700 for d in moves.iterdir())
+
+
+def test_a_newer_target_postgres_is_accepted(tmp_path):
+    # A plain dump restores into the same or a newer major version.
+    assert run_move(World(source_pg="160004", target_pg="170006"), tmp_path) == 0
 
 
 def test_a_null_target_fingerprint_counts_as_different(tmp_path):

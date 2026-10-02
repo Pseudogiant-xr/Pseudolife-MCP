@@ -294,6 +294,9 @@ def _stage_apply(root: Path, name: str, script: Path) -> tuple[Path, Path, Path]
                                                 'echo "backup $*" >> "$SCENARIO_DIR/calls.log"\n'
                                                 'echo "stub safety dump"\n',
                                                 encoding="utf-8", newline="\n")
+        # restore.sh runs it directly: on Linux and macOS it must be
+        # executable (Git Bash on Windows runs it either way).
+        (repo / "ops" / "backup.sh").chmod(0o755)
     backup = sdir / "pseudolife_memory-20261002-000000.sql.gz"
     backup.write_bytes(gzip.compress(b"-- dump\n"))
     state = sdir / "pseudolife_state-20261002-000000.tgz"
@@ -338,7 +341,7 @@ def apply_ps1_runs(tmp_path_factory):
     scenarios = []
     for name, no_start in APPLY_SCENARIOS.items():
         copy, backup, state = _stage_apply(root, name, RESTORE_PS1)
-        flag = " -NoStart -Container pgc -Db mydb -User myuser" if no_start else ""
+        flag = " -NoStart -Container pgc -Db mydb -User myuser -DaemonContainer dmn" if no_start else ""
         scenarios.append(Scenario(name, _APPLY_PS1_STUB,
                                   f'& "{copy}" -Apply{flag} -BackupFile "{backup.as_posix()}" '
                                   f'-StateArchive "{state.as_posix()}"'))
@@ -356,7 +359,7 @@ def apply_sh_runs(tmp_path_factory):
     scenarios = []
     for name, no_start in APPLY_SCENARIOS.items():
         copy, backup, state = _stage_apply(root, name, RESTORE_SH)
-        flag = " --no-start --container pgc --db mydb --user myuser" if no_start else ""
+        flag = " --no-start --container pgc --db mydb --user myuser --daemon-container dmn" if no_start else ""
         scenarios.append(Scenario(name, _APPLY_SH_STUB,
                                   f'bash "{copy.as_posix()}" --apply{flag} --backup-file "{backup.as_posix()}" '
                                   f'--state-archive "{state.as_posix()}"'))
@@ -416,5 +419,5 @@ def test_the_safety_dump_backs_up_the_database_being_replaced(applied):
     backup = [line for line in res.lines("calls.log") if line.startswith("backup")]
     assert len(backup) == 1, res.detail()
     words = backup[0].split()
-    pairs = {words[i].lstrip("-").lower(): words[i + 1] for i in range(1, len(words) - 1, 2)}
-    assert pairs == {"container": "pgc", "db": "mydb", "user": "myuser"}, res.detail()
+    pairs = {words[i].lstrip("-").replace("-", "").lower(): words[i + 1] for i in range(1, len(words) - 1, 2)}
+    assert pairs == {"container": "pgc", "db": "mydb", "user": "myuser", "daemoncontainer": "dmn"}, res.detail()

@@ -10050,6 +10050,15 @@ happens to `~/.pseudolife-mcp/moves/<move id>/record.json` on the source:
 after a move that ended that way, read it and run its `manual_rollback`
 lines in order.
 
+**Don't run commands that write the database directly during a move**
+(`lease break`, `board-audit redact`, `coordination-recovery`, a `psql`
+session). The move cuts such connections off before the final dump and
+fences the database right after it, but the dump has to connect first, so
+a write landing in those seconds would miss the dump.
+
+The target's PostgreSQL must be the source's major version or newer: a
+dump restores only forward, and preflight refuses an older target.
+
 The order:
 
 1. **Preflight, nothing changed.** The source is healthy and reports its

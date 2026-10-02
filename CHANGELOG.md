@@ -139,6 +139,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   undelivered mail, the target's files that held its replaced token, and the
   source leftovers to retire. The source is stopped and fenced, never
   deleted.
+- Preflight refuses a target whose PostgreSQL major version is older than
+  the source's, since a plain dump restores only forward. The move's
+  directories, which hold the dump, the state archive and the move record,
+  are owner-only on both hosts.
 - `ops/restore.sh --no-start` / `ops/restore.ps1 -NoStart`: a real restore
   that leaves the daemon stopped (refused without `--apply` / `-Apply`). The
   restore scripts' safety dump now covers the database being replaced

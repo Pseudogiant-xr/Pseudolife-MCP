@@ -179,7 +179,8 @@ else
     # ── REAL RESTORE ─────────────────────────────────────────────────────
     echo "WARNING: REAL RESTORE: this REPLACES the live bank '$DB' with $BACKUP_FILE" >&2
     echo "==> Safety-dumping the current bank first..."
-    "$(dirname "$0")/backup.sh" --container "$CONTAINER" --db "$DB" --user "$DB_USER"
+    "$(dirname "$0")/backup.sh" --container "$CONTAINER" --db "$DB" --user "$DB_USER" \
+        --daemon-container "$DAEMON_CONTAINER"
 
     echo "==> Stopping the daemon..."
     docker stop "$DAEMON_CONTAINER" >/dev/null

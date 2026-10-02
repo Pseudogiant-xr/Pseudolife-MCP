@@ -267,6 +267,24 @@ def fence_sql(db: str, allow: bool) -> str:
     return f"ALTER DATABASE {db} WITH ALLOW_CONNECTIONS {'true' if allow else 'false'}"
 
 
+def _private_dir(path: Path) -> None:
+    """Create a move directory (and its ``moves`` parent) owner-only: it
+    holds the bank's dump, its state archive and the move record. On
+    Windows the per-user profile already keeps other users out."""
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        for directory in (path.parent, path):
+            os.chmod(directory, 0o700)
+
+
+def _pg_major(result) -> int | None:
+    """The major version from ``SHOW server_version_num`` (170006 -> 17)."""
+    if not result.ok:
+        return None
+    text = result.text.strip()
+    return int(text) // 10000 if text.isdigit() else None
+
+
 def terminate_sql(db: str) -> str:
     return (f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = {_lit(db)} "
             f"AND pid <> pg_backend_pid()")
@@ -702,6 +720,7 @@ class Mover:
         if not result.ok or result.text.strip() != "true":
             raise self.refuse(f"the target's {POSTGRES} container is not running: start the stack there "
                               f"(docker compose -f ops/docker-compose.yml up -d) or run the installer")
+        self.check_postgres_versions()
         if not o.resume:
             result = self.ssh("curl -fsS --max-time 5 http://127.0.0.1:8765/health", timeout=60)
             try:
@@ -730,6 +749,22 @@ class Mover:
                                "needs_expose": self.needs_expose, "database": self.target_db,
                                "restart_policy": self.target_policy,
                                "unattended_update": self.target_timer_enabled}
+
+    def check_postgres_versions(self) -> None:
+        """A plain-format dump restores into the same or a newer PostgreSQL
+        major version, never an older one: pg_dump 17 and later emit
+        settings (``SET transaction_timeout``) that an older server rejects
+        part-way through the restore, after the target database was dropped."""
+        source = _pg_major(self.psql_local("SHOW server_version_num", "postgres"))
+        target = _pg_major(self.psql_remote("SHOW server_version_num", "postgres"))
+        if source is None or target is None:
+            raise self.refuse("could not read the PostgreSQL server version on both hosts "
+                              "(SHOW server_version_num)")
+        self.data["postgres"] = {"source_major": source, "target_major": target}
+        if target < source:
+            raise self.refuse(f"the target's PostgreSQL {target} is older than the source's {source}: a dump "
+                              f"restores only into the same or a newer major version. Move the target's "
+                              f"Postgres image to {source} or later first")
 
     def check_target_bank(self) -> None:
         """The target bank is empty, or (``--resume``) a marker on the target
@@ -941,7 +976,7 @@ class Mover:
     def write_record(self, state: str) -> None:
         self.state = state
         try:
-            self.local_dir.mkdir(parents=True, exist_ok=True)
+            _private_dir(self.local_dir)
             record = {"move_id": self.move_id, "target": self.o.target, "checkout": self.checkout,
                       "target_url": self.target_url, "source_bank": self.source_bank, "state": state,
                       "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1116,7 +1151,7 @@ class Mover:
 
     def final_backup(self) -> None:
         directory = self.local_dir
-        directory.mkdir(parents=True, exist_ok=True)
+        _private_dir(directory)
         dump, part = directory / DUMP_NAME, directory / (DUMP_NAME + ".part")
         # Writers other than the daemon (a psql window, a Console that kept
         # a connection, lease break) are cut off before the dump.
@@ -1172,7 +1207,8 @@ class Mover:
                   f"{state.name} ({_size(state.stat().st_size)}), {MANIFEST_NAME}, in {directory}")
 
     def copy_files(self) -> None:
-        result = self.ssh(f"mkdir -p {rq(self.remote_dir)}", timeout=60)
+        # Owner-only: it receives the bank's dump and state archive.
+        result = self.ssh(f"mkdir -p -m 700 {rq(self.remote_dir)} && chmod 700 {rq(self.remote_dir)}", timeout=60)
         if not result.ok:
             raise MoveError(f"could not create {self.remote_dir} on the target ({result.why()})")
         for name in (DUMP_NAME, STATE_NAME, MANIFEST_NAME):

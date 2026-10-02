@@ -186,7 +186,8 @@ try {
         # ── REAL RESTORE ─────────────────────────────────────────────────
         Write-Warning "REAL RESTORE: this REPLACES the live bank '$Db' with $BackupFile"
         Write-Host "==> Safety-dumping the current bank first..."
-        & (Join-Path $PSScriptRoot "backup.ps1") -Container $Container -Db $Db -User $User
+        & (Join-Path $PSScriptRoot "backup.ps1") -Container $Container -Db $Db -User $User `
+            -DaemonContainer $DaemonContainer
 
         Write-Host "==> Stopping the daemon..."
         docker stop $DaemonContainer | Out-Null
