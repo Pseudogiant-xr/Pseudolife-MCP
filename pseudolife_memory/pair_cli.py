@@ -22,10 +22,12 @@ pairing code. This command:
    anyone on a plain-HTTP path, cannot steer the path. Then verifies the
    token with ``connect``'s authenticated check.
 5. A lost response (timeout, reset, a 5xx) is retried with the same body:
-   the daemon answers an idempotent retry with the original 200. A definite
-   refusal removes the file. When the outcome stays unknown, or the check
-   fails, the file is kept and named: the code may be spent, and the file is
-   the only copy of a token the daemon may now accept.
+   the daemon answers an idempotent retry with the original 200. A refusal
+   of the first attempt removes the file. Once any attempt's outcome was
+   unknown, a later refusal (a 429, say) proves nothing, so the file is
+   kept; when the outcome stays unknown, or the check fails, the file is
+   kept and named too: the code may be spent, and the file is the only copy
+   of a token the daemon may now accept.
 
 The token and the code are never printed, and neither is in the JSON
 report.
@@ -72,6 +74,11 @@ MAX_RESPONSE_BYTES = 65536
 RATE_LIMITED = "pairing is rate-limited on the daemon, try again in a minute"
 _OLD_DAEMON = ("the daemon does not offer pairing (HTTP {status}); update the daemon first, "
                "then re-run with the same code")
+# connect's warning, for a remote daemon reached over plain HTTP.
+_PLAIN_HTTP = ("WARNING: {url} is plain HTTP: the link itself is unencrypted, so it must be a "
+               "private network such as a tailnet, or a TLS reverse proxy must front the daemon.")
+# Whether a move is the POSIX link-then-unlink (Windows renames instead).
+_POSIX_MOVE = os.name != "nt"
 _KEPT = ("{path} is kept: the code may already be spent, and this file is the only copy of a "
          "token the daemon may now accept. Re-run `pseudolife-mcp connect <url> --token-file "
          "{path}` once the daemon answers; delete the file only if the operator re-invites this "
@@ -162,15 +169,24 @@ def _text(value) -> str | None:
     return None
 
 
+class _LinkedTwice(Exception):
+    """The hard link to the new name exists, but the old name could not be
+    removed: both files hold the token."""
+
+
 def _move_no_replace(source: Path, target: Path) -> None:
     """Move ``source`` to ``target``; never replace an existing ``target``.
-    POSIX: a hard link fails on an existing name, then the old name goes.
-    Windows: ``os.rename`` refuses an existing target."""
-    if os.name == "nt":
+    POSIX: a hard link fails on an existing name, then the old name goes
+    (raises :class:`_LinkedTwice` when only the link worked). Windows:
+    ``os.rename`` refuses an existing target."""
+    if not _POSIX_MOVE:
         os.rename(source, target)
         return
     os.link(source, target)
-    os.unlink(source)
+    try:
+        os.unlink(source)
+    except OSError as exc:
+        raise _LinkedTwice() from exc
 
 
 def _report(url: str | None) -> dict:
@@ -232,16 +248,26 @@ def redeem(url: str, code: str, token_file: str | None = None) -> dict:
         report["token_file"] = None
         return _done(report, state, EXIT_REFUSED, error)
 
+    def refused_after_unknown(error: str) -> dict:
+        # An earlier attempt may have redeemed the code with this token, so
+        # this refusal does not prove the file useless.
+        return _done(report, "unknown", EXIT_UNKNOWN,
+                     f"{error}, after an attempt whose answer was lost. " + _KEPT.format(path=target))
+
     payload = None
+    uncertain = False
     for attempt in range(1 + RETRIES):
         if attempt:
             sleep(BACKOFF_S[min(attempt - 1, len(BACKOFF_S) - 1)])
         try:
             status, payload = post_pair(url, body)
         except Exception:  # noqa: BLE001 - no answer arrived; the outcome is unknown
+            uncertain = True
             continue
         if status == 200 and isinstance(payload, dict):
             break
+        if uncertain and 300 <= status < 500:
+            return refused_after_unknown(f"the daemon then answered HTTP {status}")
         if status == 400:
             return refused("refused", "the daemon refused the pairing code (unknown, expired, "
                                       "already used or revoked); ask the operator for a new one "
@@ -253,6 +279,7 @@ def redeem(url: str, code: str, token_file: str | None = None) -> dict:
         if 300 <= status < 500:
             return refused("refused", f"the daemon refused the pairing request (HTTP {status})")
         # A 5xx, or a 200 without a readable body: the outcome is unknown.
+        uncertain = True
     else:
         return _done(report, "unknown", EXIT_UNKNOWN,
                      f"no answer from the daemon at {url} after {1 + RETRIES} attempts. "
@@ -267,6 +294,12 @@ def redeem(url: str, code: str, token_file: str | None = None) -> dict:
             final = bank_directory() / f"{principal}.token"
             try:
                 _move_no_replace(target, final)
+            except _LinkedTwice:
+                report["warnings"].append(
+                    f"the token is in both {final} and {target}: the new name was linked but the "
+                    f"pairing name could not be removed; delete {target} once {final} works")
+                target = final
+                report["token_file"] = str(target)
             except OSError:
                 report["warnings"].append(
                     f"{final} already exists (or could not be created); it was left as it is, and "
@@ -354,4 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     if code is None:
         return usage("that is not a pairing code: it has 12 letters and digits, shown as "
                      "XXXX-XXXX-XXXX", url)
-    return _emit(redeem(url, code, args.token_file), args.json)
+    report = redeem(url, code, args.token_file)
+    from pseudolife_memory.daemon_url import _is_loopback_url
+    if url.startswith("http://") and not _is_loopback_url(url):
+        report["warnings"].insert(0, _PLAIN_HTTP.format(url=url))
+    return _emit(report, args.json)
