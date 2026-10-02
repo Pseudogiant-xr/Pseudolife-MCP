@@ -727,8 +727,6 @@ def test_drop_bench_db_refuses_a_database_this_run_did_not_create():
 
 
 def test_drop_bench_db_drops_exactly_the_name_it_was_given(monkeypatch):
-    import os
-
     executed = []
 
     class _Conn:
@@ -744,7 +742,7 @@ def test_drop_bench_db_drops_exactly_the_name_it_was_given(monkeypatch):
     fake = type(sys)("psycopg")
     fake.connect = lambda *a, **kw: _Conn()
     monkeypatch.setitem(sys.modules, "psycopg", fake)
-    name = f"pseudolife_memory_bench_{os.getpid()}"
+    name = eb._bench_db_name()  # "wsl<pid>" inside WSL, the bare pid elsewhere
     eb.drop_bench_db(name)
     assert executed == [f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)']
 

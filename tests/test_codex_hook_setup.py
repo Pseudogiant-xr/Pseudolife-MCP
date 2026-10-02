@@ -730,6 +730,38 @@ def test_a_mailbox_approval_setup_cannot_make_does_not_fail_hook_setup(
     assert 'choose approval_mode = "approve"' in notice
 
 
+@pytest.mark.parametrize("failure", ["locked-config", "broken-pipe"])
+def test_an_os_error_during_mailbox_approval_does_not_fail_hook_setup(
+        tmp_path, monkeypatch, failure):
+    """A locked config.toml (backup on Windows) or a Codex pipe that broke
+    mid-write raises OSError; the approval is reported unavailable and the
+    raw error, which names private paths, stays out of the report."""
+    secret = str(tmp_path / "private" / "config.toml")
+    client = MailboxCodex(tmp_path)
+    if failure == "locked-config":
+        # The hooks are already trusted, so the approval's is the only backup.
+        def locked(path):
+            raise PermissionError(13, "Access is denied", secret)
+        monkeypatch.setattr(setup, "backup", locked)
+    else:
+        rpc = client.rpc
+
+        def broken(method, params, *args, **kwargs):
+            edits = params.get("edits", []) if isinstance(params, dict) else []
+            if method == "config/batchWrite" and any(MAILBOX_KEY == e["keyPath"] for e in edits):
+                raise BrokenPipeError(32, "Broken pipe", secret)
+            return rpc(method, params, *args, **kwargs)
+        client.rpc = broken
+    result = mailbox_setup(tmp_path, monkeypatch, client, trust="yes", non_interactive=True,
+                           instructions="skip")
+    assert result["mailbox_approval"] == "unavailable"
+    detail = result["mailbox_approval_detail"]
+    assert ("PermissionError" if failure == "locked-config" else "BrokenPipeError") in detail
+    assert secret not in json.dumps(result) and "Access is denied" not in detail
+    assert "could not approve memory_message" in result["mailbox_approval_notice"]
+    assert "approve" not in json.dumps(client.user.get("mcp_servers", {}))
+
+
 def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_path):
     """A hook Codex killed can linger holding an inherited copy of the
     app-server's stdout: seen 2026-09-25 on Windows under load, a PowerShell
@@ -756,6 +788,29 @@ def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_pat
             pass
         client.reader.join(timeout=5)
         client.proc.stdout.close()
+
+
+def test_a_codex_that_exited_fails_only_the_mailbox_approval(tmp_path):
+    """With Codex gone, the approval's write fails on the pipe; the request
+    it left in stdin's buffer must not raise again when setup closes the
+    client, or the error escapes setup's `with codex(...)` block anyway."""
+    # Codex(executable, ...) runs `<executable> app-server --stdio` in cwd.
+    (tmp_path / "app-server").write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    message = json.loads(line)\n"
+        "    if message.get('method') == 'initialize':\n"
+        "        print(json.dumps({'id': message['id'], 'result': {}}), flush=True)\n"
+        "    else:\n"
+        "        break\n", encoding="utf-8")
+    client = setup.Codex(sys.executable, tmp_path, tmp_path)
+    client.proc.wait(timeout=10)
+    report = {"backups": []}
+    try:
+        assert setup.mailbox_approval({}, tmp_path, report, client, tmp_path) == "unavailable"
+        assert report["mailbox_approval_detail"].endswith("Error).")
+    finally:
+        client.close()
 
 
 def _powershell_pair_seconds():

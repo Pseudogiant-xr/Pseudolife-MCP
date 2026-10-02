@@ -703,7 +703,10 @@ def mailbox_approval(config, home, report, client=None, cwd=None):
     when consent was given (``client``) and nothing is set. States: "set",
     "already" ("approve" was set), "kept-explicit" (another value stays),
     "declined" (no consent) and "unavailable" (the reason in
-    ``mailbox_approval_detail``). A failure here never fails hook setup."""
+    ``mailbox_approval_detail``). A failure here never fails hook setup:
+    Codex's refusals and timeouts arrive as SetupError, and a file or pipe
+    error (a locked config.toml on Windows, Codex exiting mid-write) as
+    OSError. Anything else is a defect and reaches setup's own handler."""
     try:
         if client is not None:
             # The hook trust write just before this moved the version.
@@ -739,6 +742,11 @@ def mailbox_approval(config, home, report, client=None, cwd=None):
     except SetupError as exc:
         state = "unavailable"
         report["mailbox_approval_detail"] = str(exc)
+    except OSError as exc:
+        # Never serialize the raw error: it names private paths.
+        state = "unavailable"
+        report["mailbox_approval_detail"] = (
+            f"Codex config.toml could not be read, backed up or written ({type(exc).__name__}).")
     report["mailbox_approval"] = state
     return state
 
