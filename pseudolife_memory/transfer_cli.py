@@ -99,6 +99,9 @@ EXCLUDED_TABLES = (
     "coordination_leases", "coordination_lease_waiters",
     # v49: the rings the daemon decided, by this bank's agent and message ids.
     "coordination_wakes",
+    # v53: invited machines' credentials (token and code hashes). Like the
+    # board's instance credentials they stay in full backups only.
+    "principals",
 )
 
 # Columns of an exported table that are serving telemetry under the same

@@ -18,7 +18,8 @@ import uuid
 from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
-from pseudolife_memory.principals import parse_token_map, resolve_principal
+from pseudolife_memory.principals import (
+    PrincipalsUnavailable, env_auth, installed_store, principal_admitted, resolve_principal)
 from pseudolife_memory.storage.coordination import (
     DAEMON_PRINCIPAL, CoordinationClockChanged, CoordinationError,
 )
@@ -61,6 +62,9 @@ _REQUIRED = {
 _INSTANCELESS = {"context", "register", "leases"}
 PUBLIC_ERROR_CODES = frozenset({
     "authentication_required", "unauthorized", "principal_not_allowed",
+    # A bearer that may be a stored principal while the daemon's view of
+    # them is not loaded or stale (a 503 at the HTTP gate).
+    "principals_unavailable",
     "instance_not_found", "invalid_credential",
     "unknown_coordination_action", "unexpected_parameter", "missing_parameter",
     "instance_authentication_required", "coordination_requires_postgres",
@@ -331,7 +335,7 @@ def unavailable_reason(service, headers: Mapping[str, str], *,
         principal = authenticated_principal(headers, token_map=token_map, token=token)
     except ValueError as exc:
         return str(exc)
-    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+    if not principal_admitted(cfg, principal):
         return "principal_not_allowed"
     if not getattr(service, "_db_url", None):
         return "coordination_requires_postgres"
@@ -355,13 +359,22 @@ def public_detail(exc: Exception) -> str | None:
 
 
 def authenticated_principal(headers: Mapping[str, str], *, token_map=None, token=None) -> str:
-    """Require configured bearer auth; open-loopback naming is insufficient."""
+    """Require configured bearer auth; open-loopback naming is insufficient.
+
+    The environment's map and token (``token_map=None`` reads them), then
+    the installed stored-principal snapshot, through the one resolver. A
+    stored principal counts only when the environment configures
+    authentication: an open install keeps refusing with
+    ``authentication_required``."""
     if token_map is None:
-        token_map = parse_token_map(os.environ.get("PSEUDOLIFE_MCP_TOKENS"))
-        token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+        token_map, token = env_auth()
     if not token_map and not token:
         raise ValueError("authentication_required")
-    principal = resolve_principal(headers.get("authorization"), token_map, token)
+    try:
+        principal = resolve_principal(headers.get("authorization"), token_map, token,
+                                      installed_store())
+    except PrincipalsUnavailable:
+        raise ValueError("principals_unavailable") from None
     if principal is None:
         raise ValueError("unauthorized")
     return principal
@@ -481,7 +494,7 @@ def _dispatch(service, action: str, parameters: dict, *, headers=None,
     principal = principal or authenticated_principal(headers)
     # The daemon's own sender is never a client, whatever the token map or
     # allowed_principals say: only ``daemon_notice`` speaks as it.
-    if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+    if not principal_admitted(cfg, principal):
         raise ValueError("principal_not_allowed")
     if action not in _PARAMETERS:
         raise ValueError("unknown_coordination_action")
@@ -639,7 +652,7 @@ def console_snapshot(service, *, limit=50) -> dict:
         principal = request_principal()
         if principal is None:
             raise ValueError("authentication_required")
-        if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+        if not principal_admitted(cfg, principal):
             raise ValueError("principal_not_allowed")
         if getattr(service, "_storage", None) is None:
             return {"enabled": True, "available": False, "reason": "not_initialized"}

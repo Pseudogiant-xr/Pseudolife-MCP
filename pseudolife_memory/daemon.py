@@ -160,6 +160,24 @@ def reserved_principal_warnings(allowed_principals, token_map) -> list[str]:
     return out
 
 
+def start_stored_principals(svc, token_map, *, auth_configured: bool):
+    """Install the stored-principal snapshot (schema v53) and start its
+    refresh thread, or ``None`` on a daemon without Postgres, which has no
+    store. The snapshot ignores rows whose name the environment already
+    uses. The refresher gets the DSN, never the service, so it cannot take
+    the service or coordination lock."""
+    from pseudolife_memory.principal_store import PrincipalRefresher, PrincipalSnapshot
+    from pseudolife_memory.principals import install_store
+
+    dsn = getattr(svc, "_db_url", None)
+    if not dsn:
+        return None
+    snapshot = PrincipalSnapshot(shadowed=set((token_map or {}).values()))
+    install_store(snapshot)
+    PrincipalRefresher(dsn, snapshot, auth_configured=auth_configured).start()
+    return snapshot
+
+
 def _dream_stall(svc) -> dict | None:
     """The service's open dream-stall record, or ``None`` (none open, or a
     stand-in without a tracker). Lock-free; never raises."""
@@ -466,6 +484,9 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     for warning in reserved_principal_warnings(allowed, token_map):
         logger.warning("%s", warning)
     auth_configured = token is not None or bool(token_map)
+    # Invited machines (pseudolife-mcp invite / pair): resolved after the
+    # environment from an in-memory view of the bank's principals table.
+    start_stored_principals(mcp_server.service, token_map, auth_configured=auth_configured)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
     )

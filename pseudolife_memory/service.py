@@ -8420,8 +8420,8 @@ class MemoryService(DreamOps):
         if principal is None:
             principal = self._request_principal()
         # The daemon's reserved sender is never a client (as in dispatch).
-        from pseudolife_memory.storage.coordination import DAEMON_PRINCIPAL
-        if principal == DAEMON_PRINCIPAL or principal not in cfg.allowed_principals:
+        from pseudolife_memory.principals import principal_admitted
+        if not principal_admitted(cfg, principal):
             return {**result, "reason": "principal_not_allowed"}
         cap = min(cfg.awareness_limit, limit if limit is not None else cfg.awareness_limit, 20)
         # The header/context is an attribution signal, not bearer authentication.

@@ -6,6 +6,83 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-02 — `invite` and `pair`: a new machine joins a bank with one short code; schema v53)
+- `pseudolife-mcp invite <machine>` on the daemon host gives another machine
+  its own principal, admitted to the agent board, with no daemon restart and
+  no hand edits of `ops/.env` or `config.yaml`. It prints a single-use
+  12-character pairing code that expires after 15 minutes (`--expires`, at
+  most 24 hours), and the line to run on the new machine. `--tier`,
+  `--board` / `--no-board` (kept on a re-invite unless given), `--replace`
+  (a new code for a paired machine; its old token works until it is
+  redeemed), `--list` (never a token or a code) and `--revoke` (effective
+  within 10 seconds, 60 at worst while the daemon cannot read its database). `--list` and `--revoke` need no running daemon
+  (`--bank <fingerprint>` confirms the database); with a Docker daemon
+  container stopped they run through `psql` in the Postgres container. Names are lowercase
+  `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name
+  in `PSEUDOLIFE_MCP_TOKENS` or `PSEUDOLIFE_MCP_TIER_MAP` are refused. It
+  refuses a daemon without `"auth": true`, and a database whose bank is not
+  the one the local daemon's `/health` reports. On a Docker install it runs
+  inside the daemon container after checking the image has the command.
+- `pseudolife-mcp pair <url> <code>` on the new machine mints the bearer
+  token there, writes it to an owner-only `~/.pseudolife-mcp/<principal>.token`
+  (never replacing a file), and sends the daemon only its SHA-256: the token
+  never appears in a terminal, a chat, shell history or a network response.
+  A lost response is retried and answered again; a refused code removes the
+  file; an unknown outcome keeps it and says so, also when a later attempt
+  is refused (the lost one may have spent the code). `--read-code` reads the
+  code from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
+  confirmation (never in `--dry-run`, never for a plan with nothing to
+  re-point) and re-points the clients at the new file.
+- `POST /api/pair` redeems a code with one conditional UPDATE on the
+  database clock, so a code is single use under concurrency. It refuses any
+  request with an `Origin` header, takes only JSON up to 1 KiB, answers every
+  failure with the same `400 {"error": "pairing_refused"}` (any parse error,
+  a deeply nested body included), holds pairing at `429` after 20 failed
+  attempts in a minute without consulting the store (each attempt is
+  charged on arrival and refunded on success), runs at most two
+  redemptions at once on its own executor (a third gets `429`), refuses
+  without spending a code whose name the environment or a reservation
+  uses, and never logs the body.
+- The installers' option 2 accepts a pairing code where it asks for the
+  token (and `--pairing-code` / `-PairingCode`), and option 3 prints
+  `expose tailscale` and `invite <machine>` instead of the hand steps,
+  offering to run `expose tailscale` at the end (default no).
+- `pseudolife-mcp expose tailscale` now names `pseudolife-mcp invite
+  <machine>` as the next step.
+
+### Changed (2026-10-02 — stored principals in the bank; schema v53)
+- Schema v53: a `principals` table holds each invited machine's name, the
+  SHA-256 of its token (once paired) and of a pending code, its tier, its
+  board access and its times. Neither a token nor a code is stored in
+  plaintext. Excluded from logical exports (`EXCLUDED_TABLES`, like the
+  board's instance credentials); a physical backup carries it.
+- Every bearer is resolved by one resolver: the environment's
+  `PSEUDOLIFE_MCP_TOKENS` and `PSEUDOLIFE_MCP_TOKEN` first (they always win),
+  then an in-memory snapshot of the table keyed by token hash. The daemon
+  refreshes the snapshot every 10 s on its own connection, never under the
+  service or coordination lock and never on the event loop; a redemption is
+  visible at once. The HTTP gate, `/mcp` tool calls (resolved inside the
+  transport wrap from the request's own headers, so handshake-era requests
+  on the session manager's task group see it too), the board and its hooks
+  all use it, and the toolset tier falls back to the stored tier after
+  `PSEUDOLIFE_MCP_TIER_MAP`. An open daemon still refuses the board with
+  `authentication_required`. A presented bearer that stops resolving after
+  the gate (revoked meanwhile, or a stale snapshot) is refused with
+  `principals_unavailable`, never served as the default principal.
+- Board admission goes through one helper, `principal_admitted`: listed in
+  `coordination.allowed_principals`, or a stored principal with board
+  access that is not revoked (`coordination-recovery rebind` reads the
+  restored bank's table the same way). `is_stored_principal` is exposed
+  beside it.
+- A stored principal is refused `POST /api/config` and `POST
+  /api/daemon-notice` with `403 {"error": "operator_principal_required"}`;
+  environment principals keep both.
+- When the snapshot has never loaded or is older than 60 s, a bearer that
+  matches nothing in the environment gets `503 {"error":
+  "principals_unavailable"}` instead of 401; the always-200 hooks treat it
+  as unauthorized, and the board check-in names the reason. The daemon warns
+  at startup when the table has rows but no authentication is configured,
+  and when a stored name is shadowed by the environment.
 ### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
 - A Codex thread woken by board mail could stall on an approval prompt,
   because hook setup left the `memory_message` tool unapproved and only

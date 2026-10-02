@@ -45,6 +45,13 @@ modes:
                  --token-file, the token file; verifies the daemon accepts
                  them first; all-or-nothing with backups (--dry-run shows
                  the plan; --help for options)
+  invite         on the daemon host: give another machine its own principal
+                 (`invite <machine>`): prints a short-lived, single-use
+                 pairing code, no daemon restart; --list, --revoke NAME
+  pair           join a bank with a pairing code from `invite` on the daemon
+                 host (`pair <url> <code>`, or --read-code): mints the token
+                 here, writes it owner-only and sends the daemon only its
+                 SHA-256; never prints the token or the code
   expose         on the daemon host: put the daemon on the tailnet with
                  Tailscale Serve (`expose tailscale`), refusing a daemon
                  without a token and never replacing another serve;
@@ -141,6 +148,12 @@ def main() -> None:
     elif mode == "connect":
         from pseudolife_memory.connect_cli import main as connect_main
         sys.exit(connect_main(sys.argv[2:]))
+    elif mode == "invite":
+        from pseudolife_memory.invite_cli import main as invite_main
+        sys.exit(invite_main(sys.argv[2:]))
+    elif mode == "pair":
+        from pseudolife_memory.pair_cli import main as pair_main
+        sys.exit(pair_main(sys.argv[2:]))
     elif mode == "expose":
         from pseudolife_memory.expose_cli import main as expose_main
         sys.exit(expose_main(sys.argv[2:]))

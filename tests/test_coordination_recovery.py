@@ -147,3 +147,23 @@ def test_recovery_refuses_a_config_that_only_inherits_the_default(tmp_path, caps
     assert main(["recover", "--config", str(config), "--confirm-daemon-stopped",
                  "--confirm-restore"]) == 1
     assert "coordination.enabled: false" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("board,code", [(True, 0), (False, 1)])
+def test_rebind_admits_an_invited_principal_with_board_access(store, pg_url, tmp_path, monkeypatch,
+                                                              board, code):
+    """An owner the config does not list may still be a principal invited
+    with board access (schema v53): the restored bank's own table says so."""
+    import psycopg
+
+    from pseudolife_memory import principal_store
+    a = store.register("laptop")
+    store.recover()
+    with psycopg.connect(pg_url, autocommit=True) as conn:
+        principal_store.create_invite(conn, "laptop", tier=None, board=board, ttl_seconds=60,
+                                      replace=False)
+    state = tmp_path / "laptop.json"
+    assert invoke(monkeypatch, pg_url, settings(tmp_path), "rebind", "--agent", a["agent_id"],
+                  "--principal", "laptop", "--bank-url", "http://127.0.0.1:8099",
+                  "--state", str(state)) == code
+    assert state.exists() is board

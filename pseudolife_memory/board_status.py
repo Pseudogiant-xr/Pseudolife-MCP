@@ -21,8 +21,12 @@ _REASONS = {
     "unauthorized": "the daemon rejected this token; re-run the installer so the "
                     "client token file matches ops/.env",
     "principal_not_allowed": "this token's principal is not in "
-                             "coordination.allowed_principals",
+                             "coordination.allowed_principals; list it there, or invite "
+                             "this machine with `pseudolife-mcp invite <machine>` on the "
+                             "daemon host",
     "coordination_requires_postgres": "the board needs the PostgreSQL bank",
+    "principals_unavailable": "the daemon cannot check invited machines' tokens right now (its "
+                              "database is not answering); try again shortly",
 }
 
 

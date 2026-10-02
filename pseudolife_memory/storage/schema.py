@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 52
+SCHEMA_META_VERSION = 53
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -753,6 +753,31 @@ END $$;
 # v42 adds their audit log, which does not either.
 SCHEMA_SQL += COORDINATION_SCHEMA_SQL
 
+# v53: principals stored in the bank (`pseudolife-mcp invite` / `pair`,
+# spec 2026-10-02). Not coordination state: a stored principal is a bearer
+# identity, and the daemon resolves it from an in-memory snapshot
+# (principal_store). Neither a token nor a pairing code is stored in
+# plaintext: both are random, and only their SHA-256 hex is kept, the
+# scheme of the board's instance credentials. paired_code_hash keeps a
+# redeemed code's hash for ten minutes, so the client that minted the token
+# can retry a lost response. Credentials: never in a logical export
+# (transfer_cli.EXCLUDED_TABLES); a physical backup carries them.
+PRINCIPALS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS principals (
+    principal        TEXT PRIMARY KEY,
+    token_hash       TEXT UNIQUE,
+    tier             TEXT,
+    board            BOOLEAN NOT NULL DEFAULT TRUE,
+    code_hash        TEXT UNIQUE,
+    code_expires_at  DOUBLE PRECISION,
+    paired_code_hash TEXT,
+    created_at       DOUBLE PRECISION NOT NULL,
+    paired_at        DOUBLE PRECISION,
+    revoked_at       DOUBLE PRECISION
+);
+"""
+SCHEMA_SQL += PRINCIPALS_SCHEMA_SQL
+
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
 # same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
@@ -788,6 +813,7 @@ BENCH_RESET_TABLES = (
     "store_decisions",
     "coordination_agents", "coordination_messages", "coordination_events",
     "coordination_leases", "coordination_lease_waiters", "coordination_wakes",
+    "principals",
 )
 
 # A test or bench reset reaps every other backend on its database, applies
