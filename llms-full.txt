@@ -4660,7 +4660,9 @@ stdout that cannot take the mail (left unmarked), or a bad argument.
 Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
 heartbeat and writes the ring marker at the ring's `ring_at`, so a waiter
 fires up to about 22 s after a send rings (later for a staggered fan-out
-burst). It also rewrites
+burst). A marker write the filesystem refuses (on Windows, a reader holding
+the file open) is retried at each heartbeat while the rung mail is pending
+and unshown, which adds up to one heartbeat. It also rewrites
 an unchanged digest every hour, without moving the watermark, so the day-old
 sweep another adapter runs at start never takes a long-idle session's file.
 
@@ -4706,7 +4708,12 @@ shell rules before the classifier runs, while it drops broad ones such as
 background Bash or PowerShell command, not a Monitor. Setting
 `autoMode.classifyAllShell` suspends even narrow rules. Codex never starts a turn
 when a background command exits, so run it there only in the foreground: a
-background run would advance `.seen` with nobody reading its output.
+background run would advance `.seen` with nobody reading its output. A Codex
+thread is rung only while its shim declares a ring path, which it does when
+the [Codex doorbell](#codex-doorbell) is configured; the waiter's lease then
+arms the ring even after the doorbell has turned itself off. With
+the doorbell off (`PSEUDOLIFE_CODEX_DOORBELL=0`, or no codex CLI found) the
+daemon never rings the thread, so a waiter there only times out.
 Acknowledging some messages while a waiter is armed, and leaving others pending,
 rewrites the digest and fires once, the same way the tool-result hint
 re-delivers a changed digest.

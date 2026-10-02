@@ -76,6 +76,35 @@ def test_an_enabled_doorbell_disarms_after_failure(tmp_path):
     asyncio.run(drive())
 
 
+def test_a_waiter_beside_a_disabled_doorbell_still_counts_as_a_listener(tmp_path):
+    """Review finding 2026-10-02: once the doorbell watched a Codex thread,
+    only its liveness was reported, so a ``wait-mail --session-id <thread>``
+    lease beside a doorbell that later turned itself off was ignored, the
+    daemon answered no_path and the waiter slept to its timeout. Either
+    listener arms the ring: the marker is written for every rung ring."""
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    from pseudolife_memory.wake_liveness import WaitListener
+    thread = "aaaaaaaa-1111-4111-8111-111111111111"
+
+    async def drive():
+        daemon = FakeDaemon()
+        digest = tmp_path / "digest.txt"
+        client, instance = adapter(daemon, digest_path=digest, ring_path=True)
+        bell = CodexDoorbell(["fixture-cli"])
+        waiter = WaitListener(digest, 100)
+        async with client, instance:
+            bell.watch(thread, instance)
+            bell._disable("fixture failure")
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] == 0
+            waiter.renew()
+            await instance._heartbeat()
+            assert daemon.calls[-1][1]["ring_armed_until"] > time.time()
+            waiter.close()
+            await bell.aclose()
+    asyncio.run(drive())
+
+
 def adapter(daemon, **kwargs):
     from pseudolife_memory.coordination_adapter import CoordinationAdapter
     client = httpx.AsyncClient(transport=httpx.MockTransport(daemon))
@@ -1598,6 +1627,129 @@ def test_a_ring_repeated_on_a_retried_heartbeat_is_taken_once(tmp_path):
                 assert coordination.ring_due() == ("rung", "anyone")
                 await coordination._heartbeat()
                 assert coordination.ring_due() is None
+
+    asyncio.run(drive())
+
+
+def _fail_first_ring_write(coordination):
+    """Make the first ``.ring`` write fail, as a Windows sharing violation
+    does while a waiter holds the marker open."""
+    write = coordination._write_private
+    failed = []
+
+    def flaky(path, body):
+        if path.suffix == ".ring" and not failed:
+            failed.append(path)
+            return False
+        return write(path, body)
+    coordination._write_private = flaky
+    return failed
+
+
+@pytest.mark.parametrize("reoffered", [True, False], ids=["reoffered", "offer-lapsed"])
+def test_a_ring_marker_the_filesystem_refused_is_written_at_the_next_heartbeat(
+        tmp_path, reoffered):
+    """Review finding 2026-10-02: the ring was recorded as taken before its
+    marker was written, so a refused write was never retried and the
+    daemon's repeated offer was dropped as a duplicate; a waiter slept to
+    its timeout. The next heartbeat writes it, whether or not the daemon
+    still offers the ring (a non-queued ring repeats for one interval)."""
+    ring = {"decision": "rung", "reason": "anyone", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (1, _preview("m1"), ring if reoffered else None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                failed = _fail_first_ring_write(coordination)
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert failed and not (tmp_path / "digest.ring").exists()
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert (tmp_path / "digest.ring").read_text() == (
+                    f"{coordination.digest_watermark}\nrung anyone\n")
+
+    asyncio.run(drive())
+    ledger = (tmp_path / "ledger.log").read_text().splitlines()
+    assert [line.split("\t")[1] for line in ledger].count("ring") == 1
+
+
+def test_a_refused_ring_marker_is_dropped_once_the_mail_is_gone(tmp_path):
+    """The retry rings only for mail still pending: a mailbox emptied in
+    the meantime leaves no marker behind for the next waiter to fire on."""
+    ring = {"decision": "rung", "reason": "anyone", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring), (0, [], None),
+                              (0, [], None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                _fail_first_ring_write(coordination)
+                for _ in range(3):
+                    await coordination._heartbeat()
+                    await asyncio.sleep(0.05)
+                assert not (tmp_path / "digest.ring").exists()
+
+    asyncio.run(drive())
+
+
+def test_a_refused_ring_marker_is_dropped_once_its_mail_was_shown(tmp_path):
+    """The retry keeps the watermark the ring was for: once a hint or the
+    prompt hook showed that mail, a later digest change (an ack, plain
+    mail) must not turn the old ring into a wake."""
+    ring = {"decision": "rung", "reason": "anyone", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (2, _preview("m1", "m2"), ring),
+                              (1, _preview("m2"), None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                _fail_first_ring_write(coordination)
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                (tmp_path / "digest.seen").write_text(f"{coordination.digest_watermark}\n")
+                await coordination._heartbeat()   # m1 acked: the digest moves on
+                await asyncio.sleep(0.05)
+                assert not (tmp_path / "digest.ring").exists()
+
+    asyncio.run(drive())
+
+
+def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
+    """A newer ring replaces an older one, as its timer does: the refused
+    marker is not written ahead of the newer ring's ``ring_at``."""
+    daemon = _mailbox_daemon([
+        (0, [], None),
+        (1, _preview("m1"), {"decision": "rung", "reason": "anyone", "ring_at": 0.0}),
+        (2, _preview("m1", "m2"),
+         {"decision": "rung", "reason": "clearer", "ring_at": time.time() + 0.6}),
+        (2, _preview("m1", "m2"), None)])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                write = coordination._write_private
+                refusals = [2]
+
+                def flaky(path, body):
+                    if path.suffix == ".ring" and refusals[0]:
+                        refusals[0] -= 1
+                        return False
+                    return write(path, body)
+                coordination._write_private = flaky
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                await coordination._heartbeat()   # the retry is refused too
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert not (tmp_path / "digest.ring").exists()
+                await asyncio.sleep(0.8)
+                assert (tmp_path / "digest.ring").read_text().endswith("\nrung clearer\n")
 
     asyncio.run(drive())
 
