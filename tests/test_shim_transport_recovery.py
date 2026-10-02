@@ -600,12 +600,67 @@ def test_http_failure_is_sanitized_and_next_call_recovers(
     assert "private.invalid" not in errors
 
 
+def _assert_proxy_children(parent, children, binary):
+    helpers = [child for child in children
+               if binary is not None and Path(child.exe()).resolve() == binary.resolve()]
+    assert len(helpers) == (1 if binary is not None else 0)
+    assert all(child.ppid() == parent.pid for child in helpers)
+    # A piped Python process can own one Windows system console host;
+    # that direct child is separate from the persistent Rust helper.
+    consoles = [child for child in children if os.name == "nt"
+                and child.ppid() == parent.pid
+                and Path(child.exe()).resolve()
+                == (Path(os.environ["SystemRoot"]) / "System32" / "conhost.exe").resolve()]
+    assert len(consoles) <= 1
+    assert set(children) == set(helpers + consoles), "unexpected proxy child process"
+
+
+@pytest.mark.parametrize("extra", ["helper", "process"])
+def test_proxy_child_accounting_rejects_extra_processes(extra, request):
+    import psutil
+    import subprocess
+
+    binary = request.getfixturevalue("rust_binary") if extra == "helper" else None
+    command = [str(binary)] if binary is not None else [sys.executable, "-c", "import time; time.sleep(30)"]
+    code = (
+        "import json,os,subprocess,sys; "
+        "options={'creationflags':getattr(subprocess,'CREATE_NO_WINDOW',0)}; "
+        "children=[subprocess.Popen(json.loads(sys.argv[1]),stdin=subprocess.PIPE,"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**options) "
+        "for _ in range(int(sys.argv[2]))]; "
+        "print(json.dumps({'pid':os.getpid()}),flush=True); sys.stdin.readline(); "
+        "[child.terminate() for child in children]; [child.wait() for child in children]"
+    )
+    owned = []
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, json.dumps(command), "2" if binary is not None else "1"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        parent = psutil.Process(json.loads(process.stdout.readline())["pid"])
+        children = parent.children(recursive=True)
+        owned.extend([psutil.Process(process.pid), parent, *children])
+        with pytest.raises(AssertionError):
+            _assert_proxy_children(parent, children, binary)
+    finally:
+        if process.poll() is None:
+            process.stdin.write(b"close\n")
+            process.stdin.flush()
+        process.wait(timeout=5)
+        _, alive = psutil.wait_procs(owned, timeout=3)
+        for child in alive:
+            child.kill()
+        _, remaining = psutil.wait_procs(alive, timeout=3)
+        assert not alive and not remaining, "disposable accounting process cleanup failed"
+
+
 @pytest.mark.parametrize("backend", ["python", "rust"])
 def test_refused_notification_cannot_prove_later_write_was_not_dispatched(
         tmp_path, upstream, monkeypatch, backend, request):
     from mcp.shared.exceptions import MCPError
     import psutil
 
+    binary = None
     if backend == "rust":
         binary = request.getfixturevalue("rust_binary")
         monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", str(binary.resolve()))
@@ -621,8 +676,8 @@ def test_refused_notification_cannot_prove_later_write_was_not_dispatched(
                                  operation_timeout=5, pid_file=pid_file) as client:
             parent = psutil.Process(int(pid_file.read_text()))
             helpers = parent.children(recursive=True)
-            assert len(helpers) == (1 if backend == "rust" else 0)
             owned.extend([parent, *helpers])
+            _assert_proxy_children(parent, helpers, binary)
             upstream.refuse_initialized = True
             upstream.fault_method = "tools/call"
             upstream.fault = "drop_after_commit"
@@ -702,6 +757,7 @@ def test_principal_admission_refusal_survives_persistent_sdk(
     from mcp.shared.exceptions import MCPError
     import psutil
 
+    binary = None
     if backend == "rust":
         binary = request.getfixturevalue("rust_binary")
         monkeypatch.setenv("PSEUDOLIFE_MCP_RUST_HTTP", str(binary.resolve()))
@@ -717,8 +773,8 @@ def test_principal_admission_refusal_survives_persistent_sdk(
                                  operation_timeout=5, pid_file=pid_file) as client:
             parent = psutil.Process(int(pid_file.read_text()))
             helpers = parent.children(recursive=True)
-            assert len(helpers) == (1 if backend == "rust" else 0)
             owned.extend([parent, *helpers])
+            _assert_proxy_children(parent, helpers, binary)
             upstream.principals_fault = mode
             for _ in range(2):
                 with pytest.raises(MCPError) as caught:
