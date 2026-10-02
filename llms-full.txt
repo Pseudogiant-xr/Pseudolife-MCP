@@ -4505,7 +4505,10 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 `/health` digests — the image sets it to its own copy). The plugin's
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
-is delivered once and a quiet turn adds nothing. While mail stays pending and
+is delivered once and a quiet turn adds nothing. After a resume, compaction or
+`/clear` the conversation has lost the digest it saw: SessionStart writes a
+`<key>.reprint` flag naming the marker it found, and the next prompt prints
+the digest again unless a wake or a hint showed it since. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. A Claude Code
 subagent runs inside its parent's shim, so a tool result may be the
 subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
@@ -6127,11 +6130,11 @@ also capped (below, and by the daemon's `wake` caps under
   wake) does not fire again at the next turn end. Firing
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
-  written, the hook does not wake at all. SessionStart clears `.seen` on
-  resume, compact and clear, and with it a ring marker at or below the
-  value it discarded: that ring was for mail the session already saw, and
-  without `.seen` it would wake the session on later plain mail. A ring
-  past that value is still pending and can wake the session once more.
+  written, the hook does not wake at all. Resume, compact and `/clear`
+  keep `.seen`: SessionStart writes a `<key>.reprint` flag naming the
+  marker it found, and the next prompt prints the digest again unless a
+  wake or a hint showed it since. A ring the session already saw
+  therefore never fires after those, even when the shim writes it late.
 - At most 20 wakes per session in any hour, the same figure the daemon now
   applies per recipient before it decides a ring. A ring over the hook's
   cap waits for the window to free up; it is delayed, not dropped.

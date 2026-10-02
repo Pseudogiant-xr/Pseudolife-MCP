@@ -7,20 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-10-03 — a resumed session no longer wakes on plain mail)
-- On resume, compact and clear, SessionStart deletes the session's `.seen`
-  marker so the next prompt prints the digest again. It left the shim's
-  `<key>.ring` marker in place. With `.seen` gone, a ring for mail the
-  session had already seen (acknowledged or not) read as unseen. Plain
-  mail arriving later then woke the idle session through the Stop hook or
-  `pseudolife-mcp wait-mail`, which broke the rule that only a ring wakes
-  an idle session. `coordination-start.sh` and its Windows twin
-  `lifecycle.ps1` now also delete a ring marker at or below the `.seen`
-  value they discard. A ring past it is still live and stays: the next
-  prompt shows its mail. This drops the old second wake for a ring the
-  session had already seen. Rung mail still unacknowledged at a
-  compaction now waits for the next prompt, which prints it again,
-  instead of waking the session once more. `hooks.json` is unchanged, so
-  Codex users approve nothing again.
+- On resume, compact and clear, SessionStart deleted the session's
+  `.seen` marker so the next prompt would print the digest again. With
+  `.seen` gone, a ring marker for mail the session had already seen
+  (acknowledged or not) read as unseen. Plain mail arriving later then
+  woke the idle session through the Stop hook or `pseudolife-mcp
+  wait-mail`, which broke the rule that only a ring wakes an idle
+  session. This happened with a marker left from before the restart, a
+  staggered ring the shim wrote after it, or a refused ring the shim
+  retried after it. SessionStart (`coordination-start.sh` and its Windows
+  twin `lifecycle.ps1`) now keeps `.seen` and writes a `<key>.reprint`
+  flag naming the marker it found. The prompt hooks print the digest
+  again when that flag is set and nothing showed the digest since, then
+  drop the flag. The shim's stale-file sweep takes day-old flags. This
+  drops the old second wake for a ring the session had already seen:
+  rung mail still unacknowledged at a compaction waits for the next
+  prompt, which prints it again. `hooks.json` is unchanged, so Codex
+  users approve nothing again.
 
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on

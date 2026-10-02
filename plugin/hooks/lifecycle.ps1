@@ -118,6 +118,18 @@ function Read-TurnDigest([string]$SessionId) {
     if (-not $SessionId -or -not (Test-Path -LiteralPath $digestDir -PathType Container)) { return '' }
     $key = Get-DigestKey $SessionId
     $file = Join-Path $digestDir "$key.txt"
+    # SessionStart's flag after a resume, compaction or /clear; it asks for
+    # one prompt only, digest or not.
+    $reprint = Join-Path $digestDir "$key.reprint"
+    $flagged = Test-Path -LiteralPath $reprint -PathType Leaf
+    [int64]$flaggedAt = -1
+    if ($flagged) {
+        try {
+            [int64]$parsed = 0
+            if ([int64]::TryParse([IO.File]::ReadAllText($reprint).Trim(), [ref]$parsed)) { $flaggedAt = $parsed }
+        } catch {}
+        try { Remove-Item -LiteralPath $reprint -Force } catch {}
+    }
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return '' }
     $seen = Join-Path $digestDir "$key.seen"
     $lines = [IO.File]::ReadAllText($file, [Text.Encoding]::UTF8) -split "`r?`n"
@@ -127,12 +139,15 @@ function Read-TurnDigest([string]$SessionId) {
     if (Test-Path -LiteralPath $seen -PathType Leaf) {
         [void][int64]::TryParse([IO.File]::ReadAllText($seen).Trim(), [ref]$last)
     }
+    # Printed again unless something showed the digest since the flag was
+    # set (the marker moved past the value it names).
+    $again = $flagged -and ($flaggedAt -lt 0 -or $last -le $flaggedAt)
     $body = ''
     $printed = 0
-    if ($valid -and $watermark -gt $last) {
+    if ($valid -and ($watermark -gt $last -or $again)) {
         $body = (($lines | Select-Object -Skip 1) -join "`n").TrimEnd("`n", "`r")
         if ($body) { $printed = $body.Length + 1 }
-        [IO.File]::WriteAllText($seen, "$watermark`n")
+        if ($watermark -gt $last) { [IO.File]::WriteAllText($seen, "$watermark`n") }
     }
     # The marker is already advanced: a ledger problem (the shim appends to
     # the same file and Windows refuses a concurrent open) must not lose
@@ -330,28 +345,23 @@ if ($Event -eq 'CoordinationPrompt') {
 
 if ($Event -eq 'CoordinationStart') {
     if ($startReason -in 'resume', 'compact', 'clear' -and $sessionId) {
-    # A resumed or compacted session lost the digest it saw; clearing the
-    # marker makes the next prompt print the current one afresh. A ring
-    # marker at or below the discarded marker was for mail already shown;
-    # without the marker it would read as unseen, and the Stop hook and
-    # wait-mail would wake the session on later plain mail. A ring past it
-    # stays: the next prompt shows its mail.
+    # A resumed or compacted session lost the digest it saw. The .reprint
+    # flag asks the next prompt to print the current one again unless
+    # something showed it since; it names the .seen marker found here.
+    # .seen itself stays: the Stop hook, wait-mail and the shim's ring
+    # retry read it, and without it a ring for mail already shown would
+    # wake the session on later plain mail.
     try {
-        $seenPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.seen')
-        $ringPath = [IO.Path]::ChangeExtension($seenPath, '.ring')
-        if ((Test-Path -LiteralPath $seenPath -PathType Leaf) -and
-                (Test-Path -LiteralPath $ringPath -PathType Leaf) -and
-                -not ((Get-Item -LiteralPath $ringPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $seenAt = ([IO.File]::ReadAllLines($seenPath) | Select-Object -First 1) -replace '[\r\n ]', ''
-            $ringAt = ([IO.File]::ReadAllLines($ringPath) | Select-Object -First 1) -replace '[\r\n ]', ''
-            if ($seenAt -cmatch '^[0-9]{1,12}\z' -and $ringAt -cmatch '^[0-9]{1,12}\z' -and
-                    [int64]$ringAt -le [int64]$seenAt) {
-                Remove-Item -LiteralPath $ringPath -Force
+        $digestDir = Get-DigestDir
+        if (Test-Path -LiteralPath $digestDir -PathType Container) {
+            $key = Get-DigestKey $sessionId
+            $seenPath = Join-Path $digestDir "$key.seen"
+            [int64]$seenAt = 0
+            if (Test-Path -LiteralPath $seenPath -PathType Leaf) {
+                if (-not [int64]::TryParse([IO.File]::ReadAllText($seenPath).Trim(), [ref]$seenAt)) { $seenAt = 0 }
             }
+            [IO.File]::WriteAllText((Join-Path $digestDir "$key.reprint"), "$seenAt`n")
         }
-    } catch {}
-    try {
-        if (Test-Path -LiteralPath $seenPath -PathType Leaf) { Remove-Item -LiteralPath $seenPath -Force }
     } catch {}
     }
     # The board check-in comes from the daemon below, and only for a
