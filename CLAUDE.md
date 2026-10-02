@@ -182,6 +182,30 @@ took 143 CUDA OOMs.
   `lease check full-suite` sees it through the board only (its local-lock
   line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
   with the lock, so it is never a way to start a Windows full run here.
+- **Two machines, one full suite each** (maintainer decision 2026-10-02):
+  the Windows host (WSL) and the maintainer's homelab box each allow one
+  full suite, so two can run at once — never two on one machine. From the
+  Windows host, start a full run with `pwsh ops/remote-suite.ps1` (in the
+  background, output redirected): it tests the committed HEAD on the first
+  free machine, local WSL or the box over SSH, and waits for whichever
+  frees first; `PSEUDOLIFE_SUITE_WHERE=local|remote` forces one, and a
+  remote run needs the commit pushed. Its log and a JSON result (machine,
+  commit, exit code, pytest's summary line) land in
+  `~/.pseudolife-mcp/suite-results`; cite the machine and commit in the PR.
+  The box's address and settings live only in the private
+  `~/.pseudolife-mcp/locks/full-suite.remote`, never in the tree.
+  - **Each machine mirrors under its own lease**: `full-suite` on the
+    Windows host, `full-suite@box` on the box (its `full-suite.lease`
+    file; `PSEUDOLIFE_SUITE_LEASE` overrides). Gate CPU- or
+    memory-saturating work on the lease of the machine it runs on: `lease
+    check full-suite` on the Windows host, `lease check full-suite@box` on
+    the box. A suite on the other machine does not load yours.
+  - **On the box, suites never touch the live bank's Postgres** (5433):
+    `dev`'s shells source `~/.config/pseudolife-suite/env`, which points
+    `PSEUDOLIFE_TEST_DATABASE_URL` at the separate test server on 5434.
+    Sessions there run `python -m pytest tests/` natively (Linux needs no
+    WSL), under the same one-suite lock. Dispatched runs add a systemd
+    `MemoryMax=16G` scope, since the box also serves the live daemon.
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot

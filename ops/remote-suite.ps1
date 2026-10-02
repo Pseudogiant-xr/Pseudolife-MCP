@@ -121,7 +121,7 @@ if ($target -eq 'local') {
     $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
     $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
-    $lines.Add('export PATH="$PATH:$HOME/.local/bin"')
+    $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read
     # on past the run (a stray "\r" line would replace pytest's exit code).
     # The inner shell deletes the script copy and keeps pytest's code.

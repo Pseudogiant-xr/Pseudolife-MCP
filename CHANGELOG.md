@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-02 — full suites on a second machine, one per machine)
+- Full test suites took ~20-25 minutes each and queued one at a time on
+  the maintainer's workstation. `ops/remote-suite.ps1` now runs a
+  checkout's committed HEAD on the first free machine: local WSL, or a
+  second Linux machine over SSH. It waits for whichever frees first.
+  Each machine still allows one full suite, so two machines give two at
+  once. The remote side fetches the commit from origin, runs that commit's
+  own `ops/wsl-suite.sh` under a systemd `MemoryMax` scope, and streams the
+  log back. A log and a JSON result (machine, commit, exit code, summary)
+  are kept under `~/.pseudolife-mcp/suite-results`. The second machine's
+  address lives only in the private
+  `~/.pseudolife-mcp/locks/full-suite.remote`.
+- The suite's board lease is per machine: `PSEUDOLIFE_SUITE_LEASE`, else a
+  `full-suite.lease` file in the lock directory, else `full-suite`
+  (`full-suite@<host>` otherwise). Every machine shares one board, so
+  before this a second machine's suites read as the first machine's, and
+  that machine's gates held off for suites that did not load it.
+  `pseudolife-mcp lease check` maps a suite lease to the local lock only
+  when it is this machine's own name.
+
 ### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
 - On the maintainer's Windows host, a full test suite made the mouse stutter.
   Its hook-script tests start Git Bash processes in bursts of 10-32 a
