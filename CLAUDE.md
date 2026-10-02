@@ -43,7 +43,9 @@ exactly; they exist because each one was violated at least once.
    For a required full run, finish review fixes and targeted validation
    before joining the queue, then run
    `HF_HUB_OFFLINE=1 python -m pytest tests/` with the bench Postgres up
-   (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled. Keep
+   (127.0.0.1:5433), CUDA hidden, and the existing suite lock enabled —
+   on a Windows host, in WSL through `pwsh ops/wsl-suite.ps1` (see
+   "Running tests"). Keep
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
@@ -158,6 +160,24 @@ took 143 CUDA OOMs.
   instead; `=off` skips the lock (the default on GitHub Actions: one job per
   VM). Targeted runs are never locked. The lock lives in your home
   directory: a WSL or other-user run does not see it.
+- **On the maintainer's Windows host, full suites run in WSL** (maintainer
+  decision 2026-10-02): `pwsh ops/wsl-suite.ps1` from the worktree, in the
+  background, output redirected as below; any arguments go to pytest, none
+  means the full suite. Measured that day: a native Windows full suite's
+  hook-script tests start Git Bash processes in bursts of 10-32 a second,
+  and mouse input stalled 82-347 ms in exactly those seconds while CPU,
+  memory, disk and the compositor stayed normal. A WSL run's lock lives in
+  the WSL home, and neither `flock` nor `lockf` there sees a Windows
+  holder, so that host refuses native Windows full runs:
+  `~/.pseudolife-mcp/locks/full-suite.windows` says `refuse`
+  (`PSEUDOLIFE_SUITE_WINDOWS=refuse|allow` overrides it; `allow` only for a
+  deliberate run with no WSL suite going). Targeted runs on Windows are
+  unaffected, and CI's Windows job covers Windows-only behaviour. The
+  launcher keeps a uv environment per checkout under `~/.venvs/pseudolife`
+  in WSL, needs the worktree's `ops/.env` like any run, and forwards the
+  bearer, so the run still shows as the `full-suite` lease; from Windows,
+  `lease check full-suite` sees it through the board only (its local-lock
+  line stays free).
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot

@@ -730,6 +730,39 @@ def test_the_slot_count_comes_from_the_env_then_the_file_then_one(tmp_path):
             suite_lock.slot_count({}, tmp_path)
 
 
+# --- native Windows full runs, refused where configured -----------------------
+
+def test_the_windows_policy_comes_from_the_env_then_the_file_then_allow(tmp_path):
+    assert suite_lock.windows_policy({}, tmp_path) == "allow"
+    (tmp_path / suite_lock.WINDOWS_FILE).write_text("refuse\n", encoding="utf-8")
+    assert suite_lock.windows_policy({}, tmp_path) == "refuse"
+    assert suite_lock.windows_policy({"PSEUDOLIFE_SUITE_WINDOWS": " Allow "}, tmp_path) == "allow"
+    (tmp_path / suite_lock.WINDOWS_FILE).write_text("refuse\r\n", encoding="utf-8-sig")
+    assert suite_lock.windows_policy({}, tmp_path) == "refuse"
+    (tmp_path / suite_lock.WINDOWS_FILE).write_text("refuse", encoding="utf-16")
+    with pytest.raises(ValueError, match="full-suite.windows"):
+        suite_lock.windows_policy({}, tmp_path)
+    for bad in ("", "no", "1", "wsl"):
+        with pytest.raises(ValueError, match="PSEUDOLIFE_SUITE_WINDOWS"):
+            suite_lock.windows_policy({"PSEUDOLIFE_SUITE_WINDOWS": bad}, tmp_path)
+        (tmp_path / suite_lock.WINDOWS_FILE).write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match="full-suite.windows"):
+            suite_lock.windows_policy({}, tmp_path)
+
+
+def test_only_a_full_run_on_native_windows_is_refused_and_only_when_configured(tmp_path):
+    refuse = {"PSEUDOLIFE_SUITE_WINDOWS": "refuse"}
+    refusal = suite_lock.native_windows_refusal
+    message = refusal("full", refuse, tmp_path, platform="nt")
+    assert message and "ops/wsl-suite.ps1" in message
+    assert "PSEUDOLIFE_SUITE_WINDOWS=allow" in message
+    assert refusal("targeted", refuse, tmp_path, platform="nt") is None
+    assert refusal("full", refuse, tmp_path, platform="posix") is None
+    assert refusal("full", {}, tmp_path, platform="nt") is None
+    assert refusal("full", {"PSEUDOLIFE_SUITE_WINDOWS": "allow"}, tmp_path,
+                   platform="nt") is None
+
+
 def test_two_slots_hold_two_runs_and_a_third_names_both(tmp_path):
     first = suite_lock.acquire(tmp_path, "fail", worktree="first", slots=2)
     try:
@@ -865,6 +898,7 @@ def _pytest_env(directory: Path, mode: str) -> dict[str, str]:
     env["PSEUDOLIFE_SUITE_LOCK_DIR"] = str(directory)
     env["PSEUDOLIFE_SUITE_LOCK"] = mode
     env.pop("PSEUDOLIFE_SUITE_SLOTS", None)  # each test sets its own
+    env.pop("PSEUDOLIFE_SUITE_WINDOWS", None)
     # These runs never reach a PG test; don't provision a database for them,
     # and don't check the dev server's password for them either: an explicit
     # test DSN is used verbatim, so the full-run password preflight has
@@ -935,6 +969,21 @@ def test_a_listing_pytest_run_over_the_tree_is_not_locked(held, procs, listing):
                 _pytest_env(held.dir, "fail"))
     assert run.drain() != pytest.ExitCode.USAGE_ERROR, run.seen
     assert not any("full-suite lock held by" in line for line in run.seen), run.seen
+
+
+def test_a_full_pytest_run_on_windows_is_refused_before_it_queues(tmp_path, procs):
+    # The lock directory's file says refuse: on native Windows conftest stops
+    # the run before it takes a ticket; elsewhere the setting does nothing.
+    (tmp_path / suite_lock.WINDOWS_FILE).write_text("refuse\n", encoding="utf-8")
+    run = procs(_full_run_collecting_nothing(), _pytest_env(tmp_path, "fail"))
+    if os.name == "nt":
+        assert run.drain() == pytest.ExitCode.USAGE_ERROR, run.seen
+        assert any("ops/wsl-suite.ps1" in line for line in run.seen), run.seen
+        queue_dir = tmp_path / suite_lock.QUEUE_DIR
+        assert not queue_dir.exists() or not list(queue_dir.iterdir())
+        assert suite_lock.read_holder(tmp_path) is None
+    else:
+        assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
 
 
 def test_a_targeted_pytest_run_is_not_locked(held, procs):

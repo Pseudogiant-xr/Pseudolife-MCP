@@ -374,11 +374,23 @@ def pytest_configure(config: pytest.Config) -> None:
     # (2026-09-27, twice), holding the machine's one slot for a gate that
     # gated nothing. A targeted run gets one line and goes on, as it did.
     #
+    # A machine whose lock directory says so refuses a full run on native
+    # Windows before anything else (PSEUDOLIFE_SUITE_WINDOWS, else
+    # full-suite.windows): it runs full suites in WSL, whose lock a Windows
+    # run cannot see. tests/suite_lock.py carries the measurement.
+    #
     # The board mirrors the lock as the lease `full-suite` (holder, queue,
     # expected end, a notice to the peers concerned), built only for a full
     # run past that preflight, before the fingerprint, so its module is part
     # of it.
     def preflight(kind: str) -> None:
+        try:
+            refusal = suite_lock.native_windows_refusal(
+                kind, os.environ, suite_lock.lock_dir(os.environ))
+        except ValueError as exc:
+            raise pytest.UsageError(str(exc)) from None
+        if refusal:
+            raise pytest.UsageError(refusal)
         refusal = full_run_password_preflight(kind)
         if refusal:
             raise pytest.UsageError(refusal)
