@@ -429,6 +429,9 @@ class CoordinationAdapter:
         # After the digest, so the ring marker names the watermark that
         # lists the rung mail.
         self._write_agent()
+        # A newer ring in this answer replaces a refused one before the
+        # retry, so the newer ring's ``ring_at`` stagger holds.
+        self._note_wake(result)
         if self._ring_unwritten is not None:
             ring, watermark = self._ring_unwritten
             if self._read_seen() >= watermark:
@@ -437,7 +440,6 @@ class CoordinationAdapter:
                 self._ring_unwritten = None
             else:
                 self._write_ring(ring, watermark)
-        self._note_wake(result)
         observer = self.mailbox_observer
         if observer is not None:
             try:

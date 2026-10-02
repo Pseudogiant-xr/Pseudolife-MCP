@@ -1721,7 +1721,9 @@ def test_a_refused_ring_marker_is_dropped_once_its_mail_was_shown(tmp_path):
 
 def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
     """A newer ring replaces an older one, as its timer does: the refused
-    marker is not written ahead of the newer ring's ``ring_at``."""
+    marker is not written ahead of the newer ring's ``ring_at``, even when
+    the heartbeat that brings the newer ring finds the filesystem writable
+    again (review finding R1, 2026-10-02)."""
     daemon = _mailbox_daemon([
         (0, [], None),
         (1, _preview("m1"), {"decision": "rung", "reason": "anyone", "ring_at": 0.0}),
@@ -1733,18 +1735,11 @@ def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
         client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
         async with client:
             async with coordination:
-                write = coordination._write_private
-                refusals = [2]
-
-                def flaky(path, body):
-                    if path.suffix == ".ring" and refusals[0]:
-                        refusals[0] -= 1
-                        return False
-                    return write(path, body)
-                coordination._write_private = flaky
+                failed = _fail_first_ring_write(coordination)
                 await coordination._heartbeat()
                 await asyncio.sleep(0.05)
-                await coordination._heartbeat()   # the retry is refused too
+                assert failed
+                await coordination._heartbeat()   # the newer ring; writable again
                 await coordination._heartbeat()
                 await asyncio.sleep(0.05)
                 assert not (tmp_path / "digest.ring").exists()
