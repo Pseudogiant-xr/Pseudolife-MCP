@@ -1036,6 +1036,15 @@ def test_a_dispatched_run_falls_back_to_postgres_when_the_test_database_is_new()
     assert server.urls[-1].endswith("/postgres")
 
 
+def test_a_dispatched_run_asks_an_absent_server_only_once():
+    # Nothing answered at all: another database on it cannot answer either,
+    # and each try may cost a connect timeout.
+    server = _CatalogServer({"10.0.0.7:5432": ConnectionRefusedError("connection refused")})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    assert pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server) is None
+    assert server.asked.count("10.0.0.7:5432") == 1
+
+
 def test_a_dispatched_run_refuses_a_server_with_no_database_to_ask():
     # Neither the test database nor postgres exists: nothing was cleared.
     missing = psycopg.OperationalError('FATAL:  database "x" does not exist')

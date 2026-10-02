@@ -412,7 +412,8 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
     DSN named) is the live bank's server, under whatever address. A refused
     connection, an unknown host or a rejected login is passed over, since the
     suite cannot write there either; anything else refuses, as the server could
-    not be cleared: a timeout (a slow server is still a server), a URL whose
+    not be cleared: a database missing with none left to ask, a timeout (a
+    slow server is still a server), a URL whose
     hosts it cannot see (several hosts, of which only the first to answer
     would be checked, or a service file read at connect time), a URL that does
     not parse. Messages name the setting and never carry a password.
@@ -471,7 +472,9 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
             except Exception as exc:  # noqa: BLE001 - classified, never re-raised
                 if is_server_unavailable(exc) and not _timed_out(exc):
                     break  # no server there: nothing to ask through another database
-                # Another database may answer; none left to ask clears nothing.
+                # A missing database moves on while another is left to ask,
+                # and is refused when it was the last; a rejected login is
+                # passed over either way.
                 if is_auth_failure(exc) or (_database_missing(exc) and url != urls[-1]):
                     continue
                 failure = (exc, url)
