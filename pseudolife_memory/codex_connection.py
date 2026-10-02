@@ -247,7 +247,12 @@ class Codex:
 
     def close(self):
         if self.proc.stdin and not self.proc.stdin.closed:
-            self.proc.stdin.close()
+            # A request a dead Codex never read stays buffered, and close()
+            # flushes it again; subprocess.communicate() ignores this too.
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
         try:
             self.proc.wait(timeout=8)
         except subprocess.TimeoutExpired:

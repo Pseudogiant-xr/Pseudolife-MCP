@@ -790,6 +790,29 @@ def test_close_does_not_wait_on_a_process_holding_the_app_servers_stdout(tmp_pat
         client.proc.stdout.close()
 
 
+def test_a_codex_that_exited_fails_only_the_mailbox_approval(tmp_path):
+    """With Codex gone, the approval's write fails on the pipe; the request
+    it left in stdin's buffer must not raise again when setup closes the
+    client, or the error escapes setup's `with codex(...)` block anyway."""
+    # Codex(executable, ...) runs `<executable> app-server --stdio` in cwd.
+    (tmp_path / "app-server").write_text(
+        "import json, sys\n"
+        "for line in sys.stdin:\n"
+        "    message = json.loads(line)\n"
+        "    if message.get('method') == 'initialize':\n"
+        "        print(json.dumps({'id': message['id'], 'result': {}}), flush=True)\n"
+        "    else:\n"
+        "        break\n", encoding="utf-8")
+    client = setup.Codex(sys.executable, tmp_path, tmp_path)
+    client.proc.wait(timeout=10)
+    report = {"backups": []}
+    try:
+        assert setup.mailbox_approval({}, tmp_path, report, client, tmp_path) == "unavailable"
+        assert report["mailbox_approval_detail"].endswith("Error).")
+    finally:
+        client.close()
+
+
 def _powershell_pair_seconds():
     """Median wall time of the two PowerShell cold starts Codex pays for
     every Windows hook: it runs `pwsh -Command "pwsh -File lifecycle.ps1"`."""

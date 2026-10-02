@@ -6,15 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-10-03 — a locked Codex config no longer fails hook setup)
+### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
 - Codex hook setup could fail as a whole on the optional `memory_message`
   approval step it promised never to fail on. `ops/setup-codex-hooks.py`
   caught only Codex's refusals there, so an `OSError` (a `config.toml`
-  locked by another process on Windows, a permission error, or Codex's
-  pipe breaking mid-write) escaped to the outer handler and reported the
-  hooks unavailable. The step now reports the approval `unavailable`,
-  naming only the error type, and setup finishes ready. Other unexpected
-  errors still reach setup's own handler.
+  locked by another process on Windows, a permission error, or Codex
+  exiting mid-write) escaped to the outer handler and reported the hooks
+  unavailable. The step now reports the approval `unavailable`, naming
+  only the error type, and setup finishes ready. Closing the Codex
+  connection no longer raises when Codex has already exited with a request
+  still buffered (`pseudolife_memory/codex_connection.py`), which would
+  otherwise have re-raised the pipe error on the way out. Other unexpected
+  errors still reach setup's own handler, and the required hook trust
+  step still fails setup when it cannot back up `config.toml`.
 
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
