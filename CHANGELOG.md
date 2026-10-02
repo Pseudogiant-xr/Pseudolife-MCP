@@ -21,6 +21,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or `PGSERVICE` (read from a service file at connect time), and a host
   list given through `PGHOST` or `PGHOSTADDR`, not only one in the URL.
 
+### Fixed (2026-10-03 — a resumed session no longer wakes on plain mail)
+- On resume, compact and clear, SessionStart deleted the session's
+  `.seen` marker so the next prompt would print the digest again. With
+  `.seen` gone, a ring marker for mail the session had already seen
+  (acknowledged or not) read as unseen. Plain mail arriving later then
+  woke the idle session through the Stop hook or `pseudolife-mcp
+  wait-mail`, which broke the rule that only a ring wakes an idle
+  session. This happened with a marker left from before the restart, a
+  staggered ring the shim wrote after it, or a refused ring the shim
+  retried after it. SessionStart (`coordination-start.sh` and its Windows
+  twin `lifecycle.ps1`) now keeps `.seen` and writes a `<key>.reprint`
+  flag naming the marker it found. The prompt hooks print the digest
+  again when that flag is set and nothing showed the digest since, then
+  drop the flag. The shim's stale-file sweep takes day-old flags. This
+  drops the old second wake for a ring the session had already seen:
+  rung mail still unacknowledged at a compaction waits for the next
+  prompt, which prints it again. `hooks.json` is unchanged, so Codex
+  users approve nothing again.
+
+### Fixed (2026-10-03 — a revoked token is told so, not to retry)
+- An invited machine whose token was revoked between the daemon's gate and
+  the tool got the same refusal as a daemon that cannot check tokens at all
+  (`principals_unavailable`, -32003). The shim then said "retry shortly",
+  and the retry met the gate's 401. The daemon now keeps -32003 for a
+  table it cannot check and refuses a bearer it checked and no longer
+  finds with `unauthorized` (-32004, data `{"status": 401, "error":
+  "unauthorized"}`). The shim reports that exact refusal as
+  `authentication_required` with `operation_outcome: not_dispatched`: the
+  token is no longer accepted and no tool ran. Anything inexact still
+  keeps the unknown-outcome warning. Deploy the daemon with the client
+  step (`ops/update.ps1 -All`). An invited machine still on an older shim
+  reports the new refusal as an operation that may have completed, which
+  is cautious but not wrong, until that machine updates its own client.
+- `board_status.reason_hint()` is the public way to read a refusal
+  reason's plain-language line, which the shim uses in place of a
+  private table. The remote-bank guide asks reverse proxies to pass the
+  daemon's error responses through unchanged, since a rewritten 503
+  refusal reads as an operation that may have completed.
+
 ### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
 - Codex hook setup could fail as a whole on the optional `memory_message`
   approval step it promised never to fail on. `ops/setup-codex-hooks.py`

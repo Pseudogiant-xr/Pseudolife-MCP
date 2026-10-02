@@ -510,6 +510,13 @@ this page set neither. A fallback that needs the primary's credential, such
 as a second model on the same hosted provider, needs the key set again under
 the fallback name.
 
+**Redirects are refused.** The primary and the fallback never follow an
+HTTP redirect, so a key cannot be forwarded to a host you did not
+configure. A redirect fails the call with `redirect to <url> refused --
+configure the final URL directly`: set `PSEUDOLIFE_DREAM_BASE_URL` and
+`PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` to the endpoint's final URL (for
+example `https` rather than an `http` address that redirects to it).
+
 ## OpenAI primary — the Codex CLI shim
 
 The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
@@ -529,7 +536,12 @@ Scheduler, elevated pwsh opened from the Start menu, same caveat as the
 Claude shim above; `.sh` — systemd `--user`, docker-bridge bind; both pick
 and verify the unit's interpreter exactly as the Claude shim's autostart
 does, `--python` / `-PythonExe` naming one), and writes the env triple for
-you. The autostart raises the shim's
+you. Unlike the Claude shim's installer, the Windows Codex installer does
+not stop a shim already serving its port: re-running it over a live shim
+starts a second listener beside the old one, which can keep answering on
+the old settings. After a re-run, run
+`python ops/shim_autostart.py restart codex`, which stops the running
+shim and starts it again. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
 stale-ok window only costs one failed primary attempt before the dream
@@ -1004,6 +1016,15 @@ merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
 scores every queue's judge against the 2026-09-02 blind-panel set
 (`evals/results/queue-judge-panel-20260902.json`), simulating each auto gate.
+The measured merge-judge configuration (2026-09-29) is `judge_url` pointing
+at a Claude CLI shim, `judge_model: claude-opus-5-5`,
+`judge_second_model: claude-sonnet-5-5` and `judge_mode: auto-reject`: on
+that panel the pair's two-vote rejects supported `auto-reject`, its two-vote
+accepts did not support `auto`, and GPT-6 models as the second opinion let
+false rejects through the two-vote gate
+(`evals/results/queue-judge-ladder-20260929-*.json`,
+`evals/results/queue-judge-cross-20260929.json`). It is applied by
+configuration; the shipped default stays `shadow`.
 
 Pending judgments are bound to the evidence and policy that produced them.
 Changing the model, prompt, mode or supplied evidence invalidates an old opinion;

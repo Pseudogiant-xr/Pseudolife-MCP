@@ -259,7 +259,10 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 `/health` digests — the image sets it to its own copy). The plugin's
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
-is delivered once and a quiet turn adds nothing. While mail stays pending and
+is delivered once and a quiet turn adds nothing. After a resume, compaction or
+`/clear` the conversation has lost the digest it saw: SessionStart writes a
+`<key>.reprint` flag naming the marker it found, and the next prompt prints
+the digest again unless a wake or a hint showed it since. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. A Claude Code
 subagent runs inside its parent's shim, so a tool result may be the
 subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
@@ -582,9 +585,18 @@ slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
 
+Each machine mirrors its suite lock under its own lease name:
+`PSEUDOLIFE_SUITE_LEASE`, else a `full-suite.lease` file in the lock
+directory, else `full-suite`. A second machine that runs suites against the
+same board names itself `full-suite@<host>` (1-40 letters, digits, `.`,
+`_` or `-`), so its runs do not hold off the first machine's gates.
+`lease check` maps a suite lease to the local lock only when the name is
+this machine's own; for another machine's suite lease it reports that
+there is no lock here and goes by the board alone.
+
 The test suite's lock is mirrored the same way. A full `pytest` run
-(`tests/conftest.py`, `tests/suite_lock.py`) holds the board lease `full-suite`
-behind its OS lock: while it queues it is a board waiter, once it holds the lock
+(`tests/conftest.py`, `tests/suite_lock.py`) holds that machine's suite lease
+(`full-suite` by default) behind its OS lock: while it queues it is a board waiter, once it holds the lock
 it holds the lease, with the run's pid and worktree as its purpose and an
 expected end from the median of the last five timed runs
 (`~/.pseudolife-mcp/locks/full-suite.durations.jsonl`; 25 minutes until five
@@ -1881,8 +1893,11 @@ also capped (below, and by the daemon's `wake` caps under
   wake) does not fire again at the next turn end. Firing
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
-  written, the hook does not wake at all. SessionStart clears `.seen` on
-  resume and compact, so a pending ring can wake the session once more.
+  written, the hook does not wake at all. Resume, compact and `/clear`
+  keep `.seen`: SessionStart writes a `<key>.reprint` flag naming the
+  marker it found, and the next prompt prints the digest again unless a
+  wake or a hint showed it since. A ring the session already saw
+  therefore never fires after those, even when the shim writes it late.
 - At most 20 wakes per session in any hour, the same figure the daemon now
   applies per recipient before it decides a ring. A ring over the hook's
   cap waits for the window to free up; it is delayed, not dropped.
@@ -2724,6 +2739,18 @@ from the legacy bank. Leave the original `.pt` files in place until it
 completes: the resume reads them, and deleting one makes the bank
 unfinishable.
 
+`/health` treats a failed dream-tracking initialization the same way. It
+disables the dream alone: `memory_dream` pull and commit refuse while
+every other tool serves normally, and `status` stays `"ok"`. The payload
+then carries a `dream_tracking_error` field with the error code only
+(`invalid_legacy_dream_cursor`, `invalid_dream_ack_state` or
+`dream_ack_initialization_failed`), since the full message can carry a
+DSN; `memory_dream(action="status")` reports the code as `error` with the
+message as `detail`, and the daemon log has the same ERROR line. A transient failure (a dropped
+connection, a failed checkpoint write) is retried on the next dream call.
+An invalid cursor, acknowledgement state or checkpoint is the bank's own
+data, so it stays reported until it is repaired.
+
 The daemon owns its bank alone. It holds a Postgres advisory-lock *writer
 lease* for as long as it runs. A second daemon, a stdio-embedded server, or
 a maintenance script or eval that opens the same bank through the service
@@ -3421,7 +3448,7 @@ The milestones:
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
-| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
+| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the CLI episode hooks or a direct call; the stdio shim registers none, so shim-only sessions get no row): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or an episode-end call, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 | v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |

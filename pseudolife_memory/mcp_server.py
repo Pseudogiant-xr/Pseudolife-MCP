@@ -2560,10 +2560,15 @@ def _resolve_principal_tier() -> str:
     )
 
 
-# The JSON-RPC error a tools/call or tools/list gets when its bearer cannot
-# be resolved after the gate admitted it (the HTTP gate answers the same
-# case with 503 principals_unavailable before the request gets here).
+# The JSON-RPC errors a tools/call or tools/list gets when its bearer does
+# not resolve after the gate admitted it. -32003: the stored principals
+# cannot be checked right now (the HTTP gate answers the same case with 503
+# principals_unavailable). -32004: they were checked and the bearer is no
+# longer among them (revoked meanwhile; the gate would now answer 401).
+# -32001 and -32002 are left alone: the SDK's request timeout and MCP's
+# resource-not-found.
 PRINCIPALS_UNAVAILABLE_CODE = -32003
+UNAUTHORIZED_CODE = -32004
 
 
 def _transport_principal(headers) -> str | None:
@@ -2575,24 +2580,30 @@ def _transport_principal(headers) -> str | None:
     at startup, which the gate's context never reaches.
 
     With authentication configured, a presented bearer that does not
-    resolve (a snapshot that cannot be checked, or a row revoked between
-    the gate and here) is refused with ``principals_unavailable``: it is
-    never served as ``default``, so its X-PL-Writer is not honoured and the
-    default tier is not granted (security review, 2026-10-02). No bearer at
-    all, or an open install, names the caller as before."""
+    resolve is refused: ``principals_unavailable`` when the snapshot cannot
+    be checked, ``unauthorized`` when it was checked and the row is gone
+    (revoked between the gate and here), so a revoked machine is not told
+    to retry. Either way it is never served as ``default``, so its
+    X-PL-Writer is not honoured and the default tier is not granted
+    (security review, 2026-10-02). No bearer at all, or an open install,
+    names the caller as before."""
     from mcp.shared.exceptions import MCPError
 
     from pseudolife_memory.principals import (
         PrincipalsUnavailable, env_auth, installed_store, resolve_principal)
     auth = headers.get("authorization")
     token_map, token = env_auth()
+    unavailable = False
     try:
         principal = resolve_principal(auth, token_map, token, installed_store())
     except PrincipalsUnavailable:
-        principal = None
+        principal, unavailable = None, True
     if principal is None and auth and (token_map or token):
-        raise MCPError(PRINCIPALS_UNAVAILABLE_CODE, "principals_unavailable",
-                       {"status": 503, "error": "principals_unavailable"})
+        if unavailable:
+            raise MCPError(PRINCIPALS_UNAVAILABLE_CODE, "principals_unavailable",
+                           {"status": 503, "error": "principals_unavailable"})
+        raise MCPError(UNAUTHORIZED_CODE, "unauthorized",
+                       {"status": 401, "error": "unauthorized"})
     return principal
 
 

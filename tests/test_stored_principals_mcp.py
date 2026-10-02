@@ -114,14 +114,18 @@ def test_an_unavailable_view_refuses_instead_of_running_as_default(tmp_path, mon
         with pytest.raises(MCPError) as caught:
             asyncio.run(entry.handler(_ctx({"authorization": f"Bearer {STORED_TOKEN}",
                                             "x-pl-writer": "desk"}), None))
+        assert caught.value.code == -32003
         assert caught.value.message == "principals_unavailable"
+        assert caught.value.data == {"status": 503, "error": "principals_unavailable"}
     finally:
         install_store(previous)
 
 
 def test_a_bearer_dropped_after_the_gate_never_reaches_the_tool(tmp_path, monkeypatch, stored):
     """The row was revoked between the gate and the dispatch: the call is
-    refused, not run as default."""
+    refused, not run as default. The store answered, so the refusal says
+    the token is no longer accepted, not that it cannot be checked (a
+    retry would only meet the gate's 401)."""
     from mcp.shared.exceptions import MCPError
     mod = _reload_tiered(tmp_path, monkeypatch, **ENV)
     handlers = mod.mcp._lowlevel_server._request_handlers
@@ -135,7 +139,10 @@ def test_a_bearer_dropped_after_the_gate_never_reaches_the_tool(tmp_path, monkey
     with pytest.raises(MCPError) as caught:
         asyncio.run(handlers["tools/call"].handler(
             _ctx({"authorization": "Bearer fixture-dropped-token", "x-pl-writer": "desk"}), None))
-    assert caught.value.message == "principals_unavailable" and ran == []
+    assert ran == []
+    assert caught.value.code == -32004
+    assert caught.value.message == "unauthorized"
+    assert caught.value.data == {"status": 401, "error": "unauthorized"}
 
 
 def test_an_open_install_and_a_request_without_a_bearer_still_run(tmp_path, monkeypatch):

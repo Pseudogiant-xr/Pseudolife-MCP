@@ -55,7 +55,10 @@ they do not enforce semantic compliance with every memory instruction:
    when new lessons or other sessions' status notes landed since the last
    one, with a one-line reminder (recall before review, status questions are
    memory questions, log outcomes); the `ops/install-hook.*` fallback
-   injects that reminder as a fixed line on every prompt. Plus a separate
+   installs the same note (`pseudolife-mcp prompt-hook`, run through
+   `docker exec -i` on the Docker tier, where the briefing runs), and
+   re-running it replaces the fixed per-prompt line older installers wrote.
+   Plus a separate
    coordination handler for changed inbox previews. Full addressed messages are read through `memory_message`, then
    acknowledged after reading. Claude Code and current Codex runtimes.
 
@@ -381,8 +384,10 @@ If the runtime's hook or trust interface is unavailable or unsupported, or a
 hook fails verification, setup reports what remains unresolved and provides
 `/hooks` repair guidance. It installs the standing block only when approved;
 installed files or saved hashes alone never count as working hooks. New or
-changed definitions require approval again. Manual script bundles use
-content-specific paths so updating their code also changes the definitions.
+changed definitions require approval again. Manual copies run through the
+fixed launcher commands above, so a script update needs no new approval:
+the script bundles stay content-addressed, and only the `current` pointer
+moves to a new one after it is verified.
 
 ### Hooks versus AGENTS.md
 
@@ -449,7 +454,13 @@ upgrade the client or configure that entry manually before using the shim.
 2. In that environment run `pseudolife-mcp doctor`. It reports interpreter,
    source path, installed package/SDK versions, health, instructions and tool
    annotations. It neither starts a daemon nor calls a bank tool. A healthy
-   endpoint alone does not establish a working stdio handshake. Its `board`
+   endpoint alone does not establish a working stdio handshake. A shell
+   without `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE` borrows the
+   token from the Claude Code registration (`~/.claude.json`, or under
+   `CLAUDE_CONFIG_DIR`), else from the Codex one (`config.toml` under
+   `CODEX_HOME`, default `~/.codex`); `credential_source` names which, and a
+   daemon that requires a token with none found reports `BearerMissing`.
+   Its `board`
    line says whether the agent board is on for that environment's token, or
    the daemon's reason it is off.
    Its `coordination` snapshot separates daemon reachability, authenticated
