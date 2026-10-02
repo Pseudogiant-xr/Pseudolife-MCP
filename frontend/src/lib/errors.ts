@@ -43,6 +43,18 @@ export function explainError(e: ApiError, what = "This view"): Explained {
         body: "Add the principal to coordination.allowed_principals in the daemon config, or use a token for an allowed principal.",
         token: true,
       };
+    case "operator_principal_required":
+      return {
+        title: "Only the operator's token can change this",
+        body: "This token belongs to an invited machine. Invited machines read and write memory and the board, but changing the daemon's settings needs the operator's token (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS).",
+        token: true,
+      };
+    case "principals_unavailable":
+      return {
+        title: "The daemon cannot check tokens right now",
+        body: "Its database is not answering, so it cannot confirm invited machines' tokens, and nothing ran. Refresh in a moment; if it persists, check the daemon log and the database.",
+        token: false,
+      };
     case "coordination_unavailable":
       return {
         title: "The board's storage is unavailable",

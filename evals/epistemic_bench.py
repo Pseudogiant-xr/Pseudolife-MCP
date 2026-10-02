@@ -1013,11 +1013,19 @@ def serve_arms(svc, question: str) -> dict[str, Served]:
 # ─────────────────────────────────────────────────────────────────────────
 # Bench database lifecycle
 # ─────────────────────────────────────────────────────────────────────────
+def _run_suffix() -> str:
+    # The test fixtures' suffix: the pid, tagged "wsl<pid>" inside WSL, whose
+    # pids Windows cannot see; a bare WSL pid would read to a Windows run's
+    # pruner as a dead run's database (tests/pg_defaults.py, PID_NAMESPACE).
+    from tests.pg_defaults import run_suffix
+    return run_suffix()
+
+
 def _bench_db_name() -> str:
     """Private per-run database, named the way the test fixtures name
-    theirs — ``pseudolife_memory_bench_<pid>``, which
+    theirs — ``pseudolife_memory_bench_<run suffix>``, which
     ``tests/pg_fixtures.py`` also knows how to prune after a hard kill."""
-    return f"pseudolife_memory_bench_{os.getpid()}"
+    return f"pseudolife_memory_bench_{_run_suffix()}"
 
 
 def _admin_url() -> str:
@@ -1034,7 +1042,7 @@ def drop_bench_db(name: str) -> None:
     database it did not create is one typo away from dropping a bank.
     """
     if not (name.startswith("pseudolife_memory_bench_")
-            and name.endswith(f"_{os.getpid()}")):
+            and name.endswith(f"_{_run_suffix()}")):
         raise SystemExit(f"refusing to drop {name!r}: this run did not "
                          "create it")
     import psycopg

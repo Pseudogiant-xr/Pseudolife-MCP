@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
-import os
 from pathlib import Path
 import platform
 import random
@@ -130,9 +129,11 @@ def measure(dsn: str, *, agents: int, messages: int, updates_per_agent: int,
 
 @contextmanager
 def scratch_database(admin_url: str):
-    # The per-run pid suffix lets tests/pg_fixtures.py drop it if a hard kill
-    # skips the cleanup below.
-    name = f"pseudolife_memory_bench_audit_{os.getpid()}"
+    # The per-run suffix lets tests/pg_fixtures.py drop it if a hard kill
+    # skips the cleanup below; inside WSL it is tagged ("wsl<pid>") so a
+    # Windows run's pruner, which cannot see WSL pids, leaves it alone.
+    from tests.pg_defaults import run_suffix
+    name = f"pseudolife_memory_bench_audit_{run_suffix()}"
     with psycopg.connect(admin_url, autocommit=True, connect_timeout=5) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
@@ -167,9 +168,11 @@ def main(argv=None) -> int:
     out = Path(args.out)
     if out.exists():
         parser.error(f"{out} exists; results are never overwritten")
+    # tests.pg_defaults also names the scratch database, so a script-mode run
+    # needs the repository importable whether or not --admin-url is given.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     admin_url = args.admin_url
     if admin_url is None:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from tests.pg_defaults import bench_admin_url
         admin_url = bench_admin_url()
     workload = {"agents": args.agents, "messages": args.messages,

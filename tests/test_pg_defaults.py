@@ -826,3 +826,181 @@ def test_a_rejected_override_is_named_as_the_thing_to_fix(tmp_path):
     assert "correct or unset PSEUDOLIFE_TEST_PG_PASSWORD" in refusal
     assert "copy ops/.env" not in refusal  # the override wins over the file
     assert SECRET not in refusal
+
+
+# -- a dispatched run refuses the live bank's server by identity ----------------
+#
+# On the maintainer's homelab box the live bank's Postgres answers on host port
+# 5433 and also on its container's Docker-network address (container port
+# 5432). The launchers refuse a PSEUDOLIFE_TEST_PG_HOST_PORT on 5433, but every
+# connection the suite makes comes from three settings (that one, an explicit
+# PSEUDOLIFE_TEST_DATABASE_URL and PSEUDOLIFE_BENCH_ADMIN_URL), and a network
+# address in any of them passed. So a dispatched run asks each server it would
+# use which databases it holds, and refuses one that holds a production bank.
+
+_DISPATCHED = {"PSEUDOLIFE_SUITE_DISPATCHED": "1", "PSEUDOLIFE_TEST_PG_PASSWORD": "s3cret"}
+_BRIDGE_URL = "postgresql://pseudolife:s3cret@10.0.0.7:5432/pseudolife_memory_test_1"
+_BRIDGE_ADMIN = "postgresql://pseudolife:s3cret@10.0.0.7:5432/postgres"
+
+
+class _CatalogServer:
+    """A fake psycopg.connect: each host:port answers with its database list,
+    or raises. Records every address it was asked for."""
+
+    def __init__(self, servers: dict[str, object]):
+        self.servers = servers
+        self.asked: list[str] = []
+        self.urls: list[str] = []
+
+    def __call__(self, url, **kwargs):
+        from psycopg.conninfo import conninfo_to_dict
+
+        parts = conninfo_to_dict(str(url))
+        address = f"{parts['host']}:{parts['port']}"
+        self.asked.append(address)
+        self.urls.append(str(url))
+        answer = self.servers.get(address, ["postgres", "template0", "template1"])
+        if isinstance(answer, BaseException):
+            raise answer
+        names = answer
+
+        class _Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def execute(self, sql, *args):
+                assert "pg_database" in sql
+                return type("_Cur", (), {"fetchall": lambda _s: [(n,) for n in names]})()
+
+        return _Conn()
+
+
+def test_an_undispatched_run_never_asks_the_servers():
+    server = _CatalogServer({})
+    assert pg_defaults.dispatched_live_bank_refusal(
+        {"PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}, Path("absent"), connect=server) is None
+    assert server.asked == []
+
+
+def test_a_dispatched_run_asks_every_distinct_server_and_passes_test_servers():
+    server = _CatalogServer({})
+    # The bench URL names a database that need not exist yet; it is asked
+    # through ``postgres``, as its consumers connect.
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL":
+           "postgresql://pseudolife:s3cret@10.0.0.8:5434/fixed",
+           "PSEUDOLIFE_BENCH_ADMIN_URL": "postgresql://pseudolife:s3cret@10.0.0.9:5434/notyet"}
+    assert pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server) is None
+    assert sorted(server.asked) == sorted(
+        [pg_defaults.DEV_HOST_PORT, "10.0.0.8:5434", "10.0.0.9:5434"])
+    assert all(str(url).endswith("/postgres") for url in server.urls)
+
+
+def test_a_dispatched_run_asks_a_server_named_twice_once():
+    # Without a bench URL, the bench admin URL is the test URL's server.
+    server = _CatalogServer({})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL":
+           "postgresql://pseudolife:s3cret@10.0.0.8:5434/fixed"}
+    assert pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server) is None
+    assert sorted(server.asked) == sorted([pg_defaults.DEV_HOST_PORT, "10.0.0.8:5434"])
+
+
+@pytest.mark.parametrize("setting", ["PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_BENCH_ADMIN_URL"])
+def test_a_dispatched_run_refuses_the_live_bank_on_its_network_address(setting):
+    # Port 5432, not 5433: the launchers' port check lets this through.
+    server = _CatalogServer({"10.0.0.7:5432": ["postgres", "pseudolife_memory", "template1"]})
+    env = {**_DISPATCHED, setting: _BRIDGE_URL if setting.endswith("DATABASE_URL") else _BRIDGE_ADMIN}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None
+    assert "10.0.0.7:5432" in refusal and "pseudolife_memory" in refusal
+    assert setting in refusal
+    assert "s3cret" not in refusal
+
+
+def test_a_dispatched_run_refuses_the_live_bank_on_the_default_address():
+    server = _CatalogServer({pg_defaults.DEV_HOST_PORT: ["postgres", "pseudolife_memory"]})
+    refusal = pg_defaults.dispatched_live_bank_refusal(_DISPATCHED, Path("absent"), connect=server)
+    assert refusal is not None and pg_defaults.DEV_HOST_PORT in refusal
+
+
+def test_a_dispatched_run_refuses_the_bank_the_daemon_dsn_named(monkeypatch):
+    # conftest records the exported daemon DSN's database as a production bank.
+    from pseudolife_memory.storage.schema import PRODUCTION_DATABASE_ENV
+
+    monkeypatch.setenv(PRODUCTION_DATABASE_ENV, "renamed_bank")
+    server = _CatalogServer({"10.0.0.7:5432": ["postgres", "renamed_bank"]})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "renamed_bank" in refusal
+
+
+def test_a_dispatched_run_skips_servers_that_cannot_be_used_at_all():
+    # Nothing answering, or a server refusing the login: the suite cannot
+    # write there either, and its own fixtures report it.
+    server = _CatalogServer({
+        pg_defaults.DEV_HOST_PORT: ConnectionRefusedError("connection refused"),
+        "10.0.0.7:5432": psycopg.OperationalError(
+            "FATAL:  password authentication failed for user")})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    assert pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server) is None
+
+
+@pytest.mark.parametrize("failure", [
+    psycopg.OperationalError("FATAL:  too many connections for role"),
+    # A slow server is still a server: later connects wait longer.
+    psycopg.OperationalError("connection failed: timeout expired"),
+    TimeoutError("timed out"),
+])
+def test_a_dispatched_run_refuses_a_server_it_could_not_check(failure):
+    server = _CatalogServer({"10.0.0.7:5432": failure})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": _BRIDGE_URL}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "10.0.0.7:5432" in refusal
+    assert "s3cret" not in refusal
+
+
+def test_conftest_stops_a_dispatched_run_it_could_not_clear():
+    # The wiring, with no server reached: the default address is a closed
+    # port and the explicit URL is rejected by libpq before any network I/O.
+    import subprocess
+    import sys
+
+    root = str(pg_defaults.ENV_FILE.parent.parent)
+    url = "postgresql://pseudolife:s3cret@127.0.0.1:9/fixed?sslmode=bogus"
+    # PYTEST_*: under CI's xdist the child would inherit a worker id and
+    # skip the check. PSEUDOLIFE_BENCH_DB: a pinned name keeps the exit-time
+    # bench drop off any real database.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("PSEUDOLIFE_TEST_", "PSEUDOLIFE_BENCH_", "_PSEUDOLIFE_BENCH_",
+                                "PYTEST_"))}
+    env.update(PSEUDOLIFE_SUITE_DISPATCHED="1", PSEUDOLIFE_TEST_PG_HOST_PORT="127.0.0.1:9",
+               PSEUDOLIFE_TEST_DATABASE_URL=url, PSEUDOLIFE_SUITE_LOCK="off",
+               PSEUDOLIFE_BENCH_DB="pseudolife_memory_bench_wiring_test")
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "--co", "-q", "-p", "no:cacheprovider",
+         "tests/test_pg_defaults.py"],
+        cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 4, run.stdout[-2000:] + run.stderr[-2000:]
+    assert "refusing a dispatched run" in run.stderr + run.stdout
+    assert "s3cret" not in run.stderr + run.stdout
+
+
+def test_a_dispatched_run_refuses_a_url_naming_several_hosts():
+    # libpq would clear the first host to answer and might use another later.
+    server = _CatalogServer({})
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL":
+           "postgresql://pseudolife:s3cret@10.0.0.8:5434,10.0.0.7:5432/fixed"}
+    refusal = pg_defaults.dispatched_live_bank_refusal(env, Path("absent"), connect=server)
+    assert refusal is not None and "several hosts" in refusal
+    assert "s3cret" not in refusal
+
+
+def test_a_dispatched_run_refuses_a_url_that_does_not_parse():
+    env = {**_DISPATCHED, "PSEUDOLIFE_TEST_DATABASE_URL": "postgresql://s3cret@[broken",
+           "PSEUDOLIFE_BENCH_ADMIN_URL": "postgresql://pseudolife:s3cret@10.0.0.9:5434/postgres"}
+    refusal = pg_defaults.dispatched_live_bank_refusal(
+        env, Path("absent"), connect=_CatalogServer({}))
+    assert refusal is not None and "does not parse" in refusal
+    assert "s3cret" not in refusal
