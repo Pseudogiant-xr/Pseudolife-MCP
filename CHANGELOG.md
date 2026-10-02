@@ -12,9 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no hand edits of `ops/.env` or `config.yaml`. It prints a single-use
   12-character pairing code that expires after 15 minutes (`--expires`, at
   most 24 hours), and the line to run on the new machine. `--tier`,
-  `--no-board`, `--replace` (a new code for a paired machine; its old token
-  works until it is redeemed), `--list` (never a token or a code) and
-  `--revoke` (effective within 10 seconds). Names are lowercase
+  `--board` / `--no-board` (kept on a re-invite unless given), `--replace`
+  (a new code for a paired machine; its old token works until it is
+  redeemed), `--list` (never a token or a code) and `--revoke` (effective
+  within 10 seconds). `--list` and `--revoke` need no running daemon
+  (`--bank <fingerprint>` confirms the database); with a Docker daemon
+  container stopped they run through `psql` in the Postgres container. Names are lowercase
   `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name
   in `PSEUDOLIFE_MCP_TOKENS` or `PSEUDOLIFE_MCP_TIER_MAP` are refused. It
   refuses a daemon without `"auth": true`, and a database whose bank is not
@@ -25,16 +28,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (never replacing a file), and sends the daemon only its SHA-256: the token
   never appears in a terminal, a chat, shell history or a network response.
   A lost response is retried and answered again; a refused code removes the
-  file; an unknown outcome keeps it and says so. `--read-code` reads the code
-  from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
+  file; an unknown outcome keeps it and says so, also when a later attempt
+  is refused (the lost one may have spent the code). `--read-code` reads the
+  code from stdin. `pseudolife-mcp connect <url> --code <code>` pairs after the
   confirmation (never in `--dry-run`, never for a plan with nothing to
   re-point) and re-points the clients at the new file.
 - `POST /api/pair` redeems a code with one conditional UPDATE on the
   database clock, so a code is single use under concurrency. It refuses any
   request with an `Origin` header, takes only JSON up to 1 KiB, answers every
-  failure with the same `400 {"error": "pairing_refused"}`, holds pairing at
-  `429` after 20 failed attempts in a minute without consulting the store,
-  and never logs the body.
+  failure with the same `400 {"error": "pairing_refused"}` (any parse error,
+  a deeply nested body included), holds pairing at `429` after 20 failed
+  attempts in a minute without consulting the store (each attempt is
+  charged on arrival and refunded on success), runs at most two
+  redemptions at once on its own executor (a third gets `429`), refuses
+  without spending a code whose name the environment or a reservation
+  uses, and never logs the body.
 - The installers' option 2 accepts a pairing code where it asks for the
   token (and `--pairing-code` / `-PairingCode`), and option 3 prints
   `expose tailscale` and `invite <machine>` instead of the hand steps,
@@ -58,7 +66,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the session manager's task group see it too), the board and its hooks
   all use it, and the toolset tier falls back to the stored tier after
   `PSEUDOLIFE_MCP_TIER_MAP`. An open daemon still refuses the board with
-  `authentication_required`.
+  `authentication_required`. A presented bearer that stops resolving after
+  the gate (revoked meanwhile, or a stale snapshot) is refused with
+  `principals_unavailable`, never served as the default principal.
 - Board admission goes through one helper, `principal_admitted`: listed in
   `coordination.allowed_principals`, or a stored principal with board
   access that is not revoked (`coordination-recovery rebind` reads the

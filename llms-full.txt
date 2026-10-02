@@ -9665,7 +9665,10 @@ pseudolife-mcp connect http://100.64.0.2:8765 --code 7K3Q-M9XA-2PDF   # pair, th
 owner-only `~/.pseudolife-mcp/<principal>.token` (never replacing an
 existing file), and sends the daemon only the token's SHA-256. The token
 never appears in a terminal, a chat, shell history or a network response.
-`--read-code` reads the code from stdin instead of the command line.
+`--read-code` reads the code from stdin instead of the command line. When
+an answer is lost on the way back, `pair` retries; if the outcome stays
+unknown, it keeps the token file and says so (exit 5), because the code may
+be spent and that file is then the only copy of the token.
 
 What an invited machine can do: **read and write the whole bank** and use
 the agent board (unless invited with `--no-board`), with its own writer
@@ -9682,16 +9685,22 @@ The rules:
 - A name is lowercase `[a-z0-9][a-z0-9._-]{0,63}`, never `default`,
   `daemon` or `maintainer`, and never one already in `PSEUDOLIFE_MCP_TOKENS`
   or `PSEUDOLIFE_MCP_TIER_MAP` (the environment always wins). `--tier
-  minimal|core|full` sets its default toolset tier.
+  minimal|core|full` sets its default toolset tier; `--board` /
+  `--no-board` its board access. Re-inviting a name keeps both unless
+  given.
 - `invite --list` shows each name, whether it is paired or pending, its
   tier, board access and times: never a token or a code.
   `invite --revoke laptop` takes the token away within 10 seconds.
+  Neither needs a running daemon, so access can be withdrawn while it is
+  down; `--bank <fingerprint>` makes them check the database is the bank
+  you mean. With a Docker install's daemon container stopped, they run
+  through `psql` in the Postgres container.
   `invite laptop --replace` gives a paired machine a new code; its old
   token keeps working until the new code is redeemed. A revoked name can be
   invited again.
 - The daemon must have a token of its own (`"auth": true`): invited
-  principals do not turn authentication on. `invite` also checks that the
-  database it writes is the bank the local daemon serves (`/health`'s
+  principals do not turn authentication on. An invite also checks that
+  the database it writes is the bank the local daemon serves (`/health`'s
   `bank`), and refuses while that is still `null`.
 - On a Docker install `invite` runs inside the daemon container, so the
   host never handles the database password; elsewhere it uses
@@ -9704,12 +9713,18 @@ board's instance credentials. The daemon reads the table every 10 seconds
 on its own connection. If that read has failed for over 60 seconds, a
 bearer that matches nothing in the environment gets `503 {"error":
 "principals_unavailable"}` rather than 401, so a valid invited token is
-never reported as wrong.
+never reported as wrong. A tool call whose bearer stops resolving between
+the gate and the tool (revoked meanwhile) gets the JSON-RPC error
+`principals_unavailable` and is never run as the default principal.
 
 Redemption (`POST /api/pair`) refuses any request with an `Origin` header,
 takes only JSON bodies up to 1 KiB, answers every failure with the same
 `400 {"error": "pairing_refused"}`, and after 20 failed attempts in a
-minute answers `429` until the minute has passed.
+minute answers `429` until the minute has passed. Every attempt counts
+against that budget the moment it arrives (a success is given back), at
+most two redemptions run at once, and a third answers `429` at once. A
+code for a name the environment or a reservation uses is refused without
+being spent.
 
 The sections below are the hand-made alternative: tokens in the daemon's
 environment, admitted in its configuration.
