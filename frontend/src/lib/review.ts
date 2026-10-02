@@ -484,11 +484,14 @@ export function duplicateSubject(f: Finding): EvidenceSubject | null {
 }
 
 export function bulkSubject(f: Finding, r: BulkRow): EvidenceSubject {
+  // A self-loop edge (src === dst; nothing in graph_relate forbids one) would
+  // list one entity twice, and the evidence panel keys its rows by name.
+  const entities = [...new Set(r.entities)];
   if (r.edge) {
     const e = r.edge;
-    return { key: `${f.type}:${r.key}`, title: `Edge “${e.src}” ${e.relation} “${e.dst}”`, entities: r.entities, finding: f, edge: e };
+    return { key: `${f.type}:${r.key}`, title: `Edge “${e.src}” ${e.relation} “${e.dst}”`, entities, finding: f, edge: e };
   }
-  return { key: `${f.type}:${r.key}`, title: `“${r.name}”: ${typeLabel(f.type).toLowerCase()}`, entities: r.entities, finding: f };
+  return { key: `${f.type}:${r.key}`, title: `“${r.name}”: ${typeLabel(f.type).toLowerCase()}`, entities, finding: f };
 }
 
 /**

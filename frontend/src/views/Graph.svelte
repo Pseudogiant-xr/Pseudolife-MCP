@@ -143,6 +143,8 @@
 
   /** After a review decision: reload the graph, the scan and the open page. */
   async function reloadAll() {
+    // An assign may have created a project the scope picker does not list.
+    void loadProjects();
     await load(scope);
     pageKey += 1;
   }

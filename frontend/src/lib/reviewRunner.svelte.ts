@@ -1,7 +1,9 @@
 // Runs a ReviewAction: asks what planCalls() says to ask, POSTs the calls in
 // order, reports each failure (including HTTP 200 {error} refusals), and
-// toasts the outcome. Resolves to the number of calls that succeeded, so the
-// caller reloads only when something changed. <ReviewAsk/> in App.svelte
+// toasts the outcome. Resolves to the number of calls the daemon answered,
+// done or refused: a refusal such as not_pending or stale_review means the
+// item already moved, so the caller reloads either way. 0 means nothing was
+// sent or nothing got through. <ReviewAsk/> in App.svelte
 // renders the two pickers a plain confirm cannot.
 
 import { post } from "./api/client";
@@ -57,21 +59,24 @@ export async function runReviewAction(action: ReviewAction, opts: { projects?: s
 
   const calls = plan.calls(answer);
   let ok = 0;
+  let answered = 0;
   for (const c of calls) {
     try {
       const r = await post<unknown>(c.path, c.body);
       const refused = refusalOf(r);
       if (refused) {
+        answered += 1;
         toast(`${callName(c.path)} was refused: ${refused.replace(/_/g, " ")}`, "danger", 6000);
         if (plan.chained) break;
         continue;
       }
       ok += 1;
+      answered += 1;
     } catch (e) {
       toast(actionError(e, callName(c.path)), "danger", 6000);
       if (plan.chained) break;
     }
   }
   if (ok) toast(calls.length > 1 ? `${plan.done} (${ok} of ${calls.length})` : plan.done, "ok");
-  return ok;
+  return answered;
 }

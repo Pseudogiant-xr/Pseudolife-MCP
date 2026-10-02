@@ -2,7 +2,9 @@
 // shared daemon resources (health, overview, board) that several views read.
 
 import { untrack } from "svelte";
-import { api, ApiError } from "./api/client";
+import { api, ApiError, setUnauthorizedHandler } from "./api/client";
+import { settleConfirm, toast } from "./overlay.svelte";
+import { settlePick } from "./reviewRunner.svelte";
 import type { BoardSnapshot, Health, Overview } from "./api/types";
 import { DEFAULT_ROUTE, resolveRoute } from "./nav";
 import { readKey, THEME_KEY, TOKEN_KEY, writeKey } from "./storage";
@@ -61,7 +63,13 @@ export function setSubtitle(route: string, subtitle: string): void {
 export function startRouter(): () => void {
   const onHash = () => {
     const next = parseHash();
-    if (next.route !== ui.route) window.scrollTo(0, 0);
+    if (next.route !== ui.route) {
+      window.scrollTo(0, 0);
+      // A question asked by the view being left must not outlive it (Back
+      // during a delete confirm would otherwise still run the delete).
+      settleConfirm(false);
+      settlePick(null);
+    }
     ui.route = next.route;
     ui.query = next.query;
     ui.drawerOpen = false;
@@ -105,6 +113,17 @@ export function refresh(): void {
   ui.tick += 1;
 }
 
+// A 401 "unauthorized" means the stored token is missing or wrong: open the
+// token dialog, once per burst (a view load fires several requests at once).
+let unauthorizedAt = 0;
+setUnauthorizedHandler(() => {
+  const now = Date.now();
+  if (now - unauthorizedAt < 15_000 || ui.tokenOpen) return;
+  unauthorizedAt = now;
+  ui.tokenOpen = true;
+  toast("The daemon did not accept this console's token. Store the one it was started with.", "warn", 6000);
+});
+
 // ---- shared resources ------------------------------------------------------
 
 export interface Resource<T> {
@@ -135,8 +154,16 @@ function load<T>(r: Resource<T>, fetcher: () => Promise<T>): Promise<void> {
   return untrack(() => run(r, fetcher));
 }
 
+// A load requested while one is in flight runs once more when it finishes,
+// so a refresh after a new token (or after a dream) is never dropped in
+// favour of an answer to the old request.
+const again = new WeakSet<object>();
+
 async function run<T>(r: Resource<T>, fetcher: () => Promise<T>): Promise<void> {
-  if (r.loading) return;
+  if (r.loading) {
+    again.add(r);
+    return;
+  }
   r.loading = true;
   try {
     r.data = await fetcher();
@@ -149,6 +176,10 @@ async function run<T>(r: Resource<T>, fetcher: () => Promise<T>): Promise<void> 
     if (r.error.status === 401 || r.error.status === 403) r.data = null;
   } finally {
     r.loading = false;
+  }
+  if (again.has(r)) {
+    again.delete(r);
+    await run(r, fetcher);
   }
 }
 

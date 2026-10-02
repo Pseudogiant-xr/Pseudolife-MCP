@@ -29,6 +29,10 @@
     if (autofocus) input?.focus();
   });
 
+  // A debounce still pending when the view goes away would search, and
+  // rewrite the address bar, on whatever view comes next.
+  $effect(() => () => clearTimeout(timer));
+
   function fire() {
     clearTimeout(timer);
     onsearch?.(value.trim());

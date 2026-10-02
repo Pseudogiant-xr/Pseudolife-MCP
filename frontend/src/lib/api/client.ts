@@ -28,7 +28,14 @@ export class ApiError extends Error {
   }
 }
 
-export type Params = Record<string, string | number | boolean | string[] | null | undefined>;
+let onUnauthorized: (() => void) | null = null;
+
+/** Called on a 401 "unauthorized" (a missing or wrong token); the app opens the token dialog. */
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
+export type Params =Record<string, string | number | boolean | string[] | null | undefined>;
 
 function buildUrl(path: string, params?: Params): string {
   const url = new URL(path, location.origin);
@@ -84,6 +91,7 @@ async function request<T>(
   if (!res.ok && !(opts.acceptStatus ?? []).includes(res.status)) {
     const body = (data && typeof data === "object" ? data : null) as Partial<ApiErrorBody> | null;
     const code = typeof body?.error === "string" ? body.error : `http_${res.status}`;
+    if (res.status === 401 && code === "unauthorized") onUnauthorized?.();
     throw new ApiError(res.status, code, body);
   }
   return (data ?? {}) as T;

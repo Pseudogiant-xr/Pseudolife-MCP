@@ -50,12 +50,17 @@ def test_galaxy_labels_are_dom_nodes_not_strings():
     src = GALAXY_TS.read_text(encoding="utf-8")
     for call in ("nodeLabel", "linkLabel"):
         assert f".{call}(" in src, f"galaxy.ts no longer sets {call}: update this pin"
-        arg = _extract_call_arg(src, call)
-        assert "labelElement(" in arg, (
-            f"{call} must return labelElement(...), a DOM node, never a string: "
-            "the vendored tooltip renders strings via innerHTML (#171)"
-        )
-        assert "`" not in arg and "${" not in arg, f"{call} builds a template string: {arg!r}"
+    # Every label or tooltip accessor handed to the engine, anywhere in the
+    # console, not just the first one in galaxy.ts.
+    for path in _sources():
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r"\.(node|link)(Label)\(", text):
+            arg = _extract_call_arg(text[m.start():], m.group(1) + m.group(2))
+            assert "labelElement(" in arg, (
+                f"{path.relative_to(SRC)}: .{m.group(1)}Label must return labelElement(...), "
+                "a DOM node, never a string: the vendored tooltip renders strings via innerHTML (#171)"
+            )
+            assert "`" not in arg and "${" not in arg, f"{path.relative_to(SRC)} builds a template string: {arg!r}"
 
 
 def test_label_element_sets_text_content_only():
@@ -77,15 +82,44 @@ def test_no_html_sinks_anywhere_in_the_console():
         assert "insertAdjacentHTML" not in text, f"{path.relative_to(SRC)} inserts HTML"
 
 
-def test_agent_written_urls_are_linked_only_through_safe_http_url():
-    """A source URL comes from an agent or a model; only http(s) is linked.
-    Every href built from data must pass safeHttpUrl (via SourceLink)."""
+# Data-driven hrefs that are not built by hrefTo()/hrefFor() (in-app hash
+# routes, URL-encoded). Each is reviewed: SourceLink's is safeHttpUrl's
+# result; the other two are built from hrefTo() or literal "#/..." routes.
+_REVIEWED_HREFS = {
+    ("SourceLink.svelte", "safe"),
+    ("Graph.svelte", "reviewHref"),
+    ("Observatory.svelte", "s.href"),
+}
+
+
+def test_every_data_driven_href_is_an_app_route_or_checked():
+    """An agent- or model-written URL must never reach an href unchecked. In
+    the console every dynamic href is an in-app route built by hrefTo() /
+    hrefFor(), or one of the reviewed expressions above; a new one fails
+    here until someone looks at it."""
     safe = (SRC / "lib" / "safe.ts").read_text(encoding="utf-8")
     assert "^https?:\\/\\/" in safe
-    for path in _sources():
+    for path in SRC.rglob("*.svelte"):
         text = path.read_text(encoding="utf-8")
-        for m in re.finditer(r"href=\{([^}]*source_url[^}]*)\}", text):
-            assert "safeHttpUrl" in m.group(1), f"{path.relative_to(SRC)} links a source_url unchecked"
+        for m in re.finditer(r"href=\{([^}]*)\}", text):
+            expr = m.group(1).strip()
+            if "hrefTo(" in expr or "hrefFor(" in expr:
+                continue
+            assert (path.name, expr) in _REVIEWED_HREFS, (
+                f"{path.relative_to(SRC)} links href={{{expr}}}: build in-app links with "
+                "hrefTo(), and external ones only through SourceLink (safeHttpUrl)"
+            )
+    link = (SRC / "components" / "SourceLink.svelte").read_text(encoding="utf-8")
+    assert "safeHttpUrl(url)" in link and "href={safe}" in link
+
+
+def test_only_source_link_opens_external_pages():
+    for path in SRC.rglob("*.svelte"):
+        if path.name == "SourceLink.svelte":
+            continue
+        assert 'target="_blank"' not in path.read_text(encoding="utf-8"), (
+            f"{path.relative_to(SRC)} opens an external page: route it through SourceLink"
+        )
 
 
 def test_devserver_fixture_bank_carries_markup_shaped_entity_name():

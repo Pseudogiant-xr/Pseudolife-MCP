@@ -22,7 +22,7 @@
   import { factsApi, type Fact, type Limited } from "../lib/api/facts";
   import { countNote, facetCounts, filterFacts, groupByEntity, type Slot } from "../lib/cortex";
   import { explainError } from "../lib/errors";
-  import { fmtDateTime, fmtNum, fmtRelative, plural } from "../lib/format";
+  import { fmtDateTime, fmtNum, fmtRelative, plural, slotKey } from "../lib/format";
   import { hrefTo, refresh, setQuery, setSubtitle, ui } from "../lib/state.svelte";
 
   // ---- filters ---------------------------------------------------------------
@@ -93,6 +93,16 @@
   // ---- derived -----------------------------------------------------------------
   const entries = $derived(data?.entries ?? []);
   const overall = $derived(facetCounts(entries));
+  // Members per slot over every loaded fact, not the filtered view: forget
+  // removes the whole slot, so its confirm must count every member.
+  const slotSizes = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const f of entries) {
+      const k = slotKey(f.entity, f.attribute);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  });
   const textAndOrigin = $derived(filterFacts(entries, { q, origin, facet: "all" }));
   const counts = $derived(facetCounts(textAndOrigin));
   // A facet with nothing to show is hidden; a selection on it falls back to all.
@@ -301,7 +311,7 @@
 
             <div class="panel slots-panel">
               {#key current.entity}
-                <SlotTable slots={current.slots} oncorrect={(s) => openForm(s.entity, s.attribute)} />
+                <SlotTable slots={current.slots} slotSize={(s) => slotSizes.get(slotKey(s.entity, s.attribute)) ?? s.rows.length} oncorrect={(s) => openForm(s.entity, s.attribute)} />
               {/key}
             </div>
 

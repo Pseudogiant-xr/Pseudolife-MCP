@@ -24,9 +24,12 @@
 
   let {
     slots,
+    slotSize,
     oncorrect,
   }: {
     slots: Slot[];
+    /** Members in the whole slot, however the view is filtered. */
+    slotSize: (s: Slot) => number;
     /** Open the fact form on this slot's attribute. */
     oncorrect: (s: Slot) => void;
   } = $props();
@@ -80,7 +83,7 @@
     const ok = await confirm({
       title: "Forget this fact?",
       message: s.isSet
-        ? `Permanently remove all ${plural(s.rows.length, "member")} of ${label(s)} and the slot's history. This cannot be undone.`
+        ? `Permanently remove all ${plural(slotSize(s), "member")} of ${label(s)} and the slot's history, including members the current filter hides. This cannot be undone.`
         : `Permanently remove ${label(s)} = “${s.rows[0].value}” and its history. This cannot be undone.`,
       confirmLabel: "Forget the fact",
       danger: true,

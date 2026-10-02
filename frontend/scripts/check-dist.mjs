@@ -15,7 +15,10 @@ const patterns = [
   /node_modules[\/]/, // leaked module paths
   /\.claude[\/]worktrees/,
 ];
-const local = [userInfo().username, hostname()].filter((s) => s && s.length >= 3);
+// The maintainer's own user and host names must never ship. On a CI runner
+// they are generic ("runner") and not private, and a word that common would
+// fail the build on unrelated text, so the check is local only.
+const local = process.env.CI ? [] : [userInfo().username, hostname()].filter((s) => s && s.length >= 3);
 
 function walk(dir) {
   return readdirSync(dir).flatMap((name) => {

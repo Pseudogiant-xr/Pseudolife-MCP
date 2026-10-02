@@ -51,7 +51,8 @@
   <button type="button" class="btn btn-ghost btn-sm ev" aria-pressed={selectedKey === s.key} onclick={() => onevidence(s)}>Show evidence</button>
 {/snippet}
 
-<article class="finding" class:gated={auto?.tone === "warn"}>
+<!-- The finding's severity as a left rule (danger red, warn orange, info lavender). -->
+<article class="finding sev-{finding.severity ?? 'info'}" class:gated={auto?.tone === "warn"}>
   <header class="f-head">
     <span class="chip">{typeLabel(finding.type)}</span>
     <!-- A duplicate's label is just "a ↔ b", which the body shows as links. -->
@@ -177,6 +178,15 @@
   }
   .finding.gated {
     background: color-mix(in srgb, var(--warn) 7%, transparent);
+  }
+  .finding.sev-danger {
+    box-shadow: inset 3px 0 0 var(--danger);
+  }
+  .finding.sev-warn {
+    box-shadow: inset 3px 0 0 var(--warn);
+  }
+  .finding.sev-info {
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--assoc) 70%, transparent);
   }
   .f-head {
     display: flex;

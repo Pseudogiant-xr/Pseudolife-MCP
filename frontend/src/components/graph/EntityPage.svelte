@@ -149,7 +149,9 @@
     const owner = page.canonical ?? page.entity;
     try {
       const r = await graphApi.history(owner, f.attribute);
-      if (!history[key]) return;
+      // The page may have moved to another entity with the same attribute
+      // and value while this was in flight.
+      if (!history[key] || (page?.canonical ?? page?.entity) !== owner) return;
       const refused = softError(r);
       history = {
         ...history,
@@ -158,7 +160,7 @@
           : { state: "ok", versions: (r.versions ?? []).slice().reverse() },
       };
     } catch (e) {
-      if (!history[key]) return;
+      if (!history[key] || (page?.canonical ?? page?.entity) !== owner) return;
       history = { ...history, [key]: { state: "error", message: explainError(toApiError(e), "The history").title } };
     }
   }

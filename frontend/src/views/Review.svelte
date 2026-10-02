@@ -209,8 +209,10 @@
         evidenceGen += 1;
         evidence = {};
         await load(scope);
-        // The sidebar's Review badge counts from the overview.
+        // The sidebar's Review badge counts from the overview; an assign may
+        // have created a project the scope picker does not list yet.
         void loadOverview();
+        void loadProjects();
       }
     } finally {
       busy = null;

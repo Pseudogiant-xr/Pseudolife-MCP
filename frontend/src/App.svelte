@@ -98,7 +98,21 @@
     <div class="content" class:full={FULL_BLEED.has(ui.route)}>
       {#if View}
         {#key ui.route}
-          <View />
+          <!-- A view that throws while rendering shows this instead of
+               leaving the content area blank; the rest of the shell lives. -->
+          <svelte:boundary onerror={(e) => console.error("view failed to render", e)}>
+            <View />
+            {#snippet failed(_error, reset)}
+              <section class="panel notfound" role="alert">
+                <h2 class="panel-title">{title} failed to render</h2>
+                <p class="state-body">
+                  Something in the data broke this view. The error is in the browser console; try again, or
+                  open another view.
+                </p>
+                <button type="button" class="btn btn-primary btn-sm" onclick={reset}>Try again</button>
+              </section>
+            {/snippet}
+          </svelte:boundary>
         {/key}
       {:else}
         <section class="panel notfound">

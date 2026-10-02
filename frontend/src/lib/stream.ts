@@ -187,7 +187,9 @@ export interface Ask {
 export function deleteConfirmCopy(text: string): Ask {
   return {
     title: "Delete this memory?",
-    message: `Permanently remove: “${truncate(text, 120)}”.`,
+    // /api/delete matches by exact text (it has no id selector), so every
+    // copy goes, a retired history row's live twin included. Say so.
+    message: `Permanently remove every memory whose text is exactly “${truncate(text, 120)}”, including any other copies of it.`,
     confirmLabel: "Delete the memory",
     danger: true,
   };

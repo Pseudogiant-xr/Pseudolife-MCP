@@ -33,6 +33,7 @@
     shortId,
     words,
   } from "../lib/format";
+  import { describeDreamRun } from "../lib/dream";
   import { confirm } from "../lib/overlay.svelte";
   import { loadBoard, refresh, store, ui } from "../lib/state.svelte";
 
@@ -40,7 +41,13 @@
   const ov = $derived(store.overview.data);
   const counts = $derived(ov?.counts);
   const stats = $derived(ov?.stats);
-  const dream = $derived(ov?.dream);
+  // /api/overview swallows a dream_status failure into {}: that is unknown,
+  // not healthy, so an empty object reads as unavailable.
+  const dream = $derived(ov?.dream && Object.keys(ov.dream).length ? ov.dream : undefined);
+  const dreamUnknown = $derived(!!ov && !dream);
+  // The stall tracker counts a dream the fallback served as a soft stall:
+  // dreams still run, so it is a warning, not "failing".
+  const fallbackStall = $derived(dream?.stall?.reason === "served_by_fallback");
   const loop = $derived(ov?.loop);
   const health = $derived(ov?.health);
   const rq = $derived(dream?.review_queue);
@@ -104,7 +111,9 @@
   const status = $derived.by(() => {
     if (!ov) return null;
     if (health?.status && health.status !== "ok") return { tone: "danger", text: `Daemon ${health.status}` };
-    if (dream?.stall) return { tone: "danger", text: "Dreams are stalled" };
+    if (dream?.stall && !fallbackStall) return { tone: "danger", text: "Dreams are stalled" };
+    if (dream?.stall) return { tone: "warn", text: "Dreaming on the fallback" };
+    if (dreamUnknown) return { tone: "warn", text: "Dream status unavailable" };
     if (dream?.error) return { tone: "warn", text: "Dream tracking failed" };
     if (reasons.length) return { tone: "warn", text: "The review queue needs attention" };
     if ((health?.persist_errors ?? 0) > 0) return { tone: "warn", text: "Persist errors reported" };
@@ -114,7 +123,9 @@
   const headline = $derived.by(() => {
     if (!ov) return "";
     if (health?.status && health.status !== "ok") return "The daemon reports a problem.";
-    if (dream?.stall) return "Awake, but dreams are failing.";
+    if (dream?.stall && !fallbackStall) return "Awake, but dreams are failing.";
+    if (dream?.stall) return "Awake, dreaming on the fallback.";
+    if (dreamUnknown) return "Awake, but dream status is unavailable.";
     if (dream?.error) return "Awake, but dream tracking failed.";
     const backlog = dream?.backlog;
     if (backlog === undefined) return "Awake.";
@@ -142,8 +153,13 @@
     if (dream?.stall) {
       const since = fmtDuration(now / 1000 - dream.stall.since);
       const why = dream.stall.reason ? `, ${words(dream.stall.reason)}` : "";
-      s.push(`Dreams have been failing for ${since}${why}.`);
+      s.push(
+        fallbackStall
+          ? `The primary extractor has been failing for ${since}; the fallback is serving dreams.`
+          : `Dreams have been failing for ${since}${why}.`,
+      );
     }
+    if (dreamUnknown) s.push("The daemon could not report dream status, so the backlog is unknown.");
     if (dream?.idle_seconds && dream.idle_seconds >= 60) {
       s.push(`The bank has been idle for ${fmtDuration(dream.idle_seconds)}.`);
     }
@@ -185,29 +201,9 @@
     dreaming = true;
     dreamMsg = "";
     try {
-      const r = await api.dreamRun();
-      if (r.error) {
-        dreamTone = "danger";
-        dreamMsg = `The dream did not run: ${r.error}`;
-      } else if (r.skipped) {
-        dreamTone = "warn";
-        dreamMsg = `The dream was skipped: ${words(r.skipped)}.`;
-      } else if (!r.pulled) {
-        dreamTone = "ok";
-        dreamMsg = "Nothing was waiting, so the dream pulled no memories.";
-      } else {
-        const parts = [
-          plural(r.pulled, "memory", "memories") + " pulled",
-          r.claims !== undefined ? plural(r.claims, "claim") : "",
-          r.inserted !== undefined ? `${fmtNum(r.inserted)} new` : "",
-          r.confirmed !== undefined ? `${fmtNum(r.confirmed)} confirmed` : "",
-          r.contested !== undefined ? `${fmtNum(r.contested)} contested` : "",
-          r.superseded !== undefined ? `${fmtNum(r.superseded)} superseded` : "",
-        ].filter(Boolean);
-        const by = r.extractor ? ` with the ${r.extractor} extractor` : "";
-        dreamTone = "ok";
-        dreamMsg = `The dream finished${by}: ${parts.join(", ")}.`;
-      }
+      const outcome = describeDreamRun(await api.dreamRun());
+      dreamTone = outcome.tone;
+      dreamMsg = outcome.message;
       refresh();
     } catch (e) {
       const ex = explainError(e instanceof ApiError ? e : new ApiError(0, "client_error", null), "The dream");
@@ -305,7 +301,7 @@
 
   const dreamState = $derived.by(() => {
     if (!dream) return null;
-    if (dream.stall) return { tone: "danger", text: "stalled" };
+    if (dream.stall) return fallbackStall ? { tone: "warn", text: "on the fallback" } : { tone: "danger", text: "stalled" };
     if (dream.error) return { tone: "warn", text: "tracking failed" };
     if (dream.would_fire) return { tone: "warn", text: "due on the next sweep" };
     return { tone: "ok", text: "waiting" };
@@ -666,7 +662,8 @@
           <p class="unavailable">Nothing has been written yet.</p>
         {:else}
           <ul class="list">
-            {#each recent as e (e.id)}
+            <!-- An entry not yet persisted has a null id. -->
+            {#each recent as e, i (e.id ?? `t${i}`)}
               <li class="write-row">
                 <span class="mono src {sourceTone(e.source)}">{e.source ?? "memory"}</span>
                 <span class="ellipsis" title={e.text}>{e.text}</span>

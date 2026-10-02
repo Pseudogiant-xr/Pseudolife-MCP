@@ -2,6 +2,7 @@
   // Stores the bearer token under localStorage "pl_token".
   import { readKey, TOKEN_KEY } from "../lib/storage";
   import { saveToken, ui } from "../lib/state.svelte";
+  import { toast } from "../lib/overlay.svelte";
 
   let dialog: HTMLDialogElement | undefined = $state();
   let value = $state("");
@@ -22,12 +23,14 @@
     e.preventDefault();
     saveToken(value);
     ui.tokenOpen = false;
+    toast(value.trim() ? "Token saved" : "Token removed");
   }
 
   function clearToken() {
     value = "";
     saveToken("");
     ui.tokenOpen = false;
+    toast("Token forgotten");
   }
 </script>
 

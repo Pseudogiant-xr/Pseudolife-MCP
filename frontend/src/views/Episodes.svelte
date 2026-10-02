@@ -233,7 +233,7 @@
       <section class="dist" aria-labelledby="ep-recent">
         <h3 id="ep-recent" class="sub-title">Recent entries</h3>
         <ul class="entries">
-          {#each summary.recent_entries as en, i (en.id ?? i)}
+          {#each summary.recent_entries as en, i (en.id ?? `t${i}`)}
             <li class="entry" class:superseded={en.superseded}>
               <p class="entry-text">{truncate(en.text, 600)}</p>
               <p class="entry-meta">
