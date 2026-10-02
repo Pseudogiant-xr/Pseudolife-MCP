@@ -17,6 +17,8 @@
 #       -Model qwen3.6-27b -Client claude
 #   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
 #       -TokenFile ~\.pseudolife-mcp\claude-code.token -ReadToken -Client claude
+#   ops\install.ps1 -DaemonUrl http://100.64.0.2:8765 `
+#       -PairingCode ABCD-EFGH-JKMN -Client claude
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -50,6 +52,11 @@
 #   for an SSH tunnel.
 # -ReadToken (switch): client-only - create the -TokenFile (it must not exist
 #   yet) from the token typed, unechoed, or piped on stdin.
+# -PairingCode <code>: client-only - a pairing code from pseudolife-mcp
+#   invite on the daemon's host, instead of a token: the installed shim's
+#   pair creates the -TokenFile (default ~/.pseudolife-mcp/<client>.token;
+#   it must not exist yet). An interactive run also takes a code pasted
+#   where it asks for the token.
 # One token file is one principal: every client a run wires shares it. For
 # per-client attribution on the board, run the installer once per client,
 # each run with that client's own token file.
@@ -115,6 +122,7 @@ param(
     [string]$TokenFile = "",
     [switch]$ClientOnly,
     [switch]$ReadToken,
+    [string]$PairingCode = "",
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
     [switch]$Tunnel
 )
@@ -385,24 +393,46 @@ function Show-ClientOnlyNotes {
 # >>> shared bank notes >>>
 function Show-SharedBankNotes {
     Write-Host @'
-  Other machines will use this bank: three steps here, then the
-  installer on each of them (docs/guide/remote-bank.md has the detail
-  and the other ways to expose the daemon).
-  1. Expose the daemon, after checking that
-     curl -s http://127.0.0.1:8765/health reports "auth": true. Over
-     Tailscale, no certificate needed:
-       tailscale serve --bg --tcp=8765 tcp://127.0.0.1:8765
-     The others then use http://<this machine's tailnet IP>:8765.
-  2. Give each of their clients its own principal, in ops/.env:
-       PSEUDOLIFE_MCP_TOKENS=<token>:<machine>-claude-code
-       PSEUDOLIFE_MCP_TIER_MAP=<machine>-claude-code:full
-     then redeploy (ops/update.sh, or ops\update.ps1 on Windows).
-  3. Admit those principals to the agent board: list them, with default,
-     in coordination.allowed_principals in the daemon's config.yaml, and
-     restart the daemon.
-  On each other machine, run the installer, answer 2 and give it the
-  daemon's URL and that client's token.
+  Other machines will use this bank: two commands here, then the
+  installer on each of them.
+  1. Put the daemon on the tailnet. It checks first that the daemon
+     requires a bearer token, and shows its plan before it changes
+     anything:
+       pseudolife-mcp expose tailscale
+  2. For each machine that will join, make a one-time pairing code:
+       pseudolife-mcp invite <machine>
+  On that machine, run the installer, answer 2, give it the daemon's URL
+  that expose printed, and paste the code where it asks for the token
+  (or run pseudolife-mcp pair <url> <code> there). The steps by hand,
+  and the other ways to expose the daemon: docs/guide/remote-bank.md.
 '@
+}
+# Step 1 changes this machine's tailnet serve, so it is only offered, at a
+# terminal, with no as the default; expose then shows its own plan and asks
+# again before it changes anything. A failure is reported, not fatal: the
+# install itself is complete.
+function Invoke-SharedBankExposeOffer {
+    if (-not $interactive) { return }
+    $reply = Read-BankAnswer "Run pseudolife-mcp expose tailscale now? It changes this machine's tailnet serve [y/N]"
+    if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
+        Write-Host "  Not run: run pseudolife-mcp expose tailscale when you are ready."
+        return
+    }
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        Write-Warning "The pseudolife-mcp shim is unavailable (see above), so expose did not run: run pseudolife-mcp expose tailscale once it is installed."
+        return
+    }
+    try {
+        $global:LASTEXITCODE = 0
+        & $script:shimInstallPath expose tailscale
+        $exposeExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $exposeExit = 1
+    }
+    if ($exposeExit -ne 0) {
+        Write-Warning "pseudolife-mcp expose tailscale exited $exposeExit (see its message above). The install itself is complete: run it again once that is fixed."
+    }
 }
 # <<< shared bank notes <<<
 
@@ -432,8 +462,8 @@ Show-Banner
 # the environment): where the memory bank lives. "Another machine" is the
 # client-only install, with the daemon's URL asked for here and its token
 # after the agents are chosen; "shared" is a local install that ends with the
-# steps to expose it. -TokenFile or -ReadToken already mean another
-# machine, so with either only the URL is asked. The mode block below then
+# steps to expose it. -TokenFile, -ReadToken or -PairingCode already mean
+# another machine, so with any of them only the URL is asked. The mode block below then
 # resolves and checks the answer exactly as it does the parameters. Without
 # a terminal nothing is asked; end of input at one is no answer (exit 2).
 $script:bankLocation = "local"
@@ -462,7 +492,7 @@ function Get-BankReply($reply) {
 function Invoke-BankLocationQuestion {
     if ($script:DaemonUrl -or $script:ClientOnly -or $env:PSEUDOLIFE_MCP_DAEMON_URL) { return }
     if (-not $interactive) { return }
-    if (-not $script:TokenFile -and -not $script:ReadToken) {
+    if (-not $script:TokenFile -and -not $script:ReadToken -and -not $script:PairingCode) {
         Show-BankLocationQuestion
         $remote = $false
         while (-not $remote) {
@@ -497,29 +527,32 @@ function Invoke-BankLocationQuestion {
         $script:DaemonUrl = Get-BankReply $reply
     }
 }
+function Get-BankTokenName {
+    # The new token file's name, one per principal: named for the one client
+    # this run wires, as docs/guide/remote-bank.md recommends, else shared.
+    if (@($clients).Count -ne 1) { return "shared" }
+    switch ($clients[0]) {
+        "claude" { return "claude-code" }
+        "generic" { return "mcp-client" }
+        default { return $clients[0] }
+    }
+}
 function Invoke-BankTokenQuestion {
     # The other machine's token file: an existing one, or a new one from a
-    # pasted token.
+    # pasted token or a pairing code.
     if (($script:bankLocation -ne "remote") -or $script:TokenFile) { return }
-    if (-not $script:ReadToken -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
+    # A token or pairing code to come always goes to a new file.
+    $newFile = [bool]($script:ReadToken -or $script:PairingCode)
+    if (-not $newFile -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
         Step "Token file: $($env:PSEUDOLIFE_MCP_TOKEN_FILE) (PSEUDOLIFE_MCP_TOKEN_FILE in the environment)."
         return
     }
-    # One token file per principal: named for the one client this run wires,
-    # as docs/guide/remote-bank.md recommends, else shared.
-    $name = "shared"
-    if (@($clients).Count -eq 1) {
-        $name = switch ($clients[0]) {
-            "claude" { "claude-code" }
-            "generic" { "mcp-client" }
-            default { $clients[0] }
-        }
-    }
-    if (-not $script:ReadToken) {
+    $name = Get-BankTokenName
+    if (-not $newFile) {
         Write-Host ""
-        Write-Host "The daemon's bearer token:"
-        Write-Host "  1) Paste it now: it is written to a new owner-only token file (default)"
-        Write-Host "  2) It is already in a token file on this machine"
+        Write-Host "The daemon's bearer token, or a pairing code from pseudolife-mcp invite:"
+        Write-Host "  1) Paste it now: it makes a new owner-only token file (default)"
+        Write-Host "  2) The token is already in a token file on this machine"
         $choice = $null
         while (-not $choice) {
             $reply = Read-BankAnswer "Choose 1-2 (Enter = 1)"
@@ -533,11 +566,11 @@ function Invoke-BankTokenQuestion {
                 default { Write-Host "  please answer 1 or 2" }
             }
         }
-        if ($choice -eq "paste") { $script:ReadToken = [switch]$true }
+        if ($choice -eq "paste") { $script:ReadToken = [switch]$true; $newFile = $true }
     }
     $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
     while (-not $script:TokenFile) {
-        $prompt = if ($script:ReadToken) {
+        $prompt = if ($newFile) {
             "The token file to write (Enter = ~/.pseudolife-mcp/$name.token)"
         } else { "The token file" }
         $reply = Read-BankAnswer $prompt
@@ -546,14 +579,14 @@ function Invoke-BankTokenQuestion {
             exit 2
         }
         $path = Get-BankReply $reply
-        if (-not $path -and $script:ReadToken) { $path = "~/.pseudolife-mcp/$name.token" }
+        if (-not $path -and $newFile) { $path = "~/.pseudolife-mcp/$name.token" }
         if ($path -eq "~") {
             $path = $userHome
         } elseif ($path.StartsWith("~/") -or $path.StartsWith("~\")) {
             $path = Join-Path $userHome ($path.Substring(2) -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
         }
-        # A pasted token only ever goes to a new file.
-        if ($path -and $script:ReadToken -and (Test-Path -LiteralPath $path)) {
+        # A pasted token or a pairing code only ever goes to a new file.
+        if ($path -and $newFile -and (Test-Path -LiteralPath $path)) {
             Write-Host "  $path exists already: name another file, or re-run and answer 2 to use it"
             $path = ""
         }
@@ -644,8 +677,12 @@ if ($ClientOnly) {
         Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
         exit 2
     }
-} elseif ($TokenFile -or $ReadToken) {
-    Write-Host "client-only install: -TokenFile and -ReadToken name a remote daemon's token, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
+    if ($PairingCode -and $ReadToken) {
+        Write-Host "client-only install: -PairingCode and -ReadToken both say where the token comes from: pass one of them"
+        exit 2
+    }
+} elseif ($TokenFile -or $ReadToken -or $PairingCode) {
+    Write-Host "client-only install: -TokenFile, -ReadToken and -PairingCode name a remote daemon's credential, and a local install keeps its token in ops/.env. Add -ClientOnly -DaemonUrl <url>, or drop them"
     exit 2
 }
 # <<< client-only mode <<<
@@ -708,12 +745,48 @@ function Get-HelperStatus($output) {
 # >>> client-only preflight >>>
 # Nothing Docker-shaped to check: a client-only install depends on the
 # token file and on the remote daemon answering. The token is never read
-# into output.
+# into output. With a pairing code (-PairingCode, or one pasted where the
+# token is asked for) the token file does not exist yet: the installed
+# shim's pair creates it after the shim is installed (the client-only pair
+# block), so here it must not exist, and only the daemon is checked.
+function Test-PairingCode([string]$value) {
+    # The shim's own rule (principals.normalize_pairing_code), asked with the
+    # value on stdin, never in an argument list. Exit 10/11 are its answers;
+    # anything else falls back to the same rule written here: 12 Crockford
+    # base32 characters once case, dashes and surrounding whitespace are
+    # ignored, O read as 0, and I and L as 1.
+    $python = Get-InstallerPython
+    if ($python) {
+        try {
+            $global:LASTEXITCODE = 0
+            "$value" | & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from pseudolife_memory.principals import normalize_pairing_code; line = sys.stdin.buffer.readline().decode('utf-8', 'replace').rstrip(chr(13) + chr(10)); sys.exit(10 if normalize_pairing_code(line) else 11)" $repo 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 10) { return $true }
+            if ($LASTEXITCODE -eq 11) { return $false }
+        } catch { }
+    }
+    $code = ("$value".Trim() -replace '-', '').ToUpperInvariant().Replace('O', '0').Replace('I', '1').Replace('L', '1')
+    return ($code -cmatch '^[0-9A-HJKMNP-TV-Z]{12}$')
+}
+function Assert-ClientTokenFile {
+    # The shim's own check of the token file, on every OS: an owner-only
+    # regular file (the ACL on Windows, mode bits on POSIX), no link, one
+    # well-formed token. Stops the install when it cannot use it.
+    $tokenReport = & (Get-InstallerPython) (Join-Path $repo "ops/client_credentials.py") check-token-file --path $script:TokenFile
+    if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
+        $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
+        throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
+    }
+}
 function Invoke-ClientOnlyPreflight {
     Step "Client-only install$($clientOnlyVia): this machine's clients will use the daemon at $DaemonUrl (no Docker, volumes or local daemon here)."
+    if (-not $script:TokenFile -and $script:PairingCode) {
+        # The file the paste path offers: nothing asked where the token goes.
+        $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+        $script:TokenFile = Join-Path (Join-Path $userHome ".pseudolife-mcp") "$(Get-BankTokenName).token"
+    }
     if (-not $script:TokenFile) { $script:TokenFile = "$env:PSEUDOLIFE_MCP_TOKEN_FILE" }
     if (-not $script:TokenFile) {
-        Write-Host "client-only install: pass -TokenFile <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and -ReadToken to create it. The installer never mints one for a remote daemon$clientOnlyVia"
+        Write-Host "client-only install: pass -TokenFile <path> (or set PSEUDOLIFE_MCP_TOKEN_FILE) naming the file that holds the remote daemon's bearer token, and -ReadToken to create it, or -PairingCode <code> to pair. The installer never mints one for a remote daemon$clientOnlyVia"
         exit 2
     }
     $script:TokenFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($script:TokenFile)
@@ -722,7 +795,12 @@ function Invoke-ClientOnlyPreflight {
         throw "client-only install: Python 3.10 or newer is needed to check the token file and to install the shim. Install it, then re-run"
     }
     $helper = Join-Path $repo "ops/client_credentials.py"
-    if ($ReadToken) {
+    if ($script:PairingCode) {
+        # pair never replaces a file: refused here, before any code is spent.
+        if (Test-Path -LiteralPath $script:TokenFile) {
+            throw "client-only install: pairing creates the token file, and it already exists: $($script:TokenFile). Pass -TokenFile with a new path, or remove it first"
+        }
+    } elseif ($ReadToken) {
         if (Test-Path -LiteralPath $script:TokenFile) {
             throw "client-only install: -ReadToken creates the token file, and it already exists: $($script:TokenFile). Drop -ReadToken to use it, or remove it first"
         }
@@ -731,26 +809,36 @@ function Invoke-ClientOnlyPreflight {
         $tokenValue = if ([Console]::IsInputRedirected) {
             [Console]::In.ReadLine()
         } else {
-            [Net.NetworkCredential]::new("", (Read-Host -AsSecureString "Paste the daemon's bearer token (not shown)")).Password
+            [Net.NetworkCredential]::new("", (Read-Host -AsSecureString "Paste the daemon's bearer token, or a pairing code from pseudolife-mcp invite (not shown)")).Password
         }
-        $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
-        $tokenValue = $null
-        if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
-            $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
-            throw "client-only install: could not write the token file ($problem): $($script:TokenFile)"
+        if (Test-PairingCode "$tokenValue") {
+            $script:PairingCode = "$tokenValue"
+            $tokenValue = $null
+            Step "That is a pairing code: the token file $($script:TokenFile) is created by pairing, once the shim is installed."
+        } else {
+            $tokenReport = "$tokenValue" | & $tokenPython $helper write-token-file --path $script:TokenFile
+            $tokenValue = $null
+            if ("$(Get-HelperStatus $tokenReport)" -ne "written") {
+                $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
+                throw "client-only install: could not write the token file ($problem): $($script:TokenFile)"
+            }
+            Step "Wrote the token file $($script:TokenFile) (owner-only; the token is not shown)."
         }
-        Step "Wrote the token file $($script:TokenFile) (owner-only; the token is not shown)."
     }
-    $tokenItem = Get-Item -LiteralPath $script:TokenFile -Force -ErrorAction SilentlyContinue
-    if (-not $tokenItem -or $tokenItem.PSIsContainer -or $tokenItem.Length -eq 0) {
-        throw "client-only install: the token file is missing or empty: $($script:TokenFile). Create it with -ReadToken, or write the daemon's token into it owner-only, then re-run"
-    }
-    # The shim's own check, on every OS: an owner-only regular file (the ACL
-    # on Windows, mode bits on POSIX), no link, one well-formed token.
-    $tokenReport = & $tokenPython $helper check-token-file --path $script:TokenFile
-    if ("$(Get-HelperStatus $tokenReport)" -ne "ready") {
-        $problem = try { [string](($tokenReport -join "`n") | ConvertFrom-Json).recovery } catch { "no result" }
-        throw "client-only install: the shim cannot use the token file ($problem): $($script:TokenFile). It reads only an owner-only regular file: chmod 600 it on Linux or macOS, or delete it and re-run with -ReadToken to create it again"
+    if ($script:PairingCode) {
+        # Its directory, so pair can create the file in it.
+        $tokenDir = Split-Path -Parent $script:TokenFile
+        try {
+            $null = New-Item -ItemType Directory -Force -Path $tokenDir
+        } catch {
+            throw "client-only install: could not create the token file's directory: $tokenDir"
+        }
+    } else {
+        $tokenItem = Get-Item -LiteralPath $script:TokenFile -Force -ErrorAction SilentlyContinue
+        if (-not $tokenItem -or $tokenItem.PSIsContainer -or $tokenItem.Length -eq 0) {
+            throw "client-only install: the token file is missing or empty: $($script:TokenFile). Create it with -ReadToken, or write the daemon's token into it owner-only, then re-run"
+        }
+        Assert-ClientTokenFile
     }
     foreach ($selectedClient in $clients) {
         if (($selectedClient -in "claude", "codex", "gemini") -and
@@ -1725,6 +1813,56 @@ function Invoke-ClientOnlyConnect {
         ForEach-Object { [string]$_.client })
 }
 # <<< client-only connect <<<
+# >>> client-only pair >>>
+# A pairing code (-PairingCode, or one pasted where the token is asked for)
+# is redeemed by the installed shim's `pair` before anything reads the token
+# file: pair mints the token here, writes it owner-only to the token file
+# (never over an existing one) and has the daemon accept it. The code goes
+# to pair on stdin through the pipeline, never in an argument list or the
+# output, and is forgotten once pair has it. The file is then checked as a
+# given one is, and the install continues exactly as with a token file.
+# Any failure stops the install: pair's exit 5 keeps the file, which may
+# hold a token the daemon now accepts.
+function Get-PairReportField($report, [string]$field) {
+    # A text field of pair's --json report, or "".
+    if (($report -is [pscustomobject]) -and ($report.PSObject.Properties.Name -contains $field) -and
+        ($report.$field -is [string])) { return $report.$field }
+    return ""
+}
+function Invoke-ClientOnlyPair {
+    if (-not (Install-ShimOnce) -or -not $script:shimInstallPath) {
+        $script:PairingCode = ""
+        Write-Host "client-only install: pairing needs the pseudolife-mcp shim, and it is unavailable (see above). Fix its installation and re-run with the pairing code, or pass -TokenFile <path> with the daemon's token"
+        exit 1
+    }
+    $shim = $script:shimInstallPath
+    try {
+        $global:LASTEXITCODE = 0
+        $pairOutput = "$($script:PairingCode)" | & $shim pair $DaemonUrl --read-code --token-file $script:TokenFile --json
+        $pairExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $pairOutput = $null
+        $pairExit = 1
+    }
+    $script:PairingCode = ""
+    $report = try { (@($pairOutput) -join "`n") | ConvertFrom-Json } catch { $null }
+    if ($pairExit -ne 0) {
+        $pairError = Get-PairReportField $report "error"
+        $meaning = switch ($pairExit) {
+            4 { "the daemon did not accept the code, and nothing was kept. Ask for a new code (pseudolife-mcp invite <machine> on the daemon's host), then re-run" }
+            5 { "the outcome is unknown, or the check after it failed. The token file was kept at $($script:TokenFile) and may hold a token the daemon now accepts: re-run with -TokenFile $($script:TokenFile) to use it, or remove it and ask for a new code" }
+            default { "see its message above" }
+        }
+        Write-Host "client-only install: pseudolife-mcp pair exited $pairExit$(if ($pairError) { " ($pairError)" }): $meaning"
+        exit 1
+    }
+    $principal = Get-PairReportField $report "principal"
+    Step "Paired with the daemon at $DaemonUrl$(if ($principal) { " as $principal" }): wrote the token file $($script:TokenFile) (owner-only; the token is not shown)."
+    Assert-ClientTokenFile
+}
+# <<< client-only pair <<<
+if ($PairingCode) { Invoke-ClientOnlyPair }
 if ($ClientOnly) { Invoke-ClientOnlyConnect }
 
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
@@ -2925,6 +3063,7 @@ if ($codexShimMode) {
 }
 if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
+if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
