@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rung mail still unacknowledged at a compaction waits for the next
   prompt, which prints it again. `hooks.json` is unchanged, so Codex
   users approve nothing again.
+
 ### Fixed (2026-10-03 — a revoked token is told so, not to retry)
 - An invited machine whose token was revoked between the daemon's gate and
   the tool got the same refusal as a daemon that cannot check tokens at all
