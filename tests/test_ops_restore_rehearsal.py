@@ -286,9 +286,13 @@ def _stage_apply(root: Path, name: str, script: Path) -> tuple[Path, Path, Path]
     copy = repo / "ops" / script.name
     shutil.copy(script, copy)
     if script.suffix == ".ps1":
-        (repo / "ops" / "backup.ps1").write_text('Write-Host "stub safety dump"\n', encoding="utf-8")
+        (repo / "ops" / "backup.ps1").write_text(
+            'Add-Content -LiteralPath "$ScenarioDir/calls.log" -Value ("backup " + ($args -join " "))\n'
+            'Write-Host "stub safety dump"\n', encoding="utf-8")
     else:
-        (repo / "ops" / "backup.sh").write_text('#!/usr/bin/env bash\necho "stub safety dump"\n',
+        (repo / "ops" / "backup.sh").write_text('#!/usr/bin/env bash\n'
+                                                'echo "backup $*" >> "$SCENARIO_DIR/calls.log"\n'
+                                                'echo "stub safety dump"\n',
                                                 encoding="utf-8", newline="\n")
     backup = sdir / "pseudolife_memory-20261002-000000.sql.gz"
     backup.write_bytes(gzip.compress(b"-- dump\n"))
@@ -334,7 +338,7 @@ def apply_ps1_runs(tmp_path_factory):
     scenarios = []
     for name, no_start in APPLY_SCENARIOS.items():
         copy, backup, state = _stage_apply(root, name, RESTORE_PS1)
-        flag = " -NoStart" if no_start else ""
+        flag = " -NoStart -Container pgc -Db mydb -User myuser" if no_start else ""
         scenarios.append(Scenario(name, _APPLY_PS1_STUB,
                                   f'& "{copy}" -Apply{flag} -BackupFile "{backup.as_posix()}" '
                                   f'-StateArchive "{state.as_posix()}"'))
@@ -352,7 +356,7 @@ def apply_sh_runs(tmp_path_factory):
     scenarios = []
     for name, no_start in APPLY_SCENARIOS.items():
         copy, backup, state = _stage_apply(root, name, RESTORE_SH)
-        flag = " --no-start" if no_start else ""
+        flag = " --no-start --container pgc --db mydb --user myuser" if no_start else ""
         scenarios.append(Scenario(name, _APPLY_SH_STUB,
                                   f'bash "{copy.as_posix()}" --apply{flag} --backup-file "{backup.as_posix()}" '
                                   f'--state-archive "{state.as_posix()}"'))
@@ -403,3 +407,14 @@ def test_no_start_without_apply_is_refused(applied):
     assert res.returncode != 0, res.detail()
     assert "--no-start" in res.stdout + res.stderr or "-NoStart" in res.stdout + res.stderr, res.detail()
     assert _docker_calls(res) == [], res.detail()
+
+
+def test_the_safety_dump_backs_up_the_database_being_replaced(applied):
+    """A real restore into a non-default container, database or user must
+    take its safety dump of THAT database, not of the defaults."""
+    res = applied("apply_no_start")
+    backup = [line for line in res.lines("calls.log") if line.startswith("backup")]
+    assert len(backup) == 1, res.detail()
+    words = backup[0].split()
+    pairs = {words[i].lstrip("-").lower(): words[i + 1] for i in range(1, len(words) - 1, 2)}
+    assert pairs == {"container": "pgc", "db": "mydb", "user": "myuser"}, res.detail()
