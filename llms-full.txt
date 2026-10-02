@@ -4501,7 +4501,14 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
-unchanged, a one-line reminder rides every tenth tool result. The file is
+unchanged, a one-line reminder rides every tenth tool result. A Claude Code
+subagent runs inside its parent's shim, so a tool result may be the
+subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
+`<key>.sub-<agent_id>` marker beside the digest (start to stop, ignored after
+`HOOK_CHILD_TTL`), the hint and the reminder wait and `.seen` is left alone,
+so a subagent's call never spends the parent's mail; the prompt and Stop
+hooks still deliver it, and so does the parent's first tool result after the
+subagents finish. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
@@ -5810,8 +5817,11 @@ payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
 anything but a yes, let the call through. Installs without the plugin keep
 the instruction only. In Codex the same entry allows everything: a Codex
 child has a board address of its own. Claude Code
-subagents get no addresses of their own: the parent names them on its own row
-with `memory_agents(action="update", children=["review storage", "tests"])`, at
+subagents get no addresses of their own. With the plugin, its subagent hooks
+list them on the parent's row (below), and the served check-in asks a parent
+to name its subagents only when they do not appear; without it the parent
+names them with
+`memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 `{label, since}` in which the daemon stamps `since` and keeps it for a label
 the next update carries over. Omitting `children` leaves it unchanged and `[]`

@@ -60,6 +60,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that still sets it loads as before and the key does nothing; `/health`
   and `pseudolife-mcp doctor` no longer report it. The change is under
   `plugin/` and in the shim, so a deploy needs the client step.
+### Fixed (2026-10-02 — subagents and the parent's mail hint)
+- A Claude Code subagent's memory tool call no longer spends its parent's
+  "you have mail" notice. The subagent runs inside the parent's shim, so the
+  tool-result hint could ride the subagent's result and advance the shared
+  `.seen` marker, after which the parent's prompt and Stop hooks stayed
+  quiet about mail the parent never saw (the mail itself stayed unacked).
+  The plugin's SubagentStart/SubagentStop hook now keeps a
+  `<key>.sub-<agent_id>` marker beside the digest while the subagent runs,
+  and the shim holds the hint and the reminder while one is live (markers
+  older than `HOOK_CHILD_TTL` are ignored, swept with stale digests, and
+  removed with the session's digest). Needs `ops/update.ps1 -All`.
+- The coordination check-in served at session start no longer asks a parent
+  to name its subagents by hand, which listed each one twice now that the
+  v50 hooks list them, and no longer says every subagent shares its parent's
+  address (a Codex subagent has its own). Rescored with
+  `evals/coordination_checkin_bench.py` against the text it replaces
+  (artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`).
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory

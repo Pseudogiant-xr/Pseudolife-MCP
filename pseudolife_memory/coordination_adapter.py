@@ -41,6 +41,18 @@ class AdapterError(RuntimeError):
         self.code = code
 
 
+# A Claude Code subagent runs inside its parent's shim, so a tool result the
+# hint rides on may be the subagent's; the shim cannot tell, the plugin's
+# SubagentStart/SubagentStop hook can. It keeps <key>.sub-<agent_id> beside
+# the digest while the subagent runs, and the hint waits while one is live
+# (#480 review: a subagent's call marked the parent's mail shown, so the
+# parent's prompt and Stop hooks stayed quiet about mail it never saw). A
+# marker older than this outlived a missed stop: the daemon's HOOK_CHILD_TTL
+# (storage/coordination.py, not imported here: it pulls in psycopg), which
+# a test pins.
+SUBAGENT_MARKER_SECONDS = 2 * 3600 + 3600
+
+
 @dataclass
 class _StateReservation:
     dev: int
@@ -371,6 +383,8 @@ class CoordinationAdapter:
         # undelivered change; a quiet call touches nothing.
         if (self._delivered_watermark < self._digest_watermark
                 and self._read_seen() < self._digest_watermark):
+            if self._subagent_running():
+                return None  # nothing marked: the next call, or a hook, delivers it
             self._mark_seen(self._digest_watermark)
             self._hint_calls_since = 0
             self._ledger("hint", self._digest_watermark, len(self._digest_text) + 1)
@@ -378,7 +392,8 @@ class CoordinationAdapter:
         self._delivered_watermark = self._digest_watermark
         self._hint_calls_since += 1
         count = self._pending_count
-        if self._hint_calls_since < self.HINT_REPEAT_CALLS or not count:
+        if (self._hint_calls_since < self.HINT_REPEAT_CALLS or not count
+                or self._subagent_running()):
             return None
         self._hint_calls_since = 0
         reminder = (f"Coordination: {count} addressed message{'s' if count != 1 else ''} still "
@@ -447,6 +462,25 @@ class CoordinationAdapter:
             except (OSError, ValueError):
                 pass
         return leftover
+
+    def _subagent_running(self) -> bool:
+        """A live subagent marker beside the digest (SUBAGENT_MARKER_SECONDS).
+        Read only when a hint is about to go out."""
+        if self.digest_path is None:
+            return False
+        cutoff = time.time() - SUBAGENT_MARKER_SECONDS
+        try:
+            for marker in self._subagent_markers():
+                with suppress(OSError):
+                    if (marker.is_file() and not marker.is_symlink()
+                            and marker.stat().st_mtime >= cutoff):
+                        return True
+        except OSError:
+            pass
+        return False
+
+    def _subagent_markers(self):
+        return self.digest_path.parent.glob(f"{self.digest_path.stem}.sub-*")
 
     def _seen_path(self):
         return self.digest_path.with_suffix(".seen") if self.digest_path is not None else None
@@ -531,8 +565,9 @@ class CoordinationAdapter:
                 mine = (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path(),
                         self._turn_path())
                 for entry in entries:
-                    if (entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn",
-                                             ".wait-armed", ".wake-armed"))
+                    if ((entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn",
+                                              ".wait-armed", ".wake-armed"))
+                         or ".sub-" in entry.name)
                             and entry.is_file(follow_symlinks=False)
                             and entry.stat(follow_symlinks=False).st_mtime < cutoff
                             and Path(entry.path) not in mine):
@@ -592,6 +627,11 @@ class CoordinationAdapter:
             if path is not None:
                 with suppress(OSError):
                     path.unlink()
+        if self.digest_path is not None:
+            with suppress(OSError):
+                for marker in list(self._subagent_markers()):
+                    with suppress(OSError):
+                        marker.unlink()
 
     def _record_failure(self, error: AdapterError) -> None:
         """Enter the degraded state once per outage; recovery clears it."""
