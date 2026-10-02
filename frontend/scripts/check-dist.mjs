@@ -5,7 +5,7 @@ import { hostname, userInfo } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const out = fileURLToPath(new URL("../../pseudolife_memory/web/static/next/", import.meta.url));
+const out = fileURLToPath(new URL("../../pseudolife_memory/web/static/", import.meta.url));
 const TEXT = /\.(html|js|css|json|svg|txt|map)$/i;
 
 const patterns = [
@@ -15,7 +15,10 @@ const patterns = [
   /node_modules[\/]/, // leaked module paths
   /\.claude[\/]worktrees/,
 ];
-const local = [userInfo().username, hostname()].filter((s) => s && s.length >= 3);
+// The maintainer's own user and host names must never ship. On a CI runner
+// they are generic ("runner") and not private, and a word that common would
+// fail the build on unrelated text, so the check is local only.
+const local = process.env.CI ? [] : [userInfo().username, hostname()].filter((s) => s && s.length >= 3);
 
 function walk(dir) {
   return readdirSync(dir).flatMap((name) => {

@@ -113,7 +113,9 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
-"approve"`, or allow it once and keep the approval). Board mail can wake an
+"approve"`, or allow it once and keep the approval); Codex hook setup
+(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
 `PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
@@ -144,8 +146,6 @@ Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
-The rebuilt console (phase 1: Observatory and the agent Board) is at
-<http://127.0.0.1:8765/ui/next/>; the rest of its views still open the classic one.
 
 The first session auto-starts the daemon, which provisions an **embedded
 PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
@@ -425,7 +425,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`; unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `nudged`, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -985,7 +985,7 @@ per-turn discipline): [the provider matrix](docs/guide/providers.md).
 **Verify:** run `claude mcp list`, `codex mcp list`, or `gemini mcp list`
 (the server should report connected), then ask the agent to *"store a memory
 that this install works"* and check it
-appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+appears in the Console's Stream view at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio (this is what the installer wires by default, for
 per-session identity)? A thin torch-free **shim** proxies stdio to the
@@ -1220,18 +1220,23 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
 **Observatory** (health, per-layer counts, the memory store's capacity meter, dream
-gauges), **Cortex** (canonical facts with provenance, version-history
-timelines, inline Accept/Discard for contested slots), **World / Lessons /
-Episodes**, **Stream** (live search with rerank/BM25 toggles and a
-ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
-can Accept/Reject merges or — for a source file and its own bare concept,
-`band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss; proposals a background dream has already judged carry a
-verdict chip — accept/reject/leave with confidence, the model's reason in
-the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
-badges, diff-preview, and atomic save).
+gauges, consolidation review), **Cortex** (canonical facts by entity with
+provenance, version-history ladders, Adopt/Discard for contested slots),
+**World / Lessons / Episodes**, **Stream** (live search with rerank/BM25
+toggles and a ranking-trace panel), **Recall** (multi-hop walks and paths
+between two entities), **Graph** (a 3D galaxy of entities with an entity page
+per star, and a table view), **Review** (the graph review queue: Accept/Reject
+merges or — for a source file and its own bare concept, `band.py` ↔ `band` —
+record an `implements` edge instead of forcing merge-or-dismiss; proposals a
+background dream has already judged carry a verdict chip — accept/reject/leave
+with confidence, the model's reason in the tooltip — as a lead, never a
+decision), **Insight** (hubs, communities and open questions from the graph
+digest), and **Settings** (every safe `config.yaml` scalar with
+live-vs-restart badges, diff-preview, and atomic save). Bookmarks into the
+pre-v3 console (`#/console`, `#/atlas`, `#/coordination`) land on the
+matching view.
 
-**Coordination** is a read-only board view: active roster/status age, reported
+The **Board** is a read-only coordination view: active roster/status age, reported
 children, park needs/resume, resource holders and FIFO queues. Pending mail
 counts are visible only for the caller's principal; the latest 100 retained
 send/read/ack/wake/expiry events omit all message bodies. This view requires
@@ -1247,15 +1252,17 @@ initializing the bank through this read.
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No build step, no CDN, fully offline —
-vanilla ES modules + vendored OFL fonts served straight from the daemon.
-Developing the UI? A fixture-backed dev server (no Postgres, no torch)
-renders the real frontend against canned data:
+prompts for it and stores it locally). No CDN, fully offline: a Svelte
+build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+and a vendored 3D engine, served straight from the daemon, so neither the
+daemon image nor a pip install needs Node. The source is in
+[`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
+build differs. Developing the UI? A fixture-backed dev server (no Postgres,
+no torch) serves the console against canned data:
 `python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
 Its payloads self-announce (`"fixtures": true` on `/health`), and the
-topbar shows a "DEMO DATA — fixture server, not a real bank" chip in
-place of the live chip, so a fixture run is never mistaken for a real
-bank.
+topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
+mistaken for a real bank.
 
 ## Capabilities at a glance
 
@@ -1277,7 +1284,7 @@ bank.
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
-| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v53 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting

@@ -149,6 +149,35 @@ def test_one_request_names_the_session_address_and_the_subagent(tmp_path, daemon
                                 "Bearer fixture-token")]
 
 
+def test_a_marker_beside_the_digest_spans_the_subagent(tmp_path):
+    """<key>.sub-<agent_id> exists from start to stop: while it does, the
+    shim holds its tool-result mail hint, which a subagent's call would
+    otherwise spend for the parent. Written before the request, so a down
+    daemon still leaves it."""
+    directory = _agent_file(tmp_path)
+    marker = directory / f"{_key()}.sub-{CHILD}"
+    env = _env(tmp_path, "http://127.0.0.1:1")
+    assert _run(env, _payload(), "start").returncode == 0
+    assert marker.is_file() and marker.read_text() == ""
+    other = directory / f"{_key()}.sub-a0000000000000000"
+    other.write_text("")
+    assert _run(env, _payload("SubagentStop"), "stop").returncode == 0
+    assert not marker.exists() and other.exists()
+
+
+def test_the_marker_is_never_written_through_a_link(tmp_path):
+    directory = _agent_file(tmp_path)
+    target = tmp_path / "target"
+    target.write_text("keep")
+    marker = directory / f"{_key()}.sub-{CHILD}"
+    try:
+        marker.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    _run(_env(tmp_path, "http://127.0.0.1:1"), _payload(), "start")
+    assert target.read_text() == "keep"
+
+
 def test_an_inherited_off_variable_decides_nothing(tmp_path, daemon):
     """The script sets its own OFF; one in the hook's environment is not a
     switch (PR #481 review)."""
@@ -214,6 +243,7 @@ def test_nothing_is_sent_where_the_hook_has_no_business(tmp_path, daemon, case):
     result = _run(env, payload, *args)
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     assert daemon.requests == []
+    assert not list((tmp_path / "digests").glob("*.sub-*"))
 
 
 def test_it_fails_open_when_the_daemon_is_down_or_refuses(tmp_path):

@@ -282,8 +282,8 @@ paired test, and not comparable to the ceiling's re-based 0.731), so point
 at a bigger *generic* model for faster
 dreams, not better answers. Two ways to switch:
 
-*From the Console (no restart):* the **Extractor** panel in the Cortex
-Console's config view edits the endpoint, model, timeout, and token budget
+*From the Console (no restart):* the **Extractor** group in the Cortex
+Console's Settings view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
 settings and the panel's values are ignored). The API keys (primary and
@@ -1094,7 +1094,7 @@ self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
 (see the `/dream` flow in `examples/commands/dream.md`): judge each
 candidate from its snippets, post the real relations with
-`memory_graph_review(action="propose")` — they land in the Atlas Review
+`memory_graph_review(action="propose")` — they land in the review
 queue (`proposed_link` findings) for per-item accept/reject before anything
 reaches live edges — and record clearly-distinct pairs with
 `memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
@@ -1109,7 +1109,7 @@ realize one role, so merging asserts something false and dismissing throws
 a real relationship away. Settle it with one call —
 `memory_graph_review(action="relate", src=<file>, relation="implements",
 dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
-one Relate button in the Atlas review drawer, which does the same.
+one Relate button in the Console's Review view, which does the same.
 
 **Draining the quarantine.** Quarantined edges are almost all untyped
 `related-to` co-mentions, and about half of them name a real relationship

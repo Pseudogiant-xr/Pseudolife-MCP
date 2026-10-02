@@ -194,6 +194,39 @@ def test_config_rejects_nonfinite_without_persisting(svc, monkeypatch, bounded, 
     assert not config_io.config_path_for(svc).exists()
 
 
+def _knob(cfg: dict, path: str) -> dict:
+    return next(k for g in cfg["groups"] for k in g["knobs"] if k["path"] == path)
+
+
+def test_config_reports_the_saved_value_of_a_restart_knob(svc):
+    """A restart knob is written to config.yaml but not applied, so the live
+    value alone hides what the next boot will run (a mistaken save could not
+    even be undone: typing the old value back looked like no change). The
+    read reports the persisted value beside the live one when they differ."""
+    path = "memory.reranker.fusion_weight"
+    assert config_io._KNOB_BY_PATH[path]["restart"] is True
+    live = _knob(config_io.read_config(svc), path)["value"]
+    assert "saved" not in _knob(config_io.read_config(svc), path)
+
+    config_io.write_config(svc, {path: 0.4})
+    after = _knob(config_io.read_config(svc), path)
+    assert after["value"] == live            # still the running value
+    assert after["saved"] == 0.4             # what the next start reads
+
+    config_io.write_config(svc, {path: live})  # the undo is a real edit
+    assert "saved" not in _knob(config_io.read_config(svc), path)
+
+
+def test_config_saved_value_ignores_live_knobs_and_a_broken_file(svc):
+    path = "memory.top_k"
+    assert not config_io._KNOB_BY_PATH[path]["restart"]
+    config_io.write_config(svc, {path: 11})
+    assert "saved" not in _knob(config_io.read_config(svc), path)
+    config_io.config_path_for(svc).write_text("memory: [unclosed", encoding="utf-8")
+    cfg = config_io.read_config(svc)          # still answers
+    assert all("saved" not in k for g in cfg["groups"] for k in g["knobs"])
+
+
 def test_config_concurrent_patches_preserve_both_updates(svc, monkeypatch):
     cfg = config_io.config_path_for(svc)
     cfg.write_text("unmanaged: keep\nmemory:\n  top_k: 8\n", encoding="utf-8")

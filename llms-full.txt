@@ -119,7 +119,9 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
-"approve"`, or allow it once and keep the approval). Board mail can wake an
+"approve"`, or allow it once and keep the approval); Codex hook setup
+(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
 `PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task
@@ -150,8 +152,6 @@ Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
 `memory_search` finds it. Browse everything at the Cortex Console:
 <http://127.0.0.1:8765/ui/>.
-The rebuilt console (phase 1: Observatory and the agent Board) is at
-<http://127.0.0.1:8765/ui/next/>; the rest of its views still open the classic one.
 
 The first session auto-starts the daemon, which provisions an **embedded
 PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
@@ -431,7 +431,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`; unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `nudged`, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -991,7 +991,7 @@ per-turn discipline): [the provider matrix](docs/guide/providers.md).
 **Verify:** run `claude mcp list`, `codex mcp list`, or `gemini mcp list`
 (the server should report connected), then ask the agent to *"store a memory
 that this install works"* and check it
-appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+appears in the Console's Stream view at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio (this is what the installer wires by default, for
 per-session identity)? A thin torch-free **shim** proxies stdio to the
@@ -1226,18 +1226,23 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
 **Observatory** (health, per-layer counts, the memory store's capacity meter, dream
-gauges), **Cortex** (canonical facts with provenance, version-history
-timelines, inline Accept/Discard for contested slots), **World / Lessons /
-Episodes**, **Stream** (live search with rerank/BM25 toggles and a
-ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
-can Accept/Reject merges or — for a source file and its own bare concept,
-`band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss; proposals a background dream has already judged carry a
-verdict chip — accept/reject/leave with confidence, the model's reason in
-the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
-badges, diff-preview, and atomic save).
+gauges, consolidation review), **Cortex** (canonical facts by entity with
+provenance, version-history ladders, Adopt/Discard for contested slots),
+**World / Lessons / Episodes**, **Stream** (live search with rerank/BM25
+toggles and a ranking-trace panel), **Recall** (multi-hop walks and paths
+between two entities), **Graph** (a 3D galaxy of entities with an entity page
+per star, and a table view), **Review** (the graph review queue: Accept/Reject
+merges or — for a source file and its own bare concept, `band.py` ↔ `band` —
+record an `implements` edge instead of forcing merge-or-dismiss; proposals a
+background dream has already judged carry a verdict chip — accept/reject/leave
+with confidence, the model's reason in the tooltip — as a lead, never a
+decision), **Insight** (hubs, communities and open questions from the graph
+digest), and **Settings** (every safe `config.yaml` scalar with
+live-vs-restart badges, diff-preview, and atomic save). Bookmarks into the
+pre-v3 console (`#/console`, `#/atlas`, `#/coordination`) land on the
+matching view.
 
-**Coordination** is a read-only board view: active roster/status age, reported
+The **Board** is a read-only coordination view: active roster/status age, reported
 children, park needs/resume, resource holders and FIFO queues. Pending mail
 counts are visible only for the caller's principal; the latest 100 retained
 send/read/ack/wake/expiry events omit all message bodies. This view requires
@@ -1253,15 +1258,17 @@ initializing the bank through this read.
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No build step, no CDN, fully offline —
-vanilla ES modules + vendored OFL fonts served straight from the daemon.
-Developing the UI? A fixture-backed dev server (no Postgres, no torch)
-renders the real frontend against canned data:
+prompts for it and stores it locally). No CDN, fully offline: a Svelte
+build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
+and a vendored 3D engine, served straight from the daemon, so neither the
+daemon image nor a pip install needs Node. The source is in
+[`frontend/`](frontend/README.md); CI rebuilds it and fails if the committed
+build differs. Developing the UI? A fixture-backed dev server (no Postgres,
+no torch) serves the console against canned data:
 `python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
 Its payloads self-announce (`"fixtures": true` on `/health`), and the
-topbar shows a "DEMO DATA — fixture server, not a real bank" chip in
-place of the live chip, so a fixture run is never mistaken for a real
-bank.
+topbar shows a "Demo data, not a real bank" chip, so a fixture run is never
+mistaken for a real bank.
 
 ## Capabilities at a glance
 
@@ -1283,7 +1290,7 @@ bank.
 | Session briefing | SessionStart hook injects lessons + verified world facts + last-session recap once per conversation (resume/compact get the episode handle only); the plugin's per-turn note speaks only when lessons or other sessions' status notes changed (`pseudolife-mcp briefing` adds the unsure-graph section) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
-| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v53 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
@@ -3031,8 +3038,8 @@ paired test, and not comparable to the ceiling's re-based 0.731), so point
 at a bigger *generic* model for faster
 dreams, not better answers. Two ways to switch:
 
-*From the Console (no restart):* the **Extractor** panel in the Cortex
-Console's config view edits the endpoint, model, timeout, and token budget
+*From the Console (no restart):* the **Extractor** group in the Cortex
+Console's Settings view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
 settings and the panel's values are ignored). The API keys (primary and
@@ -3843,7 +3850,7 @@ self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
 (see the `/dream` flow in `examples/commands/dream.md`): judge each
 candidate from its snippets, post the real relations with
-`memory_graph_review(action="propose")` — they land in the Atlas Review
+`memory_graph_review(action="propose")` — they land in the review
 queue (`proposed_link` findings) for per-item accept/reject before anything
 reaches live edges — and record clearly-distinct pairs with
 `memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
@@ -3858,7 +3865,7 @@ realize one role, so merging asserts something false and dismissing throws
 a real relationship away. Settle it with one call —
 `memory_graph_review(action="relate", src=<file>, relation="implements",
 dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
-one Relate button in the Atlas review drawer, which does the same.
+one Relate button in the Console's Review view, which does the same.
 
 **Draining the quarantine.** Quarantined edges are almost all untyped
 `related-to` co-mentions, and about half of them name a real relationship
@@ -4318,7 +4325,6 @@ coordination:
     nightly_total: 200
     fan_out_stagger_seconds: 30
     active_seconds: 60
-    nudge_interval_seconds: 3600
 ```
 
 `audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
@@ -4332,11 +4338,14 @@ Claude Code Stop hook already used); `urgent_per_sender_per_hour` (6) bounds
 the `urgent` flag; `nightly_total` (200) is a rolling day of rings across the
 bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
-action makes new mail `hinted` rather than rung; `nudge_interval_seconds`
-(3600) bounds the ring that asks an idle, unparked session to park. The
-values are whole numbers; a cap of 0 rings nobody (or never honours
-`urgent`), and the two windows are at least 1. Over a cap the send answers
-`capped` with the cap's name.
+action makes new mail `hinted` rather than rung. The values are whole
+numbers; a cap of 0 rings nobody (or never honours `urgent`), and
+`active_seconds` is at least 1. Over a cap the send answers `capped` with
+the cap's name. `nudge_interval_seconds` is retired (2026-10-02): it
+bounded an hourly ring to an idle session that had not parked, and plain
+mail no longer rings such a session at all. A config.yaml that still sets
+it loads as before and the key does nothing; it is no longer reported on
+`/health` or by `pseudolife-mcp doctor`.
 
 Wake is on by default and policy-gated (maintainer decision, 2026-09-28), so
 the caps are the guarantee, not the usual rate. `/health` reports the caps in
@@ -4497,7 +4506,15 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
 is delivered once and a quiet turn adds nothing. While mail stays pending and
-unchanged, a one-line reminder rides every tenth tool result. The file is
+unchanged, a one-line reminder rides every tenth tool result. A Claude Code
+subagent runs inside its parent's shim, so a tool result may be the
+subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
+`<key>.sub-<agent_id>` marker beside the digest (start to stop, ignored after
+`HOOK_CHILD_TTL`), the hint and the reminder wait and `.seen` is left alone,
+so a subagent's call never spends the parent's mail; the prompt hook still
+delivers it (the Stop hook only mail that rang), and so does the parent's
+first tool result after the subagents finish. A parent that gets no prompts
+therefore sees plain mail only once its subagents stop. The file is
 removed when the shim exits; a session id without an adapter (or a host that
 exports none, such as the app-level MCP servers Claude Desktop launches from
 `claude_desktop_config.json`) gets hints only. Desktop's Code tab runs Claude
@@ -4615,7 +4632,11 @@ acceptance still needs a separately isolated supported-client session.
 Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
 MCP can start a turn in a session that has gone idle, so the host has to.
 `pseudolife-mcp wait-mail` gives the host something to wake on: it blocks until
-the digest above shows mail nothing has shown yet, prints it and exits.
+the daemon rings this session for mail nothing has shown yet, prints the mail
+and exits. Plain mail never ends the wait (maintainer decision 2026-10-02):
+the daemon rings a parked session for mail that clears its need, or any
+idle session for `urgent` mail ([the wake decision](#park-records-and-the-wake-decision)),
+so park before you wait.
 
 ```sh
 pseudolife-mcp wait-mail [--session-id ID | --digest PATH] [--timeout SECONDS] [--interval SECONDS]
@@ -4629,21 +4650,32 @@ applies); `--digest` names the file outright and accepts only a digest's own
 process if one exists and its second line confirms it for the current session
 (the SHA-256 of its id); without one, a waiter armed after `/clear` finds no
 digest. It needs no daemon connection, token or
-network. Each check is a file `stat` (every 2 s by default); the file is read
-only after the adapter rewrites it. It fires when the watermark is past the
-shared `.seen` marker and the digest lists pending mail, so mail that arrived
-while the agent was busy fires at once and mail a prompt hook or tool-result
-hint already showed does not. On firing it prints the digest body verbatim on
-stdout, agent-origin framing included, then advances `.seen` so the hook and
-hint do not repeat it, and appends a `wait` line to `ledger.log`. Exit codes:
-`0` new mail; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
+network. Each check is a `stat` of the digest and of the `<key>.ring` marker
+beside it (every 2 s by default); the files are read only after the adapter
+rewrites one. It reads the ring marker the way the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) does: the
+adapter writes it when the daemon decides a ring (line 1 the digest
+watermark the ring is for, line 2 the decision and reason), and only a
+regular file holding a `rung` decision counts. It fires when that marker's
+watermark is past the shared `.seen` marker, the digest's watermark is past
+it too and the digest lists pending mail. So a ring that arrived while the
+agent was busy fires at once, while a ring whose mail a prompt hook,
+tool-result hint or earlier wake already showed does not, and plain mail
+keeps it waiting (the mail is still pending at the next turn). On firing it
+prints the digest body verbatim on stdout, agent-origin framing included,
+then advances `.seen` to the digest's watermark so neither the hook, the
+hint nor a re-arm repeats it, and appends a `wait` line to `ledger.log` whose
+sixth column is the ring's decision and reason. Exit codes:
+`0` a ring; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
 wait on — no session id, no digest file (the adapter writes it when it
 attaches: at shim start in Claude Code, on a thread's first `memory_*` call in
 Codex), a file that disappeared because the shim exited, a file that cannot be
 inspected when armed (a later read error is retried), a
 stdout that cannot take the mail (left unmarked), or a bad argument.
 Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
-heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
+heartbeat and writes the ring marker at the ring's `ring_at`, so a waiter
+fires up to about 22 s after a send rings (later for a staggered fan-out
+burst). It also rewrites
 an unchanged digest every hour, without moving the watermark, so the day-old
 sweep another adapter runs at start never takes a long-idle session's file.
 
@@ -4669,7 +4701,7 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 
 The Stop hook alone watches for at most 59 minutes. A park record can outlive
 that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail or the
+`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
 four-hour timeout. Where Codex supports its doorbell, that is its durable host
 path. Where the host provides neither path, record `next-turn-only` in the
 park or status: a durable park is not evidence of a durable listener.
@@ -5049,13 +5081,30 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged and prints the approval choice at the
-end of successful hook setup. A recipient running with approval policy `never`
-cannot execute a tool that still requires approval. To authorize
-unattended mailbox operations specifically, configure the installed server's
-`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
-tool's send, receive and acknowledgment actions; it does not approve file writes,
-commands or other tools. Without that choice, use the host's normal approval flow.
+Codex hook setup (`ops/setup-codex-hooks.py`, or the installer's Codex step)
+asks for the `memory_message` approval together with the hooks. Its prompt
+names it, and a yes, or `--trust yes`, sets
+`tools.memory_message.approval_mode = "approve"` on the `pseudolife-memory`
+server in Codex's user configuration, through Codex's own config writer and
+after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
+yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
+alone. The JSON report's `mailbox_approval` says which happened: `set`,
+`already`, `kept-explicit`, `declined`, or `unavailable` (no
+`pseudolife-memory` server in the user configuration, or Codex refused the
+write; `mailbox_approval_detail` gives the reason, and hook setup still
+completes). When the approval is not set, the end-of-setup notice says how to
+choose it. The reason is the doorbell: a board ring wakes a thread only when it
+has mail it needs, and a woken thread that must ask before calling
+`memory_message` stalls on that prompt. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval.
+
+The trade-off is plain: Codex approves per tool, not per action, so the same
+approval lets the thread send board mail without asking. Board mail is
+rate-limited, audited and expires, cannot grant permissions, and reaches only
+allowed principals. The approval covers that one tool; it does not approve file
+writes, commands or other tools. To set it by hand, configure the installed
+server's `tools.memory_message.approval_mode = "approve"` in Codex; without
+it, use the host's normal approval flow.
 
 ### Optional Codex live delivery
 
@@ -5140,6 +5189,8 @@ A woken task reads its mail with `memory_message receive`, so the task needs
 `memory_message` approved in Codex's tool configuration; without that
 approval a woken task stalls on an approval prompt until someone answers it
 (the 2026-09-12 validation record's complete-path test approved it explicitly).
+Hook setup sets that approval when you approve the hooks
+([Codex CLI and desktop](#codex-cli-and-desktop)).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
@@ -5153,9 +5204,9 @@ approval a woken task stalls on an approval prompt until someone answers it
   task, or a daemon older than v49) the arrival stays owed and nothing
   rings; a later decision for the task covers it. A successful
   `memory_message receive` from the task answers it, and so does an emptied
-  mailbox. An idle task gets one doorbell per batch of mail. A `nudged`
-  ring (an idle task that never parked) adds one fixed sentence to the
-  notice asking for a park record.
+  mailbox. An idle task gets one doorbell per batch of mail. Plain mail to
+  a task that has not parked never rings it (since 2026-10-02); the task
+  sees it at its next turn. `urgent` mail to it does ring.
 - **What it says.** Codex delivers queued text as a user message, so the doorbell
   never carries peer text, sender labels or excerpts. The notice is fixed and
   only the count varies:
@@ -5458,11 +5509,14 @@ are nearest-rank, in seconds, with the sample size beside them (`{"n", "p50",
   daemon logs once per message): `sends`, `read`, `unread`, `seconds`,
   then the same `by_decision` (the send's wake decision: `rung`, `nudged`,
   `hinted`, `withheld`, `no_path`, `capped`, `not_needed`, or `unknown` for a
-  send from before v49) and `by_principal` (the recipient's principal, as
+  send from before v49; `nudged`, a ring to an idle session that never
+  parked, appears only for sends before 2026-10-02) and `by_principal`
+  (the recipient's principal, as
   the log saw it act in the window, else `unknown`). For a session with a
   live channel the first read is usually the adapter pushing the mail in
   (`path: delivery`), so there it measures delivery, not the model reading.
-- `wake_precision`: for each `rung` or `nudged` row decided in the window,
+- `wake_precision`: for each `rung` or (before 2026-10-02) `nudged` row
+  decided in the window,
   whether it was `served` to the recipient's adapter before `until` (`never_served`,
   `share_never_served`, `seconds_to_served`), whether the recipient acted on
   the board (an update, read, ack, send or register; not the adapter's own
@@ -5769,8 +5823,11 @@ payload the hook cannot read, and `PSEUDOLIFE_AGENT_COORDINATION` set to
 anything but a yes, let the call through. Installs without the plugin keep
 the instruction only. In Codex the same entry allows everything: a Codex
 child has a board address of its own. Claude Code
-subagents get no addresses of their own: the parent names them on its own row
-with `memory_agents(action="update", children=["review storage", "tests"])`, at
+subagents get no addresses of their own. With the plugin, its subagent hooks
+list them on the parent's row (below), and the served check-in asks a parent
+to name its subagents only when they do not appear; without it the parent
+names them with
+`memory_agents(action="update", children=["review storage", "tests"])`, at
 most 8 labels of at most 40 characters. Peers see them as `children`, a list of
 `{label, since}` in which the daemon stamps `since` and keeps it for a label
 the next update carries over. Omitting `children` leaves it unchanged and `[]`
@@ -5878,19 +5935,29 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `wake.decision` | When | Extra fields |
 | --- | --- | --- |
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
-| `not_needed` | the recipient is parked `done` | |
-| `no_path` | the recipient has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | |
+| `no_path` | the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or the recipient is idle and not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
-| `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
-| `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
+| `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`) | the parked need, if any |
 
 `reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
 `listener_unknown`, `listener_expired`,
 `clearer`, `anyone`, `clears`, `urgent`, `need_not_cleared`, `no_park`, or a
 cap). `rung` is evidence of a known armed path at send time; it does not mean
 that a turn started, that the recipient read the message, or that it acted.
-Chatter never rings. A retry of the same `request_id` repeats the first
+Chatter never rings, and regular mail never wakes (maintainer decision
+2026-10-02): a parked recipient rings for mail that clears its need, and
+an idle recipient that has not parked rings only for `urgent` mail, which
+spends the sender's urgent allowance and passes the same per-recipient,
+nightly and stagger caps as every ring. An active recipient is `hinted`,
+urgent or not. From v49 until then an idle session that had not parked
+was rung at most hourly (`nudged`) with a request to park; that ring is
+gone. A `nudged`
+row decided before a daemon update is kept for the Console's coordination
+timeline and `board-audit stats`, but is never served to an adapter, and its mail is
+never delivered through a live channel. A retry of the same `request_id`
+repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
 burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
 is a `coordination_wakes` row; the recipient's attach and heartbeat answers
@@ -5926,8 +5993,8 @@ tool-result hints and the prompt-hook digest are unchanged.
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
 Only addressed messages may wake an opted-in recipient, and since v49 the
-live channel carries only mail the daemon decided to ring (`rung`,
-`nudged`) or hinted to an active session, plus mail sent before v49; mail
+live channel carries only mail the daemon decided to ring (`rung`) or
+hinted to an active session, plus mail sent before v49; mail
 it withheld, or found not needed, waits for an explicit `receive`, which
 still returns everything. Board/status activity
 and receipts do not produce conversational wake-ups. Each live event carries a
@@ -6041,14 +6108,16 @@ also capped (below, and by the daemon's `wake` caps under
   as agent-origin, not user authority.
 - It fires on a ring the daemon decided (v49): when the shim's `<key>.ring`
   marker is past the `.seen` marker, the digest's watermark is past it too
-  and the digest lists mail. The shim writes the marker for `rung` and
-  `nudged` mail only ([the wake decision](#park-records-and-the-wake-decision)),
-  so chatter to a parked session, mail the daemon withheld, and a digest
-  that merely changed (an acknowledgement, an expiry) do not wake the
-  session. A ring for mail that arrived during the turn fires at once; a
-  digest the session already saw (through the prompt hook, the tool-result
-  hint or an earlier wake) does not fire again at the next turn end. A
-  nudge adds one sentence to the wake text asking for a park record. Firing
+  and the digest lists mail. The shim writes the marker for `rung` mail
+  only ([the wake decision](#park-records-and-the-wake-decision)), and the
+  hook fires only on a `rung` marker, so chatter to a parked session, mail
+  the daemon withheld, plain mail to a session that has not parked (a
+  `nudged` marker left from before 2026-10-02 included; `urgent` mail to
+  it is rung and does fire), and a digest that merely
+  changed (an acknowledgement, an expiry) do not wake the session. A ring
+  for mail that arrived during the turn fires at once; a digest the session
+  already saw (through the prompt hook, the tool-result hint or an earlier
+  wake) does not fire again at the next turn end. Firing
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
   written, the hook does not wake at all. SessionStart clears `.seen` on
@@ -6131,7 +6200,7 @@ also capped (below, and by the daemon's `wake` caps under
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
   longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after mail or its four-hour timeout; without that, its mail appears
+  re-armed after a ring or its four-hour timeout; without that, its mail appears
   on its next prompt and the ring listener expires. The watcher
   also stops when Claude Code exits: at once on Linux and macOS, and within
   a minute on Windows, where it lists the process through `ps -W` at arm
@@ -7597,7 +7666,7 @@ The milestones:
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
 | v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
-| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
+| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided (no `nudged` ring is decided since 2026-10-02), with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
@@ -8068,7 +8137,8 @@ script does, in Codex context, through the managed connection file. The
 wake itself is Claude Code's. Codex's own wake path is the
 [doorbell](configuration.md#codex-doorbell), also on by default when a
 `codex` CLI is found; a woken task needs `memory_message` approved, or it
-stalls on a prompt. Setup approves it with the other three, and disabling it in
+stalls on a prompt (hook setup approves that tool with your consent). Setup
+approves the Stop hook with the other three, and disabling it in
 `/hooks` does not block setup. After a plugin update, Codex's startup hook
 review lists it until setup reruns. Manual installs keep the three lifecycle
 events.
@@ -8121,6 +8191,12 @@ PowerShell uses `-CodexHooks`, `-CodexHookTrust`, and `-Instructions` with
 the same values. For unattended setup, explicit `yes` authorizes scoped
 trust and the fallback; `ask` without an interactive terminal does not grant
 approval. The helper also accepts `--non-interactive` to disable prompting.
+The same approval, `yes` or a yes at the prompt (which names it), also sets
+`approval_mode = "approve"` for the `memory_message` tool, so a task the
+doorbell wakes can read its board mail without stalling on a prompt. It keeps
+any value you set yourself and approves no other tool; Codex approves per
+tool, so this also covers sending board mail
+([details](configuration.md#codex-cli-and-desktop)).
 
 ```bash
 # Full unattended setup with automatic memory approved:
@@ -8303,8 +8379,10 @@ replacing canonical facts through `memory_store` when auto-promotion is enabled.
 Hints inform a client's `default_tools_approval_mode = "writes"`; they are not
 authorization and do not override per-tool approval settings or managed policy.
 An allow-once prompt does not guarantee durable approval. Inspect any existing
-`tools.<tool>.approval_mode` override if prompts differ from the server default;
-the installer and doctor do not change approval policy.
+`tools.<tool>.approval_mode` override if prompts differ from the server default.
+The installer and doctor do not change approval policy, with one exception:
+Codex hook setup, when you approve the hooks, sets `memory_message` to
+`"approve"` unless you already chose a value for it.
 
 Codex can also filter tools **client-side, per project**: a project-scoped
 `.codex/config.toml` (loaded for trusted projects only) may register the
@@ -9112,7 +9190,7 @@ in a contender, not in `current`, when trust is low.
 Entity dedup is where an automatic graph quietly eats itself: fold
 `band.py` into `band` once and every fact attached to either becomes
 ambiguous. Merges here are **proposals**, not actions. They queue in the
-**review queue** (the Console's Atlas Review view, or
+**review queue** (the Console's Review view, or
 `memory_graph_review`), carry their evidence, and are subject to
 **merge vetoes** — name-shape rules that block a bad **fold direction** at
 filing time. Accepting or rejecting one writes an audit-stamped row in

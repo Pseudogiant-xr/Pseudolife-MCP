@@ -145,8 +145,11 @@ def test_wake_report_does_not_echo_arbitrary_environment_values(monkeypatch):
 def test_wake_caps_only_report_known_numeric_fields(monkeypatch):
     monkeypatch.setattr(doctor_cli, "_claude_code_wake", lambda enabled: {})
     monkeypatch.setattr(doctor_cli, "_codex_wake", lambda enabled: {})
+    # nudge_interval_seconds is a daemon from before 2026-10-02 reporting a
+    # retired cap: it no longer bounds anything, so doctor does not list it.
     result = doctor_cli._wake_report({"coordination": {"wake": {
-        "nightly_total": 200, "token": "fixture-secret", "urgent_per_sender_per_hour": "fixture-secret"}}})
+        "nightly_total": 200, "token": "fixture-secret", "urgent_per_sender_per_hour": "fixture-secret",
+        "nudge_interval_seconds": 3600}}})
     assert result["caps"] == {"nightly_total": 200}
 
 

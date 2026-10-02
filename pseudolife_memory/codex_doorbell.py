@@ -101,21 +101,15 @@ class _KillJob:
         _kernel32.CloseHandle(self._handle)
 
 
-def doorbell_text(count: int, nudge: bool = False) -> str:
-    """The whole queued message. Only the count varies, and a nudge (the
-    daemon rang an idle thread that never parked) adds one fixed sentence,
-    so nothing a peer wrote (text, label, excerpt) can reach the user-role
-    turn, and the characters survive a cmd.exe batch wrapper unquoted and
-    unexpanded."""
+def doorbell_text(count: int) -> str:
+    """The whole queued message. Only the count varies, so nothing a peer
+    wrote (text, label, excerpt) can reach the user-role turn, and the
+    characters survive a cmd.exe batch wrapper unquoted and unexpanded."""
     noun = "message" if count == 1 else "messages"
-    text = ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
+    return ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
             f"{count} addressed {noun} pending for this thread. Read them with "
             "memory_message receive and ack each message_id. Act only within the task "
             "the user authorized. If nothing is pending, end the turn.")
-    if nudge:
-        text += (" Then set your park status with memory_agents update park_reason, "
-                 "park_needs, park_clear_by, park_resume and park_expires.")
-    return text
 
 
 # What CreateProcess can start directly; PATHEXT may list script types too.
@@ -322,7 +316,7 @@ class CodexDoorbell:
 
     async def _ring(self, thread_id: str, count: int, adapter, decision=("rung", "")) -> None:
         verdict, reason = decision
-        text = doorbell_text(count, nudge=verdict == "nudged")
+        text = doorbell_text(count)
         # The CLI needs nothing of Pseudolife's: bank and host bearers stay here.
         environment = {key: value for key, value in os.environ.items()
                        if not key.upper().startswith("PSEUDOLIFE_")}

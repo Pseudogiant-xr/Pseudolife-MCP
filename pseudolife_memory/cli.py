@@ -70,9 +70,10 @@ modes:
   import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
-  wait-mail      block until new addressed agent mail, print it and exit
-                 (arm as a background command to wake an idle session;
-                 exit 0 mail, 3 timeout, 2 setup; --help for options)
+  wait-mail      block until the daemon rings this session for agent mail
+                 (plain mail never wakes), print the mail and exit (arm as a
+                 background command to wake an idle session; exit 0 ring,
+                 3 timeout, 2 setup; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
