@@ -599,6 +599,7 @@ def test_the_volume_harness_runs_as_a_script_with_an_explicit_admin_url(tmp_path
     """Script mode puts evals/, not the repository, on sys.path; the scratch
     database's name comes from tests.pg_defaults, so an explicit --admin-url
     must still reach the server rather than die on the import."""
+    import re
     import subprocess
     import sys
     from pathlib import Path
@@ -611,7 +612,7 @@ def test_the_volume_harness_runs_as_a_script_with_an_explicit_admin_url(tmp_path
     assert proc.returncode != 0
     assert "ModuleNotFoundError" not in proc.stderr, proc.stderr[-2000:]
     # A connection failure (refused on Linux, a timeout on Windows).
-    assert proc.stderr.strip().splitlines()[-1].startswith("psycopg."), proc.stderr[-2000:]
+    assert re.search(r"^psycopg\.[\w.]+: ", proc.stderr, re.MULTILINE), proc.stderr[-2000:]
 
 
 def test_the_volume_harness_refuses_a_database_that_is_not_scratch(pg_conn, pg_url, monkeypatch):
