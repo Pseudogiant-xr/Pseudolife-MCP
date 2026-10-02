@@ -577,9 +577,9 @@ wake_budget_ok() {
 # its first heartbeat); one that vanishes mid-watch means the shim exited
 # (a crash that takes the shim down with Claude Code leaves it, which the
 # parent check above catches), so the watch ends rather than fire
-# into a later session. The wait-mail command being built beside this hook
-# has the same fire-and-mark contract; it can replace the loop once it
-# ships, keeping the lease, parent and cap checks beside it.
+# into a later session. `pseudolife-mcp wait-mail` (wait_mail_cli.py)
+# applies the same ring rule and fire-and-mark contract for waits longer
+# than this hook's; this loop keeps the lease, parent and cap checks.
 wait_for_mail() {
     # SECONDS counts from the start of the script, spawns included.
     local deadline=$WAIT snapshot present=0
