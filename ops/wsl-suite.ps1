@@ -38,8 +38,13 @@ $forward = @(
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'HF_HUB_OFFLINE'
 ) | Where-Object { Test-Path "env:$_" }
-$paths = @('PSEUDOLIFE_MCP_TOKEN_FILE') | Where-Object { Test-Path "env:$_" } |
-    ForEach-Object { "$_/p" }
+# The token file only when there is no token value: under /mnt/c it shows
+# loose permissions, and the board client refuses a credential file that is
+# not owner-only (seen 2026-10-02), so the run would leave the board.
+$paths = @()
+if (-not $env:PSEUDOLIFE_MCP_TOKEN -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
+    $paths = @('PSEUDOLIFE_MCP_TOKEN_FILE/p')
+}
 $entries = @($forward) + @($paths)
 $saved = $env:WSLENV
 if ($saved) { $entries = @($saved) + $entries }
