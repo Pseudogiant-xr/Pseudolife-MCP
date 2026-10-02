@@ -60,6 +60,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that still sets it loads as before and the key does nothing; `/health`
   and `pseudolife-mcp doctor` no longer report it. The change is under
   `plugin/` and in the shim, so a deploy needs the client step.
+
 ### Fixed (2026-10-02 — subagents and the parent's mail hint)
 - A Claude Code subagent's memory tool call no longer spends its parent's
   "you have mail" notice. The subagent runs inside the parent's shim, so the
@@ -77,6 +78,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   address (a Codex subagent has its own). Rescored with
   `evals/coordination_checkin_bench.py` against the text it replaces
   (artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`).
+
 ### Changed (2026-10-02 — bounded lease-list reads)
 - Board lease listings fetch the displayed FIFO queues and exact queue counts
   in two reads for the whole lease page, avoiding two reads per returned lease.
@@ -88,6 +90,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   text without transferring or decoding embeddings, and reads the relation
   registry once per pass. Shared-note selection and proposal settlement are
   unchanged.
+
 ### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
 - `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
   Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
@@ -113,6 +116,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own short-lived connection (never the service lock), at most once a
   minute while it is absent, and caches it once found. The cache is dropped
   when a reconnect finds that another writer held the bank.
+
 ### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
 - `/ui/` now serves the rebuilt console, with every view native: Observatory,
   Cortex, World, Lessons, Stream, Recall, Graph, Review, Insight, Board,
@@ -141,6 +145,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the node-based tests over the classic sources), and a rebuild that must
   match the committed output. `.gitattributes` checks the console's sources
   out with LF on every OS so a Windows build reproduces the CI one.
+
 ### Fixed (2026-10-02 — bench records keep words that contain the user name)
 - The memory-policy and coordination check-in benches redact the OS user name
   from each saved record only as a whole word. A short name such as `dev`
