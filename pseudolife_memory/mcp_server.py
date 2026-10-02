@@ -2560,25 +2560,40 @@ def _resolve_principal_tier() -> str:
     )
 
 
+# The JSON-RPC error a tools/call or tools/list gets when its bearer cannot
+# be resolved after the gate admitted it (the HTTP gate answers the same
+# case with 503 principals_unavailable before the request gets here).
+PRINCIPALS_UNAVAILABLE_CODE = -32003
+
+
 def _transport_principal(headers) -> str | None:
     """The bearer's principal for one ``tools/call`` / ``tools/list``,
     resolved here from the request's own headers with the shared resolver
     (the environment's identities, then the stored-principal snapshot: a
     dict lookup, never I/O). The gate's binding cannot be relied on:
     handshake-era requests run on the session manager's task group, created
-    at startup, which the gate's context never reaches. ``None`` (unknown,
-    or a snapshot that cannot be checked) leaves naming to
-    ``writer_context.current_principal``."""
+    at startup, which the gate's context never reaches.
+
+    With authentication configured, a presented bearer that does not
+    resolve (a snapshot that cannot be checked, or a row revoked between
+    the gate and here) is refused with ``principals_unavailable``: it is
+    never served as ``default``, so its X-PL-Writer is not honoured and the
+    default tier is not granted (security review, 2026-10-02). No bearer at
+    all, or an open install, names the caller as before."""
+    from mcp.shared.exceptions import MCPError
+
     from pseudolife_memory.principals import (
         PrincipalsUnavailable, env_auth, installed_store, resolve_principal)
+    auth = headers.get("authorization")
+    token_map, token = env_auth()
     try:
-        auth = headers.get("authorization")
-        token_map, token = env_auth()
-        return resolve_principal(auth, token_map, token, installed_store())
+        principal = resolve_principal(auth, token_map, token, installed_store())
     except PrincipalsUnavailable:
-        return None
-    except Exception:  # noqa: BLE001 - naming must never fail a request
-        return None
+        principal = None
+    if principal is None and auth and (token_map or token):
+        raise MCPError(PRINCIPALS_UNAVAILABLE_CODE, "principals_unavailable",
+                       {"status": 503, "error": "principals_unavailable"})
+    return principal
 
 
 def _wire_transport_tiering() -> None:

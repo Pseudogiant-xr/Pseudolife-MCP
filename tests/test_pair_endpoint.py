@@ -420,3 +420,12 @@ def test_the_operator_refusal_uses_the_resolvers_own_answer(snapshot, monkeypatc
     monkeypatch.setattr(principals, "is_stored_principal", lambda principal: False)
     status, out = call(_app(), "POST", "/api/config", headers=_auth(STORED_TOKEN), body=b"{}")
     assert status == 403 and json.loads(out) == {"error": "operator_principal_required"}
+
+
+@pytest.mark.parametrize("bearer", [STORED_TOKEN, "fixture-random"])
+def test_the_session_start_hook_still_answers_an_unresolvable_bearer(unloaded, bearer):
+    """Naming now refuses an unresolvable bearer; the always-200 hook
+    must still answer it with the public instructions."""
+    status, out = call(_app(), "GET", "/api/hook/session-start", headers=_auth(bearer),
+                       query="session_id=fixture-session")
+    assert status == 200 and out

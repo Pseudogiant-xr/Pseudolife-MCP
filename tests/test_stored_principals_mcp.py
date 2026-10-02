@@ -101,14 +101,68 @@ def test_a_writer_header_naming_a_stored_principal_does_not_take_its_tier(
         assert mod._resolve_principal_tier() == "full"
 
 
-def test_an_unavailable_view_names_no_stored_principal(tmp_path, monkeypatch):
+def test_an_unavailable_view_refuses_instead_of_running_as_default(tmp_path, monkeypatch):
+    """Security review, 2026-10-02: a bearer the daemon cannot check right
+    now must not be served as ``default`` (its X-PL-Writer honoured, the
+    default tier granted). The request gets principals_unavailable."""
+    from mcp.shared.exceptions import MCPError
     previous = installed_store()
     install_store(PrincipalSnapshot())          # never loaded
     try:
         mod = _reload_tiered(tmp_path, monkeypatch, **ENV)
         entry = mod.mcp._lowlevel_server._request_handlers["tools/list"]
-        result = asyncio.run(entry.handler(_ctx({"authorization": f"Bearer {STORED_TOKEN}"}),
-                                           None))
-        assert {t.name for t in result.tools} == mod._visible_tool_names("full")
+        with pytest.raises(MCPError) as caught:
+            asyncio.run(entry.handler(_ctx({"authorization": f"Bearer {STORED_TOKEN}",
+                                            "x-pl-writer": "desk"}), None))
+        assert caught.value.message == "principals_unavailable"
     finally:
         install_store(previous)
+
+
+def test_a_bearer_dropped_after_the_gate_never_reaches_the_tool(tmp_path, monkeypatch, stored):
+    """The row was revoked between the gate and the dispatch: the call is
+    refused, not run as default."""
+    from mcp.shared.exceptions import MCPError
+    mod = _reload_tiered(tmp_path, monkeypatch, **ENV)
+    handlers = mod.mcp._lowlevel_server._request_handlers
+    ran = []
+
+    async def probe(ctx, params):
+        ran.append(True)
+
+    handlers["tools/call"] = dataclasses.replace(handlers["tools/call"], handler=probe)
+    mod._wire_transport_tiering()
+    with pytest.raises(MCPError) as caught:
+        asyncio.run(handlers["tools/call"].handler(
+            _ctx({"authorization": "Bearer fixture-dropped-token", "x-pl-writer": "desk"}), None))
+    assert caught.value.message == "principals_unavailable" and ran == []
+
+
+def test_an_open_install_and_a_request_without_a_bearer_still_run(tmp_path, monkeypatch):
+    mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="full")
+    entry = mod.mcp._lowlevel_server._request_handlers["tools/list"]
+    result = asyncio.run(entry.handler(_ctx({"authorization": "Bearer anything"}), None))
+    assert {t.name for t in result.tools} == mod._visible_tool_names("full")
+
+
+def test_current_principal_refuses_an_unresolvable_bearer(monkeypatch, stored):
+    """The fallback naming path no longer turns an unknown bearer into
+    default when authentication is configured, and X-PL-Writer is never
+    honoured for it."""
+    from pseudolife_memory import writer_context as wc
+    from pseudolife_memory.principals import PrincipalsUnavailable
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", "fixture-env-token:desk")
+    binding = wc.bind_request_headers({"authorization": "Bearer fixture-unknown",
+                                       "x-pl-writer": "desk"})
+    try:
+        with pytest.raises(PrincipalsUnavailable):
+            wc.current_principal()
+        with pytest.raises(PrincipalsUnavailable):
+            wc.resolve_writer_detailed("fallback")
+    finally:
+        wc.unbind_request_headers(binding)
+    binding = wc.bind_request_headers({"x-pl-writer": "desk"})
+    try:
+        assert wc.current_principal() == "default"     # no bearer at all: naming only
+    finally:
+        wc.unbind_request_headers(binding)
