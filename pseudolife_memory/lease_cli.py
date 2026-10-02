@@ -1342,7 +1342,11 @@ def _local_suite_lease() -> str:
         except (OSError, UnicodeDecodeError):
             return SUITE_LEASE
     name = raw.strip()
-    return name if _is_suite_lease(name) else SUITE_LEASE
+    host = name[len(SUITE_LEASE) + 1:] if name.startswith(SUITE_LEASE + "@") else None
+    valid = name == SUITE_LEASE or (
+        host and len(host) <= 40 and host.isascii()
+        and all(c.isalnum() or c in "._-" for c in host))
+    return name if valid else SUITE_LEASE  # tests/suite_lock.py lease_name's rule
 
 
 def _local_state(name: str) -> dict:

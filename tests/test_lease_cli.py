@@ -1201,6 +1201,17 @@ def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
     assert "this machine's suite lease is full-suite" in other
 
 
+def test_check_reads_an_invalid_lease_file_as_the_default_name(lease_env, monkeypatch):
+    # The suite itself refuses such a file; check falls back rather than
+    # mapping a name the suite would never mirror under.
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
+    lease_env.mkdir(parents=True, exist_ok=True)
+    for bad in ("full-suite@", "full-suite@a b", "full-suite@" + "x" * 41):
+        (lease_env / "full-suite.lease").write_text(bad, encoding="utf-8")
+        assert lease_cli._local_suite_lease() == "full-suite"
+
+
 def test_check_exits_1_when_only_the_board_shows_a_holder(lease_env, capsys):
     now = time.time()
     daemon = FakeDaemon(leases=[(200, {"leases": [

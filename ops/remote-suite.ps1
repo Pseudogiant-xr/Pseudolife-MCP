@@ -23,7 +23,11 @@
 # remote run also needs the commit pushed (the remote clone fetches it from
 # origin). The remote side runs that commit's own ops/wsl-suite.sh in its
 # copy mode, under a systemd scope with MemoryMax, as the SSH user (who needs
-# password-free sudo for systemd-run). The board bearer, when this session
+# password-free sudo for systemd-run that may preserve the environment:
+# NOPASSWD:SETENV:, or NOPASSWD: ALL). It refuses to start unless
+# PSEUDOLIFE_TEST_DATABASE_URL is set there after env= is sourced, so a run
+# never falls back to a default server that may hold a live bank. The board
+# bearer, when this session
 # has one, is sent on SSH's stdin, never on a command line, so the remote
 # run mirrors on the board under that machine's lease (full-suite.lease
 # there, e.g. full-suite@box).
@@ -67,10 +71,15 @@ if ($remote -and $where -ne 'local') {
     }
 }
 
-# A machine's suite lock: exit 0 free (or never created), 1 held.
-$probe = 'f="$HOME/.pseudolife-mcp/locks/full-suite.lock"; [ -e "$f" ] || exit 0; flock -n "$f" true'
-function Test-LocalFree { & wsl.exe -e sh -c $probe; return $LASTEXITCODE -eq 0 }
-function Test-RemoteFree { & ssh -o BatchMode=yes -o ConnectTimeout=10 $remote $probe; return $LASTEXITCODE -eq 0 }
+# A machine's suite lock: exit 0 free (or never created), 1 held. Anything
+# else (ssh 255, no flock, a failed wsl.exe) is a failed probe, never "busy".
+$probe = 'f="$HOME/.pseudolife-mcp/locks/full-suite.lock"; [ -e "$f" ] || exit 0; command -v flock >/dev/null || exit 3; flock -n "$f" true'
+$distro = @()
+if ($env:PSEUDOLIFE_WSL_DISTRO) { $distro = @('-d', $env:PSEUDOLIFE_WSL_DISTRO) }
+function Get-State([string]$machine) {
+    if ($machine -eq 'local') { & wsl.exe @distro -e sh -c $probe } else { & ssh -o BatchMode=yes -o ConnectTimeout=10 $remote $probe }
+    switch ($LASTEXITCODE) { 0 { 'free' } 1 { 'held' } default { "error (exit $LASTEXITCODE)" } }
+}
 
 $candidates = switch ($where) {
     'local' { @('local') }
@@ -79,9 +88,14 @@ $candidates = switch ($where) {
 }
 $target = $null; $lastNote = [datetime]::MinValue
 while (-not $target) {
-    foreach ($c in $candidates) {
-        $free = if ($c -eq 'local') { Test-LocalFree } else { Test-RemoteFree }
-        if ($free) { $target = $c; break }
+    foreach ($c in @($candidates)) {
+        $state = Get-State $c
+        if ($state -eq 'free') { $target = $c; break }
+        if ($state -ne 'held') {
+            if ($candidates.Count -eq 1) { Write-Error "remote-suite: cannot probe $c's suite lock: $state"; exit 2 }
+            Write-Host "remote-suite: cannot probe $c's suite lock ($state); leaving it out"
+            $candidates = @($candidates | Where-Object { $_ -ne $c })
+        }
     }
     if (-not $target) {
         if (((Get-Date) - $lastNote).TotalSeconds -ge 60) {
@@ -120,6 +134,7 @@ if ($target -eq 'local') {
     $lines.Add('script="$(mktemp)"')
     $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
     $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
+    $lines.Add('if [ -z "${PSEUDOLIFE_TEST_DATABASE_URL:-}" ]; then echo "remote-suite: no PSEUDOLIFE_TEST_DATABASE_URL on this machine after env=; refusing rather than use a default server" >&2; exit 2; fi')
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
     $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read
@@ -135,7 +150,9 @@ if ($target -eq 'local') {
 $summary = (Select-String -Path $log -Pattern '\d+ (passed|failed)|no tests ran|error' -ErrorAction SilentlyContinue |
     Select-Object -Last 1).Line
 [ordered]@{
-    machine = $target; host = $(if ($target -eq 'remote') { $remote } else { 'local-wsl' })
+    # The machine kind only: the SSH destination names a host and a user,
+    # and results get cited in public PRs.
+    machine = $(if ($target -eq 'remote') { 'remote' } else { 'local-wsl' })
     commit = $sha; checkout = $name; started = $started.ToString('o'); ended = (Get-Date).ToString('o')
     exit_code = $code; summary = $summary; log = $log
 } | ConvertTo-Json | Set-Content -Path ($log -replace '\.log$', '.json') -Encoding utf8
