@@ -32,6 +32,27 @@
 # into ~/.cache/huggingface/hub, or run once with HF_HUB_OFFLINE=0.
 set -euo pipefail
 
+# A run dispatched to a second machine (ops/remote-suite.ps1 sets
+# PSEUDOLIFE_SUITE_DISPATCHED=1) starts only against a test server named
+# off 5433 — on the maintainer's homelab box 5433 is the live bank's
+# server, and a fixed PSEUDOLIFE_TEST_DATABASE_URL leaves default paths
+# there (review of #528, 2026-10-03) — and only under that machine's own
+# suite lease, so the first machine's gates do not hold off for it.
+if [[ -n "${PSEUDOLIFE_SUITE_DISPATCHED:-}" ]]; then
+    server="${PSEUDOLIFE_TEST_PG_HOST_PORT:-}"
+    if [[ -z "$server" || "${server##*:}" == "5433" ]]; then
+        echo "wsl-suite: a dispatched run needs PSEUDOLIFE_TEST_PG_HOST_PORT set to a test server other than port 5433 (got '${server}'); refusing" >&2
+        exit 2
+    fi
+    lock_dir="${PSEUDOLIFE_SUITE_LOCK_DIR:-$HOME/.pseudolife-mcp/locks}"
+    lease="${PSEUDOLIFE_SUITE_LEASE:-$(cat "$lock_dir/full-suite.lease" 2>/dev/null || true)}"
+    lease="$(printf '%s' "$lease" | tr -d '[:space:]')"
+    if [[ "$lease" != full-suite@?* ]]; then
+        echo "wsl-suite: a dispatched run needs this machine's own suite lease (full-suite@<host> in $lock_dir/full-suite.lease or PSEUDOLIFE_SUITE_LEASE; got '${lease:-full-suite}'); refusing" >&2
+        exit 2
+    fi
+fi
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="${PSEUDOLIFE_SUITE_NAME:-$(basename "$root")}"
 # wsl.exe -e starts no login shell, so uv's installer's PATH line never ran.

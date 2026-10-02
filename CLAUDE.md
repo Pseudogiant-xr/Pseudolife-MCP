@@ -209,9 +209,12 @@ took 143 CUDA OOMs.
     sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
     server) and its `PSEUDOLIFE_TEST_PG_PASSWORD`, so every default path —
     per-run databases, the admin URL, reachability probes — uses that
-    server, and a dispatched run refuses to start without it. Not a fixed
+    server. A dispatched run (`PSEUDOLIFE_SUITE_DISPATCHED`) refuses to
+    start unless that address names a port other than 5433 and the machine
+    has its own lease name (`full-suite@box`). Not a fixed
     `PSEUDOLIFE_TEST_DATABASE_URL`: that shares one database between
-    concurrent runs and covers only the fixtures.
+    concurrent runs and covers only the fixtures, leaving the default
+    paths on 5433.
     Sessions there run `python -m pytest tests/` natively (Linux needs no
     WSL), under the same one-suite lock. Dispatched runs add a systemd
     `MemoryMax=16G` scope, since the box also serves the live daemon, which

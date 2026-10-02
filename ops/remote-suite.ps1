@@ -25,9 +25,12 @@
 # copy mode, under a systemd scope with MemoryMax, as the SSH user (who needs
 # password-free sudo for systemd-run that may preserve the environment:
 # NOPASSWD:SETENV:, or NOPASSWD: ALL). It refuses to start unless env=
-# leaves PSEUDOLIFE_TEST_PG_HOST_PORT (preferred: per-run databases on that
-# server) or PSEUDOLIFE_TEST_DATABASE_URL set there, so a run never falls
-# back to the default server, which may hold a live bank. The board
+# leaves PSEUDOLIFE_TEST_PG_HOST_PORT set there to a test server other than
+# port 5433 (a fixed PSEUDOLIFE_TEST_DATABASE_URL alone is not enough: the
+# default paths would still reach 5433, which may hold a live bank), and
+# unless that machine names its own suite lease (full-suite.lease there,
+# full-suite@<host>); ops/wsl-suite.sh checks both under
+# PSEUDOLIFE_SUITE_DISPATCHED. The board
 # bearer, when this session
 # has one, is sent on SSH's stdin, never on a command line, so the remote
 # run mirrors on the board under that machine's lease (full-suite.lease
@@ -133,11 +136,18 @@ if ($target -eq 'local') {
     $lines.Add('memory=' + (Quote $cfg['memory']))
     $lines.Add('envfile="' + $(if ($cfg['env']) { $cfg['env'].Replace('~', '$HOME') } else { '' }) + '"')
     $lines.Add('git -C "$repo" fetch --quiet origin "$sha"')
-    $lines.Add('git -C "$repo" update-ref "refs/heads/suite/$name" "$sha"')
+    # Named by commit, not checkout: every Codex worktree shares one name,
+    # and two dispatches of different commits raced on one ref.
+    $lines.Add('git -C "$repo" update-ref "refs/heads/suite/$sha" "$sha"')
     $lines.Add('script="$(mktemp)"')
     $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
     $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
-    $lines.Add('if [ -z "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}${PSEUDOLIFE_TEST_DATABASE_URL:-}" ]; then echo "remote-suite: neither PSEUDOLIFE_TEST_PG_HOST_PORT nor PSEUDOLIFE_TEST_DATABASE_URL is set on this machine after env=; refusing rather than use the default server, which may hold a live bank" >&2; exit 2; fi')
+    # The same rule ops/wsl-suite.sh enforces under PSEUDOLIFE_SUITE_DISPATCHED
+    # (tests/test_wsl_suite_launcher.py), repeated here for a dispatched
+    # commit older than that guard: a fixed test URL alone leaves default
+    # paths on 5433, the live bank's server on the box.
+    $lines.Add('case "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}" in ""|*:5433) echo "remote-suite: PSEUDOLIFE_TEST_PG_HOST_PORT is not set to a test server other than port 5433 on this machine after env=; refusing" >&2; exit 2;; esac')
+    $lines.Add('export PSEUDOLIFE_SUITE_DISPATCHED=1')
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
     $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read
@@ -146,7 +156,9 @@ if ($target -eq 'local') {
     $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
     $body = ($lines -join "`n") + "`n"
     $quotedArgs = ($args | ForEach-Object { Quote ([string]$_) }) -join ' '
-    $body | & ssh -o BatchMode=yes $remote "bash -s -- $quotedArgs" 2>&1 | Tee-Object -FilePath $log
+    # Keepalives: a silently dropped link ends the run's ssh in ~2 min
+    # instead of leaving the dispatcher waiting forever.
+    $body | & ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 $remote "bash -s -- $quotedArgs" 2>&1 | Tee-Object -FilePath $log
     $code = $LASTEXITCODE
 }
 
