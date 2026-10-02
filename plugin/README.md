@@ -127,8 +127,9 @@ reads that file by the `session_id` it receives and prints the digest only when
 the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
 context and a change appears once. The same marker gates the hint the shim
 appends to tool results, so the two paths never repeat each other. SessionStart
-on `resume`, `compact` or `clear` clears the marker so the current digest
-prints afresh. Under Claude Code, `/clear` and an
+on `resume`, `compact` or `clear` keeps `.seen` and writes a `<key>.reprint`
+flag naming the marker it found, so the next prompt prints the current digest
+again unless a wake or a hint showed it since. Under Claude Code, `/clear` and an
 in-session `/resume` give the hooks a new `session_id` while the shim keeps
 the one it was launched with, so the session hooks keep the shim's key once
 per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).
@@ -242,6 +243,17 @@ listed for review and left alone. By hand:
   lists this entry too; there it allows every call, because a Codex child
   has a board address of its own. See
   [Configuration](../docs/guide/configuration.md#delivery-and-recovery).
+- **Subagent board hooks** (SubagentStart / SubagentStop, schema v50; off
+  with the board, `PSEUDOLIFE_AGENT_COORDINATION=0`) — list a Claude Code
+  session's running subagents on its board row, so peers see them as its
+  children rather than as peers. Each start or stop sends one async
+  `POST /api/hook/subagent` that adds or removes an
+  `<agent_type>#<first 8 of agent_id>` entry in the session's `children`;
+  the answer is ignored and every failure is silent. From start to stop the
+  hook also keeps a `<key>.sub-<agent_id>` marker beside the session's
+  digest, so the shim holds back the parent's tool-result mail hint instead
+  of letting a subagent's call spend it. A no-op in Codex, whose subagents
+  have board addresses of their own.
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
 

@@ -227,6 +227,16 @@ and the `drop_reason` (or `kept=True`) for each. The `final_topk` block
 shows exactly which entries reached the result set and what score they
 carried.
 
+Scoping filters (`sources`, `episodes`, `tags`, and the
+`memory.hide_superseded` setting) apply
+before each band's candidate cap, not after it, so a scoped entry is not
+crowded out by out-of-scope neighbours that rank above it. Each band in
+the trace's `tiers` list reports `entry_count` (entries in the band),
+`eligible_count` (those that passed the filters) and `excluded_count`
+(those that did not); a band named outside a `bands=` filter shows
+`filtered_out: true` with every entry excluded. An `eligible_count` of 0
+means the filters, not the ranking, removed the entry you expected.
+
 Also useful for state-probe queries where recency bias is unwelcome:
 
 ```

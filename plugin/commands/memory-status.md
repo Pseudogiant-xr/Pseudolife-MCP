@@ -22,11 +22,15 @@ Report the state of the Pseudolife memory stack:
    `entries.never_read_pct` as a coverage signal — the old-and-unread
    tail, not the young entries that are expected to be unread yet.
 3. Call `memory_dream(action="status")` for consolidation state: `backlog`,
-   `idle_seconds`, `would_fire`, `dream_cursor` (how far consolidation has
-   got), and any pending outcome inference. Fact/lesson counts and dream
-   timing live here and in the Console, not in `memory_stats()`.
+   `idle_seconds`, `would_fire`, and any pending outcome inference.
+   `backlog` is what is still pending; `dream_cursor` is display metadata
+   only and does not mark what has been consolidated. Fact/lesson counts
+   and dream timing live here and in the Console, not in `memory_stats()`.
 4. If `/health` reports `degraded` (or any component `error`), surface the
-   failing component verbatim — do not summarize it away.
+   failing component verbatim — do not summarize it away. The same goes
+   for a `dream_tracking_error` field: `status` stays `ok`, but the dream
+   cannot pull or commit until it clears, and `memory_dream(action="status")`
+   carries the detail.
 5. Report the backup from `/health`'s `last_backup`: its `age_hours`, and
    flag it when older than 36 hours (backups have stopped) or when
    `rotation` is `held` (entries, facts or lessons fell sharply, so the

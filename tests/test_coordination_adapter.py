@@ -1357,7 +1357,10 @@ def _preview(*ids):
 
 def _mailbox_daemon(answers):
     """A daemon whose attach and heartbeat answers come from ``answers``:
-    ``(count, preview, wake)`` per call."""
+    ``(count, preview, wake)`` per call. A callable ``wake`` is built when
+    it is served, so a ``ring_at`` offset counts from that heartbeat, not
+    from test setup (a slow Windows runner, 2026-10-03, spent the whole
+    0.6 s offset before the first heartbeat)."""
     daemon = FakeDaemon()
     answers = iter(answers)
 
@@ -1365,6 +1368,8 @@ def _mailbox_daemon(answers):
         if action not in {"attach", "heartbeat"}:
             return None
         count, preview, wake = next(answers)
+        if callable(wake):
+            wake = wake()
         return httpx.Response(200, json={"generation": 3, "lease_until": "later",
                                          "pending_count": count, "pending_preview": preview,
                                          "wake": wake})
@@ -1416,7 +1421,8 @@ def test_a_staggered_ring_waits_for_its_time(tmp_path):
     marker and the doorbell's offer both wait for it."""
     daemon = _mailbox_daemon([(0, [], None),
                               (1, _preview("m1"),
-                               {"decision": "rung", "reason": "anyone", "ring_at": time.time() + 0.6})])
+                               lambda: {"decision": "rung", "reason": "anyone",
+                                       "ring_at": time.time() + 0.6})])
 
     async def drive():
         client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
@@ -1728,7 +1734,7 @@ def test_a_newer_ring_replaces_a_refused_one_and_keeps_its_stagger(tmp_path):
         (0, [], None),
         (1, _preview("m1"), {"decision": "rung", "reason": "anyone", "ring_at": 0.0}),
         (2, _preview("m1", "m2"),
-         {"decision": "rung", "reason": "clearer", "ring_at": time.time() + 0.6}),
+         lambda: {"decision": "rung", "reason": "clearer", "ring_at": time.time() + 0.6}),
         (2, _preview("m1", "m2"), None)])
 
     async def drive():

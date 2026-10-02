@@ -644,9 +644,11 @@ class CoordinationAdapter:
         if self._digest_written:
             self._digest_written_at = time.monotonic()
             # The markers must stay as fresh as the digest, or the sweep
-            # takes them: mail already shown would look unshown again, and
-            # the Stop hook's park gate would lose this session's address.
-            for marker in (self._seen_path(), self._agent_path()):
+            # takes them: mail already shown would look unshown again, the
+            # Stop hook's park gate would lose this session's address, and
+            # a compacted session idle for a day would lose its reprint.
+            for marker in (self._seen_path(), self._agent_path(),
+                           self.digest_path.with_suffix(".reprint")):
                 with suppress(OSError):
                     os.utime(marker)
 
@@ -655,10 +657,10 @@ class CoordinationAdapter:
         try:
             with os.scandir(self.digest_path.parent) as entries:
                 mine = (self.digest_path, self._seen_path(), self._ring_path(), self._agent_path(),
-                        self._turn_path())
+                        self._turn_path(), self.digest_path.with_suffix(".reprint"))
                 for entry in entries:
                     if ((entry.name.endswith((".txt", ".seen", ".ring", ".agent", ".turn",
-                                              ".wait-armed", ".wake-armed"))
+                                              ".reprint", ".wait-armed", ".wake-armed"))
                          or ".sub-" in entry.name)
                             and entry.is_file(follow_symlinks=False)
                             and entry.stat(follow_symlinks=False).st_mtime < cutoff

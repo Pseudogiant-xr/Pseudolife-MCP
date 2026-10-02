@@ -65,15 +65,25 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
         LAST=$(cat "$SEEN" 2>/dev/null | tr -d '\r\n ')
         case "$WATERMARK" in ''|*[!0123456789]*) WATERMARK="" ;; esac
         case "$LAST" in ''|*[!0123456789]*) LAST=0 ;; esac
+        # SessionStart's flag after a resume, compaction or /clear: print
+        # the digest again unless something showed it since (the marker
+        # moved past the value the flag names).
+        AGAIN=""
+        REPRINT="$DIGEST_DIR/$KEY.reprint"
+        if [ -f "$REPRINT" ] && [ ! -L "$REPRINT" ]; then
+            AT=$(tr -d '\r\n ' 2>/dev/null < "$REPRINT")
+            case "$AT" in ''|*[!0123456789]*) AT=$LAST ;; esac
+            [ "$LAST" -le "$AT" ] 2>/dev/null && AGAIN=1
+        fi
         PRINTED=0
-        if [ -n "$WATERMARK" ] && [ "$WATERMARK" -gt "$LAST" ]; then
+        if [ -n "$WATERMARK" ] && { [ "$WATERMARK" -gt "$LAST" ] || [ -n "$AGAIN" ]; }; then
             BODY=""
             case "$CONTENT" in *$'\n'*) BODY=${CONTENT#*$'\n'} ;; esac
             if [ -n "$BODY" ]; then
                 printf '%s\n' "$BODY"
                 PRINTED=$(( ${#BODY} + 1 ))
             fi
-            printf '%s\n' "$WATERMARK" > "$SEEN" 2>/dev/null
+            [ "$WATERMARK" -gt "$LAST" ] && printf '%s\n' "$WATERMARK" > "$SEEN" 2>/dev/null
         fi
         # Measurement ledger: when, which session, which watermark, bytes added.
         LEDGER="$DIGEST_DIR/ledger.log"
@@ -82,6 +92,8 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
         fi
         printf '%s\thook\t%s\t%s\t%s\n' "$(date +%s)" "${KEY:0:8}" "${WATERMARK:-0}" "$PRINTED" >> "$LEDGER" 2>/dev/null
     fi
+    # The flag asks for one prompt only, digest or not.
+    [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.reprint" 2>/dev/null
 fi
 
 exit 0

@@ -474,14 +474,17 @@ def test_after_clear_the_process_record_maps_the_new_id_to_the_shims_file(
 
 
 @pytest.mark.parametrize("reason", ["clear", "resume"])
+@pytest.mark.parametrize("ring_at", [3, 2], ids=["live-ring", "seen-ring"])
 def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
-        reason, digests, tmp_path, monkeypatch, capsysbinary):
+        reason, ring_at, digests, tmp_path, monkeypatch, capsysbinary):
     """The actual Claude hooks hand the shim's key to a new session, and the
-    waiter and prompt hook agree which delivery marker belongs to that key."""
+    waiter and prompt hook agree which delivery marker belongs to that key.
+    A ring past the marker fires through the carried key; a ring the
+    session already saw does not, and the prompt shows the mail instead."""
     spawn, current = "fixture-session", f"after-{reason}"
     digest = _digest(digests, spawn)
-    _write(digest, 2, MAIL)
-    _ring(digest, 2)
+    _write(digest, 3, MAIL)
+    _ring(digest, ring_at)
     _seen(digest).write_text("2\n")
     env = isolated_env(tmp_path / "codex-home")
     env.update({"PSEUDOLIFE_DIGEST_DIR": str(digests),
@@ -505,13 +508,19 @@ def test_session_handoff_record_routes_waiter_and_shares_seen_with_prompt_hook(
     assert re.fullmatch(rb"[0-9a-f]{64}", lines[2]) and re.fullmatch(rb"[0-9]{1,12} (-|[+-][0-9]{4})", lines[3])
     assert lines[4:] == [b""]
     assert not (digests / f"claude-{os.getpid()}.switch").exists()
-    assert not _seen(digest).exists()
+    assert _seen(digest).read_text().strip() == "2"
 
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", current)
     monkeypatch.setenv("CLAUDE_PID", str(os.getpid()))
+    if ring_at <= 2:
+        assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+        assert capsysbinary.readouterr().out == b""
+        assert MAIL.strip() in hook("coordination-prompt.sh", current)
+        assert _seen(digest).read_text().strip() == "3"
+        return
     assert run_wait_mail(["--timeout", "5", *FAST]) == 0
     assert capsysbinary.readouterr().out == MAIL.encode()
-    assert _seen(digest).read_text().strip() == "2"
+    assert _seen(digest).read_text().strip() == "3"
     assert MAIL.strip() not in hook("coordination-prompt.sh", current)
     assert run_wait_mail(["--timeout", "0.1", *FAST]) == 3
     assert capsysbinary.readouterr().out == b""
@@ -549,6 +558,84 @@ def test_prompt_hook_and_waiter_share_the_marker_in_both_hook_runtimes(
     assert capsysbinary.readouterr().out == newer.encode()
     assert _seen(digest).read_text().strip() == "4"
     assert newer.strip() not in prompt()
+
+
+def _session_start(shell, source, digests, tmp_path):
+    """Run the real SessionStart hook for fixture-session."""
+    env = isolated_env(tmp_path / "hook-home")
+    env.update({"PSEUDOLIFE_DIGEST_DIR": str(digests),
+                "CLAUDE_PLUGIN_ROOT": str(ROOT / "plugin"),
+                "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:9"})
+    payload = json.dumps({"session_id": "fixture-session", "source": source})
+    if shell == "bash":
+        bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env)
+    else:
+        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
+                 input=payload, env=env)
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("source", ["resume", "compact", "clear"])
+def test_a_ring_taken_before_a_restart_never_fires_on_later_plain_mail(
+        shell, source, digests, tmp_path, capsysbinary):
+    """A ring marker the session already saw stays seen across resume,
+    compact and clear: when SessionStart deleted ``.seen``, the old ring
+    read as unseen and plain mail arriving later ended the wait (#522
+    review)."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _ring(digest, 3, "rung urgent")
+    _seen(digest).write_text("3\n")
+    _session_start(shell, source, digests, tmp_path)
+    assert _seen(digest).read_text().strip() == "3"
+    _write(digest, 4, MAIL + "- 1 more pending\n")
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("source", ["resume", "compact", "clear"])
+def test_a_ring_written_after_a_restart_for_mail_already_seen_never_fires(
+        shell, source, digests, tmp_path, capsysbinary):
+    """A staggered ring's timer can write the marker after SessionStart ran,
+    for mail the prompt hook already showed (#534 review): it is at or below
+    ``.seen``, so plain mail arriving later does not borrow it."""
+    digest = _digest(digests)
+    _write(digest, 3, MAIL)
+    _seen(digest).write_text("3\n")
+    _session_start(shell, source, digests, tmp_path)
+    _ring(digest, 3, "rung urgent")
+    _write(digest, 4, MAIL + "- 1 more pending\n")
+    assert run_wait_mail(["--timeout", "0.3", *FAST]) == 3
+    assert capsysbinary.readouterr().out == b""
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_a_refused_ring_retried_after_a_restart_stays_dropped(shell, digests, tmp_path):
+    """The shim retries a refused ring marker only while ``.seen`` is below
+    the watermark it was for. A compaction after the prompt hook showed that
+    mail must leave the marker in place, or the retry writes a ring for
+    mail already seen (#534 review)."""
+    from tests.test_coordination_adapter import _fail_first_ring_write, _mailbox_daemon, _preview
+    ring = {"decision": "rung", "reason": "anyone", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (2, _preview("m1", "m2"), ring),
+                              (2, _preview("m1", "m2"), None)])
+    digest = _digest(digests)
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=digest)
+        async with client:
+            async with coordination:
+                _fail_first_ring_write(coordination)
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                _seen(digest).write_text(f"{coordination.digest_watermark}\n")  # the prompt hook
+                _session_start(shell, "compact", digests, tmp_path)
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert not digest.with_suffix(".ring").exists()
+
+    asyncio.run(drive())
 
 
 def test_resolver_uses_the_record_only_under_its_own_guards(digests, tmp_path):

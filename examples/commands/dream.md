@@ -87,7 +87,7 @@ leads, read the evidence, and disagree freely.
    - **Distinct things**: `memory_graph_review(action="reject_entity",
      proposal_id=...)` AND `memory_graph_review(action="dismiss_pair",
      src=..., dst=...)` so the pair never re-proposes.
-   - **Unsure**: leave pending for the Atlas queue. Do not guess; scopes that
+   - **Unsure**: leave pending for the Console's **Review** view. Do not guess; scopes that
      don't overlap are a strong distinct signal.
 5. Triage the junk verdict — over-extraction artifacts the analyzer wants
    pruned. The dry-run reports them as `would_junk`
@@ -102,7 +102,7 @@ leads, read the evidence, and disagree freely.
    - **A real thing that merely looks thin** — short, weakly-connected names
      are often legitimate ("Go", "uv"):
      `memory_graph_review(action="reject_entity", proposal_id=...)`.
-   - **Unsure**: leave it pending for the Atlas queue. Junk deletion is the
+   - **Unsure**: leave it pending for the Console's **Review** view. Junk deletion is the
      one irreversible verdict in this flow — the step-1 snapshot is the
      only undo (lesson/world forgets below are reversible; see step 6).
 6. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
@@ -122,7 +122,8 @@ leads, read the evidence, and disagree freely.
    - **Unsure**: leave listed. Do not guess.
 7. Report: what the mechanical pass did (or that the tick already had),
    proposed / dismissed counts, merges you applied or rejected (they appear
-   under "recent merge decisions" in Atlas, beside the accept-rate stat),
+   under "Merge decisions" in the Review view's "Recent decisions" panel,
+   beside the accept-rate stat),
    junk entities deleted or kept, lesson/world pairs settled, contested
    facts if step 2 ran, and the snapshot filename. Link proposals still
-   need a human verdict (`accept_link` / `reject_link` or Atlas).
+   need a human verdict (`accept_link` / `reject_link` or the Review view).

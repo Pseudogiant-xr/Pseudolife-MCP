@@ -146,7 +146,12 @@ reminders, follow [Codex hooks and verification](docs/guide/providers.md#codex-s
 Use one MCP registration and one hook source; an installed plugin may
 already provide either. After the daemon is running, execute
 `pseudolife-mcp doctor` from the **same environment as the registered command**.
-It checks the handshake and annotations without calling bank tools.
+It checks the handshake and annotations without calling bank tools. When
+the shell has no `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE`,
+doctor takes the token from the Claude Code registration (`~/.claude.json`,
+or under `CLAUDE_CONFIG_DIR`), else from the Codex one, and names where it
+came from in `credential_source`; with none and a daemon that requires a
+token, it reports `BearerMissing`.
 
 Then in either coding agent: *"remember that my staging box is haze-02"* →
 the agent calls `memory_store`; next session, *"which box is staging?"* →
@@ -430,10 +435,10 @@ is agent context every session, so it stays lean.
 | `memory_reinstate(entry_id, operation_id, expected_..., evidence_packet_sha256, reviewer_ids, reason)` | Reinstate one independently reviewed retired entry under its durable ID; Postgres-only, named-principal, exact-preimage, append-only and idempotent. Refuses any trace invalidation and never confirms derived cortex facts |
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
-| `memory_agents(action, project?, task?, status?, lease?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`; unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, or explicit recipient `ack` (one id or several comma-separated, ids or prefixes); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
-| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
+| `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
@@ -443,7 +448,7 @@ is agent context every session, so it stays lean.
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?, used_ids?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons. `used_ids` names the search hits the work actually turned on — each credits every `retrieval_events` row in the session window that served it with a `retrieval_uses` label (`used_via=outcome`), the relevance signal a learned reranker trains on; same session, within `use_window_seconds`, or nothing is credited |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, commit_token?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage, with long lists capped and their full counts under `truncated`) |
-| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `list` takes `scope=<memory source>` (the Atlas project scope) to keep only analyzer findings whose entities carry that source — queued proposals (`proposed_link` / `merge_candidate` / `junk_candidate`) always list; omit or `"all"` for everything; it is not a finding-kind filter; `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity|attribute` key in `src` (or a bare entity to restore every retired aspect) |
+| `memory_graph_review(action, proposal_id?, proposal_ids?, proposals?, scope?, src?, dst?, relation?, store?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `restore_slot` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console); `list` takes `scope=<memory source>` (the project scope of the Console's Graph and Review views) to keep only analyzer findings whose entities carry that source — queued proposals (`proposed_link` / `merge_candidate` / `junk_candidate`) always list; omit or `"all"` for everything; it is not a finding-kind filter; `proposal_ids` settles many id-actions in one call; `restore_slot` undoes a `memory_forget(scope="lesson"/"world")` retirement — `store` + the retired `entity\|attribute` key in `src` (or a bare entity to restore every retired aspect). In the slot keys `restore_slot` and `dismiss_slot_pair` take, a literal `\|` inside an entity or attribute is spelled `%7C`; the one bare `\|` joins the two halves, and a key with more than one bare `\|` is refused |
 | `memory_session_title(title, episode?)` | Name THIS session's auto-opened episode (default titles are generic); `episode` is your session handle from the briefing — concurrent sessions share one HTTP connection, so pass it to land the rename on your own episode |
 | `memory_episode_start(title, hint?, episode?)` / `memory_episode_end(episode?)` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id; `episode` is your session handle so the nest/pop lands in your own tree when several sessions run concurrently |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -463,7 +468,8 @@ Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 The five recall-path tools return **compact entries** by default (result
 payloads are agent context on every retrieval; search and recent entries
-keep their write `date`); pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
+keep their write `date`), and `memory_fact_get` likewise drops bookkeeping
+keys from its record; pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
@@ -1080,9 +1086,15 @@ See the [official hook protocol](https://learn.chatgpt.com/docs/hooks).
 
 **Codex hook trust:** setup approval is limited to PseudoLife's current hook
 definitions: the memory and coordination SessionStart and UserPromptSubmit
-handlers and SessionEnd, plus the plugin's `Stop` entry (Claude Code's wake
-hook, on by default; in Codex it runs only the park gate). It does not approve other plugins or bypass
-future trust checks. Codex approves the definitions, not the scripts they
+handlers and SessionEnd, plus, with the plugin, its `Stop` entry (Claude
+Code's wake hook, on by default; in Codex it runs only the park gate), its
+`SubagentStart` and two `SubagentStop` handlers (Claude Code's subagent
+board hooks, a no-op in Codex, plus the park gate) and its `PreToolUse`
+guard. It does not approve other plugins or bypass
+future trust checks. The same consent sets `approval_mode = "approve"` for
+the `memory_message` tool on the `pseudolife-memory` server, unless you set
+another value yourself, so a Codex thread can then read and send board
+mail without asking. Codex approves the definitions, not the scripts they
 run, so the approval also covers the scripts later PseudoLife updates
 install (for manual copies the update installs them itself, verified by
 content). Changed definitions need approval again, and so does a
@@ -1127,7 +1139,10 @@ several filters narrow the match, so `text="probe", source="status"` is
 the probe entry in that source, not the whole source; a match over
 `memory.delete_confirm_threshold` entries — default 20, `0` disables — is
 refused with `would_delete` until the call repeats with
-`confirm_bulk=true`); `lesson` and `world` scopes retire the slot with an
+`confirm_bulk=true`; on Postgres, forgetting an entry also retires the
+current facts, dream edges and lessons it was the last surviving source of,
+keeping them as history, and queues affected session digests for
+regeneration); `lesson` and `world` scopes retire the slot with an
 audit row and are reversible with `memory_graph_review(action="restore_slot",
 store=..., src="entity|attribute")`; for "keep the history but mark it
 wrong" use `memory_supersede` instead:
@@ -1258,7 +1273,12 @@ initializing the bank through this read.
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
 requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No CDN, fully offline: a Svelte
+prompts for it and stores it locally). REST `POST` bodies are capped in
+wire bytes: 4 MiB for the text-bearing writes (`/api/facts/set`,
+`/api/consolidate`, `/api/supersede`), 32 KiB for `/api/coordination/*`,
+16 KiB for the session-end hook, 1 KiB for `/api/pair`, and 256 KiB for
+everything else; a larger body gets HTTP 413 `{"error":
+"request_too_large"}`. No CDN, fully offline: a Svelte
 build committed under `pseudolife_memory/web/static/` with vendored OFL fonts
 and a vendored 3D engine, served straight from the daemon, so neither the
 daemon image nor a pip install needs Node. The source is in
@@ -1308,7 +1328,13 @@ pseudolife-mcp-daemon`).
   OpenAI-compatible endpoint
   ([Quickstart](#what-lite-gives-you-and-the-one-thing-it-doesnt)) or use
   the Docker tier's bundled sidecar. `"extractor": "disabled"` instead
-  means dreaming itself is switched off in config.
+  means dreaming itself is switched off in config. `"extractor":
+  "stalled"` means an extractor is configured but live dreams have stopped
+  reaching it; the `stall` sub-object gives the reason and times. For
+  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
+  hosted endpoint rejected its key): re-run
+  `claude auth login` (or `codex login`) on the daemon host. See
+  [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
   path: the embedded Postgres runtime needs an **ASCII-only** data
   directory. Set `PSEUDOLIFE_MCP_DATA_DIR` to one (e.g.
@@ -2536,6 +2562,16 @@ and the `drop_reason` (or `kept=True`) for each. The `final_topk` block
 shows exactly which entries reached the result set and what score they
 carried.
 
+Scoping filters (`sources`, `episodes`, `tags`, and the
+`memory.hide_superseded` setting) apply
+before each band's candidate cap, not after it, so a scoped entry is not
+crowded out by out-of-scope neighbours that rank above it. Each band in
+the trace's `tiers` list reports `entry_count` (entries in the band),
+`eligible_count` (those that passed the filters) and `excluded_count`
+(those that did not); a band named outside a `bands=` filter shows
+`filtered_out: true` with every entry excluded. An `eligible_count` of 0
+means the filters, not the ranking, removed the entry you expected.
+
 Also useful for state-probe queries where recency bias is unwelcome:
 
 ```
@@ -3266,6 +3302,13 @@ this page set neither. A fallback that needs the primary's credential, such
 as a second model on the same hosted provider, needs the key set again under
 the fallback name.
 
+**Redirects are refused.** The primary and the fallback never follow an
+HTTP redirect, so a key cannot be forwarded to a host you did not
+configure. A redirect fails the call with `redirect to <url> refused --
+configure the final URL directly`: set `PSEUDOLIFE_DREAM_BASE_URL` and
+`PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` to the endpoint's final URL (for
+example `https` rather than an `http` address that redirects to it).
+
 ## OpenAI primary — the Codex CLI shim
 
 The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
@@ -3285,7 +3328,12 @@ Scheduler, elevated pwsh opened from the Start menu, same caveat as the
 Claude shim above; `.sh` — systemd `--user`, docker-bridge bind; both pick
 and verify the unit's interpreter exactly as the Claude shim's autostart
 does, `--python` / `-PythonExe` naming one), and writes the env triple for
-you. The autostart raises the shim's
+you. Unlike the Claude shim's installer, the Windows Codex installer does
+not stop a shim already serving its port: re-running it over a live shim
+starts a second listener beside the old one, which can keep answering on
+the old settings. After a re-run, run
+`python ops/shim_autostart.py restart codex`, which stops the running
+shim and starts it again. The autostart raises the shim's
 health-probe interval to 1800 s (`--health-ttl`) because every `/health`
 refresh is a real CLI call — metered spend on a free ChatGPT tier; a
 stale-ok window only costs one failed primary attempt before the dream
@@ -3760,6 +3808,15 @@ merge judge against ratified triage verdicts
 (`evals/results/judge-ladder-20260816.json`) and `evals/queue_judge_ladder.py`
 scores every queue's judge against the 2026-09-02 blind-panel set
 (`evals/results/queue-judge-panel-20260902.json`), simulating each auto gate.
+The measured merge-judge configuration (2026-09-29) is `judge_url` pointing
+at a Claude CLI shim, `judge_model: claude-opus-5-5`,
+`judge_second_model: claude-sonnet-5-5` and `judge_mode: auto-reject`: on
+that panel the pair's two-vote rejects supported `auto-reject`, its two-vote
+accepts did not support `auto`, and GPT-6 models as the second opinion let
+false rejects through the two-vote gate
+(`evals/results/queue-judge-ladder-20260929-*.json`,
+`evals/results/queue-judge-cross-20260929.json`). It is applied by
+configuration; the shipped default stays `shadow`.
 
 Pending judgments are bound to the evidence and policy that produced them.
 Changing the model, prompt, mode or supplied evidence invalidates an old opinion;
@@ -4093,13 +4150,16 @@ reliably — without the agent having to remember:
 
 An episode is not a durable record that a session happened: a root that
 ends holding no stored entry is deleted. So every registration (the
-SessionStart hook, or `POST /api/episode/start` from the stdio shim and the
-CLI episode hooks) also writes one `client_sessions` row per session key
-(schema v43), which no prune, sweep or tombstone expiry deletes. The row
+SessionStart hook, or `POST /api/episode/start` from the CLI episode hooks or
+a direct call) also writes one `client_sessions` row per session key
+(schema v43), which no prune, sweep or tombstone expiry deletes. The stdio
+shim registers nothing: a session whose client runs no SessionStart hook
+(one with only the shim, such as Claude Desktop) gets its root opened
+lazily on its first write and has no `client_sessions` row. The row
 holds how the session first registered (`hook` or `api`), the bearer's
 principal, its first start and every registration time since (a resumed
 client registers again), its most recent close and why (`end` for
-SessionEnd or shim exit, `idle` for the reaper; cleared when the session
+SessionEnd or an episode-end call, `idle` for the reaper; cleared when the session
 registers again or a store or handle reopens its root), the startup memory-policy variant the hook assigned
 (for `full_separate_hook`, a plugin without the separate memory-policy hook
 never delivers it), and every root episode id the session was given. A
@@ -4507,7 +4567,10 @@ is the daemon-side counterpart, naming the plugin tree whose hook scripts
 `/health` digests — the image sets it to its own copy). The plugin's
 coordination UserPromptSubmit hook prints the digest only when the watermark passed the
 shared `.seen` marker; the tool-result hint uses the same marker, so a change
-is delivered once and a quiet turn adds nothing. While mail stays pending and
+is delivered once and a quiet turn adds nothing. After a resume, compaction or
+`/clear` the conversation has lost the digest it saw: SessionStart writes a
+`<key>.reprint` flag naming the marker it found, and the next prompt prints
+the digest again unless a wake or a hint showed it since. While mail stays pending and
 unchanged, a one-line reminder rides every tenth tool result. A Claude Code
 subagent runs inside its parent's shim, so a tool result may be the
 subagent's: while the plugin's SubagentStart/SubagentStop hook keeps a
@@ -4830,9 +4893,18 @@ slots, with the holder record's pid, worktree and start time), since that file,
 not `lease-full-suite.lock`, is the truth for a full run. A run with
 `PSEUDOLIFE_SUITE_LOCK=off` takes no lock, so no check sees it.
 
+Each machine mirrors its suite lock under its own lease name:
+`PSEUDOLIFE_SUITE_LEASE`, else a `full-suite.lease` file in the lock
+directory, else `full-suite`. A second machine that runs suites against the
+same board names itself `full-suite@<host>` (1-40 letters, digits, `.`,
+`_` or `-`), so its runs do not hold off the first machine's gates.
+`lease check` maps a suite lease to the local lock only when the name is
+this machine's own; for another machine's suite lease it reports that
+there is no lock here and goes by the board alone.
+
 The test suite's lock is mirrored the same way. A full `pytest` run
-(`tests/conftest.py`, `tests/suite_lock.py`) holds the board lease `full-suite`
-behind its OS lock: while it queues it is a board waiter, once it holds the lock
+(`tests/conftest.py`, `tests/suite_lock.py`) holds that machine's suite lease
+(`full-suite` by default) behind its OS lock: while it queues it is a board waiter, once it holds the lock
 it holds the lease, with the run's pid and worktree as its purpose and an
 expected end from the median of the last five timed runs
 (`~/.pseudolife-mcp/locks/full-suite.durations.jsonl`; 25 minutes until five
@@ -6176,8 +6248,11 @@ also capped (below, and by the daemon's `wake` caps under
   wake) does not fire again at the next turn end. Firing
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
-  written, the hook does not wake at all. SessionStart clears `.seen` on
-  resume and compact, so a pending ring can wake the session once more.
+  written, the hook does not wake at all. Resume, compact and `/clear`
+  keep `.seen`: SessionStart writes a `<key>.reprint` flag naming the
+  marker it found, and the next prompt prints the digest again unless a
+  wake or a hint showed it since. A ring the session already saw
+  therefore never fires after those, even when the shim writes it late.
 - At most 20 wakes per session in any hour, the same figure the daemon now
   applies per recipient before it decides a ring. A ring over the hook's
   cap waits for the window to free up; it is delayed, not dropped.
@@ -7019,6 +7094,18 @@ from the legacy bank. Leave the original `.pt` files in place until it
 completes: the resume reads them, and deleting one makes the bank
 unfinishable.
 
+`/health` treats a failed dream-tracking initialization the same way. It
+disables the dream alone: `memory_dream` pull and commit refuse while
+every other tool serves normally, and `status` stays `"ok"`. The payload
+then carries a `dream_tracking_error` field with the error code only
+(`invalid_legacy_dream_cursor`, `invalid_dream_ack_state` or
+`dream_ack_initialization_failed`), since the full message can carry a
+DSN; `memory_dream(action="status")` reports the code as `error` with the
+message as `detail`, and the daemon log has the same ERROR line. A transient failure (a dropped
+connection, a failed checkpoint write) is retried on the next dream call.
+An invalid cursor, acknowledgement state or checkpoint is the bank's own
+data, so it stays reported until it is repaired.
+
 The daemon owns its bank alone. It holds a Postgres advisory-lock *writer
 lease* for as long as it runs. A second daemon, a stdio-embedded server, or
 a maintenance script or eval that opens the same bank through the service
@@ -7716,7 +7803,7 @@ The milestones:
 | v40 | Agent coordination (2026-09-11). Adds `coordination_agents` for bearer-owned instances, hashed credentials, explicit scope, activity and adapter attachment generations, and `coordination_messages` for one-recipient mail, per-recipient ordering, sender request-key deduplication, expiry and acknowledgment. Agent rows have no episode FK; episode cleanup cannot remove mail. No embeddings or changes to memory tables. Both tables are operational data excluded from portable knowledge exports. Additive/idempotent; existing banks start with empty coordination tables and the feature remains disabled until configured. |
 | v41 | Audited continuum entry reinstatement (2026-09-22). Adds `entry_reinstatement_decisions`, an operation-keyed, FK-free append-only audit that survives later entry deletion. A single Postgres transaction binds the reviewed retirement preimage to the decision and clears only the entry's retirement fields; retries use the operation UUID. The first version refuses entries with trace invalidations and leaves all cortex state unchanged. Additive/idempotent; existing banks start with an empty decision table. |
 | v42 | Board audit log (2026-09-24). Adds `coordination_events`, an append-only, FK-free, sha256-hash-chained record of every agent-board mutation (register, update with the replaced values, attach, detach, send with its body, first read, ack, attempt, expire, prune, bank identity, restore recover/rebind), written in the mutation's own transaction and pruned only by its own `coordination.audit_retention_days` window (default 90, `0` keeps it forever), which logs its cuts. Adds `coordination_messages.first_read_at`. Operational data, excluded from portable exports like the other coordination tables; read and verified with `pseudolife-mcp board-audit`. The log is cut at most once a day, on UTC day boundaries, and only while the board is in use. Additive/idempotent; existing banks start with an empty log, and history before the upgrade is not reconstructed: a message still unacknowledged at the upgrade has no `send` event, and its first read afterwards is logged as its first read. |
-| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the stdio shim and the CLI episode hooks): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or shim exit, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
+| v43 | Durable client-session record (2026-09-25). Adds `client_sessions`, one FK-free row per session key the daemon registered (the SessionStart hook, or `POST /api/episode/start` from the CLI episode hooks or a direct call; the stdio shim registers none, so shim-only sessions get no row): `registered_via` (`hook` \| `api`, the first registration's), the bearer's `principal`, `started_at` (first registration, never moves) and `start_times` (every registration, so a resumed client's new shim still pairs with it), `ended_at` + `end_reason` (the most recent close: `end` for SessionEnd or an episode-end call, `idle` for the reaper; cleared when the session registers again or a store or handle reopens it), the startup memory-policy `policy_variant` the hook assigned, and `episode_ids`, every root episode the session was given. A root that ends holding no entry is still pruned; the row is not, so the searches and outcomes of a session that stored nothing keep a session to count against, and an online `memory_policy.ab_arms` test keeps each session's arm. Written best-effort (a failed write never fails a session start); Postgres only; operational data, excluded from portable exports. Additive/idempotent; existing banks start with an empty table, and sessions before the upgrade are not reconstructed. [Episodes — session record](episodes.md#session-record) |
 | v44 | Memory-loop observability (2026-09-25). Adds `lesson_search_events`: one row per `memory_lesson_search` call (query, caller session and episode, the lessons served by `(entity_norm, attribute_norm)` slot key with rank and score; an empty list for a search that found nothing). It is a separate table from `retrieval_events`, whose rows the retrieval replay and telemetry harnesses re-run as `memory_search` calls. FK-free; it shares the retrieval log's switch (`memory.retrieval_log.enabled`) and retention (`retention_days`). Adds `outcome_signals.used_ids` (JSONB): what an outcome's `used_ids` became, as `{"credited", "unmatched", "served_elsewhere"}` id lists, or `{"unchecked", "reason"}` when the label write failed; `NULL` when the outcome named no ids, the log is off, or this best-effort write failed (counted in `retrieval_log.write_errors`). The column is serving telemetry and stays out of portable exports, like the retrieval log. Additive/idempotent; existing rows read `NULL` and the new table starts empty. |
 | v45 | Resource leases (2026-09-26). Adds `coordination_leases`, one FK-free row per lease name (holder agent and principal, purpose, the current grant's fence from the `coordination_lease_fence` sequence, so a name's fence never repeats, the acquired, expiry and expected-end times, the estimate the hold was given, and when the lease was last freed, after which a week free and unqueued forgets the row), `coordination_lease_waiters`, each lease's FIFO queue, and `coordination_agents.status_expires_at`, when a status says it stops being true. A process-held lease's truth is an OS file lock that `pseudolife-mcp lease run` takes on the host, and the row mirrors it; a session-held lease (`coordinator:<project>`, `claim:<path>`) lives only here. A freed lease goes to the head of its queue, which must renew within five minutes or lose it to the next. Grants, releases, expiries and operator breaks are audit events; renewals are not. Operational data, excluded from portable exports like the other coordination tables. Additive/idempotent. |
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
@@ -7994,7 +8081,10 @@ they do not enforce semantic compliance with every memory instruction:
    when new lessons or other sessions' status notes landed since the last
    one, with a one-line reminder (recall before review, status questions are
    memory questions, log outcomes); the `ops/install-hook.*` fallback
-   injects that reminder as a fixed line on every prompt. Plus a separate
+   installs the same note (`pseudolife-mcp prompt-hook`, run through
+   `docker exec -i` on the Docker tier, where the briefing runs), and
+   re-running it replaces the fixed per-prompt line older installers wrote.
+   Plus a separate
    coordination handler for changed inbox previews. Full addressed messages are read through `memory_message`, then
    acknowledged after reading. Claude Code and current Codex runtimes.
 
@@ -8320,8 +8410,10 @@ If the runtime's hook or trust interface is unavailable or unsupported, or a
 hook fails verification, setup reports what remains unresolved and provides
 `/hooks` repair guidance. It installs the standing block only when approved;
 installed files or saved hashes alone never count as working hooks. New or
-changed definitions require approval again. Manual script bundles use
-content-specific paths so updating their code also changes the definitions.
+changed definitions require approval again. Manual copies run through the
+fixed launcher commands above, so a script update needs no new approval:
+the script bundles stay content-addressed, and only the `current` pointer
+moves to a new one after it is verified.
 
 ### Hooks versus AGENTS.md
 
@@ -8388,7 +8480,13 @@ upgrade the client or configure that entry manually before using the shim.
 2. In that environment run `pseudolife-mcp doctor`. It reports interpreter,
    source path, installed package/SDK versions, health, instructions and tool
    annotations. It neither starts a daemon nor calls a bank tool. A healthy
-   endpoint alone does not establish a working stdio handshake. Its `board`
+   endpoint alone does not establish a working stdio handshake. A shell
+   without `PSEUDOLIFE_MCP_TOKEN` or `PSEUDOLIFE_MCP_TOKEN_FILE` borrows the
+   token from the Claude Code registration (`~/.claude.json`, or under
+   `CLAUDE_CONFIG_DIR`), else from the Codex one (`config.toml` under
+   `CODEX_HOME`, default `~/.codex`); `credential_source` names which, and a
+   daemon that requires a token with none found reports `BearerMissing`.
+   Its `board`
    line says whether the agent board is on for that environment's token, or
    the daemon's reason it is off.
    Its `coordination` snapshot separates daemon reachability, authenticated
@@ -9506,6 +9604,22 @@ attack surface rather than a defense. Defenses that key on *who wrote*
 are the class this attack does not straightforwardly evade, and that is
 why the mechanisms below are provenance-shaped.
 
+**Board mail is a cross-session channel.** On an authenticated install the
+experimental agent board lets one session's text reach another session's
+context: the per-turn digest previews up to five pending messages (sender
+label and a 100-character excerpt each), `memory_message(action="receive")`
+returns them in full, and a wake can start a turn in a parked session. A
+session that a hostile page has steered can therefore try to steer its
+peers. The mitigations are provenance-shaped too: every delivery is framed
+as agent-origin under a daemon-verified sender, never as a user
+instruction, and peer text cannot grant user approval; mailbox access
+needs a bearer whose principal is on `coordination.allowed_principals`
+(or a paired machine granted board access) and a registered adapter's own
+credential; wakes are policy-gated and capped; and an open install
+with no token keeps the board dormant. None of that stops a model from
+acting on a persuasive message, so treat peer mail like any other read
+content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).
+
 ## Mechanism → threat map
 
 Every row ships today. "Default" says what a fresh install does, because a
@@ -9525,7 +9639,7 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Writer keying / per-principal tokens** | Narrows the blast radius of a leaked credential: a matched per-principal token *becomes* its caller's writer id, where the singular shared token's holder may assert any writer via `X-PL-Writer` | Single token / open loopback |
 | **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log` / `digest`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
-| **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. The links tell you what else to retire | On |
+| **`memory_forget` + engram links** | Remediation. `scope="memory"`/`"fact"` hard-delete; `scope="lesson"`/`"world"` retire (status flips, row kept with a `store_decisions` audit trail, undoable via `restore_slot` until compaction purges it) — a poisoned lesson/world fact is contained, not purged, until then. Forgetting an entry also retires the facts, dream edges and lessons it alone supported (Postgres); the links tell you what else to retire | On |
 
 Two of these deserve their exact claim restated, because overselling them
 would be the same failure this page is about:
@@ -9583,10 +9697,16 @@ problem than the limitation it hides.
 1. **Do not try to correct it conversationally.** That leaves live poison
    with a correction beside it.
 2. **Find it and delete it** — `memory_forget(scope="memory", ...)` for the
-   entry.
+   entry. On Postgres the same transaction retires what it alone supported:
+   current cortex facts with no other current source entry (kept as
+   history), dream edges with no other current evidence, and lessons whose
+   last lineage entry it was; session digests that drew on it are retired
+   and queued for regeneration.
 3. **Follow the engram links** — `memory_fact_get` reports `source_entries`;
-   retire any cortex facts derived from the entry
-   (`memory_forget(scope="fact", ...)`).
+   a fact that still has another surviving source stays current, so retire
+   it yourself if it is poisoned too (`memory_forget(scope="fact", ...)`).
+   Dream edges extracted before schema v51 carry no evidence rows and are
+   not retired by the cascade.
 4. **If a dream did it, roll the pass back** —
    `memory_dream(action="runs")` to find it, then
    `memory_dream(action="rollback")`, which restores each touched slot's
@@ -9792,7 +9912,11 @@ Plain HTTP is acceptable only inside a private network you trust.
   address; the token requirement then applies directly.
 - **Reverse proxy:** terminate TLS at the proxy and forward to
   `127.0.0.1:8765`. The token relaxes the `Host` check, so the proxy's
-  hostname needs no further configuration.
+  hostname needs no further configuration. Pass the daemon's error
+  responses through unchanged, `Content-Length` included. The stdio shim
+  trusts a `503 principals_unavailable` (no tool ran) only in the daemon's
+  exact small JSON form; a rewritten one reads as an operation that may
+  have completed.
 
 ## Adding a machine: `invite` and `pair`
 
@@ -9869,8 +9993,11 @@ on its own connection. If that read has failed for over 60 seconds, a
 bearer that matches nothing in the environment gets `503 {"error":
 "principals_unavailable"}` rather than 401, so a valid invited token is
 never reported as wrong. A tool call whose bearer stops resolving between
-the gate and the tool (revoked meanwhile) gets the JSON-RPC error
-`principals_unavailable` and is never run as the default principal.
+the gate and the tool is never run as the default principal. It gets the
+JSON-RPC error `principals_unavailable` (-32003) when the table cannot be
+checked, and `unauthorized` (-32004) when the token was revoked or
+replaced (`invite --replace`) meanwhile. The stdio shim passes both on as refusals in which no tool
+ran.
 
 Redemption (`POST /api/pair`) refuses any request with an `Origin` header,
 takes only JSON bodies up to 1 KiB, answers every failure with the same

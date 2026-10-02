@@ -73,6 +73,15 @@ def test_board_off_line_names_the_daemons_reason(reason, expected):
     assert "fixture-token" not in line
 
 
+def test_reason_hint_is_the_line_the_probe_prints():
+    from pseudolife_memory.board_status import reason_hint
+
+    with _Daemon("off; reason=principals_unavailable") as daemon:
+        line = board_status(daemon.url, "fixture-token")[1]
+    assert line == f"off - {reason_hint('principals_unavailable')}"
+    assert reason_hint("no-such-reason") is None
+
+
 def test_an_unlisted_principal_is_told_about_invite():
     with _Daemon("off; reason=principal_not_allowed") as daemon:
         line = board_status(daemon.url, "fixture-token")[1]

@@ -137,9 +137,16 @@ class _UpstreamAttempt:
 
 
 _PRINCIPALS_UNAVAILABLE = "principals_unavailable"
-# mcp_server.PRINCIPALS_UNAVAILABLE_CODE: the daemon refused the bearer
-# before running anything (its HTTP gate says the same with a 503).
+# mcp_server.PRINCIPALS_UNAVAILABLE_CODE and UNAUTHORIZED_CODE: the daemon
+# refused the bearer before running anything, because it cannot check
+# invited machines' tokens right now (its HTTP gate says the same with a
+# 503), or because this one was revoked after the gate admitted it.
 _PRINCIPALS_UNAVAILABLE_CODE = -32003
+_UNAUTHORIZED_CODE = -32004
+_DAEMON_REFUSALS = {
+    _PRINCIPALS_UNAVAILABLE_CODE: (_PRINCIPALS_UNAVAILABLE, 503),
+    _UNAUTHORIZED_CODE: ("unauthorized", 401),
+}
 _PRINCIPALS_REFUSAL_BODY_LIMIT = 256
 _REQUEST_PHASES = {"initialize": "initialize", "tools/list": "list", "tools/call": "call"}
 
@@ -173,14 +180,18 @@ async def _principals_refusal_phase(response) -> str | None:
     return _REQUEST_PHASES.get(sent.get("method"))
 
 
-def _is_principals_refusal(sdk_error) -> bool:
-    """The daemon's exact post-admission refusal, as a JSON-RPC error."""
-    return (sdk_error is not None
-            and sdk_error.code == _PRINCIPALS_UNAVAILABLE_CODE
-            and sdk_error.message == _PRINCIPALS_UNAVAILABLE
-            and isinstance(sdk_error.data, dict)
-            and type(sdk_error.data.get("status")) is int
-            and sdk_error.data == {"status": 503, "error": _PRINCIPALS_UNAVAILABLE})
+def _daemon_refusal(sdk_error) -> int | None:
+    """The code of the daemon's exact post-admission bearer refusal, when
+    ``sdk_error`` is one (see ``_DAEMON_REFUSALS``); otherwise None."""
+    if sdk_error is None or sdk_error.code not in _DAEMON_REFUSALS:
+        return None
+    error, status = _DAEMON_REFUSALS[sdk_error.code]
+    data = sdk_error.data
+    if (sdk_error.message == error and isinstance(data, dict)
+            and type(data.get("status")) is int
+            and data == {"status": status, "error": error}):
+        return sdk_error.code
+    return None
 
 
 def _operation_timeout_seconds() -> float:
@@ -303,6 +314,8 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     coordination_failure = next(
         (leaf for leaf in leaves if isinstance(leaf, _CoordinationUnavailableError)),
         None)
+    refusal = _daemon_refusal(sdk_error)
+    revoked = False
     if coordination_failure is not None:
         classification = "coordination_unavailable"
         message = (coordination_failure.message
@@ -312,7 +325,15 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         classification = "credential_unavailable"
         message = "The memory credential is unavailable; restore the configured credential and retry."
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
-    elif _is_principals_refusal(sdk_error) or (
+    elif refusal == _UNAUTHORIZED_CODE:
+        # Checked and no longer listed: retrying cannot help, and nothing ran.
+        revoked = True
+        classification = "authentication_required"
+        message = ("The memory daemon no longer accepts this token, so it refused this request "
+                   "before running it. No tool ran; pair this machine again or refresh the "
+                   "configured credential.")
+        outcome = "not_dispatched"
+    elif refusal == _PRINCIPALS_UNAVAILABLE_CODE or (
             status == 503 and attempt.refused_phase is not None
             and attempt.refused_phase == attempt.phase):
         # The daemon refused the bearer before running anything, so the
@@ -375,11 +396,14 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     if coordination_failure is not None and coordination_failure.hint:
         data["hint"] = coordination_failure.hint
     if classification == _PRINCIPALS_UNAVAILABLE:
-        from pseudolife_memory.board_status import _REASONS
+        from pseudolife_memory.board_status import reason_hint
 
         data.update(status=503, error=_PRINCIPALS_UNAVAILABLE,
-                    hint=_REASONS[_PRINCIPALS_UNAVAILABLE])
+                    hint=reason_hint(_PRINCIPALS_UNAVAILABLE))
         return MCPError(_PRINCIPALS_UNAVAILABLE_CODE, message, data)
+    if revoked:
+        data.update(status=401, error="unauthorized")
+        return MCPError(_UNAUTHORIZED_CODE, message, data)
     code = (sdk_error.code if classification == "protocol" and sdk_error is not None
             else -32603)
     return MCPError(code, message, data)
