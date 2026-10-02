@@ -37,8 +37,10 @@ first opinion's model (the Codex shim's launch default, 2026-09-03 to
 2026-09-11) is refused too; the judge result's `served_model_mismatch` /
 `served_model_mismatches` and a warning line name any endpoint that served
 another model than it was asked for. **Day-one behaviour on an existing bank:** with
-`judge_mode: auto-reject` already in `config.yaml` (the live default since
-2026-08-30) and `judge_second_opinion` defaulting on, the reject gate
+`judge_mode: auto-reject` set in `config.yaml` (the code default is
+`shadow`; the measured configuration is in
+[Dreaming](../guide/dreaming.md#deep-dream--full-corpus-graph-consolidation))
+and `judge_second_opinion` defaulting on, the reject gate
 widens from single-vote >= 0.8 to ALSO two agreeing votes at mean >= 0.7
 without any config edit — measured 8/8 on the 2026-09-02 rows — but since
 2026-09-30 only when the two votes came from different models: with
@@ -165,7 +167,7 @@ subagents for large batches — reuse the
 - **Distinct** (name-similarity or shared-context noise) →
   `memory_graph_review(action="dismiss_pair", src=..., dst=...)` — the pair
   stops resurfacing and frees its top-k slot.
-- **Unsure** → leave for Atlas; don't guess.
+- **Unsure** → leave it for the Console's **Review** view; don't guess.
 
 ## 3b. Step C — triage entity proposals (this session)
 

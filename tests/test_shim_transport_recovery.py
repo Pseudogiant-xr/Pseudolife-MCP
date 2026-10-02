@@ -35,7 +35,7 @@ class _Fixture:
     def __init__(self) -> None:
         self.requests: list[tuple[str, str | None, dict]] = []
         self.fault_method: str | None = None
-        self.fault: int | str | bytes | dict | None = None
+        self.fault: int | str | bytes | tuple | dict | None = None
         self.block_initialize = False
         self.initialize_blocked = Event()
         self.release_initialize = Event()
@@ -131,6 +131,10 @@ class _Fixture:
                         return
                     if isinstance(fault, bytes):
                         self._reply_raw(503, fault)
+                        return
+                    if isinstance(fault, tuple):
+                        # (content type, body) for a 503.
+                        self._reply_raw(503, fault[1], fault[0])
                         return
                     if isinstance(fault, dict):
                         # A JSON-RPC error object answering the request.
@@ -600,7 +604,7 @@ def test_principals_unavailable_refusal_is_definitely_not_executed(
     503 from its HTTP gate or a -32003 JSON-RPC error after admission. The
     shim keeps that code and a reason the caller can act on, and never says
     the operation may have completed."""
-    from pseudolife_memory.board_status import _REASONS
+    from pseudolife_memory.board_status import reason_hint
 
     token_file = tmp_path / "token"
     _replace_token(token_file, NEW_TOKEN)
@@ -619,7 +623,7 @@ def test_principals_unavailable_refusal_is_definitely_not_executed(
                 "operation_outcome": "not_dispatched",
                 "status": 503,
                 "error": "principals_unavailable",
-                "hint": _REASONS["principals_unavailable"],
+                "hint": reason_hint("principals_unavailable"),
             }
             assert "no tool ran" in error.message.lower()
             assert "may have completed" not in error.message
@@ -630,19 +634,78 @@ def test_principals_unavailable_refusal_is_definitely_not_executed(
     asyncio.run(asyncio.wait_for(drive(), timeout=8))
 
 
-def test_principals_unavailable_on_tools_list_keeps_its_code(tmp_path, upstream):
+def test_revoked_token_refusal_is_definitely_not_executed(tmp_path, upstream):
+    """An invited token revoked between the daemon's gate and the tool is
+    refused as unauthorized (-32004), before anything runs. The shim says
+    the token is no longer accepted and that no tool ran, not that the
+    daemon cannot check tokens or that the operation may have completed."""
+    token_file = tmp_path / "token"
+    _replace_token(token_file, NEW_TOKEN)
+
+    async def drive():
+        async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
+            upstream.fault_method = "tools/call"
+            upstream.fault = {"code": -32004, "message": "unauthorized",
+                              "data": {"status": 401, "error": "unauthorized"}}
+            with pytest.raises(Exception) as caught:
+                await client.call_tool("write", {})
+            error = caught.value.error
+            assert error.code == -32004
+            assert error.data == {
+                "classification": "authentication_required",
+                "phase": "call",
+                "operation_outcome": "not_dispatched",
+                "status": 401,
+                "error": "unauthorized",
+            }
+            assert "no longer accepts this token" in error.message
+            assert "no tool ran" in error.message.lower()
+            assert "may have completed" not in error.message
+            assert upstream.writes == 0
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=8))
+
+
+def test_a_stale_credential_outranks_a_daemon_refusal():
+    """The credential changed under the call: that is the failure to report,
+    even if the daemon's answer to the old bearer was a refusal."""
+    from mcp.shared.exceptions import MCPError
+
+    for code, error, status in ((-32004, "unauthorized", 401),
+                                (-32003, "principals_unavailable", 503)):
+        group = ExceptionGroup("fixture", [
+            shim._CredentialChangedError(),
+            MCPError(code, error, {"status": status, "error": error}),
+        ])
+        sanitized = shim._transport_error(
+            group, shim._UpstreamAttempt(phase="call", dispatched=True), "call")
+        assert sanitized.code == -32603
+        assert sanitized.data == {
+            "classification": "credential_unavailable",
+            "phase": "call",
+            "operation_outcome": "unknown",
+        }
+
+
+@pytest.mark.parametrize("fault,code,classification", [
+    (_PRINCIPALS_RPC_ERROR, -32003, "principals_unavailable"),
+    ({"code": -32004, "message": "unauthorized",
+      "data": {"status": 401, "error": "unauthorized"}}, -32004, "authentication_required"),
+], ids=["unavailable", "revoked"])
+def test_daemon_refusal_on_tools_list_keeps_its_code(
+        tmp_path, upstream, fault, code, classification):
     token_file = tmp_path / "token"
     _replace_token(token_file, NEW_TOKEN)
 
     async def drive():
         async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
             upstream.fault_method = "tools/list"
-            upstream.fault = _PRINCIPALS_RPC_ERROR
+            upstream.fault = fault
             with pytest.raises(Exception) as caught:
                 await client.list_tools()
             data = caught.value.error.data
-            assert caught.value.error.code == -32003
-            assert data["classification"] == "principals_unavailable"
+            assert caught.value.error.code == code
+            assert data["classification"] == classification
             assert data["phase"] == "list"
             assert data["operation_outcome"] == "not_dispatched"
 
@@ -664,8 +727,17 @@ def test_principals_unavailable_on_tools_list_keeps_its_code(tmp_path, upstream)
      -32603, "service_unavailable"),
     (b'{"error":"principals_unavailable"', -32603, "service_unavailable"),
     (b'{"error":"principals_unavailable"}' + b" " * 257, -32603, "service_unavailable"),
+    (("text/plain", b'{"error":"principals_unavailable"}'), -32603, "service_unavailable"),
+    ({"code": -32004, "message": "unauthorized",
+      "data": {"status": "401", "error": "unauthorized"}}, -32004, "protocol"),
+    ({"code": -32004, "message": BODY_MARKER,
+      "data": {"status": 401, "error": "unauthorized"}}, -32004, "protocol"),
+    ({"code": -32004, "message": "unauthorized",
+      "data": {"status": 401, "error": "unauthorized", "credential": OLD_TOKEN}},
+     -32004, "protocol"),
 ], ids=["rpc-message", "rpc-status-type", "rpc-extra", "rpc-no-data",
-        "http-extra", "http-duplicate", "http-malformed", "http-oversized"])
+        "http-extra", "http-duplicate", "http-malformed", "http-oversized",
+        "http-not-json-type", "revoked-status-type", "revoked-message", "revoked-extra"])
 def test_inexact_principals_refusal_stays_unknown(
         tmp_path, upstream, fault, code, classification):
     """Only the daemon's exact refusal proves no tool ran; anything that

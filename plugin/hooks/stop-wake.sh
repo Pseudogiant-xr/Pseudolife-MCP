@@ -29,9 +29,10 @@
 # "nudged" marker left from before then is no ring),
 # an acknowledgement changing the digest: none of these ring. Mail the
 # session already saw (through the prompt hook, the tool-result hint or an
-# earlier wake) does not fire again at the next turn end; SessionStart
-# clears .seen on resume and compact, so a pending ring can wake the session
-# once more after those. Firing prints first, then advances
+# earlier wake) does not fire again at the next turn end, and resume,
+# compact and /clear keep .seen (SessionStart sets a .reprint flag for the
+# prompt hook instead), so a ring the session already saw never fires
+# after those either. Firing prints first, then advances
 # .seen, so those paths stay quiet about it, then appends a "wait" line to
 # the ledger with the ring's reason. A marker that cannot advance means no
 # wake at all: it would otherwise fire again at every turn end.

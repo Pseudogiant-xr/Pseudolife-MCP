@@ -131,13 +131,16 @@ reliably — without the agent having to remember:
 
 An episode is not a durable record that a session happened: a root that
 ends holding no stored entry is deleted. So every registration (the
-SessionStart hook, or `POST /api/episode/start` from the stdio shim and the
-CLI episode hooks) also writes one `client_sessions` row per session key
-(schema v43), which no prune, sweep or tombstone expiry deletes. The row
+SessionStart hook, or `POST /api/episode/start` from the CLI episode hooks or
+a direct call) also writes one `client_sessions` row per session key
+(schema v43), which no prune, sweep or tombstone expiry deletes. The stdio
+shim registers nothing: a session whose client runs no SessionStart hook
+(one with only the shim, such as Claude Desktop) gets its root opened
+lazily on its first write and has no `client_sessions` row. The row
 holds how the session first registered (`hook` or `api`), the bearer's
 principal, its first start and every registration time since (a resumed
 client registers again), its most recent close and why (`end` for
-SessionEnd or shim exit, `idle` for the reaper; cleared when the session
+SessionEnd or an episode-end call, `idle` for the reaper; cleared when the session
 registers again or a store or handle reopens its root), the startup memory-policy variant the hook assigned
 (for `full_separate_hook`, a plugin without the separate memory-policy hook
 never delivers it), and every root episode id the session was given. A
