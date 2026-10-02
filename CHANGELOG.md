@@ -19,6 +19,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   otherwise have re-raised the pipe error on the way out. Other unexpected
   errors still reach setup's own handler, and the required hook trust
   step still fails setup when it cannot back up `config.toml`.
+
 ### Fixed (2026-10-03 — eval benches inside WSL no longer lose their database to a Windows test run)
 - Three eval harnesses still named their private databases with a bare
   pid: `evals/epistemic_bench.py` (`pseudolife_memory_bench_<pid>`),
@@ -35,6 +36,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - WSL detection no longer depends on the kernel release saying
   "microsoft": `WSL_DISTRO_NAME`, `WSL_INTEROP` or a `WSLInterop*` binfmt
   entry also count, so a custom WSL kernel still tags its database names.
+
 ### Fixed (2026-10-03 — a token the daemon cannot check is reported as such)
 - When the daemon cannot check invited machines' tokens (its database is
   not answering), it refuses the request before any tool runs: a
@@ -53,10 +55,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deploy with the client step (`ops/update.ps1 -All`).
 - The Console explained an invited machine's 403 on an operator-only
   action (`operator_principal_required`: saving the config or the daemon
-  notice) as "a
-  tokenless daemon serves loopback browsers only", and a 503
+  notice) as "a tokenless daemon serves loopback browsers only", and a 503
   `principals_unavailable` as a bare HTTP code. Each now has its own
   explanation.
+
 ### Fixed (2026-10-03 — a dispatched suite refuses the live bank at any address)
 - A full suite dispatched to the second machine could still reach that
   machine's live bank. The launchers refused a test server on host port

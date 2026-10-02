@@ -746,7 +746,7 @@ def mailbox_approval(config, home, report, client=None, cwd=None):
         # Never serialize the raw error: it names private paths.
         state = "unavailable"
         report["mailbox_approval_detail"] = (
-            f"Codex config.toml could not be backed up or written ({type(exc).__name__}).")
+            f"Codex config.toml could not be read, backed up or written ({type(exc).__name__}).")
     report["mailbox_approval"] = state
     return state
 
