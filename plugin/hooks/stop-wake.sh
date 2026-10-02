@@ -20,16 +20,18 @@
 # The daemon decides, this hook rings (schema v49, maintainer decision
 # 2026-09-28). Every send gets a wake decision in the daemon; for a ring
 # (rung: mail that clears what the parked recipient declared it needs, or
-# nudged: an idle session that never parked) the shim writes <key>.ring
-# beside the digest: line 1 the digest watermark the ring is for, line 2 the
+# urgent mail to one that never parked) the shim writes <key>.ring beside
+# the digest: line 1 the digest watermark the ring is for, line 2 the
 # decision and its reason. It fires when that ring is past the <key>.seen
 # marker, the digest's watermark (line 1) is past it too and the body is
-# non-empty. Chatter, mail the daemon withheld, an acknowledgement changing
-# the digest: none of these ring. Mail the session already saw (through the
-# prompt hook, the tool-result hint or an earlier wake) does not fire again
-# at the next turn end; SessionStart clears .seen on resume and compact, so a
-# pending ring can wake the session once more after those. Firing prints
-# first (a nudge adds one sentence asking for a park record), then advances
+# non-empty. Chatter, mail the daemon withheld, plain mail to a session that
+# never parked (regular mail never wakes, maintainer decision 2026-10-02; a
+# "nudged" marker left from before then is no ring),
+# an acknowledgement changing the digest: none of these ring. Mail the
+# session already saw (through the prompt hook, the tool-result hint or an
+# earlier wake) does not fire again at the next turn end; SessionStart
+# clears .seen on resume and compact, so a pending ring can wake the session
+# once more after those. Firing prints first, then advances
 # .seen, so those paths stay quiet about it, then appends a "wait" line to
 # the ledger with the ring's reason. A marker that cannot advance means no
 # wake at all: it would otherwise fire again at every turn end.
@@ -526,7 +528,7 @@ read_seen() {
 
 # Sets RING_AT and RING_REASON from the shim's ring marker; true when the
 # daemon decided a ring this session has not seen. Anything but a regular
-# file with a watermark and a reason is no ring: the hook rings on the
+# file with a watermark and a rung decision is no ring: the hook rings on the
 # daemon's word, never on a guess.
 ring_past_seen() {
     RING_AT=0
@@ -539,6 +541,7 @@ ring_past_seen() {
     [ "${#RING_AT}" -le 12 ] || return 1
     RING_AT=$((10#$RING_AT))
     case "$RING_REASON" in ''|*[!-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_\ ]*) return 1 ;; esac
+    case "$RING_REASON" in "rung "*) ;; *) return 1 ;; esac
     [ "$RING_AT" -gt "$SEEN_AT" ]
 }
 
@@ -574,9 +577,9 @@ wake_budget_ok() {
 # its first heartbeat); one that vanishes mid-watch means the shim exited
 # (a crash that takes the shim down with Claude Code leaves it, which the
 # parent check above catches), so the watch ends rather than fire
-# into a later session. The wait-mail command being built beside this hook
-# has the same fire-and-mark contract; it can replace the loop once it
-# ships, keeping the lease, parent and cap checks beside it.
+# into a later session. `pseudolife-mcp wait-mail` (wait_mail_cli.py)
+# applies the same ring rule and fire-and-mark contract for waits longer
+# than this hook's; this loop keeps the lease, parent and cap checks.
 wait_for_mail() {
     # SECONDS counts from the start of the script, spawns included.
     local deadline=$WAIT snapshot present=0
@@ -618,10 +621,6 @@ fire() {
     if [ -e "$SEEN" ] && [ ! -f "$SEEN" ]; then return; fi
     text="Pseudolife board mail woke this session (Claude Code labels this delivery a Stop hook error; nothing failed):
 $BODY"
-    case "$RING_REASON" in
-        nudged*) text="$text
-Set your park status before you stop: memory_agents(action=update, park_reason=..., park_needs=..., park_clear_by=..., park_resume=..., park_expires=<epoch, default 12 h>), so mail wakes you only when it clears that need." ;;
-    esac
     printf '%s\n' "$text" >&3
     # The prompt hook may have moved the marker while this watcher slept:
     # only ever raise it.

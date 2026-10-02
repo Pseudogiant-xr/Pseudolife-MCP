@@ -304,13 +304,15 @@ class CoordinationAdapter:
 
     def _note_wake(self, result) -> None:
         """Take a ``wake`` off an attach or heartbeat answer. Anything but a
-        well-formed ring is ignored: a daemon from before v49 sends none,
-        and nothing here may ring on a guess."""
+        well-formed ``rung`` ring is ignored: a daemon from before v49 sends
+        none, one from before 2026-10-02 may still send ``nudged`` (an idle
+        session that never parked; regular mail never wakes now), and
+        nothing here may ring on a guess."""
         wake = result.get("wake")
         if not isinstance(wake, dict):
             return
         decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
-        if (decision not in {"rung", "nudged"} or not isinstance(reason, str)
+        if (decision != "rung" or not isinstance(reason, str)
                 or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
                 or not math.isfinite(ring_at)):
             return
@@ -334,7 +336,7 @@ class CoordinationAdapter:
     def _write_ring(self, ring) -> None:
         """Write ``<key>.ring``: the digest watermark the ring is for, then
         the decision and reason; the Stop hook fires on a ring past its
-        ``.seen`` marker, and says so for a nudge."""
+        ``.seen`` marker."""
         self._ring_timer = None
         if self._closing or self.digest_path is None:
             return

@@ -26,7 +26,8 @@
 #
 # Other flags:
 #   --codex-hooks auto|manual|plugin|skip  hook owner (default: auto)
-#   --codex-hook-trust ask|yes|no     approve PseudoLife hooks (default: ask)
+#   --codex-hook-trust ask|yes|no     approve PseudoLife hooks and the memory_message
+#                                    tool (default: ask)
 #   --claude-plugin auto|skip        install the Claude Code plugin (hooks +
 #                                    commands) when claude is a client (default: auto)
 #   --claude-legacy-hooks ask|remove|keep  with the plugin installed, remove the

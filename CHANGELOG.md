@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
+- A Codex thread woken by board mail could stall on an approval prompt,
+  because hook setup left the `memory_message` tool unapproved and only
+  printed how to approve it. Now the consent that approves PseudoLife's hooks
+  covers that tool too. The `--trust ask` prompt names it, and a yes, or
+  `--trust yes`, sets `approval_mode = "approve"` for `memory_message` on the
+  `pseudolife-memory` server in Codex's user configuration, through Codex's
+  config writer and after a backup. `--trust no` leaves it alone.
+- Setup never overrides a value you chose (`"prompt"`, say), and an existing
+  `"approve"` needs no change. The JSON report gains `mailbox_approval`
+  (`set`, `already`, `kept-explicit`, `declined` or `unavailable`, with
+  `mailbox_approval_detail` for a kept value or the reason it could not be
+  set). If the approval cannot be set, hook setup still completes. The
+  end-of-setup notice gives the remaining choice only when the approval is
+  not set.
+- The trade-off: Codex approves per tool, so this also lets the thread send
+  board mail without asking. Board mail is rate-limited, audited and
+  expires, cannot grant permissions, and reaches only allowed principals.
+  Nothing else is approved: no file writes, commands or other tools. The
+  plugin's `hooks.json` is unchanged, so no hook needs approving again.
+
+### Changed (2026-10-02 — plain mail never wakes an unparked session)
+- Plain mail to an idle session that has not parked no longer wakes it,
+  through the Claude Code Stop hook, the Codex doorbell or
+  `pseudolife-mcp wait-mail`. Before, such a session was rung at most once
+  an hour (`nudged`) and asked to record a park, and `wait-mail` woke on
+  any new mail at all. Now a parked session rings only for mail that
+  plausibly clears its need: the sender is its clearer (or just released
+  the lease it waits on), it accepts `anyone`, the message's `clears`
+  names the need, or `urgent`. An idle session that has not parked rings
+  only for `urgent` mail (reason `urgent`), which spends the sender's
+  urgent allowance (6 an hour) like any urgent ring. Every ring keeps the
+  existing per-recipient, nightly and stagger caps. Plain mail or `clears`
+  to an unparked session answers `not_needed` with reason `no_park` and
+  waits for its next turn; an active session is `hinted`, urgent or not
+  (maintainer decisions 2026-10-02).
+- `pseudolife-mcp wait-mail` follows the same rule: it returns only when
+  the daemon rings the session. It reads the `<key>.ring` marker the Stop
+  hook reads, under the same rule (a `rung` ring past `.seen`, with unshown
+  mail in the digest), and plain mail keeps it waiting; that mail is still
+  pending at the next turn. Exit codes are unchanged (0 now means a ring),
+  and its `wait` ledger line gains the ring as a sixth column. A session
+  that relies on it is woken only when parked with a need the mail clears,
+  or by `urgent` mail.
+- A `nudged` ring decided before the update is never served to an adapter
+  and its mail is never delivered through a live channel; the Console's
+  coordination timeline and `board-audit stats` still show it. The shim
+  ignores a `nudged` wake from an older daemon, and the Stop hook fires
+  only on a `rung` marker. The Codex doorbell and the Stop hook no longer
+  append a park request.
+- `coordination.wake.nudge_interval_seconds` is retired. A config.yaml
+  that still sets it loads as before and the key does nothing; `/health`
+  and `pseudolife-mcp doctor` no longer report it. The change is under
+  `plugin/` and in the shim, so a deploy needs the client step.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender

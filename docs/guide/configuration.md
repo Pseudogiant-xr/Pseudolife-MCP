@@ -79,7 +79,6 @@ coordination:
     nightly_total: 200
     fan_out_stagger_seconds: 30
     active_seconds: 60
-    nudge_interval_seconds: 3600
 ```
 
 `audit_retention_days` is how long the [audit log](#audit-log) keeps each event:
@@ -93,11 +92,14 @@ Claude Code Stop hook already used); `urgent_per_sender_per_hour` (6) bounds
 the `urgent` flag; `nightly_total` (200) is a rolling day of rings across the
 bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
-action makes new mail `hinted` rather than rung; `nudge_interval_seconds`
-(3600) bounds the ring that asks an idle, unparked session to park. The
-values are whole numbers; a cap of 0 rings nobody (or never honours
-`urgent`), and the two windows are at least 1. Over a cap the send answers
-`capped` with the cap's name.
+action makes new mail `hinted` rather than rung. The values are whole
+numbers; a cap of 0 rings nobody (or never honours `urgent`), and
+`active_seconds` is at least 1. Over a cap the send answers `capped` with
+the cap's name. `nudge_interval_seconds` is retired (2026-10-02): it
+bounded an hourly ring to an idle session that had not parked, and plain
+mail no longer rings such a session at all. A config.yaml that still sets
+it loads as before and the key does nothing; it is no longer reported on
+`/health` or by `pseudolife-mcp doctor`.
 
 Wake is on by default and policy-gated (maintainer decision, 2026-09-28), so
 the caps are the guarantee, not the usual rate. `/health` reports the caps in
@@ -376,7 +378,11 @@ acceptance still needs a separately isolated supported-client session.
 Mail reaches a recipient on its next Pseudolife tool call or prompt; nothing in
 MCP can start a turn in a session that has gone idle, so the host has to.
 `pseudolife-mcp wait-mail` gives the host something to wake on: it blocks until
-the digest above shows mail nothing has shown yet, prints it and exits.
+the daemon rings this session for mail nothing has shown yet, prints the mail
+and exits. Plain mail never ends the wait (maintainer decision 2026-10-02):
+the daemon rings a parked session for mail that clears its need, or any
+idle session for `urgent` mail ([the wake decision](#park-records-and-the-wake-decision)),
+so park before you wait.
 
 ```sh
 pseudolife-mcp wait-mail [--session-id ID | --digest PATH] [--timeout SECONDS] [--interval SECONDS]
@@ -390,21 +396,32 @@ applies); `--digest` names the file outright and accepts only a digest's own
 process if one exists and its second line confirms it for the current session
 (the SHA-256 of its id); without one, a waiter armed after `/clear` finds no
 digest. It needs no daemon connection, token or
-network. Each check is a file `stat` (every 2 s by default); the file is read
-only after the adapter rewrites it. It fires when the watermark is past the
-shared `.seen` marker and the digest lists pending mail, so mail that arrived
-while the agent was busy fires at once and mail a prompt hook or tool-result
-hint already showed does not. On firing it prints the digest body verbatim on
-stdout, agent-origin framing included, then advances `.seen` so the hook and
-hint do not repeat it, and appends a `wait` line to `ledger.log`. Exit codes:
-`0` new mail; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
+network. Each check is a `stat` of the digest and of the `<key>.ring` marker
+beside it (every 2 s by default); the files are read only after the adapter
+rewrites one. It reads the ring marker the way the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) does: the
+adapter writes it when the daemon decides a ring (line 1 the digest
+watermark the ring is for, line 2 the decision and reason), and only a
+regular file holding a `rung` decision counts. It fires when that marker's
+watermark is past the shared `.seen` marker, the digest's watermark is past
+it too and the digest lists pending mail. So a ring that arrived while the
+agent was busy fires at once, while a ring whose mail a prompt hook,
+tool-result hint or earlier wake already showed does not, and plain mail
+keeps it waiting (the mail is still pending at the next turn). On firing it
+prints the digest body verbatim on stdout, agent-origin framing included,
+then advances `.seen` to the digest's watermark so neither the hook, the
+hint nor a re-arm repeats it, and appends a `wait` line to `ledger.log` whose
+sixth column is the ring's decision and reason. Exit codes:
+`0` a ring; `3` timeout (default 4 h, at most 24 h), re-arm; `2` nothing to
 wait on — no session id, no digest file (the adapter writes it when it
 attaches: at shim start in Claude Code, on a thread's first `memory_*` call in
 Codex), a file that disappeared because the shim exited, a file that cannot be
 inspected when armed (a later read error is retried), a
 stdout that cannot take the mail (left unmarked), or a bad argument.
 Diagnostics go to stderr. The adapter refreshes the digest on its 20 s
-heartbeat, so a waiter fires up to about 22 s after the send. It also rewrites
+heartbeat and writes the ring marker at the ring's `ring_at`, so a waiter
+fires up to about 22 s after a send rings (later for a staggered fan-out
+burst). It also rewrites
 an unchanged digest every hour, without moving the watermark, so the day-old
 sweep another adapter runs at start never takes a long-idle session's file.
 
@@ -430,7 +447,7 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 
 The Stop hook alone watches for at most 59 minutes. A park record can outlive
 that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after mail or the
+`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
 four-hour timeout. Where Codex supports its doorbell, that is its durable host
 path. Where the host provides neither path, record `next-turn-only` in the
 park or status: a durable park is not evidence of a durable listener.
@@ -810,13 +827,30 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged and prints the approval choice at the
-end of successful hook setup. A recipient running with approval policy `never`
-cannot execute a tool that still requires approval. To authorize
-unattended mailbox operations specifically, configure the installed server's
-`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
-tool's send, receive and acknowledgment actions; it does not approve file writes,
-commands or other tools. Without that choice, use the host's normal approval flow.
+Codex hook setup (`ops/setup-codex-hooks.py`, or the installer's Codex step)
+asks for the `memory_message` approval together with the hooks. Its prompt
+names it, and a yes, or `--trust yes`, sets
+`tools.memory_message.approval_mode = "approve"` on the `pseudolife-memory`
+server in Codex's user configuration, through Codex's own config writer and
+after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
+yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
+alone. The JSON report's `mailbox_approval` says which happened: `set`,
+`already`, `kept-explicit`, `declined`, or `unavailable` (no
+`pseudolife-memory` server in the user configuration, or Codex refused the
+write; `mailbox_approval_detail` gives the reason, and hook setup still
+completes). When the approval is not set, the end-of-setup notice says how to
+choose it. The reason is the doorbell: a board ring wakes a thread only when it
+has mail it needs, and a woken thread that must ask before calling
+`memory_message` stalls on that prompt. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval.
+
+The trade-off is plain: Codex approves per tool, not per action, so the same
+approval lets the thread send board mail without asking. Board mail is
+rate-limited, audited and expires, cannot grant permissions, and reaches only
+allowed principals. The approval covers that one tool; it does not approve file
+writes, commands or other tools. To set it by hand, configure the installed
+server's `tools.memory_message.approval_mode = "approve"` in Codex; without
+it, use the host's normal approval flow.
 
 ### Optional Codex live delivery
 
@@ -901,6 +935,8 @@ A woken task reads its mail with `memory_message receive`, so the task needs
 `memory_message` approved in Codex's tool configuration; without that
 approval a woken task stalls on an approval prompt until someone answers it
 (the 2026-09-12 validation record's complete-path test approved it explicitly).
+Hook setup sets that approval when you approve the hooks
+([Codex CLI and desktop](#codex-cli-and-desktop)).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
@@ -914,9 +950,9 @@ approval a woken task stalls on an approval prompt until someone answers it
   task, or a daemon older than v49) the arrival stays owed and nothing
   rings; a later decision for the task covers it. A successful
   `memory_message receive` from the task answers it, and so does an emptied
-  mailbox. An idle task gets one doorbell per batch of mail. A `nudged`
-  ring (an idle task that never parked) adds one fixed sentence to the
-  notice asking for a park record.
+  mailbox. An idle task gets one doorbell per batch of mail. Plain mail to
+  a task that has not parked never rings it (since 2026-10-02); the task
+  sees it at its next turn. `urgent` mail to it does ring.
 - **What it says.** Codex delivers queued text as a user message, so the doorbell
   never carries peer text, sender labels or excerpts. The notice is fixed and
   only the count varies:
@@ -1219,11 +1255,14 @@ are nearest-rank, in seconds, with the sample size beside them (`{"n", "p50",
   daemon logs once per message): `sends`, `read`, `unread`, `seconds`,
   then the same `by_decision` (the send's wake decision: `rung`, `nudged`,
   `hinted`, `withheld`, `no_path`, `capped`, `not_needed`, or `unknown` for a
-  send from before v49) and `by_principal` (the recipient's principal, as
+  send from before v49; `nudged`, a ring to an idle session that never
+  parked, appears only for sends before 2026-10-02) and `by_principal`
+  (the recipient's principal, as
   the log saw it act in the window, else `unknown`). For a session with a
   live channel the first read is usually the adapter pushing the mail in
   (`path: delivery`), so there it measures delivery, not the model reading.
-- `wake_precision`: for each `rung` or `nudged` row decided in the window,
+- `wake_precision`: for each `rung` or (before 2026-10-02) `nudged` row
+  decided in the window,
   whether it was `served` to the recipient's adapter before `until` (`never_served`,
   `share_never_served`, `seconds_to_served`), whether the recipient acted on
   the board (an update, read, ack, send or register; not the adapter's own
@@ -1639,19 +1678,29 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `wake.decision` | When | Extra fields |
 | --- | --- | --- |
 | `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
-| `not_needed` | the recipient is parked `done` | |
-| `no_path` | the recipient has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap | `ring_at` |
+| `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | |
+| `no_path` | the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or the recipient is idle and not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
-| `nudged` | idle with no park record (or an expired one), rung at most once per `nudge_interval_seconds` with a request to park | `ring_at` |
-| `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `nudge_hour`) | the parked need, if any |
+| `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`) | the parked need, if any |
 
 `reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
 `listener_unknown`, `listener_expired`,
 `clearer`, `anyone`, `clears`, `urgent`, `need_not_cleared`, `no_park`, or a
 cap). `rung` is evidence of a known armed path at send time; it does not mean
 that a turn started, that the recipient read the message, or that it acted.
-Chatter never rings. A retry of the same `request_id` repeats the first
+Chatter never rings, and regular mail never wakes (maintainer decision
+2026-10-02): a parked recipient rings for mail that clears its need, and
+an idle recipient that has not parked rings only for `urgent` mail, which
+spends the sender's urgent allowance and passes the same per-recipient,
+nightly and stagger caps as every ring. An active recipient is `hinted`,
+urgent or not. From v49 until then an idle session that had not parked
+was rung at most hourly (`nudged`) with a request to park; that ring is
+gone. A `nudged`
+row decided before a daemon update is kept for the Console's coordination
+timeline and `board-audit stats`, but is never served to an adapter, and its mail is
+never delivered through a live channel. A retry of the same `request_id`
+repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
 burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
 is a `coordination_wakes` row; the recipient's attach and heartbeat answers
@@ -1687,8 +1736,8 @@ tool-result hints and the prompt-hook digest are unchanged.
 delivery requires explicit preview opt-in and recipient wake configuration;
 protocol tests alone do not establish compatibility with an installed host.
 Only addressed messages may wake an opted-in recipient, and since v49 the
-live channel carries only mail the daemon decided to ring (`rung`,
-`nudged`) or hinted to an active session, plus mail sent before v49; mail
+live channel carries only mail the daemon decided to ring (`rung`) or
+hinted to an active session, plus mail sent before v49; mail
 it withheld, or found not needed, waits for an explicit `receive`, which
 still returns everything. Board/status activity
 and receipts do not produce conversational wake-ups. Each live event carries a
@@ -1802,14 +1851,16 @@ also capped (below, and by the daemon's `wake` caps under
   as agent-origin, not user authority.
 - It fires on a ring the daemon decided (v49): when the shim's `<key>.ring`
   marker is past the `.seen` marker, the digest's watermark is past it too
-  and the digest lists mail. The shim writes the marker for `rung` and
-  `nudged` mail only ([the wake decision](#park-records-and-the-wake-decision)),
-  so chatter to a parked session, mail the daemon withheld, and a digest
-  that merely changed (an acknowledgement, an expiry) do not wake the
-  session. A ring for mail that arrived during the turn fires at once; a
-  digest the session already saw (through the prompt hook, the tool-result
-  hint or an earlier wake) does not fire again at the next turn end. A
-  nudge adds one sentence to the wake text asking for a park record. Firing
+  and the digest lists mail. The shim writes the marker for `rung` mail
+  only ([the wake decision](#park-records-and-the-wake-decision)), and the
+  hook fires only on a `rung` marker, so chatter to a parked session, mail
+  the daemon withheld, plain mail to a session that has not parked (a
+  `nudged` marker left from before 2026-10-02 included; `urgent` mail to
+  it is rung and does fire), and a digest that merely
+  changed (an acknowledgement, an expiry) do not wake the session. A ring
+  for mail that arrived during the turn fires at once; a digest the session
+  already saw (through the prompt hook, the tool-result hint or an earlier
+  wake) does not fire again at the next turn end. Firing
   advances `.seen` and appends a `wait` line to `ledger.log` whose sixth
   column is the ring's decision and reason; if the marker cannot be
   written, the hook does not wake at all. SessionStart clears `.seen` on
@@ -1892,7 +1943,7 @@ also capped (below, and by the daemon's `wake` caps under
   `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
   `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
   longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after mail or its four-hour timeout; without that, its mail appears
+  re-armed after a ring or its four-hour timeout; without that, its mail appears
   on its next prompt and the ring listener expires. The watcher
   also stops when Claude Code exits: at once on Linux and macOS, and within
   a minute on Windows, where it lists the process through `ps -W` at arm
@@ -3358,7 +3409,7 @@ The milestones:
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
 | v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
-| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided, with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
+| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided (no `nudged` ring is decided since 2026-10-02), with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
