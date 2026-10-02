@@ -133,7 +133,9 @@ imported files change on disk while it waits refuses to start and asks for
 a rerun. On a Windows host, `pwsh ops/wsl-suite.ps1` runs the committed
 HEAD's suite in WSL, and `pwsh ops/remote-suite.ps1` runs it on the first
 free machine (local WSL, or a second Linux machine configured outside the
-repository); both refuse a checkout with uncommitted changes.
+repository); both refuse a checkout with uncommitted changes (the WSL
+launcher's `PSEUDOLIFE_WSL_SUITE_SOURCE=worktree` tests the working tree
+instead).
 
 All tests must pass. Every PR requires fresh CI for its current head
 integrated with current master, including the full PostgreSQL, lite Linux,

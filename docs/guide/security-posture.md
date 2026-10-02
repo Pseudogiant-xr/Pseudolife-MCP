@@ -63,8 +63,9 @@ session that a hostile page has steered can therefore try to steer its
 peers. The mitigations are provenance-shaped too: every delivery is framed
 as agent-origin under a daemon-verified sender, never as a user
 instruction, and peer text cannot grant user approval; mailbox access
-needs a bearer whose principal is on the allowed list and a registered
-adapter's own credential; wakes are policy-gated and capped; and an open install
+needs a bearer whose principal is on `coordination.allowed_principals`
+(or a paired machine granted board access) and a registered adapter's own
+credential; wakes are policy-gated and capped; and an open install
 with no token keeps the board dormant. None of that stops a model from
 acting on a persuasive message, so treat peer mail like any other read
 content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).

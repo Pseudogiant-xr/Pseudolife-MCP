@@ -1331,7 +1331,8 @@ pseudolife-mcp-daemon`).
   means dreaming itself is switched off in config. `"extractor":
   "stalled"` means an extractor is configured but live dreams have stopped
   reaching it; the `stall` sub-object gives the reason and times. For
-  `stall.reason` `login_expired`, the extractor CLI's login lapsed: re-run
+  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
+  hosted endpoint rejected its key): re-run
   `claude auth login` (or `codex login`) on the daemon host. See
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
@@ -2561,7 +2562,8 @@ and the `drop_reason` (or `kept=True`) for each. The `final_topk` block
 shows exactly which entries reached the result set and what score they
 carried.
 
-Scoping filters (`sources`, `episodes`, `tags`, `hide_superseded`) apply
+Scoping filters (`sources`, `episodes`, `tags`, and the
+`memory.hide_superseded` setting) apply
 before each band's candidate cap, not after it, so a scoped entry is not
 crowded out by out-of-scope neighbours that rank above it. Each band in
 the trace's `tiers` list reports `entry_count` (entries in the band),
@@ -9556,8 +9558,9 @@ session that a hostile page has steered can therefore try to steer its
 peers. The mitigations are provenance-shaped too: every delivery is framed
 as agent-origin under a daemon-verified sender, never as a user
 instruction, and peer text cannot grant user approval; mailbox access
-needs a bearer whose principal is on the allowed list and a registered
-adapter's own credential; wakes are policy-gated and capped; and an open install
+needs a bearer whose principal is on `coordination.allowed_principals`
+(or a paired machine granted board access) and a registered adapter's own
+credential; wakes are policy-gated and capped; and an open install
 with no token keeps the board dormant. None of that stops a model from
 acting on a persuasive message, so treat peer mail like any other read
 content ([Experimental agent coordination](configuration.md#experimental-agent-coordination)).

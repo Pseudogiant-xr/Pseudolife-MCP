@@ -55,11 +55,11 @@ The shipped configuration is deliberately conservative:
   `updates` (the newest known release, when it was checked, and the
   unattended-update switches), the hooks digest, memory headroom, the
   embedder in use, the last backup's age, the `extractor` state with a
-  `stall` record (reason and times only) when dreams have stopped, and
+  `stall` record (reason, times and failure count) when dreams have stopped, and
   flags such as `migration_partial`, `dream_tracking_error` (a code only)
   and `capacity_warning`. When the daemon is degraded it adds a
-  startup-refusal message and the raw database error string, which can
-  carry DSN-shaped detail. Anyone who can reach the port reads all of it.
+  startup-refusal message, the raw database error string and a `not_ready`
+  reason, which can carry DSN-shaped detail. Anyone who can reach the port reads all of it.
   Fine on the loopback default; a reason not to publish the port.
   `pseudolife-mcp expose tailscale` refuses a daemon without a token, but
   `/health` stays unauthenticated, so after it every machine on the tailnet

@@ -1325,7 +1325,8 @@ pseudolife-mcp-daemon`).
   means dreaming itself is switched off in config. `"extractor":
   "stalled"` means an extractor is configured but live dreams have stopped
   reaching it; the `stall` sub-object gives the reason and times. For
-  `stall.reason` `login_expired`, the extractor CLI's login lapsed: re-run
+  `stall.reason` `login_expired`, the extractor CLI's login lapsed (or a
+  hosted endpoint rejected its key): re-run
   `claude auth login` (or `codex login`) on the daemon host. See
   [When dreaming stalls](docs/guide/dreaming.md#when-dreaming-stalls).
 - **Lite daemon refuses to start on Windows** with a message about the data
