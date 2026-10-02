@@ -127,8 +127,9 @@ reads that file by the `session_id` it receives and prints the digest only when
 the watermark passed the `.seen` marker, so a quiet turn adds nothing to the
 context and a change appears once. The same marker gates the hint the shim
 appends to tool results, so the two paths never repeat each other. SessionStart
-on `resume`, `compact` or `clear` clears the marker so the current digest
-prints afresh. Under Claude Code, `/clear` and an
+on `resume`, `compact` or `clear` keeps `.seen` and writes a `<key>.reprint`
+flag naming the marker it found, so the next prompt prints the current digest
+again unless a wake or a hint showed it since. Under Claude Code, `/clear` and an
 in-session `/resume` give the hooks a new `session_id` while the shim keeps
 the one it was launched with, so the session hooks keep the shim's key once
 per Claude Code process (`claude-<CLAUDE_PID>.host` in the same directory).

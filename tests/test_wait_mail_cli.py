@@ -610,7 +610,8 @@ def test_a_ring_written_after_a_restart_for_mail_already_seen_never_fires(
     assert capsysbinary.readouterr().out == b""
 
 
-def test_a_refused_ring_retried_after_a_restart_stays_dropped(digests, tmp_path):
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_a_refused_ring_retried_after_a_restart_stays_dropped(shell, digests, tmp_path):
     """The shim retries a refused ring marker only while ``.seen`` is below
     the watermark it was for. A compaction after the prompt hook showed that
     mail must leave the marker in place, or the retry writes a ring for
@@ -629,7 +630,7 @@ def test_a_refused_ring_retried_after_a_restart_stays_dropped(digests, tmp_path)
                 await coordination._heartbeat()
                 await asyncio.sleep(0.05)
                 _seen(digest).write_text(f"{coordination.digest_watermark}\n")  # the prompt hook
-                _session_start("bash", "compact", digests, tmp_path)
+                _session_start(shell, "compact", digests, tmp_path)
                 await coordination._heartbeat()
                 await asyncio.sleep(0.05)
                 assert not digest.with_suffix(".ring").exists()
