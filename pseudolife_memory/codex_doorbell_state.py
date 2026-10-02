@@ -55,6 +55,7 @@ class PendingNotice:
         self.accepted_path = self.path.with_suffix(".bell-accepted")
         self.expired_path = self.path.with_suffix(".bell-unresolved-expired")
         self.resolution_basis = None
+        self.reservation_expiry_basis = None
 
     @contextmanager
     def _locked(self, *, retry=0.0):
@@ -152,6 +153,7 @@ class PendingNotice:
         self._write_atomic(path, nonce)
 
     def reserve(self, count, *, expires_at=None, now=None, recipient_state=None):
+        self.reservation_expiry_basis = None
         now = time.time() if now is None else now
         if (type(count) is not int or count < 1 or not _timestamp(now)
                 or recipient_state not in (None, "unknown")
@@ -164,9 +166,14 @@ class PendingNotice:
                     return None
                 if os.path.lexists(self.path):
                     previous = self._current(now)
-                    if self._resolution(previous, now) is None:
+                    outcome = self._resolution(previous, now)
+                    if outcome is None:
                         return None
-                    self.path.unlink()
+                    if outcome == "unresolved_expired":
+                        self._release_expired(previous)
+                        self.reservation_expiry_basis = previous["expiry_basis"]
+                    else:
+                        self.path.unlink()
                 nonce = uuid.uuid4().hex
                 record = {"version": 2, "thread_id": self.thread_id, "nonce": nonce,
                           "count": count, "recipient_state": recipient_state,
@@ -192,6 +199,16 @@ class PendingNotice:
             return "unresolved_expired"
         return None
 
+    def _release_expired(self, record):
+        # Persist the disposition before releasing this exact nonce.
+        # This is availability recovery, never queue cancellation.
+        receipt = {"thread_id": self.thread_id, "nonce": record["nonce"],
+                   "expires_at": record["expires_at"],
+                   "expiry_basis": record["expiry_basis"],
+                   "outcome": "unresolved_expired", "native_cancellation": "unknown"}
+        self._write_atomic(self.expired_path, json.dumps(receipt, separators=(",", ":")))
+        self.path.unlink()
+
     def resolution(self, *, now=None):
         now = time.time() if now is None else now
         if not _timestamp(now):
@@ -204,14 +221,7 @@ class PendingNotice:
                 self.resolution_basis = record.get("expiry_basis")
                 outcome = self._resolution(record, now)
                 if outcome == "unresolved_expired":
-                    # Persist the disposition before releasing this exact nonce.
-                    # This is availability recovery, never queue cancellation.
-                    receipt = {"thread_id": self.thread_id, "nonce": record["nonce"],
-                               "expires_at": record["expires_at"],
-                               "expiry_basis": record["expiry_basis"],
-                               "outcome": outcome, "native_cancellation": "unknown"}
-                    self._write_atomic(self.expired_path, json.dumps(receipt, separators=(",", ":")))
-                    self.path.unlink()
+                    self._release_expired(record)
                 return outcome
         except (OSError, ValueError, PrivateStateError):
             return None

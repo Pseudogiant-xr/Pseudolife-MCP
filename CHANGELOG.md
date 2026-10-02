@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from queue acceptance, reading mail or completing work.
 - An unresolved reservation may clear at its originating message's durably
   recorded expiry, with an explicit `unresolved_expired` availability receipt.
+  Expiry receipts precede release on both polling and replacement paths; a failed
+  receipt write retains the old reservation, and replacement logs the expiry once.
   Native cancellation remains unknown and the queued item may remain visible.
   Valid older records without exact expiry get one durable first-seen plus
   24-hour upper bound; malformed or foreign state stays fail-closed.

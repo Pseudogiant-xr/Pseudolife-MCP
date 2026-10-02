@@ -268,6 +268,13 @@ class CodexDoorbell:
                 and arguments.get("action") == "receive"):
             bell.covered = max(bell.covered, bell.arrival)
 
+    @staticmethod
+    def _note_expiry(adapter, basis):
+        adapter.note_delivery("unresolved_expired", 0,
+                              "availability_fallback native_cancellation_unknown "
+                              + ("origin_expiry_unknown legacy_upper_bound"
+                                 if basis == "legacy_upper_bound" else "origin_message_expiry"))
+
     def observe(self, thread_id: str, adapter) -> None:
         """Called by the adapter after each mailbox update. Never blocks: a
         due bell is rung by a background task."""
@@ -280,11 +287,7 @@ class CodexDoorbell:
             if resolution is not None:
                 bell.outstanding = False
                 if resolution == "unresolved_expired":
-                    adapter.note_delivery("unresolved_expired", 0,
-                                          "availability_fallback native_cancellation_unknown "
-                                          + ("origin_expiry_unknown legacy_upper_bound"
-                                             if bell.pending_notice.resolution_basis == "legacy_upper_bound"
-                                             else "origin_message_expiry"))
+                    self._note_expiry(adapter, bell.pending_notice.resolution_basis)
         if self._disabled or count is None:
             return
         preview = adapter.pending_preview
@@ -333,6 +336,9 @@ class CodexDoorbell:
         notice = bell.pending_notice.reserve(count,
                     expires_at=context.get("message_expires_at"),
                     recipient_state="unknown" if decision[0] == "attention" else None)
+        if bell.pending_notice.reservation_expiry_basis is not None:
+            self._note_expiry(adapter, bell.pending_notice.reservation_expiry_basis)
+            bell.pending_notice.reservation_expiry_basis = None
         if notice is None:
             bell.outstanding = (bell.pending_notice is not None
                                 and os.path.lexists(bell.pending_notice.path))

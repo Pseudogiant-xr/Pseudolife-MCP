@@ -568,9 +568,71 @@ def test_late_accept_after_expiry_does_not_claim_a_prompt_receipt(tmp_path):
     first = pending.reserve(1, expires_at=2000, now=1000)
     second = pending.reserve(2, expires_at=90000, now=2000)
     assert second
+    receipt = json.loads(pending.expired_path.read_text())
+    assert receipt["nonce"] == first["nonce"]
+    assert receipt["outcome"] == "unresolved_expired"
+    assert receipt["native_cancellation"] == "unknown"
     assert not pending.accept(first)
     assert not pending.prompt_seen_path.exists()
     assert json.loads(pending.path.read_text())["nonce"] == second["nonce"]
+
+
+def test_reserve_expiry_receipt_failure_preserves_old_nonce(tmp_path, monkeypatch):
+    pending = PendingNotice(tmp_path, THREAD)
+    first = pending.reserve(1, expires_at=2000, now=1000)
+    def refuse(path, text):
+        raise OSError("fixture receipt persistence unavailable")
+    monkeypatch.setattr(pending, "_write_atomic", refuse)
+    assert pending.reserve(2, expires_at=90000, now=2000) is None
+    assert json.loads(pending.path.read_text())["nonce"] == first["nonce"]
+    assert not pending.expired_path.exists()
+
+
+def test_external_expired_reservation_logs_once_before_new_queue(tmp_path, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    async def drive():
+        adapter = CoordinationAdapter("http://127.0.0.1:1", "fixture", delivery_transport="codex", digest_path=tmp_path / "digest.txt")
+        bell = RecordingDoorbell(now)
+        bell.watch(THREAD, adapter)
+        assert not bell._bells[THREAD].outstanding
+        other = PendingNotice(tmp_path, THREAD)
+        first = other.reserve(1, expires_at=1100, now=1000)
+        other.accept(first)
+        try:
+            now[0] = 1200
+            answer = mailbox("m2", offer=1)
+            answer["wake"]["message_expires_at"] = 2000
+            adapter._update_pending_count(answer)
+            await settle(bell)
+            assert len(bell.queued) == 1
+            receipt = json.loads(other.expired_path.read_text())
+            assert receipt["nonce"] == first["nonce"]
+            assert receipt["expires_at"] == 1100
+            assert receipt["native_cancellation"] == "unknown"
+            ledger = (tmp_path / "ledger.log").read_text()
+            assert ledger.count("\tunresolved_expired\t") == 1
+            assert "native_cancellation_unknown origin_message_expiry" in ledger
+            assert ledger.index("\tunresolved_expired\t") < ledger.index("\tbell\t")
+            adapter._update_pending_count(answer)
+            await settle(bell)
+            assert (tmp_path / "ledger.log").read_text().count("\tunresolved_expired\t") == 1
+            assert not other.note_prompt({"session_id": THREAD, "prompt": first["text"]})
+            assert json.loads(other.path.read_text())["nonce"] == bell.queued[0]["nonce"]
+        finally:
+            await bell.aclose()
+            if adapter._ring_timer:
+                adapter._ring_timer.cancel()
+    asyncio.run(drive())
+
+
+def test_reserve_exact_prompt_release_is_not_an_expiry_receipt(tmp_path):
+    pending = PendingNotice(tmp_path, THREAD)
+    first = pending.reserve(1, expires_at=2000, now=1000)
+    assert pending.note_prompt({"session_id": THREAD, "prompt": first["text"]})
+    second = pending.reserve(2, expires_at=90000, now=2000)
+    assert second and second["nonce"] != first["nonce"]
+    assert not pending.expired_path.exists()
 
 
 def test_disabled_transport_still_observes_lazy_expiry_without_retry(tmp_path, monkeypatch):
