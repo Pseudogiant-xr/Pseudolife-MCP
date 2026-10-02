@@ -10,8 +10,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The memory-policy and coordination check-in benches redact the OS user name
   from each saved record only as a whole word. A short name such as `dev`
   used to be replaced inside ordinary words, so `device` was saved as
-  `<redacted>ice`. Home paths and the canary are still removed wherever they
-  appear.
+  `<redacted>ice`. A name next to punctuation, curly quotes or an escaped
+  control character is still redacted, and a non-ASCII user name or home
+  path, which was never matched before, is now removed too.
 
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory

@@ -157,11 +157,24 @@ def test_scrub_redacts_a_short_user_name_only_as_a_whole_word(tmp_path, monkeypa
     # A user named "dev" must not turn "device" into "<redacted>ice".
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "dev"))
     rec = {"a": "device developer dev_box", "b": "ran by dev, as dev's user",
-           "c": "first line\ndev"}
+           "c": "first line\ndev", "d": "tab\tdev", "e": "user “dev” ran—dev",
+           "f": "by dev", "g": "esc\x1bdev", "h": json.dumps({"q": "“dev”"})}
     mb.scrub_record(rec, None)
     assert rec == {"a": "device developer dev_box",
                    "b": "ran by <redacted>, as <redacted>'s user",
-                   "c": "first line\n<redacted>"}
+                   "c": "first line\n<redacted>", "d": "tab\t<redacted>",
+                   "e": "user “<redacted>” ran—<redacted>",
+                   "f": "by <redacted>", "g": "esc\x1b<redacted>",
+                   "h": json.dumps({"q": "“<redacted>”"})}
+
+
+def test_scrub_removes_a_non_ascii_home_path_and_user_name(tmp_path, monkeypatch):
+    home = tmp_path / "josé"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    rec = {"a": f"at {home / 'p'}", "b": "josé ran it"}
+    mb.scrub_record(rec, None)
+    assert rec["a"] in ("at <redacted>/p", "at <redacted>\\p")
+    assert rec["b"] == "<redacted> ran it"
 
 
 # ── validity ───────────────────────────────────────────────────────────────
