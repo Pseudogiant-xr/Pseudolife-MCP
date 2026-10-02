@@ -25,6 +25,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that machine's gates held off for suites that did not load it.
   `pseudolife-mcp lease check` maps a suite lease to the local lock only
   when it is this machine's own name.
+- `ops/wsl-suite.sh` keys its WSL test copy by repository as well as
+  checkout name and re-points it at the current mirror on every run. Every
+  Codex worktree shares one folder name, so a copy made for one repository
+  stayed bound to its mirror, and a checkout of another repository exited
+  128 before pytest. The mirror is cloned and fetched under a lock, so two
+  launches cannot race there, and `ops/.env` is copied in owner-only.
+  `ops/wsl-suite.ps1` refusals exit 2 as documented (they exited 1).
 
 ### Fixed (2026-10-02 — a ring marker the filesystem refused is written later)
 - The shim took a daemon ring as handled before writing its `<key>.ring`

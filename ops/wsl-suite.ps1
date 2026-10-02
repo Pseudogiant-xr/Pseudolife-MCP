@@ -23,6 +23,8 @@
 # (default: WSL's default one). The exit code is pytest's.
 
 $ErrorActionPreference = 'Stop'
+# Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
+function Fail([string]$message) { [Console]::Error.WriteLine("wsl-suite: $message"); exit 2 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $distro = @()
@@ -30,8 +32,7 @@ if ($env:PSEUDOLIFE_WSL_DISTRO) { $distro = @('-d', $env:PSEUDOLIFE_WSL_DISTRO) 
 
 $linuxRoot = (& wsl.exe @distro -e wslpath -a ($root -replace '\\', '/'))
 if ($LASTEXITCODE -ne 0 -or -not $linuxRoot) {
-    Write-Error "wsl-suite: could not map $root into WSL (is a distribution installed?)"
-    exit 2
+    Fail "could not map $root into WSL (is a distribution installed?)"
 }
 
 # What the run reads from the environment: the board mirror's bearer and
@@ -54,11 +55,10 @@ if (-not $env:PSEUDOLIFE_MCP_TOKEN -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
 $copy = @{}
 if ($env:PSEUDOLIFE_WSL_SUITE_SOURCE -ne 'worktree') {
     $dirty = git -C $root status --porcelain --untracked-files=no
-    if ($LASTEXITCODE -ne 0) { Write-Error "wsl-suite: $root is not a git checkout"; exit 2 }
+    if ($LASTEXITCODE -ne 0) { Fail "$root is not a git checkout" }
     if ($dirty) {
-        Write-Error ("wsl-suite: $root has uncommitted changes; the run tests the " +
-            "committed HEAD, so commit first (or set PSEUDOLIFE_WSL_SUITE_SOURCE=worktree)")
-        exit 2
+        Fail ("$root has uncommitted changes; the run tests the committed HEAD, " +
+            "so commit first (or set PSEUDOLIFE_WSL_SUITE_SOURCE=worktree)")
     }
     $copy = @{
         PSEUDOLIFE_SUITE_COMMIT     = (git -C $root rev-parse HEAD)
