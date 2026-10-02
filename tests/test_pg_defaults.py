@@ -4,6 +4,7 @@ skipping them (2026-09-20: ~1000 silent skips after the 09-14 rotation)."""
 from __future__ import annotations
 
 import io
+import os
 import re
 from pathlib import Path
 
@@ -92,13 +93,35 @@ def test_default_admin_url_embeds_the_resolved_password(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=s3cret\n", encoding="utf-8")
     assert pg_defaults.default_admin_url({}, env_file) == (
-        "postgresql://pseudolife:s3cret@127.0.0.1:5433/postgres")
+        f"postgresql://pseudolife:s3cret@{pg_defaults.DEV_HOST_PORT}/postgres")
+
+
+def test_the_dev_server_address_can_be_moved_off_5433():
+    # A machine whose 5433 is a live bank's server (the homelab box) points
+    # every default path at its test server instead.
+    import subprocess
+    import sys
+
+    code = "from tests import pg_defaults as d; print(d.DEV_HOST_PORT)"
+    root = str(pg_defaults.ENV_FILE.parent.parent)
+    env = {k: v for k, v in os.environ.items() if k != "PSEUDOLIFE_TEST_PG_HOST_PORT"}
+    plain = subprocess.run([sys.executable, "-c", code], cwd=root, env=env,
+                           capture_output=True, text=True, check=True)
+    assert plain.stdout.strip() == "127.0.0.1:5433"
+    moved = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True,
+                           text=True, check=True,
+                           env={**env, "PSEUDOLIFE_TEST_PG_HOST_PORT": "127.0.0.1:5434"})
+    assert moved.stdout.strip() == "127.0.0.1:5434"
+    bad = subprocess.run([sys.executable, "-c", code], cwd=root, capture_output=True,
+                         text=True, env={**env, "PSEUDOLIFE_TEST_PG_HOST_PORT": "5434"})
+    assert bad.returncode != 0 and "PSEUDOLIFE_TEST_PG_HOST_PORT" in bad.stderr
 
 
 def test_default_admin_url_percent_encodes_a_generated_password():
     """`@` would re-split the authority; `%` `/` `:` `#` `?` are misparsed."""
     url = pg_defaults.default_admin_url({"PSEUDOLIFE_TEST_PG_PASSWORD": "p@ss/w:rd#1%?"})
-    assert url == "postgresql://pseudolife:p%40ss%2Fw%3Ard%231%25%3F@127.0.0.1:5433/postgres"
+    assert url == (f"postgresql://pseudolife:p%40ss%2Fw%3Ard%231%25%3F@"
+                   f"{pg_defaults.DEV_HOST_PORT}/postgres")
     from psycopg.conninfo import conninfo_to_dict
 
     assert conninfo_to_dict(url)["password"] == "p@ss/w:rd#1%?"
@@ -110,7 +133,8 @@ def test_fixture_default_admin_follows_the_env_file(monkeypatch, tmp_path):
     monkeypatch.setattr(pg_defaults, "ENV_FILE", env_file)
     monkeypatch.delenv("PSEUDOLIFE_TEST_DATABASE_URL", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_TEST_PG_PASSWORD", raising=False)
-    assert pg_fixtures._admin_url() == "postgresql://pseudolife:rotated@127.0.0.1:5433/postgres"
+    assert pg_fixtures._admin_url() == (
+        f"postgresql://pseudolife:rotated@{pg_defaults.DEV_HOST_PORT}/postgres")
     assert pg_fixtures.resolve_test_db_url.__doc__ or True  # exists
     # An explicit override is still returned verbatim.
     monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", "postgresql://u:p@h:1/db")

@@ -206,8 +206,12 @@ took 143 CUDA OOMs.
     the box. A suite on the other machine does not load yours.
   - **On the box, suites never touch the live bank's Postgres** (5433):
     the suite user's shells source `~/.config/pseudolife-suite/env`, which
-    points `PSEUDOLIFE_TEST_DATABASE_URL` at the separate test server on
-    5434, and a dispatched run refuses to start without that variable.
+    sets `PSEUDOLIFE_TEST_PG_HOST_PORT=127.0.0.1:5434` (the separate test
+    server) and its `PSEUDOLIFE_TEST_PG_PASSWORD`, so every default path —
+    per-run databases, the admin URL, reachability probes — uses that
+    server, and a dispatched run refuses to start without it. Not a fixed
+    `PSEUDOLIFE_TEST_DATABASE_URL`: that shares one database between
+    concurrent runs and covers only the fixtures.
     Sessions there run `python -m pytest tests/` natively (Linux needs no
     WSL), under the same one-suite lock. Dispatched runs add a systemd
     `MemoryMax=16G` scope, since the box also serves the live daemon, which

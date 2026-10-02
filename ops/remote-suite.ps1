@@ -24,9 +24,10 @@
 # origin). The remote side runs that commit's own ops/wsl-suite.sh in its
 # copy mode, under a systemd scope with MemoryMax, as the SSH user (who needs
 # password-free sudo for systemd-run that may preserve the environment:
-# NOPASSWD:SETENV:, or NOPASSWD: ALL). It refuses to start unless
-# PSEUDOLIFE_TEST_DATABASE_URL is set there after env= is sourced, so a run
-# never falls back to a default server that may hold a live bank. The board
+# NOPASSWD:SETENV:, or NOPASSWD: ALL). It refuses to start unless env=
+# leaves PSEUDOLIFE_TEST_PG_HOST_PORT (preferred: per-run databases on that
+# server) or PSEUDOLIFE_TEST_DATABASE_URL set there, so a run never falls
+# back to the default server, which may hold a live bank. The board
 # bearer, when this session
 # has one, is sent on SSH's stdin, never on a command line, so the remote
 # run mirrors on the board under that machine's lease (full-suite.lease
@@ -37,14 +38,16 @@
 # ~/.pseudolife-mcp/suite-results. The exit code is pytest's.
 
 $ErrorActionPreference = 'Stop'
+# Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
+function Fail([string]$message) { [Console]::Error.WriteLine("remote-suite: $message"); exit 2 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $name = Split-Path $root -Leaf
 $home_ = [Environment]::GetFolderPath('UserProfile')
 
 $dirty = git -C $root status --porcelain --untracked-files=no
-if ($LASTEXITCODE -ne 0) { Write-Error "remote-suite: $root is not a git checkout"; exit 2 }
-if ($dirty) { Write-Error "remote-suite: $root has uncommitted changes; commit first"; exit 2 }
+if ($LASTEXITCODE -ne 0) { Fail "$root is not a git checkout" }
+if ($dirty) { Fail "$root has uncommitted changes; commit first" }
 $sha = (git -C $root rev-parse HEAD).Trim()
 
 $cfg = @{ repo = '~/projects/Pseudolife-MCP'; memory = '16G' }
@@ -58,15 +61,15 @@ if ($env:PSEUDOLIFE_SUITE_REMOTE) { $cfg['ssh'] = $env:PSEUDOLIFE_SUITE_REMOTE }
 $remote = $cfg['ssh']
 
 $where = $env:PSEUDOLIFE_SUITE_WHERE
-if ($where -and $where -notin 'local', 'remote') { Write-Error "remote-suite: PSEUDOLIFE_SUITE_WHERE must be local or remote"; exit 2 }
-if ($where -eq 'remote' -and -not $remote) { Write-Error "remote-suite: no remote configured ($cfgFile ssh=...)"; exit 2 }
+if ($where -and $where -notin 'local', 'remote') { Fail "PSEUDOLIFE_SUITE_WHERE must be local or remote" }
+if ($where -eq 'remote' -and -not $remote) { Fail "no remote configured ($cfgFile ssh=...)" }
 
 $pushed = $false
 if ($remote -and $where -ne 'local') {
     git -C $root fetch --quiet origin 2>$null
     $pushed = [bool](git -C $root branch -r --contains $sha 2>$null)
     if (-not $pushed) {
-        if ($where -eq 'remote') { Write-Error "remote-suite: $($sha.Substring(0,8)) is not on origin; push it first"; exit 2 }
+        if ($where -eq 'remote') { Fail "$($sha.Substring(0,8)) is not on origin; push it first" }
         Write-Host "remote-suite: $($sha.Substring(0,8)) is not pushed, so only local WSL is a candidate"
     }
 }
@@ -92,7 +95,7 @@ while (-not $target) {
         $state = Get-State $c
         if ($state -eq 'free') { $target = $c; break }
         if ($state -ne 'held') {
-            if ($candidates.Count -eq 1) { Write-Error "remote-suite: cannot probe $c's suite lock: $state"; exit 2 }
+            if ($candidates.Count -eq 1) { Fail "cannot probe $c's suite lock: $state" }
             Write-Host "remote-suite: cannot probe $c's suite lock ($state); leaving it out"
             $candidates = @($candidates | Where-Object { $_ -ne $c })
         }
@@ -134,7 +137,7 @@ if ($target -eq 'local') {
     $lines.Add('script="$(mktemp)"')
     $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
     $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
-    $lines.Add('if [ -z "${PSEUDOLIFE_TEST_DATABASE_URL:-}" ]; then echo "remote-suite: no PSEUDOLIFE_TEST_DATABASE_URL on this machine after env=; refusing rather than use a default server" >&2; exit 2; fi')
+    $lines.Add('if [ -z "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}${PSEUDOLIFE_TEST_DATABASE_URL:-}" ]; then echo "remote-suite: neither PSEUDOLIFE_TEST_PG_HOST_PORT nor PSEUDOLIFE_TEST_DATABASE_URL is set on this machine after env=; refusing rather than use the default server, which may hold a live bank" >&2; exit 2; fi')
     $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
     $lines.Add('export PATH="$PATH:$HOME/.local/bin" TERM=dumb')
     # exec: PowerShell ends piped stdin with CRLF, and bash must never read

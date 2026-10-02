@@ -53,7 +53,14 @@ def own_run_pid(suffix: str, *, namespace: str | None = None) -> int | None:
 
 
 COMPOSE_DEFAULT_PASSWORD = "pseudolife"
-DEV_HOST_PORT = "127.0.0.1:5433"
+# PSEUDOLIFE_TEST_PG_HOST_PORT moves every default path (the admin URL, the
+# reachability probe, per-run databases) to another test server: on the
+# maintainer's homelab box 5433 is the live bank's server, and a dispatched
+# suite there (2026-10-02) still knocked on it from paths an explicit test
+# URL does not cover; only a password mismatch kept them out.
+DEV_HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433").strip()
+if not DEV_HOST_PORT.rpartition(":")[0] or not DEV_HOST_PORT.rpartition(":")[2].isdigit():
+    raise ValueError(f"PSEUDOLIFE_TEST_PG_HOST_PORT={DEV_HOST_PORT!r}: expected host:port")
 DEV_ROLE = "pseudolife"
 # The compose stack's env file; the installer writes POSTGRES_PASSWORD there.
 ENV_FILE = Path(__file__).resolve().parent.parent / "ops" / ".env"
