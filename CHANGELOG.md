@@ -16,8 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "unauthorized"}`). The shim reports that exact refusal as
   `authentication_required` with `operation_outcome: not_dispatched`: the
   token is no longer accepted and no tool ran. Anything inexact still
-  keeps the unknown-outcome warning. Both halves deploy together: the
-  daemon and the client step (`ops/update.ps1 -All`).
+  keeps the unknown-outcome warning. Deploy the daemon with the client
+  step (`ops/update.ps1 -All`). An invited machine still on an older shim
+  reports the new refusal as an operation that may have completed, which
+  is cautious but not wrong, until that machine updates its own client.
 - `board_status.reason_hint()` is the public way to read a refusal
   reason's plain-language line, which the shim uses in place of a
   private table. The remote-bank guide asks reverse proxies to pass the

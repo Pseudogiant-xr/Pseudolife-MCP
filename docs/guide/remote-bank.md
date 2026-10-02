@@ -247,8 +247,8 @@ bearer that matches nothing in the environment gets `503 {"error":
 never reported as wrong. A tool call whose bearer stops resolving between
 the gate and the tool is never run as the default principal. It gets the
 JSON-RPC error `principals_unavailable` (-32003) when the table cannot be
-checked, and `unauthorized` (-32004) when the token was revoked
-meanwhile. The stdio shim passes both on as refusals in which no tool
+checked, and `unauthorized` (-32004) when the token was revoked or
+replaced (`invite --replace`) meanwhile. The stdio shim passes both on as refusals in which no tool
 ran.
 
 Redemption (`POST /api/pair`) refuses any request with an `Origin` header,

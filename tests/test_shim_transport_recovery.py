@@ -687,19 +687,25 @@ def test_a_stale_credential_outranks_a_daemon_refusal():
         }
 
 
-def test_principals_unavailable_on_tools_list_keeps_its_code(tmp_path, upstream):
+@pytest.mark.parametrize("fault,code,classification", [
+    (_PRINCIPALS_RPC_ERROR, -32003, "principals_unavailable"),
+    ({"code": -32004, "message": "unauthorized",
+      "data": {"status": 401, "error": "unauthorized"}}, -32004, "authentication_required"),
+], ids=["unavailable", "revoked"])
+def test_daemon_refusal_on_tools_list_keeps_its_code(
+        tmp_path, upstream, fault, code, classification):
     token_file = tmp_path / "token"
     _replace_token(token_file, NEW_TOKEN)
 
     async def drive():
         async with _proxy_client(upstream, token_file, tmp_path / "stderr.log") as client:
             upstream.fault_method = "tools/list"
-            upstream.fault = _PRINCIPALS_RPC_ERROR
+            upstream.fault = fault
             with pytest.raises(Exception) as caught:
                 await client.list_tools()
             data = caught.value.error.data
-            assert caught.value.error.code == -32003
-            assert data["classification"] == "principals_unavailable"
+            assert caught.value.error.code == code
+            assert data["classification"] == classification
             assert data["phase"] == "list"
             assert data["operation_outcome"] == "not_dispatched"
 
