@@ -364,12 +364,16 @@ def pytest_configure(config: pytest.Config) -> None:
 
     # Then, on a run dispatched to a second machine, refuse a server that
     # holds a production bank under any address (tests/pg_defaults.py,
-    # dispatched_live_bank_refusal). Once, in the process that started the
-    # run: xdist workers inherit its settings.
-    if not os.environ.get("PYTEST_XDIST_WORKER"):
-        from tests.pg_defaults import dispatched_live_bank_refusal
+    # dispatched_live_bank_refusal): here, and again once the run holds the
+    # suite lock below, as a server that refused the first connection may be
+    # up by then. Only in the process that started the run: xdist workers
+    # inherit its settings.
+    def refuse_live_bank() -> None:
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return
+        from tests import pg_defaults
 
-        refusal = dispatched_live_bank_refusal()
+        refusal = pg_defaults.dispatched_live_bank_refusal()
         if refusal:
             # The exit-time bench drop would connect to the refused server.
             if _bench_pin is not None:
@@ -377,6 +381,8 @@ def pytest_configure(config: pytest.Config) -> None:
 
                 atexit.unregister(_drop_run_bench_db)
             raise pytest.UsageError(refusal)
+
+    refuse_live_bank()
 
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
@@ -424,7 +430,7 @@ def pytest_configure(config: pytest.Config) -> None:
             name=suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))))
     if held is not None:
         config.stash[_SUITE_LOCK] = held
-
+    refuse_live_bank()  # pytest_unconfigure releases the lock on a refusal
 
     embedder_mode(os.environ)  # a bad PSEUDOLIFE_TEST_EMBEDDER fails here
     from pseudolife_memory.memory import embedding as embedding_module

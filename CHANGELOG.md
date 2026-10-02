@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
+- A dispatched full suite checked for the live bank's server once, before
+  it queued for the suite lock, and passed over a server that refused the
+  connection. A live container that was restarting at that moment would
+  be up by the time the run started. The check now runs again once the run
+  holds the lock.
+- The explicit `PSEUDOLIFE_TEST_DATABASE_URL` is asked through its own
+  database first, where its tests and daemons connect, then through
+  `postgres` when that database is missing or will not have the login. A
+  server whose access rules let the suite into the test database but not
+  into `postgres` was passed over.
+- A URL whose servers the check cannot see is refused: a `service=` setting
+  or `PGSERVICE` (read from a service file at connect time), and a host
+  list given through `PGHOST` or `PGHOSTADDR`, not only one in the URL.
+
 ### Fixed (2026-10-03 — a resumed session no longer wakes on plain mail)
 - On resume, compact and clear, SessionStart deleted the session's
   `.seen` marker so the next prompt would print the digest again. With
