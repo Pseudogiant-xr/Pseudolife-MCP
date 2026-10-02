@@ -1836,7 +1836,7 @@ def test_a_null_park_expiry_is_refused(store):
     assert store.authenticate(*creds(a))["park_reason"] is None
 
 @pytest.mark.parametrize("recent", [True, False])
-def test_codex_urgent_unknown_turn_reports_attention_without_queue_path(store, recent):
+def test_codex_urgent_unknown_turn_reports_one_capped_queue_permission(store, recent):
     """Board-call age cannot prove that a desktop task is idle."""
     sender = store.register("alice")
     recipient = store.register("alice", capabilities={"codex": False, "ring": True})
@@ -1850,11 +1850,12 @@ def test_codex_urgent_unknown_turn_reports_attention_without_queue_path(store, r
     assert receipt["wake"]["decision"] == "no_path"
     assert receipt["wake"]["reason"] == "no_steer_path"
     assert receipt["wake"]["attention"] is True
-    assert receipt["wake"]["delivery"] == "pending"
+    assert receipt["wake"]["delivery"] == "queue_pending"
     assert receipt["wake"]["recipient_state"] == "unknown"
     answer = store.heartbeat(*creds(recipient), attachment_id="codex",
-                             generation=attached["generation"])
-    assert answer["wake"] == {"decision": "attention", "reason": "urgent", "ring_at": 1000.0}
+                             generation=attached["generation"], ring_armed_until=1060.0)
+    assert answer["wake"] == {"decision": "attention", "reason": "urgent", "ring_at": 1000.0,
+                              "message_expires_at": 87400.0, "queue_allowed": True, "recipient_state": "unknown"}
     assert store.receive(*creds(recipient), for_delivery=True)["messages"] == []
     assert len(store.receive(*creds(recipient))["messages"]) == 1
 
@@ -1946,7 +1947,7 @@ def test_codex_legacy_rung_offer_requires_current_live_park(store, queued, serve
     answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
                           ring_armed_until=2063.0)
     if park == "blocked":
-        assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0}
+        assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0, "message_expires_at": 88400.0}
     elif park == "done":
         assert answer["wake"] is None
     else:
@@ -2021,7 +2022,7 @@ def test_codex_legacy_grant_preserves_unchanged_park_with_same_clock_stamp(store
     store.test_time[0] = 2003.0
     answer = store.attach(*creds(recipient), attachment_id="upgraded-shim", ring=True,
                           ring_armed_until=2063.0)
-    assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0}
+    assert answer["wake"] == {"decision": "rung", "reason": "urgent", "ring_at": 2000.0, "message_expires_at": 88400.0}
 
 
 @pytest.mark.parametrize("missing", ["send", "park", "park_snapshot"])
@@ -2048,6 +2049,7 @@ def test_retained_codex_offer_cannot_queue_after_authoritative_withdrawal(store,
     from pseudolife_memory.coordination_adapter import CoordinationAdapter
     from tests.test_codex_doorbell import THREAD, _stub, _calls, _settle
     monkeypatch.setenv('PSEUDOLIFE_DIGEST_DIR', str(tmp_path))
+    monkeypatch.setattr(time, 'time', lambda: store.test_time[0])
     sender = store.register('alice')
     recipient = store.register('alice', capabilities={'codex': False, 'ring': True})
     store.test_time[0] = 1999.0

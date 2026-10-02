@@ -958,7 +958,7 @@ def test_a_thread_whose_bridge_fails_does_not_queue_an_ambiguous_alternate(tmp_p
         return bell.events, attached
 
     events, attached = asyncio.run(drive())
-    assert [event[0] for event in events] == ["close"]
+    assert [event[0] for event in events] == ["watch", "close"]
 
 
 def test_registry_leaves_bridged_threads_to_the_bridge(tmp_path):
@@ -1185,7 +1185,7 @@ def test_without_a_daemon_decision_the_doorbell_holds(tmp_path):
     box = asyncio.run(drive())
     assert _argv(log) == [_queued(1)]
     assert box.deliveries == ["bell"]
-    assert box.reasons == ["rung clears accepted pending recipient_state_unknown"]
+    assert box.reasons == ["rung clears queue_accepted pending recipient_state_unknown"]
 
 
 @pytest.mark.parametrize("decision", ["rung", "nudged"])
@@ -1410,7 +1410,7 @@ def test_queue_acceptance_receipt_reports_a_prompt_hook_that_arrived_first(tmp_p
         now[0] += 60
         box.set("m1")
         await _settle(bell)
-        assert box.reasons == ["rung anyone accepted prompt_seen recipient_state_unknown"]
+        assert box.reasons == ["rung anyone queue_accepted prompt_seen recipient_state_unknown"]
         assert bell._bells[THREAD].pending_notice.resolved()
     asyncio.run(drive())
     assert _argv(log) == [_queued(1)]

@@ -1784,7 +1784,8 @@ def test_hook_installers_fresh_install_gets_one_briefing_and_one_checkin(tmp_pat
 
 
 @pytest.mark.parametrize("platform_hook", ["windows", "posix"])
-def test_coordination_prompt_records_only_exact_doorbell_arrival(tmp_path, platform_hook):
+@pytest.mark.parametrize("notice_kind", ["legacy", "unknown"])
+def test_coordination_prompt_records_only_exact_doorbell_arrival(tmp_path, platform_hook, notice_kind):
     import hashlib
     import sys
 
@@ -1800,6 +1801,12 @@ def test_coordination_prompt_records_only_exact_doorbell_arrival(tmp_path, platf
             f"[notice {nonce}]")
     record = {"thread_id": thread, "nonce": nonce, "count": 1, "text": text}
     from pseudolife_memory.private_state import open_private
+    if notice_kind == "unknown":
+        from pseudolife_memory.codex_doorbell_state import notice_text
+        import time
+        text = notice_text(1, nonce, version=2, recipient_state="unknown")
+        record.update(version=2, recipient_state="unknown", text=text,
+                      expires_at=time.time()+86400, expiry_basis="message")
     fd = open_private(digest / f"{key}.bell-pending", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(record, handle)

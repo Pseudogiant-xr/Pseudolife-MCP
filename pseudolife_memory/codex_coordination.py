@@ -231,9 +231,13 @@ class CodexCoordinationRegistry:
                     await adapter.downgrade_to_pull()
                 except Exception:  # noqa: BLE001 - local pull mode is already set
                     pass
-                # A timeout/disconnect can follow owner acceptance. Without
-                # definite no-active evidence and refreshed idle eligibility,
-                # queueing an alternate notice could duplicate that delivery.
+                # The ambiguous snapshot is covered: never queue an alternate
+                # for it. Later independently eligible arrivals retain a listener.
+                if self._doorbell is not None and not self._closing:
+                    try:
+                        self._doorbell.watch(thread_id, adapter, shown=True)
+                    except Exception:  # noqa: BLE001 - pull coordination remains available
+                        pass
             try:
                 await delivery.__aexit__(None, None, None)
             except Exception:  # noqa: BLE001 - shutdown is best effort

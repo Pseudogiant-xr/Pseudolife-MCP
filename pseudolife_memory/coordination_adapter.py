@@ -205,7 +205,11 @@ class CoordinationAdapter:
         self._ring_timer = None
         self._ring_offer = None
         self._attention_pending = False
+        self._attention_state = "unknown"
         self._last_attention = None
+        self.ring_context = {}
+        self._taken_ring = None
+        self._ring_context = {}
         self._last_ring = None
         self._ring_unwritten = None
         self._agent_written = None
@@ -318,11 +322,22 @@ class CoordinationAdapter:
         if time.time() < offer[2]:
             return None
         self._ring_offer = None
+        self._taken_ring = offer
+        self.ring_context = self._ring_context.copy()
         return offer[0], offer[1]
+
+    def restore_ring(self, decision) -> None:
+        """Retry a reservation that did not create any native queue attempt."""
+        offer = self._taken_ring
+        if (offer is not None and offer[:2] == decision and self._ring_offer is None
+                and offer[:3] == self._last_ring):
+            self._ring_offer = offer
 
     def _withdraw_ring(self) -> None:
         """Withdraw local authorization, never an outstanding native notice."""
         self._ring_offer = None
+        self._taken_ring = None
+        self._ring_context = {}
         self._ring_unwritten = None
         if self._ring_timer is not None:
             self._ring_timer.cancel()
@@ -347,16 +362,22 @@ class CoordinationAdapter:
         if (decision == "attention" and codex
                 and isinstance(reason, str) and type(ring_at) in (int, float)
                 and math.isfinite(ring_at)):
-            attention = (reason, float(ring_at))
             self._attention_pending = True
-            self._withdraw_ring()
+            self._attention_state = "busy" if wake.get("recipient_state") == "busy" else "unknown"
+            queue_allowed = (wake.get("queue_allowed") is True
+                             and wake.get("recipient_state") == "unknown")
+            attention = (reason, float(ring_at), self._attention_state, queue_allowed)
+            if not queue_allowed or (decision, reason, float(ring_at)) != self._last_ring:
+                self._withdraw_ring()
             if attention != self._last_attention:
                 self._last_attention = attention
                 self._ledger("attention", self._digest_watermark, 0,
-                             "no_steer_path pending recipient_state_unknown")
+                             f"no_steer_path pending recipient_state_{self._attention_state}")
             self._refresh_digest()
-            return
-        if (decision != "rung" or not isinstance(reason, str)
+            if not queue_allowed:
+                return
+        if ((decision != "rung" and not (decision == "attention" and codex))
+                or not isinstance(reason, str)
                 or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
                 or not math.isfinite(ring_at)):
             if codex:
@@ -368,6 +389,9 @@ class CoordinationAdapter:
         if ring == self._last_ring:
             return  # the same ring, repeated on a retried heartbeat's answer
         self._last_ring = ring
+        self._ring_context = {"message_expires_at": wake.get("message_expires_at"),
+                              "recipient_state": wake.get("recipient_state"),
+                              "queue_allowed": wake.get("queue_allowed")}
         self._ring_unwritten = None   # superseded by the newer ring
         # The offer names the digest watermark it rings for.
         self._ring_offer = (*ring, self._digest_watermark)
@@ -375,6 +399,8 @@ class CoordinationAdapter:
             self._ring_timer.cancel()
         # A far-off ring_at (a stepped clock) still rings within minutes.
         delay = min(max(0.0, ring[2] - time.time()), 300.0)
+        if decision == "attention":
+            return  # unknown-state queue permission never writes an idle Stop marker
         try:
             self._ring_timer = asyncio.get_running_loop().call_later(delay, self._write_ring, ring)
         except RuntimeError:
@@ -489,7 +515,7 @@ class CoordinationAdapter:
         if text and self._attention_pending:
             from .codex_doorbell import attention_text
             text += ("\nCoordination attention: no_steer_path; mail pending for hint/pull, "
-                     "recipient turn state unknown.\n" + attention_text(self._pending_count))
+                     f"recipient turn state {self._attention_state}.\n" + attention_text(self._pending_count))
         if text == self._digest_text and self._digest_written and not self._digest_due():
             return
         if text != self._digest_text:

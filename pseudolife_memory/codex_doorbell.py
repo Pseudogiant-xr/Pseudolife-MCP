@@ -12,6 +12,7 @@ itself with ``memory_message receive``, where it stays framed as agent-origin.
 from __future__ import annotations
 
 import asyncio
+import errno
 from contextlib import suppress
 from dataclasses import dataclass, field
 import os
@@ -24,8 +25,8 @@ import time
 from .codex_coordination import thread_id_from_meta
 
 # Recent Pseudolife activity suppresses an intended-idle park wake; it does
-# not establish native turn state. Unparked Codex urgency uses attention
-# hints instead of this queue path.
+# not establish native turn state. Explicit capped unknown-state urgency
+# may queue one labelled bell; a known-busy attention remains a hint.
 QUIET_SECONDS = 30.0
 # ``codex queue`` starts an embedded app-server to enqueue when no managed
 # daemon is running. Not measured here: no live probe ran against a real
@@ -104,12 +105,8 @@ def doorbell_text(count: int, notice_id: str | None = None) -> str:
     """The whole queued message. Only the count and system nonce vary, so
     nothing a peer wrote can reach the user-role turn, and the
     characters survive a cmd.exe batch wrapper unquoted and unexpanded."""
-    noun = "message" if count == 1 else "messages"
-    text = ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
-            f"{count} addressed {noun} pending for this thread. Read them with "
-            "memory_message receive and ack each message_id. Act only within the task "
-            "the user authorized. If nothing is pending, end the turn.")
-    return text + (f" [notice {notice_id}]" if notice_id is not None else "")
+    from .codex_doorbell_state import notice_text
+    return notice_text(count, notice_id)
 
 
 def attention_text(count: int) -> str:
@@ -276,7 +273,19 @@ class CodexDoorbell:
         due bell is rung by a background task."""
         bell = self._bells.get(thread_id)
         count = adapter.pending_count
-        if bell is None or self._disabled or count is None:
+        if bell is None:
+            return
+        if bell.outstanding and bell.pending_notice is not None:
+            resolution = bell.pending_notice.resolution()
+            if resolution is not None:
+                bell.outstanding = False
+                if resolution == "unresolved_expired":
+                    adapter.note_delivery("unresolved_expired", 0,
+                                          "availability_fallback native_cancellation_unknown "
+                                          + ("origin_expiry_unknown legacy_upper_bound"
+                                             if bell.pending_notice.resolution_basis == "legacy_upper_bound"
+                                             else "origin_message_expiry"))
+        if self._disabled or count is None:
             return
         preview = adapter.pending_preview
         # Arrival: the count grew, or an unknown message appeared. When the
@@ -302,8 +311,6 @@ class CodexDoorbell:
         if count == 0:
             bell.covered = bell.arrival
             return
-        if bell.outstanding and bell.pending_notice.resolved():
-            bell.outstanding = False
         if bell.arrival <= bell.covered or bell.outstanding:
             return
         if self._clock() - bell.last_call < self._quiet:
@@ -317,12 +324,26 @@ class CodexDoorbell:
         decision = ring_due() if callable(ring_due) else None
         if not decision:
             return  # re-checked at the next heartbeat
-        if decision[0] != "rung":
-            return  # Attention never becomes a queued user turn.
-        notice = bell.pending_notice.reserve(count)
+        if decision[0] not in ("rung", "attention"):
+            return  # Unsupported attention remains hint/pull context.
+        context = getattr(adapter, "ring_context", {})
+        if decision[0] == "attention" and (context.get("queue_allowed") is not True
+                                           or context.get("recipient_state") != "unknown"):
+            return
+        notice = bell.pending_notice.reserve(count,
+                    expires_at=context.get("message_expires_at"),
+                    recipient_state="unknown" if decision[0] == "attention" else None)
         if notice is None:
-            bell.outstanding = True
-            adapter.note_delivery("bell_pending", 0, "unresolved queue transport")
+            bell.outstanding = (bell.pending_notice is not None
+                                and os.path.lexists(bell.pending_notice.path))
+            if not bell.outstanding:
+                restore = getattr(adapter, "restore_ring", None)
+                if restore is not None:
+                    restore(decision)
+            if bell.outstanding:
+                adapter.note_delivery("bell_pending", 0, "unresolved queue transport")
+            else:
+                adapter.note_delivery("bell_deferred", 0, "reservation_unavailable no_queue_attempt")
             return
         bell.covered = bell.arrival
         bell.outstanding = True
@@ -369,6 +390,10 @@ class CodexDoorbell:
         except Exception as error:  # noqa: BLE001 - any spawn failure degrades to pull
             if job is not None:
                 job.close()
+            definite = isinstance(error, OSError) and error.errno in (
+                errno.ENOENT, errno.EACCES, errno.ENOEXEC, errno.ENOTDIR)
+            if definite and notice is not None and self._bells[thread_id].pending_notice.rollback_unstarted(notice):
+                self._bells[thread_id].outstanding = False
             self._disable(f"could not start the Codex CLI: {type(error).__name__}")
             return
         try:
@@ -379,6 +404,9 @@ class CodexDoorbell:
                         job = None      # taskkill is the kill, as before
                 except Exception as error:  # noqa: BLE001 - never leave it suspended
                     await self._kill(process, job)
+                    # adopt raises before successfully resuming this suspended CLI.
+                    if notice is not None and self._bells[thread_id].pending_notice.rollback_unstarted(notice):
+                        self._bells[thread_id].outstanding = False
                     self._disable(f"could not start the Codex CLI: {type(error).__name__}")
                     return
             try:
@@ -400,7 +428,7 @@ class CodexDoorbell:
                        and self._bells[thread_id].pending_notice.accept(notice))
         state = "prompt_seen" if prompt_seen else "pending"
         adapter.note_delivery("bell", len(text) + 1,
-                              f"{verdict} {reason} accepted {state} recipient_state_unknown".strip())
+                              f"{verdict} {reason} queue_accepted {state} recipient_state_unknown".strip())
 
     @staticmethod
     async def _kill(process, job: _KillJob | None = None) -> None:

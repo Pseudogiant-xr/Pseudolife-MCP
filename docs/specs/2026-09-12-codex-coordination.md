@@ -48,17 +48,26 @@ independent of that limitation.
 
 ## Queue doorbell (2026-09-23)
 
-Current behavior (2026-10-03): eligible parked wakes retain the queue path.
-Unparked Codex urgency is capped attention with unknown host state and returns
-`no_steer_path` for pull/hints; board recency cannot establish native idle state.
-A private per-thread reservation precedes queue launch and survives restart.
-Only the complete generated notice plus opaque nonce matching the owning
-UserPromptSubmit hook permits a later queue. Reads, acks, expiry and unrelated
-turns cannot resolve it. This proves prompt-pipeline arrival, not model reading.
-Automatic queued-notice hook emission by the current desktop remains unverified;
-missing receipt evidence keeps the reservation pending. Ambiguous bridge failure
-never authorizes an alternate queue. The historical probes below did not record
-this hook path, and do not establish desktop steer support.
+Current behavior (2026-10-03): eligible parked wakes retain the queue path,
+with their audit-bound grant explicitly repeated until ACK, message expiry or
+park withdrawal. Capped unparked Codex urgency may queue one fixed bell labelled
+`turn state unknown` when a queue listener is armed; the receipt remains
+`no_steer_path`, with `delivery: queue_pending` and unknown native turn state.
+Known-busy attention remains a hint; board recency proves neither idle state nor
+steer support. A private per-thread reservation precedes launch and survives
+restart. Exact complete versioned notice plus nonce at the owning prompt hook
+permits a later queue; reads, ACKs and unrelated turns do not. At the originating
+message's durably recorded expiry, an unresolved reservation may clear as
+`unresolved_expired`, an authorized availability fallback with native cancellation
+unknown: the native item may remain visible. A valid older record missing exact
+expiry gets one durable first-seen plus 24-hour `legacy_upper_bound`, with
+`origin_expiry_unknown`; restart cannot renew it. Corrupt records fail closed.
+Exact hook evidence proves prompt-pipeline arrival, not model reading. Automatic
+queued-notice hook emission by the current desktop remains unverified; missing
+receipts leave the reservation pending until its expiry fallback. An ambiguous
+bridge failure covers that snapshot without an alternate queue, then restores a
+guarded listener for later eligible arrivals. Historical probes below did not
+record this hook path and do not establish desktop steer support.
 
 
 Codex's first-party `codex queue` command reaches idle tasks the bridge cannot,

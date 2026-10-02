@@ -921,7 +921,8 @@ It is on by default since 2026-09-28 (before that, opt-in with
 coordination adapter is up (on by default with a bearer token, off with
 `PSEUDOLIFE_AGENT_COORDINATION=0`, which stays the master off switch). It
 rings only when the daemon decides a message should wake the task: the task
-is parked with a declared need and the message plausibly clears it (see the
+is parked with a declared need and the message plausibly clears it, or an
+unparked task receives capped urgent mail with turn state unknown (see the
 `wake` caps under [Experimental agent coordination](#experimental-agent-coordination)).
 Set these in the Pseudolife MCP server's environment, next to
 `PSEUDOLIFE_AGENT_COORDINATION`, to turn it off or to name the CLI:
@@ -955,23 +956,31 @@ approval a woken task stalls on an approval prompt until someone answers it
 Hook setup sets that approval when you approve the hooks
 ([Codex CLI and desktop](#codex-cli-and-desktop)).
 
-- **When it rings.** After each heartbeat, the shim queues a notice only for
-  an eligible daemon `rung` decision, new unshown addressed mail and a task
-  quiet on Pseudolife for 30 seconds. A parked need supplies intended-idle
-  eligibility; tool-call recency alone does not establish the host's turn state.
-  Plain mail to an unparked task never rings it. Urgent mail to an unparked
-  Codex task is capped attention with unknown host state: the sender receives
-  `no_path`, `reason: no_steer_path`, `delivery: pending`, and
-  `recipient_state: unknown`. The adapter carries a pending hint for explicit
-  receive; it never queues this attention behind an active turn. Previously
-  an unparked task with old board activity could ring for urgency; that case
-  now waits for pull or a hint because idle state cannot be proved.
+- **When it rings.** After each heartbeat, the shim queues a notice for an
+  eligible daemon `rung` decision, or explicit permission for one capped urgent
+  unknown-state bell, with new unshown addressed mail and 30 seconds quiet on
+  Pseudolife. The quiet interval is a rate guard, not proof of native idle state.
+  A parked need supplies intended-idle eligibility. Plain mail to an unparked
+  task never rings it. Urgent unparked Codex mail spends the existing urgent,
+  recipient, nightly and stagger caps before any recent-activity hint branch.
+  With an armed queue listener, the sender receives `no_path`,
+  `reason: no_steer_path`, `delivery: queue_pending`, `recipient_state: unknown`
+  and `queue_allowed: true`. This authorizes one queued bell labelled
+  `turn state unknown`; it does not prove a turn is idle or interrupt an active
+  turn. A known-busy attention hint remains pull/hint delivery. No desktop
+  steer route is proved or enabled.
   Historical database ring grants also require the current live park and
   retained audit ordering proving the grant follows its latest park update.
   Clearing, expiry or refinement invalidates the old grant, even when clock
   stamps repeat or go backwards. Missing audit evidence stays pending for
   pull/hints; serving does not rewrite the grant or spend its caps again.
-  Each attach or heartbeat replaces the adapter's ring authorization. A
+  Pre-update attention rows without explicit unknown-state queue permission also
+  remain hint-only; new urgent mail takes the current capped decision.
+  A still-valid Codex grant is explicitly repeated until its originating
+  message is acknowledged or expires, with the original `ring_at` and message
+  expiry; the 25-second handoff window used by other clients cannot erase a
+  grant while it waits for the quiet interval or a stagger. Each attach or
+  heartbeat replaces the adapter's ring authorization. A
   withdrawn or malformed offer clears its retained offer, delayed write and
   refused-marker retry, with best-effort removal of an existing ring marker.
   Withdrawal does not resolve a notice already submitted to the native queue.
@@ -980,35 +989,56 @@ Hook setup sets that approval when you approve the hooks
   nonce. Peer text, sender labels and message IDs never enter that notice.
   The idle notice asks the task to receive and acknowledge mail, act only
   within user-authorized work, and end if nothing is pending. The active
-  attention hint instead says to continue the original task even if nothing
-  is pending; it never asks an active task to park or end its turn.
+  attention hint and unknown-state queued bell instead say to continue the
+  original task even if nothing is pending; they never ask an active task to
+  park or end its turn.
 - **Queue resolution.** Before starting the CLI, the shim reserves one private
   `<key>.bell-pending` record for the verified thread. Mailbox reads, acks,
-  expiry, an empty mailbox, a timer or an unrelated new turn cannot resolve it.
+  an empty mailbox or an unrelated new turn cannot resolve it. The original
+  message's immutable expiry is recorded in the reservation before launch and
+  is retained across restart. At that deadline an unresolved reservation may
+  clear on the next normal observation as the authorized availability fallback
+  `unresolved_expired`; there is no wall-clock timer. A private
+  `<key>.bell-unresolved-expired` receipt precedes release of the matching nonce. Its
+  receipt says `native_cancellation_unknown`. A native queue item may still be
+  visible or dispatch later. This fallback does not claim cancellation,
+  prompt arrival or delivery. A valid pre-update record lacking exact expiry
+  gets one durable first-seen plus 24-hour upper bound, reported as
+  `origin_expiry_unknown legacy_upper_bound`; restarting never renews it.
+  Malformed, foreign or unsupported-version records stay fail-closed.
   The existing UserPromptSubmit hook records `<key>.bell-prompt-seen` only
   when the complete system-built notice and nonce exactly match that thread's
   pending record. This proves arrival at the native prompt hook, not model
   reading, mailbox acknowledgment or completed work; later hooks may still
-  block the turn. That exact receipt permits the next legitimate queue, and
-  pending state survives shim restart. Queue success is recorded separately
-  as accepted and pending with unknown host state.
+  block the turn. That exact receipt also permits the next legitimate queue.
+  Stored versioned system notice formats remain exact across wording updates.
+  The hook retries brief lock contention for at most 250 milliseconds. Queue
+  success is recorded separately as `queue_accepted` and pending with unknown
+  host state.
 - **How it fails.** The CLI runs in the background with a 20-second timeout,
   no `PSEUDOLIFE_*` variables and no Windows console window. Timeout or shim
   shutdown kills the CLI process tree using the existing Windows job object
   or process-tree fallback. Failure disables the doorbell for that shim and
-  retains unresolved private state, since a failed result may follow queue
-  acceptance. Malformed, missing or foreign receipt evidence never permits
-  another attempt. Pull delivery and hints continue. The digest ledger's
+  retains unresolved private state after ambiguous results, since failure may
+  follow acceptance. A definite failure before CLI execution releases only
+  its own unaccepted reservation; an empty reservation-lock failure keeps
+  the still-valid offer retryable without inventing an outstanding notice.
+  Expiry observation still runs while that shim's transport is disabled and
+  never restarts the CLI. Malformed, missing or foreign receipt evidence never
+  proves consumption. Pull delivery and hints continue. The digest ledger's
   `bell` entry records accepted/pending status; `attention` records
   `no_steer_path pending recipient_state_unknown`.
 - **Limits.** Watching starts at the task's first Pseudolife call after MCP
   reconnect. An existing explicitly configured authenticated bridge remains
   separate; timeout or disconnect does not queue an alternate because the
-  owner may already have accepted delivery. No desktop steer endpoint is
+  owner may already have accepted delivery. After downgrade, that snapshot
+  stays covered while a guarded listener can ring for a later independently
+  eligible arrival. No desktop steer endpoint is
   proved or enabled by default. Automatic queued-notice emission of
   UserPromptSubmit by the current desktop is unverified: if the exact hook
   receipt never arrives, the pending record continues to suppress later
-  queue attempts, including after restart. Install the updated client hooks
+  queue attempts until exact arrival evidence or the recorded expiry fallback,
+  including after restart. Install the updated client hooks
   with the normal client update procedure to use this receipt path; updating
   server code alone cannot provide it. Pre-update queued notices have no
   correlation record and cannot be proven resolved by this mechanism.
@@ -1711,7 +1741,8 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | --- | --- | --- |
 | `hinted` | ordinary mail to a recipient that is not parked and acted on the board within `active_seconds` (unparked Codex urgency takes the capped attention branch first); its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | |
-| `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: pending`, `recipient_state: unknown`), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: queue_pending`, `recipient_state: unknown`,
+`queue_allowed: true` for a capped unknown-state bell), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
 | `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`) | the parked need, if any |
@@ -1725,8 +1756,10 @@ Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
 a non-Codex recipient retains its established urgent ring contract. Unparked
 Codex urgency spends the sender's urgent allowance and passes the same
-per-recipient, nightly and stagger caps, but records attention for pull/hints
-with `no_steer_path`; board recency cannot prove native idle state. Ordinary
+per-recipient, nightly and stagger caps, and records attention with
+`no_steer_path`. An armed queue listener may queue one fixed bell labelled
+`turn state unknown`; neither its acceptance nor board recency proves native
+idle state or steering. Without that listener, mail remains for pull/hints. Ordinary
 recently active recipients remain `hinted`. From v49 until then an idle session that had not parked
 was rung at most hourly (`nudged`) with a request to park; that ring is
 gone. A `nudged`
@@ -1737,8 +1770,10 @@ repeats the first
 decision, and the audit log's `send` event names it. Rings from one sender's
 burst are staggered by `fan_out_stagger_seconds` through `ring_at`. Each ring
 is a `coordination_wakes` row; the recipient's attach and heartbeat answers
-carry the newest for one heartbeat interval after it is first served
-(`wake`, with the latest `ring_at`), so a retried heartbeat still gets it,
+carry the newest for one heartbeat interval after it is first served for
+other clients. Codex receives an explicit still-valid grant until ACK/expiry
+or current-park withdrawal (`wake`, with the original `ring_at` and originating
+message expiry), so a quiet interval or stagger cannot lose its permission,
 and the adapter takes each ring once. A wake path is a live channel or an
 armed **ring path**. `ring` in `capabilities` describes what an adapter can
 support; it does not prove a listener is still running. The adapter reports

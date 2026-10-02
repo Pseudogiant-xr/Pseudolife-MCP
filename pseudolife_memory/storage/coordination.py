@@ -2043,8 +2043,9 @@ class CoordinationStore:
         Queued mail retains a stable offer until acknowledgment or expiry,
         covering lost handoffs and replacement attachments. Codex ring offers
         require retained audit proof of the unchanged current live park. Other rings
-        repeat only for one heartbeat interval. ``attention`` rows are offered
-        to Codex for pending hints, never a queue or channel delivery. A
+        repeat only for one heartbeat interval. New capped unparked ``attention``
+        rows may explicitly authorize an unknown-state queue bell; historical
+        attention without that permission stays hint-only. A
         ``nudged`` row decided before 2026-10-02 (regular mail never wakes) is history, never served."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
         codex = "codex" in (row.get("capabilities") or {})
@@ -2075,7 +2076,8 @@ class CoordinationStore:
             "AND m.acknowledged_at IS NULL AND m.expires_at>%s)" + serve_guard,
             (now, agent_id, agent_id, now, *serve_values))
         rows = self._all(
-            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,"
+            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,"
+            "coalesce(m.wake->>'queue_allowed'='true',false) AS queue_allowed,"
             "coalesce(m.wake->>'queued'='true',false) AS queued,"
             "EXISTS (SELECT 1 FROM coordination_events s WHERE s.event='send' "
             "AND s.message_id=w.message_id AND s.seq>%s) AS park_authorized FROM coordination_wakes w "
@@ -2102,10 +2104,18 @@ class CoordinationStore:
             if not rows:
                 return None
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
-        if not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
+        if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
             return None
-        return {"decision": newest["decision"], "reason": newest["reason"],
-                "ring_at": max(r["ring_at"] for r in rows)}
+        offer = {"decision": newest["decision"], "reason": newest["reason"],
+                 "ring_at": max(r["ring_at"] for r in rows)}
+        if codex:
+            # Exact immutable message expiry, not a new lifetime on each heartbeat.
+            offer["message_expires_at"] = newest["expires_at"]
+            if newest["decision"] == "attention":
+                offer.update(queue_allowed=(newest["queue_allowed"] and park is None
+                                            and self._listener_path(row, now) is None),
+                             recipient_state="unknown")
+        return offer
 
     def _live_park(self, row, now):
         """The row's park record while it stands: a reason set, and no
@@ -2149,8 +2159,8 @@ class CoordinationStore:
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need so the sender knows what would wake it. Unparked Codex
-        urgency is capped attention with unknown native state and no steer
-        path. Other unparked clients retain their urgent ring contract,
+        urgency is capped attention with explicit one-bell queue permission,
+        unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
         else ``not_needed`` with reason ``no_park``: the session is
         waiting on nobody, so the mail waits for its next turn. Regular
         mail never wakes (maintainer decision 2026-10-02, retiring the
@@ -2229,9 +2239,10 @@ class CoordinationStore:
             # Codex's desktop owner uses private stdio; a queue capability
             # proves neither actual idle state nor a supported steer route.
             return {"decision": "no_path", "reason": "no_steer_path",
-                    "attention": True, "delivery": "pending", "recipient_state": "unknown",
+                    "attention": True, "delivery": "queue_pending", "recipient_state": "unknown",
+                    "queue_allowed": True,
                     "ring_at": ring_at,
-                    "fallback": "Mail remains pending for tool-result hints or memory_message receive."}
+                    "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering."}
         missing = self._listener_path(recipient, now)
         if missing is not None:
             return {"decision": "no_path", "reason": missing, "queued": True,

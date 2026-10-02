@@ -6,29 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-10-03 — Codex queue notices retain unresolved transport state)
-- Reading or acknowledging mail, mailbox expiry and a new turn no longer
-  permit a second queued notice while the first native queue is unresolved.
-  Private per-thread reservations survive restart; only the exact generated
-  notice and nonce reaching that thread's prompt hook permit another queue.
-  Queue acceptance and prompt-hook arrival remain separate from reading mail.
-- Urgent unparked Codex mail now takes capped attention before ordinary
-  recent-activity hints. With no proved steer path it reports
-  `no_steer_path` and pending unknown host state, and waits for pull/hints
-  rather than queuing behind a potentially active turn. Eligible parked
-  wakes retain the queue path. Active hints resume the original task.
-- Historical Codex ring grants cannot create a new queue after their park
-  is cleared, expires or is refined. Serving requires retained audit ordering
-  proving the grant follows the unchanged current park; missing evidence
-  stays pending for pull/hints. Historical grant and cap records are retained.
-- When an attach or heartbeat withdraws a Codex ring, the adapter drops its
-  retained offer, cancels delayed writes and refused-marker retries, and
-  removes its ring marker. An already accepted native notice stays unresolved
-  until its exact prompt-hook receipt; repeated valid grants stay deduplicated.
-- An ambiguous bridge failure no longer queues an alternate notice. Current
-  desktop queued-notice prompt-hook emission remains unverified; missing
-  exact receipts retain pending state. The client hooks must be updated to
-  use the correlation path.
+### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
+- Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved
+  native queue notice. Private per-thread reservations survive restart; exact
+  generated notice/nonce arrival at the owning prompt hook is separate evidence
+  from queue acceptance, reading mail or completing work.
+- An unresolved reservation may clear at its originating message's durably
+  recorded expiry, with an explicit `unresolved_expired` availability receipt.
+  Native cancellation remains unknown and the queued item may remain visible.
+  Valid older records without exact expiry get one durable first-seen plus
+  24-hour upper bound; malformed or foreign state stays fail-closed.
+- Capped urgent unparked Codex mail may queue one fixed bell labelled
+  `turn state unknown`. Receipts distinguish pending queue permission from
+  known-busy attention hints; no native desktop steer route is proved.
+  Active and unknown-state notices resume the original authorized task.
+- Current eligible Codex grants remain explicit through the quiet interval and
+  fan-out stagger. Historical grants require retained audit ordering after the
+  unchanged current park; cleared, expired or refined parks withdraw old offers,
+  delayed writes and marker retries without rewriting historical grants or caps.
+- Empty reservation contention remains retryable; definite pre-execution CLI
+  failures release only their own unaccepted reservation, while ambiguous results
+  retain it. Versioned exact notice formats survive wording updates, and prompt
+  receipt recording retries brief real lock contention.
+- Ambiguous bridge failure never queues an alternate for that snapshot and restores
+  a guarded listener for later eligible arrivals. Current desktop queued-notice
+  hook emission remains unverified; missing receipts use the recorded expiry
+  fallback. Client hooks must be updated to use the correlation path.
 
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
