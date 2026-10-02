@@ -73,9 +73,12 @@ can read and write the whole bank.
 
 `/health` gains `"bank": "<first 16 hex of sha256(coordination_bank_id)>"`.
 It is not secret and identifies the bank, unlike `version` and `schema`.
-The health payload never touches or starts storage (`daemon.py` 195-198),
-so `bank` is null until storage has started and the bank id has been read
-once by normal use; it is then cached (it never changes for a bank). Null
+The health payload never starts storage (`daemon.py` 195-198), so `bank` is
+null until storage has started. After that, each `/health` whose storage
+ping succeeded reads the bank id's meta row on its own short-lived
+connection (never the service lock), at most once a minute, until the id
+exists; it is then cached (it never changes for a bank), and the cache is
+dropped when a reconnect finds that another writer held the bank. Null
 means "unknown": `invite` refuses on null, and `move` treats a null target
 as different from the source. It is used by `expose`'s check, by
 `invite` (direct-database mode must write to the daemon's own database; the

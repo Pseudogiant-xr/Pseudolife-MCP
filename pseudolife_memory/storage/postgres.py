@@ -685,6 +685,10 @@ class PostgresStorage:
             self._lease_lost = None
             self._session_ok_at = time.monotonic()  # fresh, epoch-checked
             if handed_over is not None:
+                # Another writer may have restored a different bank here:
+                # the cached bank id goes with the resident copy.
+                self._bank_id = None
+                self._bank_id_retry_at = 0.0
                 self.resident_invalidated = (
                     "another writer held this bank while this process was "
                     f"disconnected (lease epoch {handed_over[0]} -> "
@@ -720,8 +724,10 @@ class PostgresStorage:
 
         Read on a DEDICATED short-lived connection, like :meth:`ping`, so it
         never waits on the shared connection, the service lock or a dream,
-        and never runs DDL. Cached once found. While the row is absent or
-        the read fails, it is asked again at most every
+        and never runs DDL. ``/health`` calls it only after :meth:`ping`
+        succeeded. Cached once found, and dropped when a reconnect finds
+        that another writer held the bank. While the row is absent or the
+        read fails, it is asked again at most every
         ``BANK_ID_RETRY_SECONDS``. Raises on nothing it can catch."""
         if self._bank_id is not None:
             return self._bank_id

@@ -47,16 +47,22 @@ _FAKE = textwrap.dedent('''\
     if args == ["status", "--json"]:
         if state["backend"] is None:
             done(err="failed to connect to local tailscaled; it doesn't appear to be running\\n", rc=1)
-        done(json.dumps({"BackendState": state["backend"],
-                         "Self": {"TailscaleIPs": [state["ip"], "fd00::1"]}}))
+        ips = ([state["ip"]] if state["ip"] else []) + ["fd00::1"]
+        done(json.dumps({"BackendState": state["backend"], "Self": {"TailscaleIPs": ips}}))
     if args == ["ip", "-4"]:
+        if not state["ip"]:
+            done(err="no current Tailscale IPv4 address\\n", rc=1)
         done(state["ip"] + "\\n")
     if args == ["serve", "status", "--json"]:
+        if state["status_fail_after_serve"] and any(c[:2] == ["serve", "--bg"] for c in state["calls"]):
+            done(err="failed to get serve config: context deadline exceeded\\n", rc=1)
         done(state["serve_raw"] if state.get("serve_raw") is not None
              else json.dumps(state["serve"]))
     if args[:1] == ["serve"] and args[-1] == "off":
         if state["off_rc"]:
             done(err=state["off_err"], rc=state["off_rc"])
+        if state["off_noop"]:
+            done()
         port = args[1].split("=", 1)[1]
         state["serve"].get("TCP", {}).pop(port, None)
         done()
@@ -93,7 +99,8 @@ class FakeTailscale:
             launcher.chmod(0o755)
         self.state = {"backend": "Running", "ip": "127.0.0.1", "serve": {}, "serve_raw": None,
                       "serve_rc": 0, "serve_err": "", "serve_result": "takes",
-                      "off_rc": 0, "off_err": "", "calls": []}
+                      "off_rc": 0, "off_err": "", "off_noop": False,
+                      "status_fail_after_serve": False, "calls": []}
         self.save()
 
     def save(self):
@@ -118,8 +125,10 @@ class Daemon:
     """``/health`` only. ``after`` holds the answers for requests after the
     first: a dict is served, ``"drop"`` closes the connection unanswered."""
 
-    def __init__(self, *, status="ok", auth=True, bank=BANK):
+    def __init__(self, *, status="ok", auth=True, bank=BANK, raw=None):
         self.health = {"status": status, "auth": auth, "version": "0.0.0-fixture", "bank": bank}
+        # (status code, headers, body) served instead of the JSON payload
+        self.raw = raw
         self.after: list = []
         self.seen = 0
         daemon = self
@@ -130,6 +139,14 @@ class Daemon:
 
             def do_GET(self):
                 daemon.seen += 1
+                if daemon.raw is not None:
+                    code, headers, body = daemon.raw
+                    self.send_response(code)
+                    for name, value in headers:
+                        self.send_header(name, value)
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 answer = daemon.health
                 if daemon.seen > 1 and daemon.after:
                     answer = daemon.after.pop(0) if len(daemon.after) > 1 else daemon.after[0]
@@ -322,13 +339,38 @@ def test_a_confirmed_run_exposes(tailscale, daemon, capsys, monkeypatch):
     "Access denied: serve config denied\n",
     "permission denied; use 'sudo tailscale serve' or 'tailscale set --operator=$USER'\n",
 ])
-def test_a_permission_refusal_exits_4_with_the_operator_fix(tailscale, daemon, capsys, message):
+def test_a_permission_refusal_on_linux_names_the_operator_fix(tailscale, daemon, capsys,
+                                                              monkeypatch, message):
+    monkeypatch.setattr(expose_cli, "platform", lambda: "linux")
     tailscale.set(serve_rc=1, serve_err=message)
     code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
     assert code == 4
     assert "sudo tailscale set --operator=$USER" in err
     # One attempt, nothing to undo.
     assert [c for c in tailscale.changing_calls() if c[-1] == "off"] == []
+
+
+@pytest.mark.parametrize(("system", "expected"), [
+    ("win32", "elevated"),
+    ("darwin", "logged in to the Tailscale app"),
+])
+def test_a_permission_refusal_names_the_fix_for_this_os(tailscale, daemon, capsys, monkeypatch,
+                                                        system, expected):
+    monkeypatch.setattr(expose_cli, "platform", lambda: system)
+    tailscale.set(serve_rc=1, serve_err="Access denied: serve config denied\n")
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 4
+    assert expected in err
+    assert "--operator" not in err
+
+
+def test_the_word_operator_alone_is_not_a_permission_refusal(tailscale, daemon, capsys, monkeypatch):
+    monkeypatch.setattr(expose_cli, "platform", lambda: "linux")
+    tailscale.set(serve_rc=1, serve_err="invalid serve target: unknown operator in expression\n")
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 4
+    assert "tailscale refused the serve" in err
+    assert "set --operator" not in err
 
 
 def test_another_tailscale_refusal_that_changed_nothing_exits_4(tailscale, daemon, capsys):
@@ -446,7 +488,8 @@ def test_off_without_a_tty_or_yes_exits_2(tailscale, daemon, capsys):
     assert tailscale.changing_calls() == []
 
 
-def test_off_refused_for_permission_names_the_fix(tailscale, daemon, capsys):
+def test_off_refused_for_permission_names_the_fix(tailscale, daemon, capsys, monkeypatch):
+    monkeypatch.setattr(expose_cli, "platform", lambda: "linux")
     tailscale.set(serve=_ours(daemon.port), off_rc=1, off_err="Access denied: serve config denied\n")
     code, _out, err = run(capsys, "off", "--port", str(daemon.port), "--yes")
     assert code == 4
@@ -502,6 +545,137 @@ def test_an_empty_serve_status_reads_as_nothing_served(tailscale, daemon, capsys
         tailscale.set(serve_raw=raw)
         code, report = run_json(capsys, "status", "--port", str(daemon.port))
         assert code == 0 and report["state"] == "not_exposed", raw
+
+
+# -- Funnel ---------------------------------------------------------------------
+
+FUNNEL_HOST = "<machine>.<tailnet>.ts.net"
+
+
+def _funnelled(port: int, key_port=None, on=True) -> dict:
+    return dict(_ours(port), AllowFunnel={f"{FUNNEL_HOST}:{key_port or port}": on})
+
+
+def test_a_funnelled_port_is_foreign_even_with_our_forward(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve=_funnelled(port))
+    code, _out, err = run(capsys, "tailscale", "--port", str(port), "--yes")
+    assert code == 4
+    assert "Funnel (public internet)" in err
+    assert tailscale.changing_calls() == []
+
+
+def test_status_never_reports_a_funnelled_port_as_exposed(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve=_funnelled(port))
+    code, report = run_json(capsys, "status", "--port", str(port))
+    assert code == 0
+    assert report["state"] == "foreign" and report["url"] is None
+    assert "Funnel (public internet)" in report["detail"]
+
+
+def test_off_leaves_a_funnelled_port_alone(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve=_funnelled(port))
+    code, _out, err = run(capsys, "off", "--port", str(port), "--yes")
+    assert code == 4 and "left alone" in err
+    assert tailscale.changing_calls() == []
+
+
+def test_a_foreground_funnel_on_the_port_is_foreign(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve=dict(_ours(port), Foreground={
+        "session-1": {"AllowFunnel": {f"{FUNNEL_HOST}:{port}": True}}}))
+    _code, report = run_json(capsys, "status", "--port", str(port))
+    assert report["state"] == "foreign" and "Funnel (public internet)" in report["detail"]
+
+
+@pytest.mark.parametrize(("key_port", "on"), [(443, True), (None, False)])
+def test_a_funnel_elsewhere_or_switched_off_does_not_count(tailscale, daemon, capsys, key_port, on):
+    port = daemon.port
+    tailscale.set(serve=_funnelled(port, key_port=key_port, on=on))
+    code, out, _err = run(capsys, "tailscale", "--port", str(port), "--yes")
+    assert code == 0 and "already exposed" in out
+
+
+# -- the local daemon check -----------------------------------------------------
+
+def test_a_redirect_on_the_local_port_is_not_the_daemon(tailscale, capsys):
+    target = Daemon()
+    # A JSON body on the redirect must not pass for the daemon's /health.
+    stub = Daemon(raw=(302, [("Location", f"http://127.0.0.1:{target.port}/health"),
+                             ("Content-Type", "application/json")],
+                       json.dumps({"status": "ok", "auth": True}).encode()))
+    try:
+        code, _out, err = run(capsys, "tailscale", "--port", str(stub.port), "--yes")
+    finally:
+        stub.close()
+        target.close()
+    assert code == 4
+    assert f"something that is not the Pseudolife daemon answers on 127.0.0.1:{stub.port}" in err
+    assert target.seen == 0  # the redirect was not followed
+    assert tailscale.calls() == []
+
+
+def test_a_non_json_answer_on_the_local_port_is_not_the_daemon(tailscale, capsys):
+    stub = Daemon(raw=(200, [("Content-Type", "text/html")], b"<html>hello</html>"))
+    try:
+        code, _out, err = run(capsys, "tailscale", "--port", str(stub.port), "--yes")
+    finally:
+        stub.close()
+    assert code == 4
+    assert f"something that is not the Pseudolife daemon answers on 127.0.0.1:{stub.port}" in err
+    assert tailscale.calls() == []
+
+
+# -- edge branches --------------------------------------------------------------
+
+def test_an_unreadable_status_after_the_serve_is_reported_not_undone(tailscale, daemon, capsys):
+    tailscale.set(status_fail_after_serve=True)
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 5
+    assert "could not verify" in err and "tailscale serve status" in err
+    assert "undo failed" not in err
+    assert [c for c in tailscale.changing_calls() if c[-1] == "off"] == []
+
+
+def test_off_reports_a_forward_tailscale_did_not_remove(tailscale, daemon, capsys):
+    tailscale.set(serve=_ours(daemon.port), off_noop=True)
+    code, _out, err = run(capsys, "off", "--port", str(daemon.port), "--yes")
+    assert code == 4
+    assert "did not remove" in err
+
+
+def test_off_leaves_a_foreground_serve_alone(tailscale, daemon, capsys):
+    port = daemon.port
+    tailscale.set(serve={"Foreground": {"session-1": _ours(port)}})
+    code, _out, err = run(capsys, "off", "--port", str(port), "--yes")
+    assert code == 4
+    assert "foreground" in err and "left alone" in err
+    assert tailscale.changing_calls() == []
+
+
+def test_no_tailnet_ipv4_is_refused_before_any_change(tailscale, daemon, capsys):
+    tailscale.set(ip="")
+    code, _out, err = run(capsys, "tailscale", "--port", str(daemon.port), "--yes")
+    assert code == 4 and "IPv4" in err
+    assert tailscale.changing_calls() == []
+
+
+def test_status_without_a_tailnet_ipv4_is_unavailable(tailscale, daemon, capsys):
+    tailscale.set(ip="", serve=_ours(daemon.port))
+    code, report = run_json(capsys, "status", "--port", str(daemon.port))
+    assert code == 0
+    assert report["state"] == "unavailable" and report["url"] is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows default install location")
+def test_the_windows_location_prefers_the_64_bit_program_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("ProgramW6432", str(tmp_path / "pf64"))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "pf"))
+    assert expose_cli.default_locations() == [tmp_path / "pf64" / "Tailscale" / "tailscale.exe"]
+    monkeypatch.delenv("ProgramW6432")
+    assert expose_cli.default_locations() == [tmp_path / "pf" / "Tailscale" / "tailscale.exe"]
 
 
 # -- usage ----------------------------------------------------------------------
