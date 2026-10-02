@@ -77,11 +77,27 @@ def test_a_zero_cap_rings_nobody_and_the_windows_need_a_second():
     wake = WakeConfig(per_recipient_per_hour=0, urgent_per_sender_per_hour=0,
                       nightly_total=0, fan_out_stagger_seconds=0)
     assert {k: getattr(wake, k) for k in CAPS} == dict.fromkeys(CAPS, 0)
-    for name, value in (("active_seconds", 0), ("nudge_interval_seconds", 0),
-                        ("fan_out_stagger_seconds", 2.5), ("nightly_total", -1),
-                        ("per_recipient_per_hour", True)):
+    for name, value in (("active_seconds", 0), ("fan_out_stagger_seconds", 2.5),
+                        ("nightly_total", -1), ("per_recipient_per_hour", True)):
         with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
             WakeConfig(**{name: value})
+
+
+@pytest.mark.parametrize("value", [3600, 0])
+def test_the_retired_nudge_interval_still_loads_and_does_nothing(tmp_path, value):
+    """``nudge_interval_seconds`` bounded the hourly ring to an idle, unparked
+    session, retired with it on 2026-10-02 (regular mail never wakes). A
+    config.yaml that still carries the key, at the documented 3600 or any
+    other value, loads as before; the key sets nothing and is no longer
+    served on /health."""
+    p = tmp_path / "config.yaml"
+    p.write_text("coordination:\n  wake:\n    nightly_total: 40\n"
+                 f"    nudge_interval_seconds: {value}\n")
+    config = load_config(p)
+    assert config.coordination.wake == WakeConfig(nightly_total=40)
+    assert not hasattr(config.coordination.wake, "nudge_interval_seconds")
+    payload = _build_health_payload(_Svc(config), token_present=True)
+    assert "nudge_interval_seconds" not in payload["coordination"]["wake"]
 
 
 # --- caps on /health ---------------------------------------------------------

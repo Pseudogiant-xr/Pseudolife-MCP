@@ -1387,7 +1387,7 @@ def test_a_staggered_ring_waits_for_its_time(tmp_path):
     marker and the doorbell's offer both wait for it."""
     daemon = _mailbox_daemon([(0, [], None),
                               (1, _preview("m1"),
-                               {"decision": "nudged", "reason": "no_park", "ring_at": time.time() + 0.6})])
+                               {"decision": "rung", "reason": "anyone", "ring_at": time.time() + 0.6})])
 
     async def drive():
         client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
@@ -1398,10 +1398,34 @@ def test_a_staggered_ring_waits_for_its_time(tmp_path):
                 assert not (tmp_path / "digest.ring").exists()
                 assert coordination.ring_due() is None
                 await asyncio.sleep(0.8)
-                assert (tmp_path / "digest.ring").read_text().endswith("\nnudged no_park\n")
-                assert coordination.ring_due() == ("nudged", "no_park")
+                assert (tmp_path / "digest.ring").read_text().endswith("\nrung anyone\n")
+                assert coordination.ring_due() == ("rung", "anyone")
 
     asyncio.run(drive())
+
+
+def test_a_nudged_wake_rings_nothing(tmp_path):
+    """Regular mail never wakes (maintainer decision 2026-10-02): a daemon
+    from before it may still serve a ``nudged`` ring for an idle session
+    that never parked. The shim writes no ``.ring`` marker for it, offers
+    nothing to the Codex doorbell and logs no ring."""
+    daemon = _mailbox_daemon([(0, [], None),
+                              (1, _preview("m1"),
+                               {"decision": "nudged", "reason": "no_park", "ring_at": time.time()})])
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                await asyncio.sleep(0.05)
+                assert not (tmp_path / "digest.ring").exists()
+                assert coordination.ring_due() is None
+
+    asyncio.run(drive())
+    ledger = tmp_path / "ledger.log"
+    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    assert not [line for line in lines if line.split("\t")[1] == "ring"]
 
 
 def test_a_malformed_wake_answer_rings_nothing(tmp_path):

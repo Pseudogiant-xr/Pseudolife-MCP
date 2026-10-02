@@ -527,3 +527,71 @@ def test_a_plain_shim_session_is_rung_through_its_ring_path(pg_conn, pg_url, tmp
         asyncio.run(asyncio.wait_for(drive(), 30))
     finally:
         storage.close()
+
+
+def test_urgent_mail_rings_an_unparked_shim_session_once(pg_conn, pg_url, tmp_path):
+    """Plain mail never wakes a session that has not parked; ``urgent`` mail
+    does (maintainer decision 2026-10-02). End to end: the daemon decides
+    ``rung`` / ``urgent``, the real adapter writes the Stop hook's
+    ``.ring`` marker and offers the ring once through ``ring_due``, and
+    the Codex doorbell takes that one offer; a repeated heartbeat answer
+    rings nothing more."""
+    import time
+    from pseudolife_memory.codex_doorbell import CodexDoorbell
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+    from tests.test_codex_doorbell import THREAD, _argv, _queued, _settle, _stub
+    storage = PostgresStorage(pg_url)
+    service = FixtureService()
+    service.config.coordination.enabled = True
+    service.config.coordination.allowed_principals = ["default"]
+    service._storage = storage
+    service._lock = threading.Lock()
+    service._hlc = HybridLogicalClock()
+    service._ensure_init = lambda: None
+    app = build_console_app(stub_mcp, "fixture-bearer", lambda: {}, service)
+    command, log = _stub(tmp_path)
+
+    async def drive():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+            def adapter(name, digest):
+                return CoordinationAdapter("http://fixture", "fixture-bearer", client=client,
+                    state_path=tmp_path / f"{name}.json", label=name, wake_enabled=False,
+                    digest_path=(tmp_path / "digests" / f"{name}.txt") if digest else None)
+            async with adapter("sender", False) as sender, adapter("plain", True) as plain:
+                async def send(body):
+                    result = await client.post("http://fixture/api/coordination/send",
+                        headers={"Authorization": "Bearer fixture-bearer", **sender.instance_headers},
+                        json={"to": plain.instance_headers["X-PL-Agent"], **body})
+                    assert result.status_code == 200, result.text
+                    return result.json()
+
+                async def beat():
+                    await plain._heartbeat()
+                    await asyncio.sleep(0.05)
+                    await _settle(bell)
+
+                storage.conn.execute("UPDATE coordination_agents SET last_activity=last_activity-3600")
+                storage.conn.commit()
+                armed = tmp_path / "digests" / "plain.wait-armed"
+                armed.write_text(f"fixture-listener\n{time.time() + 60}\n", encoding="ascii")
+                await plain._heartbeat()
+                bell = CodexDoorbell(command, quiet_seconds=0)
+                bell.watch(THREAD, plain)
+                quiet = await send({"text": "fyi", "request_id": "plain"})
+                assert quiet["wake"] == {"decision": "not_needed", "reason": "no_park"}
+                await beat()
+                assert not (tmp_path / "digests" / "plain.ring").exists()
+                assert _argv(log) == []
+                rung = await send({"text": "the build is red", "request_id": "urgent",
+                                   "urgent": True})
+                assert (rung["wake"]["decision"], rung["wake"]["reason"]) == ("rung", "urgent")
+                await beat()
+                await beat()   # the same ring, repeated on the next answer
+                ring = (tmp_path / "digests" / "plain.ring").read_text().splitlines()
+                assert ring == [str(plain.digest_watermark), "rung urgent"]
+                assert plain.ring_due() is None   # the doorbell took the one offer
+                assert _argv(log) == [_queued(2)]
+    try:
+        asyncio.run(asyncio.wait_for(drive(), 30))
+    finally:
+        storage.close()

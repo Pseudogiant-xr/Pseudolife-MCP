@@ -177,8 +177,7 @@ CHECKIN_TEXT = (
 # 2026-09-28). NOT served yet: CHECKIN_TEXT is pinned byte for byte to the
 # text evals/coordination_checkin_bench.py measured (#435), so this sentence
 # joins it only with a new bench run. Until then the park request reaches a
-# session through memory_agents' description, the Stop hook's park gate and
-# the nudge text.
+# session through memory_agents' description and the Stop hook's park gate.
 PARK_CHECKIN_SENTENCE = (
     "When you stop, park: memory_agents(action=update, park_reason=<done|blocked|"
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
