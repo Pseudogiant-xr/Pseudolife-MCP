@@ -15,14 +15,62 @@ from __future__ import annotations
 
 import os
 
-from tests import pg_fixtures
+from tests import pg_defaults, pg_fixtures
 
 
 def test_default_test_db_is_private_to_this_run(monkeypatch):
     monkeypatch.delenv("PSEUDOLIFE_TEST_DATABASE_URL", raising=False)
     url = pg_fixtures.resolve_test_db_url()
     db = url.rsplit("/", 1)[1]
-    assert db == f"pseudolife_memory_test_{os.getpid()}"
+    assert db == f"pseudolife_memory_test_{pg_defaults.run_suffix()}"
+
+
+# ── Process namespaces: Windows and WSL share one dev server ────────────────
+# A run names its database after its pid, and a later run drops the ones
+# whose pid is gone. A WSL pid is invisible to Windows (and the reverse), so
+# on 2026-10-02 a Windows pytest session dropped a running WSL suite's
+# database mid-run (78 setup errors). A run inside WSL tags its names, and
+# each run prunes only its own namespace's.
+
+def test_a_run_inside_wsl_tags_its_database_names():
+    assert pg_defaults.run_suffix(123, namespace="") == "123"
+    assert pg_defaults.run_suffix(123, namespace="wsl") == "wsl123"
+    assert pg_defaults.own_run_pid("123", namespace="") == 123
+    assert pg_defaults.own_run_pid("wsl123", namespace="wsl") == 123
+    # Never another namespace's, and never a name that is not a run's.
+    assert pg_defaults.own_run_pid("wsl123", namespace="") is None
+    assert pg_defaults.own_run_pid("123", namespace="wsl") is None
+    for other in ("gw0", "proof", "", "wsl", "wslx1"):
+        assert pg_defaults.own_run_pid(other, namespace="") is None
+        assert pg_defaults.own_run_pid(other, namespace="wsl") is None
+
+
+class _PruneConn:
+    def __init__(self, names):
+        self.names, self.dropped = names, []
+
+    def execute(self, sql):
+        if sql.startswith("DROP DATABASE"):
+            self.dropped.append(sql.split('"')[1])
+            return self
+        self._rows = [(name,) for name in self.names]
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_pruning_drops_only_this_namespaces_dead_runs(monkeypatch):
+    monkeypatch.setattr(pg_fixtures, "_pid_alive", lambda pid: False)
+    names = ["pseudolife_memory_test_111", "pseudolife_memory_test_wsl222",
+             "pseudolife_memory_bench_333", "pseudolife_memory_bench_wsl444",
+             "pseudolife_memory_test_gw0"]
+    native = _PruneConn(names)
+    pg_fixtures._prune_dead_run_dbs(native, namespace="")
+    assert native.dropped == ["pseudolife_memory_test_111", "pseudolife_memory_bench_333"]
+    wsl = _PruneConn(names)
+    pg_fixtures._prune_dead_run_dbs(wsl, namespace="wsl")
+    assert wsl.dropped == ["pseudolife_memory_test_wsl222", "pseudolife_memory_bench_wsl444"]
 
 
 def test_env_override_wins_verbatim(monkeypatch):
@@ -56,11 +104,11 @@ def test_bench_autopin_decision_covers_all_three_origins():
 
     # Unset: pin this process's name.
     env: dict[str, str] = {}
-    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{os.getpid()}"
+    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{pg_defaults.run_suffix()}"
     # Inherited from a parent process's autopin (xdist worker): re-pin.
     env = {"PSEUDOLIFE_BENCH_DB": "pseudolife_memory_bench_99999",
            "_PSEUDOLIFE_BENCH_DB_AUTOPIN": "pseudolife_memory_bench_99999"}
-    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{os.getpid()}"
+    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{pg_defaults.run_suffix()}"
     # Deliberately user-set (no matching autopin sentinel): keep it.
     env = {"PSEUDOLIFE_BENCH_DB": "my_bench"}
     assert bench_db_autopin(env) is None
@@ -86,7 +134,7 @@ def test_bench_db_is_private_to_this_run():
     from psycopg.conninfo import conninfo_to_dict
 
     assert conninfo_to_dict(ladder_sweep.bench_url())["dbname"] == (
-        f"pseudolife_memory_bench_{os.getpid()}")
+        f"pseudolife_memory_bench_{pg_defaults.run_suffix()}")
 
 
 # ── In-process reaper victim: the end-of-session dream thread ───────────────

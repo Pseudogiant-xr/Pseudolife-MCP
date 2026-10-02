@@ -26,6 +26,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the lock directory, `allow` (the default) or `refuse`. With `refuse`, a
   full run on native Windows exits before it queues and names the launcher.
   Targeted runs and CI are unaffected.
+- A test run names its private databases after its pid and drops those
+  whose pid is gone. Windows and WSL share the dev Postgres but not a
+  process table, so a Windows pytest session dropped a running WSL suite's
+  database mid-run (78 setup errors, 2026-10-02). A run inside WSL now tags
+  its names (`pseudolife_memory_test_wsl<pid>`), and each run prunes only
+  its own namespace's.
 - `AGENTS.md` is now tracked and points every coding agent to `CLAUDE.md`,
   so Codex sessions get the same conventions as Claude Code.
 
