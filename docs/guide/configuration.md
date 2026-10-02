@@ -810,13 +810,30 @@ A refusal that carries such a detail surfaces it after the code in the MCP
 tool's error (`ambiguous_recipient: 518a3e67aa, 518a3e67ab`) and as a
 separate `detail` field beside `error` on REST.
 These calls work in the CLI and desktop without live wake support.
-Setup leaves Codex tool approvals unchanged and prints the approval choice at the
-end of successful hook setup. A recipient running with approval policy `never`
-cannot execute a tool that still requires approval. To authorize
-unattended mailbox operations specifically, configure the installed server's
-`tools.memory_message.approval_mode = "approve"` in Codex. This permits that
-tool's send, receive and acknowledgment actions; it does not approve file writes,
-commands or other tools. Without that choice, use the host's normal approval flow.
+Codex hook setup (`ops/setup-codex-hooks.py`, or the installer's Codex step)
+asks for the `memory_message` approval together with the hooks. Its prompt
+names it, and a yes, or `--trust yes`, sets
+`tools.memory_message.approval_mode = "approve"` on the `pseudolife-memory`
+server in Codex's user configuration, through Codex's own config writer and
+after a backup. A no, or `--trust no`, leaves it as it is. A value you chose
+yourself (`"prompt"`, say) is kept, and an existing `"approve"` is left
+alone. The JSON report's `mailbox_approval` says which happened: `set`,
+`already`, `kept-explicit`, `declined`, or `unavailable` (no
+`pseudolife-memory` server in the user configuration, or Codex refused the
+write; `mailbox_approval_detail` gives the reason, and hook setup still
+completes). When the approval is not set, the end-of-setup notice says how to
+choose it. The reason is the doorbell: a board ring wakes a thread only when it
+has mail it needs, and a woken thread that must ask before calling
+`memory_message` stalls on that prompt. A recipient running with approval
+policy `never` cannot execute a tool that still requires approval.
+
+The trade-off is plain: Codex approves per tool, not per action, so the same
+approval lets the thread send board mail without asking. Board mail is
+rate-limited, audited and expires, cannot grant permissions, and reaches only
+allowed principals. The approval covers that one tool; it does not approve file
+writes, commands or other tools. To set it by hand, configure the installed
+server's `tools.memory_message.approval_mode = "approve"` in Codex; without
+it, use the host's normal approval flow.
 
 ### Optional Codex live delivery
 
@@ -901,6 +918,8 @@ A woken task reads its mail with `memory_message receive`, so the task needs
 `memory_message` approved in Codex's tool configuration; without that
 approval a woken task stalls on an approval prompt until someone answers it
 (the 2026-09-12 validation record's complete-path test approved it explicitly).
+Hook setup sets that approval when you approve the hooks
+([Codex CLI and desktop](#codex-cli-and-desktop)).
 
 - **When it rings.** After each 20-second heartbeat the task's adapter reports its
   pending mail. The shim runs `codex queue --thread <task id> --message <notice>`

@@ -36,6 +36,7 @@ from pseudolife_memory.credentials import (
 # install too.
 from pseudolife_memory import codex_connection as _connection  # noqa: E402
 from pseudolife_memory.codex_connection import (  # noqa: E402,F401
+    SERVER,
     Codex,
     SetupError,
     _connection_values,
@@ -663,6 +664,109 @@ def trust_hooks(client, config, hooks, home, report):
                                     "expectedVersion": layers[0]["version"]})
 
 
+# Board mail's tool. Hook setup's consent also covers approving it
+# (maintainer decision 2026-10-02): a board ring wakes a thread only for mail
+# it needs, and a woken thread that must ask before memory_message stalls on
+# the prompt. Codex approves per tool, so this approves sends too; it
+# approves nothing else. The server is the user-registered pseudolife-memory
+# for every hook source: the plugin ships hooks only, no MCP server.
+MAILBOX_TOOL = "memory_message"
+
+
+def _user_layer(config, home):
+    path = (home / "config.toml").resolve()
+    layers = [l for l in config.get("layers", [])
+              if l.get("name", {}).get("type") == "user" and not l["name"].get("profile")
+              and Path(l["name"].get("file", "")).resolve() == path]
+    return layers[0] if len(layers) == 1 else None
+
+
+def _mailbox_mode(config, home):
+    """The approval_mode Codex holds for memory_message on PseudoLife's
+    server, and that server's table in the user configuration. The effective
+    value counts first, so a choice another layer makes is kept too; the
+    user layer's is read where Codex does not report the tool table."""
+    def mode(server):
+        tools = server.get("tools") if isinstance(server, dict) else None
+        tool = tools.get(MAILBOX_TOOL) if isinstance(tools, dict) else None
+        return tool.get("approval_mode") if isinstance(tool, dict) else None
+    effective = (config.get("config", {}).get("mcp_servers") or {}).get(SERVER)
+    layer = _user_layer(config, home)
+    user = ((layer or {}).get("config") or {}).get("mcp_servers") or {}
+    user = user.get(SERVER) if isinstance(user, dict) else None
+    current = mode(effective)
+    return (mode(user) if current is None else current), user
+
+
+def mailbox_approval(config, home, report, client=None, cwd=None):
+    """Record in ``report`` whether memory_message is approved, approving it
+    when consent was given (``client``) and nothing is set. States: "set",
+    "already" ("approve" was set), "kept-explicit" (another value stays),
+    "declined" (no consent) and "unavailable" (the reason in
+    ``mailbox_approval_detail``). A failure here never fails hook setup."""
+    try:
+        if client is not None:
+            # The hook trust write just before this moved the version.
+            config = client.rpc("config/read", {"includeLayers": True, "cwd": str(cwd)})
+        current, server = _mailbox_mode(config, home)
+        if current == "approve":
+            state = "already"
+        elif current is not None:
+            state = "kept-explicit"
+            report["mailbox_approval_detail"] = "approval_mode = " + toml_value(current)
+        elif client is None:
+            state = "declined"
+        else:
+            # Writing the key without the server's own table would leave
+            # Codex a server with no command.
+            if not isinstance(server, dict) or not server:
+                raise SetupError("Codex's user configuration has no pseudolife-memory server.")
+            layer = _user_layer(config, home)
+            if not layer or not layer.get("version"):
+                raise SetupError("Codex did not expose a versioned user configuration.")
+            path = (home / "config.toml").resolve()
+            saved = backup(path)
+            if saved:
+                report["backups"].append(saved)
+            client.rpc("config/batchWrite", {
+                "edits": [{"keyPath": dotted("mcp_servers", SERVER, "tools", MAILBOX_TOOL, "approval_mode"),
+                           "value": "approve", "mergeStrategy": "replace"}],
+                "filePath": str(path), "expectedVersion": layer["version"]})
+            after = client.rpc("config/read", {"includeLayers": True, "cwd": str(cwd)})
+            if _mailbox_mode(after, home)[0] != "approve":
+                raise SetupError("Codex saved the approval but its effective configuration differs.")
+            state = "set"
+    except SetupError as exc:
+        state = "unavailable"
+        report["mailbox_approval_detail"] = str(exc)
+    report["mailbox_approval"] = state
+    return state
+
+
+def mailbox_notice(state, detail=None):
+    """The end-of-setup line for ready hooks: what happened to the
+    memory_message approval, and the choice still open where none was set."""
+    table = f"[mcp_servers.{SERVER}.tools.{MAILBOX_TOOL}]"
+    see = "\nSee docs/guide/configuration.md (Experimental agent coordination)."
+    if state == "set":
+        return ('Hooks ready; setup approved memory_message (approval_mode = "approve" under '
+                f'{table} in Codex config.toml), so a thread woken by board mail can receive, '
+                'ack and send without an approval prompt. No other tool was approved.' + see)
+    if state == "already":
+        return ('Hooks ready; memory_message is already approved (approval_mode = "approve"), '
+                'so a thread woken by board mail can receive, ack and send without an '
+                'approval prompt.' + see)
+    if state == "kept-explicit":
+        lead = f"Hooks ready; setup kept your memory_message {detail}. "
+    elif state == "unavailable":
+        lead = f"Hooks ready; setup could not approve memory_message: {detail} "
+    else:
+        lead = "Hooks ready; setup leaves tool approvals unchanged. "
+    return (lead + 'For unattended receive, ack and send, choose approval_mode = "approve" '
+            f'under {table} in Codex config.toml. '
+            'Without that approval, a woken thread can stall on an approval prompt.' + see)
+
+
 def configure_credential_file(client, home, cwd, config=None,
                               installer_connection=None):
     """Bootstrap a private token file and migrate an existing Codex MCP env
@@ -857,7 +961,8 @@ def consent(args):
     if args.instructions != "auto":
         print("Approve PseudoLife's hooks (briefing, reminders, cleanup, agent-board check-in, "
               "new-mail hint) to run outside the sandbox, including the scripts later PseudoLife "
-              "updates install? [y/N] ",
+              "updates install, and its memory_message tool (board mail: receive, ack, send) "
+              "so a thread woken by mail does not stall on an approval prompt? [y/N] ",
               end="", file=sys.stderr, flush=True)
         approved = sys.stdin.readline().strip().lower() in ("y", "yes")
         return approved, args.instructions == "append"
@@ -866,8 +971,9 @@ def consent(args):
           "     Where the agent board is on, also an agent-board check-in at session start\n"
           "     and a new-mail hint when a peer's message is waiting.\n"
           "     Approves only PseudoLife's hooks to run outside the sandbox, including the\n"
-          "     scripts later PseudoLife updates install;\n"
-          "     adds standing memory instructions if verification fails.\n"
+          "     scripts later PseudoLife updates install, and its memory_message tool\n"
+          "     (board mail: receive, ack, send) so a thread woken by mail does not stall\n"
+          "     on an approval prompt; adds standing memory instructions if verification fails.\n"
           "  2. Standing memory instructions only.\n"
           "  3. Skip both.\nChoose [1/2/3, default 1]: ", end="", file=sys.stderr, flush=True)
     answer = sys.stdin.readline()
@@ -932,6 +1038,9 @@ def setup(args):
                         else:
                             vet_plugin(selected)
                         trust_hooks(client, config, selected, home, report)
+                        mailbox_approval(config, home, report, client, cwd)
+                else:
+                    mailbox_approval(config, home, report)
                 if obsolete and not approved:
                     raise SetupError("Duplicate PseudoLife hooks need migration. Rerun setup with approval or remove duplicates in /hooks.")
                 if not complete_set(selected, source):
@@ -953,12 +1062,8 @@ def setup(args):
                             report["verified"] = verify(
                                 executable, home, cwd, config, hooks, selected)
                         report["status"] = "ready"
-                        report["mailbox_approval_notice"] = (
-                            'Hooks ready; setup leaves tool approvals unchanged. '
-                            'For unattended receive, ack and send, choose approval_mode = "approve" '
-                            'under [mcp_servers.pseudolife-memory.tools.memory_message] in Codex config.toml. '
-                            'Without that approval, a woken thread can stall on an approval prompt.\n'
-                            'See docs/guide/configuration.md (Experimental agent coordination).')
+                        report["mailbox_approval_notice"] = mailbox_notice(
+                            report["mailbox_approval"], report.get("mailbox_approval_detail"))
         except SetupError as exc:
             report.update(status="unavailable", recovery=str(exc))
         except Exception as exc:

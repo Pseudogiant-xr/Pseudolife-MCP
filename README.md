@@ -113,7 +113,9 @@ the shim's 180-second deadline to report a failure before the host cancels it; p
 
 Approve `memory_message` in that table's tool configuration
 (`[mcp_servers.pseudolife-memory.tools.memory_message] approval_mode =
-"approve"`, or allow it once and keep the approval). Board mail can wake an
+"approve"`, or allow it once and keep the approval); Codex hook setup
+(`python ops/setup-codex-hooks.py`) sets it when you approve the hooks, and
+keeps any value you chose. Board mail can wake an
 idle Codex task by default, and the woken task reads its mail with that tool:
 without the approval it stalls on a prompt until someone answers it. Set
 `PSEUDOLIFE_CODEX_DOORBELL = "0"` in the same `env` table to keep the task

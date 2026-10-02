@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
+- A Codex thread woken by board mail could stall on an approval prompt,
+  because hook setup left the `memory_message` tool unapproved and only
+  printed how to approve it. Now the consent that approves PseudoLife's hooks
+  covers that tool too. The `--trust ask` prompt names it, and a yes, or
+  `--trust yes`, sets `approval_mode = "approve"` for `memory_message` on the
+  `pseudolife-memory` server in Codex's user configuration, through Codex's
+  config writer and after a backup. `--trust no` leaves it alone.
+- Setup never overrides a value you chose (`"prompt"`, say), and an existing
+  `"approve"` needs no change. The JSON report gains `mailbox_approval`
+  (`set`, `already`, `kept-explicit`, `declined` or `unavailable`, with
+  `mailbox_approval_detail` for a kept value or the reason it could not be
+  set). If the approval cannot be set, hook setup still completes. The
+  end-of-setup notice gives the remaining choice only when the approval is
+  not set.
+- The trade-off: Codex approves per tool, so this also lets the thread send
+  board mail without asking. Board mail is rate-limited, audited and
+  expires, cannot grant permissions, and reaches only allowed principals.
+  Nothing else is approved: no file writes, commands or other tools. The
+  plugin's `hooks.json` is unchanged, so no hook needs approving again.
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender
