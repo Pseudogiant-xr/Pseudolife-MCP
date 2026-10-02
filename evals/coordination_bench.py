@@ -106,7 +106,9 @@ def disposable_database(admin_url=None):
     # Never reinterpret a user's configured DSN as a disposable test target.
     if any(os.environ.get(key) for key in ("PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_MCP_DATABASE_URL")):
         raise ValueError("database environment override refused; select the disposable server with --admin-url")
-    name = f"coordination_bench_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    # run_suffix tags the pid inside WSL, which shares the server with Windows.
+    from tests.pg_defaults import run_suffix
+    name = f"coordination_bench_{run_suffix()}_{uuid.uuid4().hex[:8]}"
     admin_url = admin_url or BENCH_ADMIN
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
     params = conninfo_to_dict(admin_url)
