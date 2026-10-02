@@ -365,24 +365,41 @@ def _build_health_payload(svc, token_present: bool) -> dict:
 
 
 MOVED_MARKER = "moved.json"
+MOVE_MARKER = "move.json"
 
 
 def moved_refusal(environ) -> str | None:
-    """Why this daemon must not start, when its bank has moved: the
-    message naming the new location, else ``None``.
+    """Why this daemon must not start because of ``pseudolife-mcp move``:
+    the message, else ``None``.
 
-    ``pseudolife-mcp move`` fences the old host's database (``ALLOW_CONNECTIONS
+    On the old host, ``move`` fences the database (``ALLOW_CONNECTIONS
     false``) and writes ``moved.json`` into the stopped daemon's data dir.
     The fence is what stops the old host; the file is the readable reason, so
     an operator who starts the old container hears where the bank went
-    instead of a refused database connection. Presence is the refusal: a
-    file that cannot be read still refuses."""
+    instead of a refused database connection. On the new host, ``move.json``
+    marks a restored bank whose move has not started this daemon yet.
+    Presence is the refusal: a file that cannot be read still refuses."""
     data_dir = environ.get("PSEUDOLIFE_MCP_DATA_DIR")
     if not data_dir:
         return None
     import json
     from pathlib import Path
 
+    incoming = Path(data_dir) / MOVE_MARKER
+    if incoming.exists():
+        # The other end of a move: the bank was restored here and the move
+        # that restored it has not started this daemon yet. Starting now
+        # (a reboot, an unattended update) could serve a half-moved bank
+        # beside a source that still runs.
+        try:
+            record = json.loads(incoming.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            record = None
+        move_id = record.get("move_id") if isinstance(record, dict) else None
+        return (f"an unfinished pseudolife-mcp move{' ' + move_id if isinstance(move_id, str) else ''} "
+                f"is restoring into this bank ({incoming}); refusing to start. Let the move finish "
+                f"(it starts this daemon itself), or rerun it with --resume. To abandon the move, "
+                f"make sure the source daemon is the one serving the bank, then remove {incoming}.")
     marker = Path(data_dir) / MOVED_MARKER
     if not marker.exists():
         return None

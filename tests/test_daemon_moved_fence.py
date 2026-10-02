@@ -56,3 +56,15 @@ def test_serve_exits_nonzero_before_touching_storage(tmp_path):
     assert proc.returncode != 0, proc.stderr
     assert "http://100.64.0.7:8765" in proc.stderr, proc.stderr
     assert "storage" not in proc.stderr.lower(), proc.stderr
+
+
+def test_an_unfinished_move_into_this_bank_refuses_too(tmp_path):
+    """``move`` leaves ``/data/move.json`` on the target from the restore
+    until just before its own start: a target that starts outside the move
+    (a reboot, an unattended update) must not serve a half-moved bank while
+    the source may still run."""
+    (tmp_path / "move.json").write_text(json.dumps({"move_id": "20261002-120000-0a1b2c3d"}),
+                                        encoding="utf-8")
+    message = daemon.moved_refusal({"PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path)})
+    assert message is not None
+    assert "20261002-120000-0a1b2c3d" in message and "move.json" in message
