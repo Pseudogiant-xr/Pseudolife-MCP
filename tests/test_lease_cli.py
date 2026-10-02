@@ -1175,6 +1175,43 @@ def test_check_of_the_full_suite_probes_the_suite_lock_and_names_its_holder(
     assert _run(["check", "full-suite"], daemon) == 0
 
 
+def test_check_of_another_machines_suite_lease_ignores_this_machines_lock(
+        lease_env, monkeypatch, capsys):
+    # Each machine mirrors its suite under its own name (full-suite, or
+    # full-suite@<host> from full-suite.lease). This machine's held suite
+    # lock speaks only for this machine's name; another machine's lease is
+    # the board's to report.
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
+    lease_env.mkdir(parents=True, exist_ok=True)
+    suite = os_lock.OsLock(lease_env / "full-suite.lock")
+    assert suite.acquire()
+    daemon = FakeDaemon()
+    try:
+        assert _run(["check", "full-suite@box"], daemon) == 0
+        other = capsys.readouterr().out
+        assert _run(["check", "full-suite"], daemon) == 1
+        capsys.readouterr()
+        (lease_env / "full-suite.lease").write_text("full-suite@box\n", encoding="utf-8")
+        assert _run(["check", "full-suite@box"], daemon) == 1
+        assert _run(["check", "full-suite"], daemon) == 0
+    finally:
+        suite.release()
+    assert "lease full-suite@box: free" in other
+    assert "this machine's suite lease is full-suite" in other
+
+
+def test_check_reads_an_invalid_lease_file_as_the_default_name(lease_env, monkeypatch):
+    # The suite itself refuses such a file; check falls back rather than
+    # mapping a name the suite would never mirror under.
+    monkeypatch.setenv("PSEUDOLIFE_SUITE_LOCK_DIR", str(lease_env))
+    monkeypatch.delenv("PSEUDOLIFE_SUITE_LEASE", raising=False)
+    lease_env.mkdir(parents=True, exist_ok=True)
+    for bad in ("full-suite@", "full-suite@a b", "full-suite@" + "x" * 41):
+        (lease_env / "full-suite.lease").write_text(bad, encoding="utf-8")
+        assert lease_cli._local_suite_lease() == "full-suite"
+
+
 def test_check_exits_1_when_only_the_board_shows_a_holder(lease_env, capsys):
     now = time.time()
     daemon = FakeDaemon(leases=[(200, {"leases": [

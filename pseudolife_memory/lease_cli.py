@@ -121,6 +121,10 @@ SUITE_LEASE = "full-suite"
 SUITE_LOCK_FILE = "full-suite.lock"
 SUITE_HOLDER_FILE = "full-suite.holder.json"
 SUITE_LOCK_DIR_ENV = "PSEUDOLIFE_SUITE_LOCK_DIR"
+# Which suite lease is this machine's: full-suite, or full-suite@<host> where
+# a second machine runs suites on the same board (tests/suite_lock.py).
+SUITE_LEASE_ENV = "PSEUDOLIFE_SUITE_LEASE"
+SUITE_LEASE_FILE = "full-suite.lease"
 SUITE_MAX_SLOTS = 8
 # Whose status marks them as concerned with the suite and GPU leases: the
 # CLAUDE.md status convention (``suite=running|queued``, ``gpu=...``).
@@ -1324,11 +1328,35 @@ def _suite_lock_dir() -> Path:
     return Path(override) if override else os_lock.lock_dir()
 
 
+def _is_suite_lease(name: str) -> bool:
+    return name == SUITE_LEASE or name.startswith(SUITE_LEASE + "@")
+
+
+def _local_suite_lease() -> str:
+    """This machine's suite lease name, as the suite's conftest reads it; a
+    setting the suite would refuse reads as the default here."""
+    raw = os.environ.get(SUITE_LEASE_ENV)
+    if raw is None:
+        try:
+            raw = (_suite_lock_dir() / SUITE_LEASE_FILE).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            return SUITE_LEASE
+    name = raw.strip()
+    host = name[len(SUITE_LEASE) + 1:] if name.startswith(SUITE_LEASE + "@") else None
+    valid = name == SUITE_LEASE or (
+        host and len(host) <= 40 and host.isascii()
+        and all(c.isalnum() or c in "._-" for c in host))
+    return name if valid else SUITE_LEASE  # tests/suite_lock.py lease_name's rule
+
+
 def _local_state(name: str) -> dict:
     """The OS lock behind ``name`` right now: ``state`` held, free, or None
     when there is no lock file; for the test suite's lock, the holder record
-    (pid, worktree, started) of the held slot."""
-    if name != SUITE_LEASE:
+    (pid, worktree, started) of the held slot. Another machine's suite lease
+    has no lock here (``elsewhere`` names this machine's)."""
+    if _is_suite_lease(name) and name != (mine := _local_suite_lease()):
+        return {"file": SUITE_LOCK_FILE, "state": None, "elsewhere": mine}
+    if not _is_suite_lease(name):
         path = os_lock.lock_dir() / os_lock.lock_file_name(name)
         try:
             held = os_lock.probe(path)
@@ -1367,6 +1395,8 @@ def _local_state(name: str) -> dict:
 
 
 def _local_text(local: dict) -> str:
+    if local.get("elsewhere"):
+        return f"none here (this machine's suite lease is {_clean(local['elsewhere'])})"
     state = local["state"]
     if state is None:
         return "absent"
@@ -1436,7 +1466,7 @@ def _check_lease(args, transport) -> int:
     # holder (a claim, `lease run`, a hold from WSL or another machine or
     # account) has its lock elsewhere, if anywhere, and counts as held.
     holder = board["holder"]
-    here = _suite_lock_dir() if args.name == SUITE_LEASE else os_lock.lock_dir()
+    here = _suite_lock_dir() if _is_suite_lease(args.name) else os_lock.lock_dir()
     ours = instance_id(here)
     board_stale = (holder is not None and local["state"] == "free" and ours is not None
                    and holder.get("label") == f"{HOLD_LABEL}@{ours}")

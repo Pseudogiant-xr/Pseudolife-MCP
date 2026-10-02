@@ -32,6 +32,30 @@
 # into ~/.cache/huggingface/hub, or run once with HF_HUB_OFFLINE=0.
 set -euo pipefail
 
+# A run dispatched to a second machine (ops/remote-suite.ps1 sets
+# PSEUDOLIFE_SUITE_DISPATCHED=1) starts only against a test server named
+# off 5433 — on the maintainer's homelab box 5433 is the live bank's
+# server, and a fixed PSEUDOLIFE_TEST_DATABASE_URL leaves default paths
+# there (review of #528, 2026-10-03) — and only under that machine's own
+# suite lease, so the first machine's gates do not hold off for it.
+if [[ -n "${PSEUDOLIFE_SUITE_DISPATCHED:-}" ]]; then
+    # Stripped and compared as a number, as pg_defaults reads it: '05433'
+    # and '5433 ' both reach 5433 (re-review of #528, 2026-10-03).
+    server="$(printf '%s' "${PSEUDOLIFE_TEST_PG_HOST_PORT:-}" | tr -d '[:space:]')"
+    port="${server##*:}"
+    if [[ "$server" != *:* || ! "$port" =~ ^[0-9]+$ ]] || (( 10#$port == 5433 )); then
+        echo "wsl-suite: a dispatched run needs PSEUDOLIFE_TEST_PG_HOST_PORT set to a test server other than port 5433 (got '${server}'); refusing" >&2
+        exit 2
+    fi
+    lock_dir="${PSEUDOLIFE_SUITE_LOCK_DIR:-$HOME/.pseudolife-mcp/locks}"
+    lease="${PSEUDOLIFE_SUITE_LEASE:-$(cat "$lock_dir/full-suite.lease" 2>/dev/null || true)}"
+    lease="$(printf '%s' "$lease" | tr -d '[:space:]')"
+    if [[ "$lease" != full-suite@?* ]]; then
+        echo "wsl-suite: a dispatched run needs this machine's own suite lease (full-suite@<host> in $lock_dir/full-suite.lease or PSEUDOLIFE_SUITE_LEASE; got '${lease:-full-suite}'); refusing" >&2
+        exit 2
+    fi
+fi
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="${PSEUDOLIFE_SUITE_NAME:-$(basename "$root")}"
 # wsl.exe -e starts no login shell, so uv's installer's PATH line never ran.
@@ -44,18 +68,28 @@ fi
 if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     common="${PSEUDOLIFE_SUITE_GIT_COMMON:?PSEUDOLIFE_SUITE_GIT_COMMON is required with PSEUDOLIFE_SUITE_COMMIT}"
     base="$HOME/.cache/pseudolife-suite"
-    mirror="$base/mirror-$(printf '%s' "$common" | sha256sum | cut -c1-8).git"
+    mirror_key="$(printf '%s' "$common" | sha256sum | cut -c1-8)"
+    mirror="$base/mirror-$mirror_key.git"
+    mkdir -p "$base/work"
+    # The mirror is cloned and fetched under its own lock: two launches at
+    # once raced here and one failed (review of #527, 2026-10-02).
+    exec 8>"$mirror.lock"
+    flock 8
     if [[ ! -d "$mirror" ]]; then
         git clone --quiet --bare --no-hardlinks "$common" "$mirror"
     fi
     git -C "$mirror" fetch --quiet --prune "$common" \
         '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+    exec 8>&-
     if ! git -C "$mirror" cat-file -e "${PSEUDOLIFE_SUITE_COMMIT}^{commit}" 2>/dev/null; then
         echo "wsl-suite: $PSEUDOLIFE_SUITE_COMMIT is on no branch or tag; commit it to a branch" >&2
         exit 2
     fi
-    root="$base/work/$name"
-    mkdir -p "$base/work"
+    # Keyed by mirror as well as name: checkouts of different repositories
+    # share a folder name (every Codex worktree is "Pseudolife-MCP"), and a
+    # copy keyed by name alone stayed bound to the first one's mirror, which
+    # lacked the next one's commit (exit 128 before pytest, 2026-10-02).
+    root="$base/work/$mirror_key-$name"
     # One run at a time per test copy: a second run of the same checkout
     # would check out and clean under the first. The descriptor passes to
     # pytest through exec, so the lock lasts the run; Python's subprocesses
@@ -66,16 +100,18 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
         flock 9
     fi
     if [[ ! -d "$root/.git" ]]; then
-        mkdir -p "$base/work"
         git clone --quiet --shared --no-checkout "$mirror" "$root"
     fi
+    # Always this mirror, objects included (a --shared clone borrows them).
+    git -C "$root" remote set-url origin "$mirror"
+    printf '%s\n' "$mirror/objects" > "$root/.git/objects/info/alternates"
     git -C "$root" fetch --quiet origin
     git -C "$root" checkout --quiet --force --detach "$PSEUDOLIFE_SUITE_COMMIT"
     # Untracked files from the last run (caches, build output) go; the copy
     # holds nothing else.
     git -C "$root" clean --quiet -fdx
     if [[ -n "${PSEUDOLIFE_SUITE_ENV_FILE:-}" && -f "$PSEUDOLIFE_SUITE_ENV_FILE" ]]; then
-        cp "$PSEUDOLIFE_SUITE_ENV_FILE" "$root/ops/.env"
+        install -m 600 "$PSEUDOLIFE_SUITE_ENV_FILE" "$root/ops/.env"  # it holds secrets
     fi
     echo "wsl-suite: testing $(git -C "$root" rev-parse --short HEAD) in $root"
 fi
