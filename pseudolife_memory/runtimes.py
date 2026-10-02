@@ -76,6 +76,7 @@ SHIM_REQUIREMENTS = (
     # first runtime on a Docker-tier host crashed on `import httpx`
     # (2026-09-29); tests/test_shim_runtimes.py pins the whole closure.
     "httpx>=0.27",
+    "httpx2>=2.5.0",
     "anyio>=4",
     "pydantic>=2.12,<3",
     "pyyaml>=6.0",

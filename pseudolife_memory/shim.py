@@ -106,6 +106,7 @@ _BOARD_PROBE_SECONDS = 1.5
 _UPSTREAM_OPERATION_TIMEOUT_SECONDS = 180.0
 _COORDINATION_HEADERS = (
     "X-PL-Agent", "X-PL-Agent-Key", "X-PL-Bank", "X-PL-Principal")
+_REQUEST_PHASES = {"initialize": "initialize", "tools/list": "list", "tools/call": "call"}
 
 
 @dataclass
@@ -117,12 +118,56 @@ class _UpstreamAttempt:
     response_phase: str | None = None
     dispatched: bool = False
     transport_failure: str | None = None
+    principal_admission_refused: bool = False
+    active_request: tuple[str, int | str] | None = None
+    response_request: tuple[str, int | str] | None = None
+
+    def observe_request(self, method, message):
+        # The SDK already supplies this JSON object to http.stream. Retain only
+        # its request key, never arguments, headers or a second parsed body.
+        if method != "POST" or not isinstance(message, dict):
+            return None
+        rpc_method, request_id = message.get("method"), message.get("id")
+        if not isinstance(rpc_method, str):
+            return None
+        request_phase = _REQUEST_PHASES.get(rpc_method)
+        if request_phase is None or type(request_id) not in {int, str}:
+            return None
+        key = (rpc_method, request_id)
+        if request_phase == self.phase:
+            self.active_request = key
+            self.http_status = None
+            self.response_phase = None
+            self.response_request = None
+            self.principal_admission_refused = False
+        return key
 
     async def observe_response(self, response) -> None:
+        if response.request.method != "POST":
+            return
+        request_key = response.request.extensions.get("pseudolife_rpc_request")
+        if request_key is None or request_key != self.active_request:
+            return
         status = int(response.status_code)
         if status >= 400:
             self.http_status = status
-            self.response_phase = self.phase
+            self.response_phase = _REQUEST_PHASES[request_key[0]]
+            self.response_request = request_key
+            self.principal_admission_refused = False
+        if status == 503 and response.headers.get("content-type", "").split(";", 1)[0].strip() == "application/json":
+            # Only the API gate's exact admission refusal proves no tool ran.
+            # Read a bounded body; generic or malformed 503s remain ambiguous.
+            raw = bytearray()
+            try:
+                async for chunk in response.aiter_bytes():
+                    if len(raw) + len(chunk) > 256:
+                        return
+                    raw.extend(chunk)
+                self.principal_admission_refused = (
+                    json.loads(raw, object_pairs_hook=list)
+                    == [("error", "principals_unavailable")])
+            except Exception:
+                pass
 
     def note_transport_failure(self, kind: str) -> None:
         priority = {None: 0, "protocol": 1, "timeout": 2, "connection_failure": 3}
@@ -263,6 +308,16 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         classification = "authentication_required"
         message = "Memory daemon authentication is required; refresh the configured credential and retry."
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif (status == 503 and attempt.principal_admission_refused
+            and attempt.response_request == attempt.active_request) or (
+            sdk_error is not None and sdk_error.code == -32003
+            and sdk_error.message == "principals_unavailable"
+            and isinstance(sdk_error.data, dict)
+            and type(sdk_error.data.get("status")) is int
+            and sdk_error.data == {"status": 503, "error": "principals_unavailable"}):
+        classification = "principals_unavailable"
+        message = "principals_unavailable"
+        outcome = "not_dispatched"
     elif status in {429, 502, 503, 504}:
         classification = "service_unavailable"
         message = "The memory daemon is temporarily unavailable; retry this operation."
@@ -312,8 +367,12 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     }
     if coordination_failure is not None and coordination_failure.hint:
         data["hint"] = coordination_failure.hint
-    code = (sdk_error.code if classification == "protocol" and sdk_error is not None
-            else -32603)
+    if classification == "principals_unavailable":
+        data.update(status=503, error="principals_unavailable")
+        code = -32003
+    else:
+        code = (sdk_error.code if classification == "protocol" and sdk_error is not None
+                else -32603)
     return MCPError(code, message, data)
 
 
@@ -1144,6 +1203,24 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                  coordination_adapter=None, codex_metadata: bool = False,
                  coordination_registry=None, instructions_note: str = "",
                  board_checkin=False, coordination_refusal: str = "") -> None:
+    from pseudolife_memory.rust_transport import transport_context
+
+    async with transport_context(_validated_daemon_url(url)) as http_transport:
+        await _proxy_impl(
+            url, token, session_uid, provider=provider, channel_inbox=channel_inbox,
+            agent_headers=agent_headers, coordination_hint=coordination_hint,
+            coordination_adapter=coordination_adapter, codex_metadata=codex_metadata,
+            coordination_registry=coordination_registry, instructions_note=instructions_note,
+            board_checkin=board_checkin, coordination_refusal=coordination_refusal,
+            http_transport=http_transport)
+
+
+async def _proxy_impl(url: str, token: str | None, session_uid: str, *, provider=None,
+                      channel_inbox=None, agent_headers=None, coordination_hint=None,
+                      coordination_adapter=None, codex_metadata: bool = False,
+                      coordination_registry=None, instructions_note: str = "",
+                      board_checkin=False, coordination_refusal: str = "",
+                      http_transport=None) -> None:
     import asyncio
     import contextlib
     import anyio
@@ -1192,8 +1269,12 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         connect_seconds = min(5.0, max(0.01, timeout_seconds / 2))
         timeout = streamable_http.httpx2.Timeout(
             timeout_seconds, connect=connect_seconds)
-        async with streamable_http.create_mcp_http_client(
-                headers=request_headers or None, timeout=timeout) as http:
+        http_client = (
+            streamable_http.create_mcp_http_client(headers=request_headers or None, timeout=timeout)
+            if http_transport is None else streamable_http.httpx2.AsyncClient(
+                headers=request_headers or None, timeout=timeout,
+                transport=http_transport.borrow(), follow_redirects=False))
+        async with http_client as http:
             # The SDK enables redirects by default. httpx strips Authorization
             # across origins but retains custom coordination credentials, so a
             # redirect could disclose an instance key or bank binding.
@@ -1218,6 +1299,13 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             if original_stream is not None:
                 @contextlib.asynccontextmanager
                 async def observed_stream(*args, **kwargs):
+                    request_key = attempt.observe_request(
+                        args[0] if args else kwargs.get("method"), kwargs.get("json"))
+                    if request_key is not None:
+                        kwargs["extensions"] = {
+                            **(kwargs.get("extensions") or {}),
+                            "pseudolife_rpc_request": request_key,
+                        }
                     try:
                         async with original_stream(*args, **kwargs) as response:
                             yield response

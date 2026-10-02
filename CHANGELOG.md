@@ -26,6 +26,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no codex CLI found) a Codex thread still declares no ring path, so
   wait-mail there only times out; the configuration guide says so.
 
+### Fixed (2026-10-02 — principal admission errors through the shim)
+- The stdio shim preserves the daemon's structured `principals_unavailable`
+  admission refusal through both HTTP transports. Only the exact JSON-RPC
+  error or bounded HTTP 503 JSON contract confirms that no tool ran; other
+  failures retain safe guidance for an unknown operation outcome.
+- Admission evidence is tied to the SDK request's method and ID. A refused
+  notification, listen exchange or session termination cannot prove that a
+  later tool call did not run; a lost write response keeps the unknown-outcome
+  warning and is never replayed automatically.
+
+### Fixed (2026-10-02 — default HTTP transport selection)
+- An empty `PSEUDOLIFE_MCP_RUST_HTTP` selects Python, matching an unset value.
+  The default shim path no longer imports the optional Rust adapter's private
+  HTTPX2 proxy utilities; those load only when the Rust transport is selected.
+
+### Added (2026-10-02 — optional Rust HTTP transport)
+- The Python stdio shim can opt into a persistent Rust HTTP helper by setting
+  `PSEUDOLIFE_MCP_RUST_HTTP` to a locally built executable. The helper streams
+  responses, cancels individual exchanges and never follows redirects or
+  retries requests. Existing Python MCP, credential and coordination policy
+  remains authoritative; unsupported transport settings select Python before
+  dispatch. The default transport and installers are unchanged.
+- Disposable HTTP and real stdio fixtures compare both paths, including TLS,
+  attribution, pagination, credential rotation and recovery without replay.
+  A bounded comparison harness records startup, call latency and aggregate
+  shim/helper memory; no performance improvement is claimed.
+
 ### Changed (2026-10-02 — full suites can run in WSL, and a host can refuse native Windows runs)
 - On the maintainer's Windows host, a full test suite made the mouse stutter.
   Its hook-script tests start Git Bash processes in bursts of 10-32 a

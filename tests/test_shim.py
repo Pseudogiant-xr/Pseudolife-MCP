@@ -634,11 +634,28 @@ def test_shipped_package_never_spawns_with_detached_process():
     The 2026-07-20 pass added CREATE_NO_WINDOW to the *test files'* own daemon
     spawns but left ``shim.spawn_daemon`` on DETACHED_PROCESS, so the windows
     came straight back — the shipped shim was the actual source all along.
-    Any future spawn in the package has to make the same choice.
+    The sole exception is RustTransport._start's exact piped helper launch:
+    the Windows release-helper tests pin response pipes, no console host,
+    normal close, stdin EOF and abrupt parent termination. Python daemon and
+    all other launches retain this ban.
     """
+    import ast
     import io
+    import textwrap
     import tokenize
     from pathlib import Path
+
+    allowed = [ast.dump(node) for node in ast.parse(textwrap.dedent("""
+        options = ({"creationflags": subprocess.DETACHED_PROCESS}
+                   if os.name == "nt" else {})
+        try:
+            self._process = await asyncio.create_subprocess_exec(
+                str(self.binary), stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                env=child_env, limit=_MAX_FRAME, **options)
+        except OSError:
+            raise httpx2.ConnectError(_MESSAGE, request=request) from None
+    """)).body]
 
     def _code_only(path: Path) -> str:
         """Source with comments and strings dropped.
@@ -647,6 +664,24 @@ def test_shipped_package_never_spawns_with_detached_process():
         used — only a real reference to it should fail this guard.
         """
         src = path.read_text(encoding="utf-8", errors="ignore")
+        if path == pkg / "rust_transport.py":
+            starts = [method for owner in ast.parse(src).body
+                      if isinstance(owner, ast.ClassDef) and owner.name == "RustTransport"
+                      for method in owner.body
+                      if isinstance(method, ast.AsyncFunctionDef) and method.name == "_start"]
+            matches = [first for method in starts for block in ast.walk(method)
+                       if isinstance(block, ast.AsyncWith)
+                       for first, second in zip(block.body, block.body[1:])
+                       if [ast.dump(first), ast.dump(second)] == allowed]
+            # One binding and its one approved consumer; aliases or another
+            # launch must not borrow this detached-process exception.
+            references = [node for method in starts for node in ast.walk(method)
+                          if isinstance(node, ast.Name) and node.id == "options"]
+            if len(starts) == len(matches) == 1 and len(references) == 2:
+                # Remove only this exact flag assignment, never the whole file.
+                lines = src.splitlines(keepends=True)
+                lines[matches[0].lineno - 1:matches[0].end_lineno] = ["\n"]
+                src = "".join(lines)
         try:
             return " ".join(
                 t.string
@@ -665,6 +700,49 @@ def test_shipped_package_never_spawns_with_detached_process():
     assert offenders == [], (
         f"DETACHED_PROCESS in shipped code: {offenders} — use "
         f"CREATE_NO_WINDOW so no console window is ever allocated")
+
+
+@pytest.mark.parametrize("mutation", ["daemon", "helper-pipes", "second-helper-launch",
+                                     "reused-options", "aliased-options", "copied-options",
+                                     "captured-options"])
+def test_detached_process_exception_rejects_other_launches(tmp_path, monkeypatch, mutation):
+    from pathlib import Path
+
+    package = Path(__file__).resolve().parents[1] / "pseudolife_memory"
+    copied = tmp_path / "pseudolife_memory"
+    copied.mkdir()
+    helper = (package / "rust_transport.py").read_text(encoding="utf-8")
+    (copied / "rust_transport.py").write_text(helper, encoding="utf-8")
+    monkeypatch.setitem(globals(), "__file__", str(tmp_path / "tests" / "test_shim.py"))
+    # The reviewed pipe launch is accepted before each adversarial change.
+    test_shipped_package_never_spawns_with_detached_process()
+    if mutation == "daemon":
+        daemon = (package / "shim.py").read_text(encoding="utf-8")
+        assert "subprocess.CREATE_NO_WINDOW" in daemon
+        (copied / "shim.py").write_text(daemon.replace(
+            "subprocess.CREATE_NO_WINDOW", "subprocess.DETACHED_PROCESS", 1), encoding="utf-8")
+    elif mutation == "helper-pipes":
+        assert "stdout=asyncio.subprocess.PIPE" in helper
+        helper = helper.replace("stdout=asyncio.subprocess.PIPE", "stdout=None", 1)
+        (copied / "rust_transport.py").write_text(helper, encoding="utf-8")
+    elif mutation in {"reused-options", "aliased-options", "copied-options", "captured-options"}:
+        prefix = {"reused-options": "", "aliased-options": "alias = options\n            ",
+                  "copied-options": "alias = dict(options)\n            ",
+                  "captured-options": "def later():\n                return options\n"
+                                      "            alias = later()\n            "}[mutation]
+        argument = "options" if mutation == "reused-options" else "alias"
+        anchor = "            self._ready = asyncio.get_running_loop().create_future()"
+        assert helper.count(anchor) == 1
+        helper = helper.replace(anchor, f"            {prefix}await asyncio.create_subprocess_exec(\n"
+            f"                sys.executable, '-m', 'pseudolife_memory.cli', 'serve', **{argument})\n"
+            + anchor, 1)
+        (copied / "rust_transport.py").write_text(helper, encoding="utf-8")
+    else:
+        (copied / "rust_transport.py").write_text(helper + "\nasync def other_launch():\n"
+            "    return await asyncio.create_subprocess_exec(\n"
+            "        'fixture', creationflags=subprocess.DETACHED_PROCESS)\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="DETACHED_PROCESS in shipped code"):
+        test_shipped_package_never_spawns_with_detached_process()
 
 
 def _reap_daemon(port: int, data_dir) -> None:
