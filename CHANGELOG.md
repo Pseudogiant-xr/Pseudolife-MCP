@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a locked Codex config no longer fails hook setup)
+- Codex hook setup could fail as a whole on the optional `memory_message`
+  approval step it promised never to fail on. `ops/setup-codex-hooks.py`
+  caught only Codex's refusals there, so an `OSError` (a `config.toml`
+  locked by another process on Windows, a permission error, or Codex's
+  pipe breaking mid-write) escaped to the outer handler and reported the
+  hooks unavailable. The step now reports the approval `unavailable`,
+  naming only the error type, and setup finishes ready. Other unexpected
+  errors still reach setup's own handler.
+
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
   the maintainer's workstation. `ops/remote-suite.ps1` now runs a
