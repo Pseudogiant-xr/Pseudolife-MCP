@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-02 — `pseudolife-mcp move` verification)
+- Writing `moved.json` on the source is the commit point: a failure after it
+  (restoring the target's restart policy or unattended update, removing the
+  resume marker, an ssh drop included) exits 5 with each follow-up's exact
+  command and never rolls a moved bank back.
+- The rollback checks the target reports stopped before the source starts,
+  stopping it again if a remote `update.sh` brought it back; when it cannot
+  write the target's gate, it leaves the target's update and restart policy
+  paused. The gate is set only once `restore.sh` has begun replacing the
+  bank (read from its output; an unreadable outcome counts as replaced).
+- The manual rollback lists only the steps the move has done, re-gates the
+  target before the source starts, and the unfinished-move refusal says how
+  to abandon (restore the target's own safety dump) or finish a move.
+- Windows: Ctrl-Break rolls back too, rollback steps run in their own
+  process group, and the guide says a closed window ends a move with no
+  rollback. `on-failure:N` restart policies keep their count; an unreadable
+  target timer is reported.
+
 ### Fixed (2026-10-02 — `pseudolife-mcp move` review)
 - A dropped ssh connection (exit 255) is always a failure: it was read as
   "the target's ops/.env is missing", which overwrote the file with no

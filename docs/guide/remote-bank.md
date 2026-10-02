@@ -401,11 +401,16 @@ expose status`; when the target is not exposed yet, the move runs `expose
 tailscale --yes` there first.
 
 **Run it under `tmux`, `screen` or `nohup`.** A move takes as long as a
-dump, a copy and a restore of the whole bank. A closed terminal (SIGHUP), a
-SIGTERM or Ctrl-C rolls it back, and the rollback itself ignores Ctrl-C;
-a session that survives the terminal lets it finish instead. Every step's
-progress, with the manual rollback, is written as it happens to
-`~/.pseudolife-mcp/moves/<move id>/record.json` on the source.
+dump, a copy and a restore of the whole bank. On Linux and macOS a closed
+terminal (SIGHUP), a SIGTERM or Ctrl-C rolls it back, and the rollback
+itself ignores Ctrl-C. On Windows, Ctrl-C and Ctrl-Break roll it back (each
+rollback step runs in its own process group, so a second Ctrl-C cannot kill
+one), but a closed console window or a dropped ssh session to the source
+ends the process with no rollback at all. Every step's progress, with the
+manual rollback for exactly what has been done so far, is written as it
+happens to `~/.pseudolife-mcp/moves/<move id>/record.json` on the source:
+after a move that ended that way, read it and run its `manual_rollback`
+lines in order.
 
 The order:
 
@@ -457,11 +462,14 @@ The order:
    must equal the source's within 180 s (a cold daemon reports null until
    it has read its bank identity, so the move nudges it with one
    authenticated read a minute), and `docker inspect` must show it runs
-   with each carried value (compared by SHA-256). Then what step 4 paused on
-   the target is restored, the source container's restart policy is set to
-   `no` (so the refusing source never crash-loops), `/data/moved.json` is
-   written into it (a daemon new enough to read it refuses to start and
-   names the new location), and the resume marker is removed last.
+   with each carried value (compared by SHA-256). Then the source
+   container's restart policy is set to `no` (so the refusing source never
+   crash-loops) and `/data/moved.json` is written into it (a daemon new
+   enough to read it refuses to start and names the new location). That is
+   the commit point: from here on nothing rolls back. What step 4 paused on
+   the target is restored and the resume marker is removed last; if one of
+   those fails (a dropped ssh connection, say), the move exits 5 and lists
+   each follow-up with its exact command.
 10. **Re-point this machine's clients** with `pseudolife-mcp connect
     <target-url> --yes`.
 11. **Report**: the manual rollback, the `connect <target-url>` line for
@@ -481,14 +489,31 @@ restart policy and paused schedule are restored, and the source daemon is
 started again. The target is never left running beside a running source:
 if it cannot be stopped, the source stays down, and so it does while the
 fence or `moved.json` cannot be undone; the move then exits 6 and the
-report and the record say what to finish by hand. The target keeps its
-resume marker, so `pseudolife-mcp move --to <target> --resume` may
-overwrite that half-restored bank on the next attempt; `--resume` refuses
-any bank whose marker names another move.
+report and the record say what to finish by hand. A target that comes
+back up after the stop (a remote `ops/update.sh` that kept going when the
+local ssh died) is stopped again, and the source starts only once the
+target reports stopped. When the gate cannot be written, the target's
+unattended update and restart policy stay paused (either could start the
+clone), and the rollback says so. The target keeps its resume marker, so
+`pseudolife-mcp move --to <target> --resume` may overwrite that
+half-restored bank on the next attempt; `--resume` refuses any bank whose
+marker names another move.
+
+**A target left gated.** While `/data/move.json` is there the target's
+daemon refuses to start, and the bank under it is a clone of the source's.
+To abandon the move there, restore the target's own pre-move safety dump
+(the one `ops/restore.sh` took first, in its `data/backups`) with
+`ops/restore.sh --apply --backup-file <that dump> --state-archive <its
+state archive>`, which replaces `/data`, gate included. Remove the gate by
+hand (`docker run --rm --volumes-from pseudolife-mcp-daemon <image> rm -f
+/data/move.json`) only to finish a move deliberately, with the source
+stopped and fenced.
 
 **Afterwards** the source is stopped and fenced, never deleted. To roll the
-move back by hand: `docker stop pseudolife-mcp-daemon` on the target; on the
-source, `docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres
+move back by hand: `docker stop pseudolife-mcp-daemon` on the target, then
+gate it so its next scheduled update cannot bring it back (`docker run --rm
+--entrypoint touch --volumes-from pseudolife-mcp-daemon <image>
+/data/move.json` there); on the source, `docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres
 -c "ALTER DATABASE <db> WITH ALLOW_CONNECTIONS true"`, `docker run --rm
 --entrypoint rm --volumes-from pseudolife-mcp-daemon <image> -f
 /data/moved.json` (`docker cp` cannot delete), `docker update
@@ -503,7 +528,8 @@ what that means for pending mail.
 Exit codes: 0 moved; 1 failed and rolled back (the source runs again);
 2 usage, declined, or no TTY without `--yes`; 4 preflight refused, nothing
 changed; 5 the bank moved but re-pointing this machine's clients failed
-(rerun the `connect` line it prints); 6 failed and the rollback could not
+(rerun the `connect` line it prints), or a follow-up on the target after
+the commit point failed (run the commands it lists); 6 failed and the rollback could not
 finish (finish it with the commands the report and the move record list).
 `--json` prints one report object.
 

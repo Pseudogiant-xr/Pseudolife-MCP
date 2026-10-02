@@ -67,9 +67,12 @@ record (``~/.pseudolife-mcp/moves/<id>/record.json``) as they happen.
 
 Exit codes: 0 moved; 1 failed and rolled back; 2 usage, declined, or no
 TTY without ``--yes``; 4 refused before any change; 5 the bank moved but
-re-pointing this machine's clients failed (no rollback: the target is
-correct and the source is fenced); 6 failed and the rollback could not
-finish (the error and the record say what is left).
+re-pointing this machine's clients failed, or a follow-up on the target
+after the commit point (``moved.json`` written) did (no rollback: the target
+is correct and the source is fenced); 6 failed and the rollback could not
+finish (the error and the record say what is left). On Windows a closed
+console ends the process with no rollback: the record's manual rollback
+is the way back.
 
 Every external effect (``ssh``, ``docker``, the schedule and ``connect``
 subprocesses, the HTTP reads) goes through :class:`Runner`, which the tests
@@ -109,14 +112,18 @@ MANIFEST_NAME = "manifest.json"
 MARKER = "/data/move.json"      # on the target: a daemon refuses to start while it is there
 MOVED = "/data/moved.json"      # on the source: the same, naming the new location
 SSH_OPTS = ("ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4")
-BANK_ID_SQL = "SELECT value FROM meta WHERE key = 'coordination_bank_id'"
+# What ops/restore.sh prints just before it drops the database it replaces.
+RESTORE_BOUNDARY = "==> Dropping + recreating"
+BANK_ID_SQL ="SELECT value FROM meta WHERE key = 'coordination_bank_id'"
 # Where a client on the target may hold a token (``grep -lsF`` reads the
 # tokens from stdin; a path that does not exist is skipped).
 TARGET_CLIENT_FILES = ("~/.pseudolife-mcp/*.token", "~/.claude.json", "~/.claude/settings.json",
                        "~/.codex/config.toml", "~/.codex/pseudolife/token", "~/.gemini/settings.json",
                        "~/.config/Claude/claude_desktop_config.json",
                        "~/'Library/Application Support/Claude/claude_desktop_config.json'")
-_SIGNALS = tuple(getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name))
+# SIGHUP is POSIX only, SIGBREAK (Ctrl-Break) Windows only.
+_SIGNALS = tuple(getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK")
+                 if hasattr(signal, name))
 INSTALL_LINE = ("git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git ~/src/Pseudolife-MCP && "
                 "cd ~/src/Pseudolife-MCP && ops/install.sh")
 
@@ -170,10 +177,14 @@ class Runner:
     dump or an archive)."""
 
     def run(self, argv, *, stdin: bytes | None = None, stdin_file: Path | None = None,
-            stdout_file: Path | None = None, timeout: int = 600) -> Result:
+            stdout_file: Path | None = None, timeout: int = 600, new_group: bool = False) -> Result:
+        """``new_group`` starts the child in its own process group on Windows,
+        so a Ctrl-C at the console does not reach it (a rollback step)."""
         argv = [str(part) for part in argv]
         handles = []
         kwargs: dict = {}
+        if new_group and os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
             if stdin_file is not None:
                 handles.append(open(stdin_file, "rb"))
@@ -469,6 +480,9 @@ class Mover:
         self.checkout = options.checkout.rstrip("/") or DEFAULT_CHECKOUT
         self.phase_code = EXIT_REFUSED     # what an ssh failure exits with before the source stops
         self.recording = False
+        self.in_rollback = False
+        self.target_timer_unknown: str | None = None   # why the target's timer state could not be read
+        self.follow_ups: list[dict] = []               # what is left to do after the commit point
         self.state = "planned"
         # what preflight learns
         self.source_bank: str | None = None
@@ -527,14 +541,19 @@ class Mover:
         return self.finish(code)
 
     # -- commands ----------------------------------------------------------
+    def _new_group(self) -> bool:
+        """Rollback steps on Windows run in their own process group: a
+        second Ctrl-C at the console must not kill one half-way."""
+        return self.in_rollback and self.platform.startswith("win")
+
     def local(self, argv, **kwargs) -> Result:
-        return self.runner.run(argv, **kwargs)
+        return self.runner.run(argv, new_group=self._new_group(), **kwargs)
 
     def ssh(self, command: str, **kwargs) -> Result:
         """``command`` on the target. Exit 255 is ssh's own failure (the
         connection dropped, or never came up), never the command's answer:
         it raises, so no caller can read it as "no such file"."""
-        result = self.runner.run([*SSH_OPTS, self.o.target, command], **kwargs)
+        result = self.runner.run([*SSH_OPTS, self.o.target, command], new_group=self._new_group(), **kwargs)
         if result.code == 255:
             raise SshLost(f"ssh to {self.o.target} failed while running `{command[:80]}` "
                           f"({result.why(out=False)}): move needs key-based ssh to the target that stays up",
@@ -827,8 +846,17 @@ class Mover:
                 result = self.local(["systemctl", "--user", "is-enabled", f"{unattended_update.UNIT_NAME}.timer"],
                                     timeout=60)
                 self.schedule_enabled = result.text.strip() == "enabled"
-        result = self.ssh("systemctl --user is-enabled pseudolife-update.timer 2>/dev/null", timeout=60)
-        self.target_timer_enabled = result.text.strip() == "enabled"
+        result = self.ssh("systemctl --user is-enabled pseudolife-update.timer 2>&1", timeout=60)
+        answer = (result.text.strip().splitlines() or [""])[0].strip()
+        self.target_timer_enabled = answer == "enabled"
+        if answer not in ("enabled", "disabled", "static", "masked", "indirect", "linked", "generated",
+                          "transient", "not-found", "alias", "enabled-runtime", "linked-runtime",
+                          "masked-runtime"):
+            # No user bus for the ssh user (no lingering session), say: the
+            # timer state is unknown, and nothing is paused.
+            self.target_timer_unknown = answer[:200] or f"exit {result.code}"
+            self.warn(f"could not read the ssh user's systemd --user timers on {self.o.target} "
+                      f"({self.target_timer_unknown}); an unattended update there is not paused")
 
     def read_target_registrations(self) -> None:
         """The files on the target that hold the token its installer minted,
@@ -976,23 +1004,35 @@ class Mover:
                 reason = str(exc) if isinstance(exc, (MoveError, MoveInterrupted)) and str(exc) else \
                     f"{type(exc).__name__}: {str(exc)[:300]}"
                 ignored = self._set_signals(signal.SIG_IGN)
+                self.in_rollback = True
                 try:
                     complete = self.rollback()
                     self.write_record("rolled_back" if complete else "rollback_incomplete")
                 finally:
+                    self.in_rollback = False
                     self._restore_signals(ignored)
                 if complete:
                     raise MoveError(f"{reason}. Rolled back: the source daemon runs again and the target is "
                                     f"stopped; the target keeps its move marker, so `move --resume` may overwrite "
                                     f"that half-restored bank on the next attempt", EXIT_FAILED) from None
-                raise MoveError(f"{reason}. The rollback is INCOMPLETE (see the rollback steps, and the move "
-                                f"record {self.local_dir / 'record.json'}): finish it by hand with the commands "
+                left = "; ".join(f"{s['step']}" + (f" ({s['detail'][:200]})" if s.get("detail") else "")
+                                 for s in self.data["rollback"] if not s.get("ok"))
+                raise MoveError(f"{reason}. The rollback is INCOMPLETE: {left}. See the rollback steps, and the move "
+                                f"record {self.local_dir / 'record.json'}, and finish it by hand with the commands "
                                 f"listed there", EXIT_INCOMPLETE) from None
         finally:
             self._restore_signals(previous)
         self.write_record("moved")
+        self.finish_target()
         code = self.repoint()
         self.final_report()
+        if self.follow_ups:
+            commands = "; ".join(item["command"] for item in self.follow_ups)
+            message = f"the bank moved, but follow-ups need doing: {commands}"
+            self.data["error"] = f"{self.data['error']}; {message}" if self.data.get("error") else message
+            if not self.o.as_json:
+                print(f"move: {message}", file=sys.stderr, flush=True)
+            code = EXIT_PARTIAL
         return code
 
     def expose_and_reach(self) -> None:
@@ -1170,12 +1210,23 @@ class Mover:
             raise MoveError(f"could not write the move marker on the target ({result.why()})")
         dump, state = f"{self.remote_dir}/{DUMP_NAME}", f"{self.remote_dir}/{STATE_NAME}"
         self.step("restoring on the target without starting it (ops/restore.sh --apply --no-start)")
+        # The bank is "restored" (gated on rollback) from the moment restore.sh
+        # starts dropping it: its own safety dump comes first, and a failure
+        # there leaves the target's original bank in place. restore.sh says
+        # where it is ("==> Dropping + recreating"), so a failure whose
+        # output stops short of that line un-marks it. An outcome that cannot
+        # be read (ssh lost, a kill) stays marked: a gated original bank only
+        # refuses to start, while an ungated clone could serve beside the
+        # source.
         self.mark(target_restored=True)
         result = self.ssh(f"cd {rq(self.checkout)} && bash ops/restore.sh --apply --no-start --backup-file "
                           f"{rq(dump)} --state-archive {rq(state)} --db {shlex.quote(self.target_db)} "
                           f"--user {shlex.quote(self.target_user)}", timeout=_TIMEOUT_LONG)
         if not result.ok:
-            raise MoveError(f"ops/restore.sh on the target failed ({result.why()})")
+            if RESTORE_BOUNDARY not in result.text:
+                self.mark(target_restored=False)
+            raise MoveError(f"ops/restore.sh on the target failed ({result.why()})"
+                            + ("" if self.target_restored else "; the target's own bank was not touched"))
         # Deterministic, while the target is still stopped: the restored
         # bank's identity is the source's (no daemon, no cache, no backoff).
         result = self.psql_remote(BANK_ID_SQL)
@@ -1339,22 +1390,6 @@ class Mover:
                             f"serving the restored bank")
         self.step(f"the target serves this bank (fingerprint {bank})")
         self.check_target_env()
-        # The target is the live daemon now: what step 4 paused there goes
-        # back as it was. A failure here is reported, not rolled back.
-        if self.target_policy_paused:
-            result = self.ssh(f"docker update --restart={shlex.quote(self.target_policy)} {DAEMON}", timeout=120)
-            if result.ok:
-                self.mark(target_policy_paused=False)
-            else:
-                self.warn(f"could not restore the target daemon's restart policy: run docker update "
-                          f"--restart={self.target_policy} {DAEMON} on {self.o.target}")
-        if self.target_timer_paused:
-            result = self.ssh("systemctl --user enable --now pseudolife-update.timer", timeout=120)
-            if result.ok:
-                self.mark(target_timer_paused=False)
-            else:
-                self.warn(f"could not resume the target's unattended update: run systemctl --user enable --now "
-                          f"pseudolife-update.timer on {self.o.target}")
         if self.source_policy not in ("", "no"):
             self.mark(source_policy_changed=True)
             result = self.local([self.docker, "update", "--restart=no", DAEMON], timeout=120)
@@ -1369,14 +1404,38 @@ class Mover:
         result = self.local([self.docker, "cp", str(moved), f"{DAEMON}:{MOVED}"], timeout=120)
         if not result.ok:
             raise MoveError(f"could not write {MOVED} into the stopped source container ({result.why()})")
-        self.step(f"wrote {MOVED} into the stopped source container")
-        # The very last action: without the marker, --resume no longer takes
-        # this bank over.
-        result = self.ssh(f"rm -f {rq(self.marker_path)}", timeout=60)
-        if result.ok:
-            self.mark(marker_written=False)
-        else:
-            self.warn(f"could not remove the move marker {self.marker_path} on {self.o.target}; remove it there")
+        # The commit point: the target serves the bank and both checks
+        # passed, and the source now refuses to start. Nothing after this
+        # line rolls back (finish_target).
+        self.step(f"wrote {MOVED} into the stopped source container: the bank has moved")
+
+    def finish_target(self) -> None:
+        """After the commit point: put back what step 4 paused on the target
+        (it is the live daemon now) and remove the resume marker last. A
+        failure, an ssh drop included, never rolls a moved bank back: it is
+        recorded as a follow-up with its exact command (exit 5)."""
+        steps = []
+        if self.target_policy_paused:
+            steps.append(("restore the target daemon's restart policy",
+                          f"docker update --restart={shlex.quote(self.target_policy)} {DAEMON}",
+                          "target_policy_paused"))
+        if self.target_timer_paused:
+            steps.append(("resume the target's unattended update",
+                          "systemctl --user enable --now pseudolife-update.timer", "target_timer_paused"))
+        if self.marker_written:
+            steps.append(("remove the resume marker", f"rm -f {rq(self.marker_path)}", "marker_written"))
+        for what, command, flag in steps:
+            try:
+                result = self.ssh(command, timeout=120)
+                ok, why = result.ok, ("" if result.ok else result.why())
+            except MoveError as exc:
+                ok, why = False, str(exc)
+            if ok:
+                self.mark(**{flag: False})
+                continue
+            self.follow_ups.append({"what": what, "command": f"ssh {self.o.target} {command}", "why": why[:300]})
+            self.warn(f"the bank moved, but this follow-up failed: {what} ({why[:200]}); run: "
+                      f"ssh {self.o.target} {command}")
 
     # -- rollback ----------------------------------------------------------
     def rollback(self) -> bool:
@@ -1394,20 +1453,41 @@ class Mover:
             return ok
 
         self.say("==> rolling back")
-        complete, can_start = True, True
-        if self.target_started:
+        complete, can_start, gate_missing = True, True, False
+
+        def blocked(reason: str) -> bool:
+            log.append({"step": "the source stays stopped: two daemons must never serve one bank", "ok": False,
+                        "detail": f"{reason}; stop the target by hand (ssh {self.o.target} docker stop {DAEMON}), "
+                                  f"then: {'; '.join(self.manual_rollback()[1:])}"})
+            return False
+
+        was_started = self.target_started
+        if was_started:
             if not attempt(f"stop the target daemon ({self.o.target})",
                            lambda: self.ssh(f"docker stop {DAEMON}", timeout=300)):
-                log.append({"step": "the source stays stopped: two daemons must never serve one bank", "ok": False,
-                            "detail": f"stop the target by hand (ssh {self.o.target} docker stop {DAEMON}), "
-                                      f"then: {'; '.join(self.manual_rollback()[1:])}"})
-                return False
+                return blocked("the target daemon could not be stopped")
             self.mark(target_started=False)
         if self.target_restored and not self.gate_written:
             if attempt(f"keep the target from starting outside the move ({MARKER})", self.write_gate):
                 self.mark(gate_written=True)
             else:
-                complete = False
+                complete, gate_missing = False, True
+        if was_started:
+            # A remote update.sh may keep going after the local ssh child
+            # died, and bring the target back up: only a target that reports
+            # stopped lets the source start.
+            for _attempt in range(3):
+                try:
+                    state = self.ssh(f"docker inspect -f '{{{{.State.Running}}}}' {DAEMON}", timeout=60)
+                    running = state.text.strip() if state.ok else "unknown"
+                except MoveError:
+                    running = "unknown"
+                if running == "false":
+                    break
+                attempt(f"stop the target daemon again (it reports running: {running})",
+                        lambda: self.ssh(f"docker stop {DAEMON}", timeout=300))
+            else:
+                return blocked("the target daemon is still running after three stops")
         if self.env_written:
             if self.env_backup:
                 ok = attempt("restore the target's ops/.env",
@@ -1418,13 +1498,20 @@ class Mover:
             if ok:
                 self.mark(env_written=False)
             complete = complete and ok
-        if self.target_timer_paused:
+        if gate_missing and (self.target_timer_paused or self.target_policy_paused):
+            # Without the gate, either one could start the restored clone
+            # beside the source: both stay paused.
+            log.append({"step": "the target's unattended update and restart policy are left paused", "ok": False,
+                        "detail": f"the gate {MARKER} could not be written, so either could start the restored "
+                                  f"clone beside the source; restore them once the target holds its own bank "
+                                  f"again"})
+        elif self.target_timer_paused:
             if attempt("resume the target's unattended update",
                        lambda: self.ssh("systemctl --user enable --now pseudolife-update.timer", timeout=120)):
                 self.mark(target_timer_paused=False)
             else:
                 complete = False
-        if self.target_policy_paused:
+        if self.target_policy_paused and not gate_missing:
             if attempt(f"restore the target daemon's restart policy ({self.target_policy})",
                        lambda: self.ssh(f"docker update --restart={shlex.quote(self.target_policy)} {DAEMON}",
                                         timeout=120)):
@@ -1479,17 +1566,37 @@ class Mover:
         return complete
 
     def manual_rollback(self) -> list[str]:
-        """The rollback by hand, in order. The psql line puts its SQL in
-        double quotes with none inside, so it reads the same in sh, cmd.exe
-        and PowerShell."""
-        lines = [f"ssh {self.o.target} docker stop {DAEMON}",
-                 f'docker exec {POSTGRES} psql -U {self.db_user} -d postgres -c "{fence_sql(self.db, True)}"',
-                 f"docker run --rm --entrypoint rm --volumes-from {DAEMON} {self.source_image} -f {MOVED}"]
-        if self.source_policy not in ("", "no"):
+        """The rollback by hand, in order, listing only what the move has
+        done so far (after a successful move, all of it). The target is
+        stopped and gated before anything else, so its next scheduled update
+        cannot bring the clone back beside the source. The psql line puts its
+        SQL in double quotes with none inside, so it reads the same in sh,
+        cmd.exe and PowerShell."""
+        t, lines = self.o.target, []
+        if self.target_started:
+            lines.append(f"ssh {t} docker stop {DAEMON}")
+        if self.target_restored and not self.gate_written:
+            lines.append(f'ssh {t} "docker run --rm --entrypoint touch --volumes-from {DAEMON} '
+                         f'{self.target_image} {MARKER}"')
+        if self.env_written:
+            lines.append(f"ssh {t} cp -p {rq(self.env_backup)} {rq(self.env_path)}" if self.env_backup
+                         else f"ssh {t} rm -f {rq(self.env_path)}")
+        if self.target_timer_paused:
+            lines.append(f"ssh {t} systemctl --user enable --now pseudolife-update.timer")
+        if self.target_policy_paused:
+            lines.append(f"ssh {t} docker update --restart={self.target_policy} {DAEMON}")
+        if self.fenced:
+            lines.append(f'docker exec {POSTGRES} psql -U {self.db_user} -d postgres -c "{fence_sql(self.db, True)}"')
+        if self.moved_written:
+            lines.append(f"docker run --rm --entrypoint rm --volumes-from {DAEMON} {self.source_image} -f {MOVED}")
+        if self.source_policy_changed:
             lines.append(f"docker update --restart={self.source_policy} {DAEMON}")
-        if self.schedule and self.schedule_enabled:
+        if self.schedule_paused:
             lines.append(" ".join(self._schedule_argv(enable=True)))
-        lines += [f"docker start {DAEMON}", f"pseudolife-mcp connect {SOURCE_URL} --yes"]
+        if self.source_stopped:
+            lines.append(f"docker start {DAEMON}")
+        if self.moved_written:
+            lines.append(f"pseudolife-mcp connect {SOURCE_URL} --yes")
         return lines
 
     # -- 10. re-point --------------------------------------------------------
@@ -1564,8 +1671,15 @@ class Mover:
                          + (f" (its previous ops/.env: {self.env_backup})" if self.env_backup else "") + using
                          + f". Re-point a client there with pseudolife-mcp connect {url} --token-file "
                            f"<a file holding one of the carried tokens>")
+        if not self.target_timer_enabled:
+            seen = (f"could not be read ({self.target_timer_unknown})" if self.target_timer_unknown
+                    else "was not found")
+            notes.append(f"the target's unattended update was looked up as the ssh user only (systemctl --user) "
+                         f"and {seen}; a timer another user installed on {o.target} is not visible to the move "
+                         f"and was not paused: check it there as that user (systemctl --user list-timers)")
         report = {
             "rollback": self.manual_rollback(),
+            "follow_ups": self.follow_ups,
             "principals": principals,
             "reinvite": reinvite,
             "leases": leases,
@@ -1642,7 +1756,14 @@ class Mover:
 
 
 def _restart_policy(container: dict) -> str:
-    return str(((container.get("HostConfig") or {}).get("RestartPolicy") or {}).get("Name") or "")
+    """The restart policy as ``docker update --restart`` takes it back:
+    ``on-failure:N`` keeps its retry count."""
+    policy = (container.get("HostConfig") or {}).get("RestartPolicy") or {}
+    name = str(policy.get("Name") or "")
+    count = policy.get("MaximumRetryCount")
+    if name == "on-failure" and isinstance(count, int) and count > 0:
+        return f"on-failure:{count}"
+    return name
 
 
 # ── command line ────────────────────────────────────────────────────────────

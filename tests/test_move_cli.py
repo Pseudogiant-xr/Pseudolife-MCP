@@ -87,6 +87,11 @@ def _tar(members: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _policy(text: str) -> dict:
+    name, _, count = text.partition(":")
+    return {"Name": name, "MaximumRetryCount": int(count or 0)}
+
+
 def _env_from_dotenv(text: str) -> list[str]:
     env = dict(item.split("=", 1) for item in TARGET_ENV)
     for line in text.splitlines():
@@ -97,9 +102,10 @@ def _env_from_dotenv(text: str) -> list[str]:
 
 
 class Call:
-    def __init__(self, argv, stdin):
+    def __init__(self, argv, stdin, new_group=False):
         self.argv = argv
         self.stdin = stdin
+        self.new_group = new_group
         self.text = " ".join(argv)
 
     @property
@@ -136,7 +142,7 @@ class World:
                  target_up_after_start=True, env_mismatch=False, still_running_after_stop=False,
                  stop_exit_code=0, lingering_backends=0, target_timer="enabled", source_timer="enabled",
                  source_policy="unless-stopped", target_policy="unless-stopped", grep_hits=(REGISTRATION,),
-                 dotenv=TARGET_DOTENV, hooks=None):
+                 dotenv=TARGET_DOTENV, hooks=None, target_respawns=0, restore_fails_after_drop=False):
         self.fail = tuple(fail)
         self.fail255 = tuple(fail255)
         self.calls: list[Call] = []
@@ -185,6 +191,8 @@ class World:
         self.target_policy = target_policy
         self.grep_hits = tuple(grep_hits)
         self.hooks = hooks or {}
+        self.target_respawns = target_respawns     # a remote update.sh that keeps going brings it back
+        self.restore_fails_after_drop = restore_fails_after_drop
         self.target_live_env = list(TARGET_ENV)
         self.overlap = False   # ever a running target beside a running source on the moved bank
 
@@ -198,8 +206,8 @@ class World:
             self.overlap = True
 
     # -- the runner surface ----------------------------------------------
-    def run(self, argv, stdin=None):
-        call = Call([str(a) for a in argv], stdin)
+    def run(self, argv, stdin=None, new_group=False):
+        call = Call([str(a) for a in argv], stdin, new_group)
         self.calls.append(call)
         for needle, hook in self.hooks.items():
             if needle in call.text:
@@ -241,7 +249,7 @@ class World:
                     return 1, b"", b"Error: No such container: pseudolife-mcp-daemon"
                 return 0, json.dumps([{"Config": {"Env": SOURCE_ENV, "Image": "pseudolife-daemon:0.15.0"},
                                        "State": {"Running": self.source_running},
-                                       "HostConfig": {"RestartPolicy": {"Name": self.source_policy}}}]).encode(), b""
+                                       "HostConfig": {"RestartPolicy": _policy(self.source_policy)}}]).encode(), b""
             running = self.source_running or self.still_running_after_stop
             return 0, f"{'true' if running else 'false'} {0 if running else self.stop_exit_code}\n".encode(), b""
         if argv[:2] == ["docker", "stop"]:
@@ -319,7 +327,9 @@ class World:
         if cmd.startswith("docker inspect --type container pseudolife-mcp-daemon"):
             return 0, json.dumps([{"Config": {"Env": self.target_live_env, "Image": "pseudolife-daemon:0.15.0"},
                                    "State": {"Running": self.target_running},
-                                   "HostConfig": {"RestartPolicy": {"Name": self.target_policy}}}]).encode(), b""
+                                   "HostConfig": {"RestartPolicy": _policy(self.target_policy)}}]).encode(), b""
+        if cmd.startswith("docker inspect -f") and cmd.endswith("pseudolife-mcp-daemon"):
+            return 0, (b"true\n" if self.target_running else b"false\n"), b""
         if cmd.startswith("docker inspect -f"):
             return 0, f"{self.target_pg_running}\n".encode(), b""
         if cmd.startswith("curl -fsS"):
@@ -328,6 +338,8 @@ class World:
             return 0, json.dumps({"status": "ok", "schema": self.target_schema, "auth": True,
                                   "bank": self.target_bank}).encode(), b""
         if cmd.startswith("systemctl --user is-enabled"):
+            if self.target_timer == "no-bus":
+                return 1, b"Failed to connect to bus: No medium found\n", b""
             return (0 if self.target_timer == "enabled" else 1), f"{self.target_timer}\n".encode(), b""
         if cmd.startswith("systemctl --user disable"):
             self.target_timer = "disabled"
@@ -374,6 +386,12 @@ class World:
         if cmd.startswith("docker run --rm --entrypoint rm") and "/data/move.json" in cmd:
             self.data_files.pop("/data/move.json", None)
             return 0, b"", b""
+        if "ops/restore.sh" in cmd and self.restore_fails_after_drop:
+            self.target_running = False
+            self.target_restored = True
+            self.data_files = {}
+            return 1, (b"==> Safety-dumping the current bank first...\n==> Stopping the daemon...\n"
+                       b"==> Dropping + recreating pseudolife_memory...\n"), b"RESTORE FAILED mid-way"
         if "ops/restore.sh" in cmd:
             self.target_running = False
             self.target_restored = True
@@ -424,7 +442,8 @@ class World:
         if cmd == "docker stop pseudolife-mcp-daemon":
             if self.stop_target_fails:
                 return 1, b"", b"daemon unreachable"
-            self.target_running = False
+            self.target_running = self.target_respawns > 0
+            self.target_respawns = max(0, self.target_respawns - 1)
             return 0, b"", b""
         raise AssertionError(f"unexpected remote command: {cmd}")
 
@@ -433,9 +452,9 @@ class FakeRunner(move_cli.Runner):
     def __init__(self, world: World):
         self.world = world
 
-    def run(self, argv, *, stdin=None, stdin_file=None, stdout_file=None, timeout=600):
+    def run(self, argv, *, stdin=None, stdin_file=None, stdout_file=None, timeout=600, new_group=False):
         data = stdin if stdin is not None else (Path(stdin_file).read_bytes() if stdin_file else None)
-        code, out, err = self.world.run(argv, data)
+        code, out, err = self.world.run(argv, data, new_group)
         if stdout_file is not None:
             Path(stdout_file).write_bytes(out if code == 0 else b"")
             out = b""
@@ -532,9 +551,10 @@ def test_a_move_runs_every_step_in_order_and_reports(tmp_path, capsys):
         first(world, "bash ops/update.sh"),
         index(world, lambda c: c.remote is not None and c.remote.startswith("docker inspect --type container")
               and world.calls.index(c) > first(world, "bash ops/update.sh")),
-        index(world, remote_is("systemctl --user enable")),           # the target's update as it was
         index(world, local_is("docker", "update", "--restart=no")),  # the source never restarts itself
         index(world, lambda c: c.argv[:2] == ["docker", "cp"] and c.argv[-1].endswith(":/data/moved.json")),
+        index(world, remote_is("docker update --restart=unless-stopped")),   # after the commit point,
+        index(world, remote_is("systemctl --user enable")),                 # the target as it was
         index(world, lambda c: c.remote is not None and c.remote.startswith("rm -f ")
               and c.remote.endswith("/marker.json")),
         index(world, lambda c: "connect" in c.argv),
@@ -1250,3 +1270,161 @@ def test_a_fenced_database_refuses_new_connections_until_lifted():
     finally:
         with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+# ── after the commit point (moved.json written): follow-ups, never a rollback ──
+
+FOLLOW_UPS = {
+    "target_policy": remote_is("docker update --restart=unless-stopped"),
+    "target_timer": remote_is("systemctl --user enable"),
+    "marker": lambda c: c.remote is not None and c.remote.startswith("rm -f ") and c.remote.endswith("/marker.json"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(FOLLOW_UPS))
+def test_a_dropped_ssh_after_the_commit_point_never_rolls_back(tmp_path, capsys, case):
+    world = World(fail255=(FOLLOW_UPS[case],))
+    code = run_move(world, tmp_path, as_json=True)
+    report = json.loads(capsys.readouterr().out)
+    assert code == 5, report
+    assert report["rollback"] == []
+    assert not world.source_running and world.fenced and world.moved and world.target_running
+    assert index(world, local_is("docker", "start")) == -1
+    assert "follow-up" in report["error"]
+    follow_ups = report["report"]["follow_ups"]
+    assert len(follow_ups) == 1 and follow_ups[0]["command"].startswith(f"ssh {TARGET} "), follow_ups
+
+
+# ── the rollback: gate, a target that comes back, the restore boundary ──────
+
+def test_a_gate_the_rollback_cannot_write_leaves_the_targets_update_and_policy_paused(tmp_path, capsys):
+    world = World(fail=("bash ops/update.sh",))
+    stopped = []
+    world.hooks = {"docker stop pseudolife-mcp-daemon": lambda w, c: stopped.append(c) if c.remote else None}
+    world.fail = ("bash ops/update.sh",
+                  lambda c: bool(stopped) and c.remote is not None and "cat > /data/move.json" in c.remote)
+    code = run_move(world, tmp_path, as_json=True)
+    report = json.loads(capsys.readouterr().out)
+    assert code == 6, report
+    after = world.calls[index(world, lambda c: c.remote == "docker stop pseudolife-mcp-daemon"):]
+    assert not any(c.remote and c.remote.startswith(("systemctl --user enable", "docker update --restart=unless"))
+                   for c in after)
+    assert world.target_timer == "disabled" and world.target_policy == "no"
+    assert any("left paused" in step["step"] or "left paused" in step.get("detail", "")
+               for step in report["rollback"]), report["rollback"]
+
+
+def test_a_target_that_comes_back_after_the_stop_is_stopped_again_first(tmp_path):
+    world = World(fail=("bash ops/update.sh",), target_respawns=1)
+    assert run_move(world, tmp_path) == 1
+    stops = [i for i, c in enumerate(world.calls) if c.remote == "docker stop pseudolife-mcp-daemon"]
+    start = index(world, local_is("docker", "start"))
+    assert len(stops) == 2 and stops[-1] < start
+    checks = [i for i, c in enumerate(world.calls) if c.remote is not None
+              and c.remote.startswith("docker inspect -f") and c.remote.endswith("pseudolife-mcp-daemon")]
+    assert checks and checks[-1] < start
+    assert not world.overlap and world.source_running and not world.target_running
+
+
+def test_a_target_that_will_not_stay_stopped_keeps_the_source_down(tmp_path, capsys):
+    world = World(fail=("bash ops/update.sh",), target_respawns=10)
+    assert run_move(world, tmp_path, as_json=True) == 6
+    assert "still running" in json.loads(capsys.readouterr().out)["error"]
+    assert index(world, local_is("docker", "start")) == -1
+    assert not world.source_running and not world.overlap
+
+
+def test_a_restore_that_failed_before_touching_the_bank_is_not_gated(tmp_path):
+    """restore.sh's own safety dump failed: the target still holds its own
+    bank, so the rollback must not gate it."""
+    world = World(fail=("bash ops/restore.sh",))
+    assert run_move(world, tmp_path) == 1
+    assert not any(c.remote and "cat > /data/move.json" in c.remote for c in world.calls)
+
+
+def test_a_restore_that_failed_after_dropping_the_bank_is_gated(tmp_path):
+    world = World(restore_fails_after_drop=True)
+    assert run_move(world, tmp_path) == 1
+    assert "/data/move.json" in world.data_files
+
+
+def test_a_dropped_ssh_during_the_restore_counts_as_a_replaced_bank(tmp_path):
+    world = World(fail255=("bash ops/restore.sh",))
+    assert run_move(world, tmp_path) == 1
+    assert "/data/move.json" in world.data_files
+
+
+# ── the manual rollback lists only what is needed ───────────────────────────
+
+def test_the_recorded_manual_rollback_follows_the_progress(tmp_path):
+    snapshots = {}
+
+    def at_fence(world, call):
+        records = list((tmp_path / "home" / "moves").glob("*/record.json"))
+        snapshots["fence"] = json.loads(records[0].read_text())["manual_rollback"]
+
+    world = World(hooks={"ALLOW_CONNECTIONS false": at_fence})
+    assert run_move(world, tmp_path) == 0
+    lines = snapshots["fence"]
+    # The target was not started, restored or rewritten yet: only what step 4
+    # paused there needs putting back.
+    target_lines = [line for line in lines if line.startswith(f"ssh {TARGET}")]
+    assert target_lines == [f"ssh {TARGET} systemctl --user enable --now pseudolife-update.timer",
+                            f"ssh {TARGET} docker update --restart=unless-stopped pseudolife-mcp-daemon"], lines
+    assert any("ALLOW_CONNECTIONS true" in line for line in lines)
+    assert lines.index(next(l for l in lines if "ALLOW_CONNECTIONS true" in l)) < \
+        lines.index("docker start pseudolife-mcp-daemon")
+
+
+def test_the_reported_manual_rollback_regates_the_target_before_the_source_starts(tmp_path, capsys):
+    world = World()
+    assert run_move(world, tmp_path, as_json=True) == 0
+    lines = json.loads(capsys.readouterr().out)["report"]["rollback"]
+    gate = next(i for i, line in enumerate(lines) if "/data/move.json" in line and line.startswith(f"ssh {TARGET}"))
+    env = next(i for i, line in enumerate(lines) if line.startswith(f"ssh {TARGET} cp -p") and ".pre-move-" in line)
+    start = lines.index("docker start pseudolife-mcp-daemon")
+    assert lines[0] == f"ssh {TARGET} docker stop pseudolife-mcp-daemon"
+    assert 0 < gate < start and env < start
+
+
+# ── Windows: SIGBREAK, and a rollback a second Ctrl-C cannot kill ────────────
+
+@pytest.mark.skipif(not hasattr(signal, "SIGBREAK"), reason="SIGBREAK is Windows-only")
+def test_a_sigbreak_during_the_move_rolls_back(tmp_path):
+    def brk(world, call):
+        signal.getsignal(signal.SIGBREAK)(signal.SIGBREAK, None)
+
+    world = World(hooks={"pg_dump": brk})
+    move = mover(world, tmp_path, as_json=True)
+    assert move.run() == 1
+    assert "SIGBREAK" in move.data["error"] and world.source_running
+
+
+def test_rollback_steps_run_in_their_own_process_group_on_windows(tmp_path):
+    world = World(fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path, platform="win32") == 1
+    failed = first(world, "bash ops/update.sh")
+    assert not any(c.new_group for c in world.calls[:failed + 1])
+    assert world.calls[failed + 1:] and all(c.new_group for c in world.calls[failed + 1:])
+
+
+def test_no_process_groups_off_windows(tmp_path):
+    world = World(fail=("bash ops/update.sh",))
+    assert run_move(world, tmp_path) == 1
+    assert not any(c.new_group for c in world.calls)
+
+
+# ── nits ─────────────────────────────────────────────────────────────────────
+
+def test_an_on_failure_restart_policy_comes_back_with_its_count(tmp_path):
+    world = World(source_policy="on-failure:3", target_policy="on-failure:5", fail=(":/data/moved.json",))
+    world.fail = (lambda c: c.argv[:2] == ["docker", "cp"] and c.argv[-1].endswith(":/data/moved.json"),)
+    assert run_move(world, tmp_path) == 1
+    assert world.source_policy == "on-failure:3" and world.target_policy == "on-failure:5"
+
+
+def test_a_target_timer_that_cannot_be_read_is_reported(tmp_path, capsys):
+    world = World(target_timer="no-bus")
+    assert run_move(world, tmp_path, as_json=True) == 0
+    notes = " ".join(json.loads(capsys.readouterr().out)["report"]["notes"])
+    assert "systemctl --user" in notes and "another user" in notes
