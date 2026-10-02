@@ -182,6 +182,10 @@ took 143 CUDA OOMs.
   `lease check full-suite` sees it through the board only (its local-lock
   line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
   with the lock, so it is never a way to start a Windows full run here.
+  Rebase a branch onto master before its first WSL run: code from before
+  the WSL database-name tag (2026-10-02) names its databases after a WSL
+  pid that Windows runs cannot see, and any Windows pytest session drops
+  them mid-run.
 - The lock has a slot count, default 1: `PSEUDOLIFE_SUITE_SLOTS`, else
   `~/.pseudolife-mcp/locks/full-suite.slots`. Leave it at 1 on the
   maintainer's host (maintainer decision 2026-09-25 ~19:15). A two-slot
