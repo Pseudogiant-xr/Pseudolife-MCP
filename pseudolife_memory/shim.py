@@ -117,17 +117,70 @@ class _UpstreamAttempt:
     response_phase: str | None = None
     dispatched: bool = False
     transport_failure: str | None = None
+    # The phase of the request the daemon refused with principals_unavailable.
+    refused_phase: str | None = None
 
     async def observe_response(self, response) -> None:
         status = int(response.status_code)
         if status >= 400:
             self.http_status = status
             self.response_phase = self.phase
+        if status == 503:
+            refused = await _principals_refusal_phase(response)
+            if refused is not None:
+                self.refused_phase = refused
 
     def note_transport_failure(self, kind: str) -> None:
         priority = {None: 0, "protocol": 1, "timeout": 2, "connection_failure": 3}
         if priority[kind] > priority[self.transport_failure]:
             self.transport_failure = kind
+
+
+_PRINCIPALS_UNAVAILABLE = "principals_unavailable"
+# mcp_server.PRINCIPALS_UNAVAILABLE_CODE: the daemon refused the bearer
+# before running anything (its HTTP gate says the same with a 503).
+_PRINCIPALS_UNAVAILABLE_CODE = -32003
+_PRINCIPALS_REFUSAL_BODY_LIMIT = 256
+_REQUEST_PHASES = {"initialize": "initialize", "tools/list": "list", "tools/call": "call"}
+
+
+async def _principals_refusal_phase(response) -> str | None:
+    """The phase of the request a 503 refused, when its body is exactly the
+    daemon gate's ``{"error": "principals_unavailable"}``; otherwise None.
+
+    Only that exact, small JSON body proves no tool ran, and only for the
+    JSON-RPC request it answered: a refused notification or listen stream
+    says nothing about a tool call. The SDK reads the same body afterwards;
+    ``aread`` caches it."""
+    request = response.request
+    if request.method != "POST":
+        return None
+    content_type = response.headers.get("content-type", "")
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        return None
+    length = response.headers.get("content-length", "")
+    if not length.isdigit() or int(length) > _PRINCIPALS_REFUSAL_BODY_LIMIT:
+        return None
+    try:
+        body = json.loads(await response.aread(), object_pairs_hook=list)
+        sent = json.loads(request.content)
+    except Exception:  # noqa: BLE001 - unreadable means unproven
+        return None
+    if body != [("error", _PRINCIPALS_UNAVAILABLE)] or not isinstance(sent, dict):
+        return None
+    if type(sent.get("id")) not in (int, str):
+        return None
+    return _REQUEST_PHASES.get(sent.get("method"))
+
+
+def _is_principals_refusal(sdk_error) -> bool:
+    """The daemon's exact post-admission refusal, as a JSON-RPC error."""
+    return (sdk_error is not None
+            and sdk_error.code == _PRINCIPALS_UNAVAILABLE_CODE
+            and sdk_error.message == _PRINCIPALS_UNAVAILABLE
+            and isinstance(sdk_error.data, dict)
+            and type(sdk_error.data.get("status")) is int
+            and sdk_error.data == {"status": 503, "error": _PRINCIPALS_UNAVAILABLE})
 
 
 def _operation_timeout_seconds() -> float:
@@ -259,6 +312,15 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
         classification = "credential_unavailable"
         message = "The memory credential is unavailable; restore the configured credential and retry."
         outcome = "unknown" if requested_phase == "call" and attempt.dispatched else "not_dispatched"
+    elif _is_principals_refusal(sdk_error) or (
+            status == 503 and attempt.refused_phase is not None
+            and attempt.refused_phase == attempt.phase):
+        # The daemon refused the bearer before running anything, so the
+        # outcome is known even after dispatch.
+        classification = _PRINCIPALS_UNAVAILABLE
+        message = ("The memory daemon refused this request before running it: it cannot "
+                   "check invited machines' tokens right now. No tool ran; retry shortly.")
+        outcome = "not_dispatched"
     elif status in {401, 403}:
         classification = "authentication_required"
         message = "Memory daemon authentication is required; refresh the configured credential and retry."
@@ -312,6 +374,12 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     }
     if coordination_failure is not None and coordination_failure.hint:
         data["hint"] = coordination_failure.hint
+    if classification == _PRINCIPALS_UNAVAILABLE:
+        from pseudolife_memory.board_status import _REASONS
+
+        data.update(status=503, error=_PRINCIPALS_UNAVAILABLE,
+                    hint=_REASONS[_PRINCIPALS_UNAVAILABLE])
+        return MCPError(_PRINCIPALS_UNAVAILABLE_CODE, message, data)
     code = (sdk_error.code if classification == "protocol" and sdk_error is not None
             else -32603)
     return MCPError(code, message, data)
