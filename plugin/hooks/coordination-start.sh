@@ -184,11 +184,20 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
             ;;
     esac
     # A resumed, compacted or cleared conversation lost the coordination
-    # digest it saw; clearing the marker makes the next prompt hook print
-    # the current one afresh.
+    # digest it saw. The .reprint flag asks the next prompt hook to print
+    # the current one again unless something showed it since; it names the
+    # .seen marker found here. .seen itself stays: the Stop hook, wait-mail
+    # and the shim's ring retry read it, and without it a ring for mail
+    # already shown would wake the session on later plain mail.
     case "$SRC" in
         resume|compact|clear)
-            [ -n "$KEY" ] && rm -f "$DIGEST_DIR/$KEY.seen" 2>/dev/null
+            if [ -n "$KEY" ]; then
+                SEEN_AT=$(tr -d '\r\n ' 2>/dev/null < "$DIGEST_DIR/$KEY.seen")
+                case "$SEEN_AT" in ''|*[!0123456789]*) SEEN_AT=0 ;; esac
+                printf '%s\n' "$SEEN_AT" > "$DIGEST_DIR/$KEY.reprint.$$" 2>/dev/null &&
+                    mv -f "$DIGEST_DIR/$KEY.reprint.$$" "$DIGEST_DIR/$KEY.reprint" 2>/dev/null ||
+                    rm -f "$DIGEST_DIR/$KEY.reprint.$$" 2>/dev/null
+            fi
             ;;
     esac
 fi

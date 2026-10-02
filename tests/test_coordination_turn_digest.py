@@ -498,6 +498,48 @@ def test_subagent_markers_go_with_the_digest(monkeypatch, tmp_path):
     asyncio.run(asyncio.wait_for(drive(), 5))
 
 
+def test_the_stale_sweep_takes_old_reprint_flags_but_not_this_sessions(tmp_path):
+    """SessionStart's ``.reprint`` flag outlives a session that never
+    prompts again; the sweep takes a day-old one, except this session's."""
+    from pseudolife_memory.coordination_adapter import CoordinationAdapter
+
+    async def drive():
+        directory = tmp_path / "d"
+        directory.mkdir()
+        old = time.time() - CoordinationAdapter.STALE_DIGEST_SECONDS - 60
+        for name in ("gone.reprint", "k.reprint"):
+            (directory / name).write_text("3\n")
+            os.utime(directory / name, (old, old))
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            assert not (directory / "gone.reprint").exists()
+            assert (directory / "k.reprint").exists()
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_live_sessions_reprint_flag_stays_fresh_with_its_digest(tmp_path):
+    """Another shim's sweep spares only its own files, so a session idle a
+    day after a compaction would lose the flag, and with it the reprint:
+    the flag is touched with the digest, as .seen is."""
+    async def drive():
+        directory = tmp_path / "d"
+        directory.mkdir()
+        flag = directory / "k.reprint"
+        flag.write_text("3\n")
+        daemon = _daemon_with([{"count": 1, "preview": _preview(1)}])
+        client, instance = adapter(daemon, digest_path=directory / "k.txt")
+        async with client, instance:
+            old = time.time() - 2 * 86400
+            os.utime(flag, (old, old))
+            instance._digest_written_at = -1e9     # the hourly rewrite is due
+            await instance._heartbeat()
+            assert flag.stat().st_mtime > old + 86400
+
+    asyncio.run(asyncio.wait_for(drive(), 5))
+
+
 def test_codex_tool_result_carries_the_digest_exactly_once(monkeypatch):
     """The registry's hint is consumed once per tool call: the failure text
     for a missing adapter must not be fetched through the delivering path."""
@@ -787,21 +829,58 @@ def test_prompt_hook_ignores_a_malformed_digest_and_never_fails(shell, tmp_path)
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-@pytest.mark.parametrize("source,kept", [("compact", False), ("resume", False), ("clear", False),
-                                         ("startup", True)])
-def test_session_start_on_resume_or_compact_forces_a_fresh_digest(shell, source, kept, tmp_path):
+@pytest.mark.parametrize("source,reprinted", [("compact", True), ("resume", True), ("clear", True),
+                                              ("startup", False)])
+def test_session_start_reprints_the_digest_and_leaves_the_markers_alone(
+        shell, source, reprinted, tmp_path):
+    """A resumed, compacted or cleared conversation lost the digest it saw,
+    so the next prompt prints it again. SessionStart asks for that with a
+    ``.reprint`` flag and leaves ``.seen`` and ``.ring`` as they are: with
+    ``.seen`` deleted, a ring for mail already seen read as unseen and later
+    plain mail woke the idle session (#522 review), and deleting the ring
+    instead raced the shim's own ring writes (#534 review)."""
     env, key = _digest_env(tmp_path)
     env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"
     directory = _write_digest(tmp_path, key, 3, BODY)
     seen = directory / f"{key}.seen"
-    seen.write_text("3")
-    payload = json.dumps({"session_id": "fixture-session", "source": source})
-    if shell == "bash":
-        bash_run(ROOT / "plugin/hooks/coordination-start.sh", input=payload, env=env)
-    else:
-        pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1", "-Event", "CoordinationStart",
-                 input=payload, env=env)
-    assert seen.exists() is kept
+    seen.write_text("3\n")
+    ring = directory / f"{key}.ring"
+    ring.write_text("3\nrung urgent\n")
+    _run_start_hook(shell, env, source)
+    assert seen.read_text() == "3\n"
+    assert ring.read_text() == "3\nrung urgent\n"
+    assert _run_prompt_hook(shell, env).rstrip("\n") == (BODY if reprinted else "")
+    assert seen.read_text().strip() == "3"
+    assert not (directory / f"{key}.reprint").exists()
+    assert _run_prompt_hook(shell, env) == ""
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_a_digest_shown_after_the_restart_is_not_reprinted(shell, tmp_path):
+    """The flag names the marker SessionStart found. A wake or a hint that
+    showed the digest after the restart moved the marker past it, so the
+    next prompt does not print that mail a second time."""
+    env, key = _digest_env(tmp_path)
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = "http://127.0.0.1:9"
+    directory = _write_digest(tmp_path, key, 3, BODY)
+    (directory / f"{key}.seen").write_text("2\n")
+    _run_start_hook(shell, env, "compact")
+    (directory / f"{key}.seen").write_text("3\n")   # a wake printed watermark 3
+    assert _run_prompt_hook(shell, env) == ""
+    assert not (directory / f"{key}.reprint").exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("flag", ["", "garbage\n", "-1\n"])
+def test_a_flag_that_names_no_marker_still_reprints(shell, flag, tmp_path):
+    """A flag cut short or garbled still asks for the reprint, in both
+    hook runtimes alike."""
+    env, key = _digest_env(tmp_path)
+    directory = _write_digest(tmp_path, key, 3, BODY)
+    (directory / f"{key}.seen").write_text("3\n")
+    (directory / f"{key}.reprint").write_text(flag)
+    assert _run_prompt_hook(shell, env).rstrip("\n") == BODY
+    assert not (directory / f"{key}.reprint").exists()
 
 
 # --- Claude Code: the digest key survives /clear and in-session /resume -----
@@ -1490,4 +1569,5 @@ def test_start_hook_honours_an_explicit_client_opt_out(shell, value, checkin_dae
     assert _run_start_hook(shell, env, "resume") == ""
     assert checkin_daemon.requests == []
     # The digest bookkeeping still runs.
-    assert not (directory / f"{key}.seen").exists()
+    assert (directory / f"{key}.reprint").read_text().strip() == "3"
+    assert (directory / f"{key}.seen").read_text().strip() == "3"

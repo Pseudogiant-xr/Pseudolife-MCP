@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a resumed session no longer wakes on plain mail)
+- On resume, compact and clear, SessionStart deleted the session's
+  `.seen` marker so the next prompt would print the digest again. With
+  `.seen` gone, a ring marker for mail the session had already seen
+  (acknowledged or not) read as unseen. Plain mail arriving later then
+  woke the idle session through the Stop hook or `pseudolife-mcp
+  wait-mail`, which broke the rule that only a ring wakes an idle
+  session. This happened with a marker left from before the restart, a
+  staggered ring the shim wrote after it, or a refused ring the shim
+  retried after it. SessionStart (`coordination-start.sh` and its Windows
+  twin `lifecycle.ps1`) now keeps `.seen` and writes a `<key>.reprint`
+  flag naming the marker it found. The prompt hooks print the digest
+  again when that flag is set and nothing showed the digest since, then
+  drop the flag. The shim's stale-file sweep takes day-old flags. This
+  drops the old second wake for a ring the session had already seen:
+  rung mail still unacknowledged at a compaction waits for the next
+  prompt, which prints it again. `hooks.json` is unchanged, so Codex
+  users approve nothing again.
+
 ### Fixed (2026-10-03 — the memory_message approval step no longer fails Codex hook setup)
 - Codex hook setup could fail as a whole on the optional `memory_message`
   approval step it promised never to fail on. `ops/setup-codex-hooks.py`
