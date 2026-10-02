@@ -1184,28 +1184,44 @@ def test_without_a_daemon_decision_the_doorbell_holds(tmp_path):
     assert box.reasons == ["rung clears"]
 
 
-def test_a_nudge_asks_the_thread_to_park(tmp_path):
+@pytest.mark.parametrize("decision", ["rung", "nudged"])
+def test_only_a_rung_wake_reaches_the_doorbell(tmp_path, decision):
+    """Regular mail never wakes (maintainer decision 2026-10-02). Through the
+    real adapter, a ``nudged`` wake (an idle thread that never parked, from
+    a daemon before the change) rings nothing; a ``rung`` one rings with
+    the one fixed notice, which asks for no park record."""
+    from tests.test_coordination_adapter import FakeDaemon, adapter
+
     command, log = _stub(tmp_path)
     now = [1000.0]
+    reason = "anyone" if decision == "rung" else "no_park"
+    answers = iter([(0, [], None),
+                    (2, _preview_entries("m1", "m2"),
+                     {"decision": decision, "reason": reason, "ring_at": time.time()})])
+    daemon = FakeDaemon()
+
+    def hook(action, body):
+        if action not in {"attach", "heartbeat"}:
+            return None
+        count, preview, wake = next(answers)
+        return httpx.Response(200, json={"generation": 3, "lease_until": "later",
+                                         "pending_count": count, "pending_preview": preview,
+                                         "wake": wake})
+    daemon.hook = hook
 
     async def drive():
         bell = CodexDoorbell(command, clock=lambda: now[0])
-        box = Mailbox()
-        box.ring = ("nudged", "no_park")
-        bell.watch(THREAD, box)
-        now[0] += 60
-        box.set("m1", "m2")
-        await _settle(bell)
-        return box
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                bell.watch(THREAD, coordination)
+                now[0] += 60
+                await coordination._heartbeat()
+                await _settle(bell)
 
-    box = asyncio.run(drive())
-    [argv] = _argv(log)
-    assert argv[:4] == ["queue", "--thread", THREAD, "--message"]
-    assert argv[4] == doorbell_text(2, nudge=True)
-    assert argv[4].startswith(doorbell_text(2))
-    assert "park_reason" in argv[4] and "memory_agents update" in argv[4]
-    assert re.fullmatch(r"[A-Za-z0-9 .,:\[\]_-]+", argv[4]), argv[4]
-    assert box.reasons == ["nudged no_park"]
+    asyncio.run(drive())
+    assert _argv(log) == ([_queued(2)] if decision == "rung" else [])
+    assert "park_reason" not in doorbell_text(2)
 
 
 def test_the_decision_is_asked_only_when_the_doorbell_would_ring(tmp_path):

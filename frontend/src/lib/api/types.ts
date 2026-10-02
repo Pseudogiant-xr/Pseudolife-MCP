@@ -159,6 +159,13 @@ export interface DreamRunResult {
   extractor?: string;
   skipped?: string;
   error?: string;
+  /** The cursor was held: nothing consolidated, the next sweep retries. */
+  extractor_failed?: boolean;
+  /** "extract" (the extractor) or "write" (the database). */
+  hold_phase?: string;
+  extractor_error?: { reason?: string; error?: string };
+  /** Memories the per-memory retry set aside. */
+  quarantined?: number;
 }
 
 // ---- coordination board: GET /api/agents?view=coordination&limit=50 ----

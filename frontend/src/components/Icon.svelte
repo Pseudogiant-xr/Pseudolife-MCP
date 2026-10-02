@@ -17,7 +17,20 @@
     | "external"
     | "more"
     | "close"
-    | "park";
+    | "park"
+    | "search"
+    | "plus"
+    | "chevron-right"
+    | "chevron-down"
+    | "history"
+    | "trash"
+    | "expand"
+    | "play"
+    | "pause"
+    | "check"
+    | "arrow-right"
+    | "warning"
+    | "edit";
 
   let { name, size = 16 }: { name: Name; size?: number } = $props();
 </script>
@@ -77,5 +90,36 @@
   {:else if name === "park"}
     <rect x="3" y="2" width="10" height="12" rx="2" stroke="currentColor" stroke-width="1.5" />
     <path d="M6 6h4M6 9h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+  {:else if name === "search"}
+    <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" />
+    <path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+  {:else if name === "plus"}
+    <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+  {:else if name === "chevron-right"}
+    <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "chevron-down"}
+    <path d="M3.5 6 8 10.5 12.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "history"}
+    <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M8 5v3.2l2.2 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+  {:else if name === "trash"}
+    <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "expand"}
+    <path d="M3 6.5V3h3.5M13 6.5V3H9.5M3 9.5V13h3.5M13 9.5V13H9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "play"}
+    <path d="M5 3.5v9l7.5-4.5z" fill="currentColor" />
+  {:else if name === "pause"}
+    <rect x="4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" />
+    <rect x="9.4" y="3.5" width="2.6" height="9" rx="0.8" fill="currentColor" />
+  {:else if name === "check"}
+    <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "arrow-right"}
+    <path d="M2.5 8h10M9 4.5 12.5 8 9 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+  {:else if name === "warning"}
+    <path d="M8 2.5 14 13H2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+    <path d="M8 6.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    <circle cx="8" cy="11.2" r="0.8" fill="currentColor" />
+  {:else if name === "edit"}
+    <path d="M10.5 2.5l3 3L6 13H3v-3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
   {/if}
 </svg>

@@ -45,6 +45,11 @@ modes:
                  --token-file, the token file; verifies the daemon accepts
                  them first; all-or-nothing with backups (--dry-run shows
                  the plan; --help for options)
+  expose         on the daemon host: put the daemon on the tailnet with
+                 Tailscale Serve (`expose tailscale`), refusing a daemon
+                 without a token and never replacing another serve;
+                 `expose off` removes only that forward, `expose status`
+                 prints the client URL
   update         update the daemon and the client side from a release, with
                  no checkout: pull the pinned GHCR image, back the bank up,
                  tag a rollback, recreate only the daemon, wait for health,
@@ -58,9 +63,10 @@ modes:
   import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
-  wait-mail      block until new addressed agent mail, print it and exit
-                 (arm as a background command to wake an idle session;
-                 exit 0 mail, 3 timeout, 2 setup; --help for options)
+  wait-mail      block until the daemon rings this session for agent mail
+                 (plain mail never wakes), print the mail and exit (arm as a
+                 background command to wake an idle session; exit 0 ring,
+                 3 timeout, 2 setup; --help for options)
   lease          hold a named lease around a command: `lease run NAME --
                  COMMAND...` takes an OS file lock the agent board mirrors
                  (FIFO queue, holder, expected end); `lease hold NAME
@@ -135,6 +141,9 @@ def main() -> None:
     elif mode == "connect":
         from pseudolife_memory.connect_cli import main as connect_main
         sys.exit(connect_main(sys.argv[2:]))
+    elif mode == "expose":
+        from pseudolife_memory.expose_cli import main as expose_main
+        sys.exit(expose_main(sys.argv[2:]))
     elif mode == "tunnel":
         from pseudolife_memory.tunnel_cli import main as tunnel_main
         sys.exit(tunnel_main(sys.argv[2:]))

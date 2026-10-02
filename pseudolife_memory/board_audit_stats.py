@@ -30,9 +30,12 @@ import math
 REPORT_SHAPE = 1
 # Every wake decision the daemon can make at send (v49), in the order the
 # report lists them; a send from before v49 has none and reads ``unknown``.
+# ``nudged`` (an idle session that never parked) is no longer decided since
+# 2026-10-02, when regular mail stopped waking anyone; it stays listed so a
+# window reaching back before then still reports those sends and rings.
 WAKE_DECISIONS = ("rung", "nudged", "hinted", "withheld", "no_path", "capped", "not_needed",
                   "unknown")
-# The decisions that ring a shim, and so have a row in ``coordination_wakes``.
+# The decisions that rang a shim, and so have a row in ``coordination_wakes``.
 RING_DECISIONS = ("rung", "nudged")
 # How soon after a ring the recipient must act on the board for the ring to
 # count as precise: the Stop hook fires under a second after the marker, and

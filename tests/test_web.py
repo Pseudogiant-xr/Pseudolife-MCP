@@ -435,16 +435,16 @@ def test_fixture_health_carries_demo_flag_real_service_does_not(svc):
 
 
 def test_topbar_banner_keyed_on_fixture_flag():
-    """Source-level pin (no JS harness in this repo — see
-    test_console_static_js.py): the topbar must render the demo-data banner
-    from the ``fixtures`` health flag, or the backend flag is decoration."""
+    """Source-level pin on the Console's topbar (frontend/src): it must render
+    the demo-data banner from the ``fixtures`` health flag, or the backend
+    flag is decoration."""
     from pathlib import Path
 
-    app_js = (Path(__file__).resolve().parent.parent
-              / "pseudolife_memory" / "web" / "static" / "js" / "app.js")
-    src = app_js.read_text(encoding="utf-8")
-    assert "h.fixtures" in src, "topbar no longer reads the fixtures health flag"
-    assert "DEMO DATA" in src, "topbar demo-data banner text is gone"
+    topbar = (Path(__file__).resolve().parent.parent
+              / "frontend" / "src" / "components" / "Topbar.svelte")
+    src = topbar.read_text(encoding="utf-8")
+    assert "health.data?.fixtures" in src, "topbar no longer reads the fixtures health flag"
+    assert ">Demo data<" in src and "not a real bank" in src, "topbar demo-data banner text is gone"
 
 
 def test_overview_carries_loop_health(svc):

@@ -6,6 +6,155 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-02 — Codex hook setup can approve the mailbox tool)
+- A Codex thread woken by board mail could stall on an approval prompt,
+  because hook setup left the `memory_message` tool unapproved and only
+  printed how to approve it. Now the consent that approves PseudoLife's hooks
+  covers that tool too. The `--trust ask` prompt names it, and a yes, or
+  `--trust yes`, sets `approval_mode = "approve"` for `memory_message` on the
+  `pseudolife-memory` server in Codex's user configuration, through Codex's
+  config writer and after a backup. `--trust no` leaves it alone.
+- Setup never overrides a value you chose (`"prompt"`, say), and an existing
+  `"approve"` needs no change. The JSON report gains `mailbox_approval`
+  (`set`, `already`, `kept-explicit`, `declined` or `unavailable`, with
+  `mailbox_approval_detail` for a kept value or the reason it could not be
+  set). If the approval cannot be set, hook setup still completes. The
+  end-of-setup notice gives the remaining choice only when the approval is
+  not set.
+- The trade-off: Codex approves per tool, so this also lets the thread send
+  board mail without asking. Board mail is rate-limited, audited and
+  expires, cannot grant permissions, and reaches only allowed principals.
+  Nothing else is approved: no file writes, commands or other tools. The
+  plugin's `hooks.json` is unchanged, so no hook needs approving again.
+
+### Changed (2026-10-02 — plain mail never wakes an unparked session)
+- Plain mail to an idle session that has not parked no longer wakes it,
+  through the Claude Code Stop hook, the Codex doorbell or
+  `pseudolife-mcp wait-mail`. Before, such a session was rung at most once
+  an hour (`nudged`) and asked to record a park, and `wait-mail` woke on
+  any new mail at all. Now a parked session rings only for mail that
+  plausibly clears its need: the sender is its clearer (or just released
+  the lease it waits on), it accepts `anyone`, the message's `clears`
+  names the need, or `urgent`. An idle session that has not parked rings
+  only for `urgent` mail (reason `urgent`), which spends the sender's
+  urgent allowance (6 an hour) like any urgent ring. Every ring keeps the
+  existing per-recipient, nightly and stagger caps. Plain mail or `clears`
+  to an unparked session answers `not_needed` with reason `no_park` and
+  waits for its next turn; an active session is `hinted`, urgent or not
+  (maintainer decisions 2026-10-02).
+- `pseudolife-mcp wait-mail` follows the same rule: it returns only when
+  the daemon rings the session. It reads the `<key>.ring` marker the Stop
+  hook reads, under the same rule (a `rung` ring past `.seen`, with unshown
+  mail in the digest), and plain mail keeps it waiting; that mail is still
+  pending at the next turn. Exit codes are unchanged (0 now means a ring),
+  and its `wait` ledger line gains the ring as a sixth column. A session
+  that relies on it is woken only when parked with a need the mail clears,
+  or by `urgent` mail.
+- A `nudged` ring decided before the update is never served to an adapter
+  and its mail is never delivered through a live channel; the Console's
+  coordination timeline and `board-audit stats` still show it. The shim
+  ignores a `nudged` wake from an older daemon, and the Stop hook fires
+  only on a `rung` marker. The Codex doorbell and the Stop hook no longer
+  append a park request.
+- `coordination.wake.nudge_interval_seconds` is retired. A config.yaml
+  that still sets it loads as before and the key does nothing; `/health`
+  and `pseudolife-mcp doctor` no longer report it. The change is under
+  `plugin/` and in the shim, so a deploy needs the client step.
+
+### Fixed (2026-10-02 — subagents and the parent's mail hint)
+- A Claude Code subagent's memory tool call no longer spends its parent's
+  "you have mail" notice. The subagent runs inside the parent's shim, so the
+  tool-result hint could ride the subagent's result and advance the shared
+  `.seen` marker, after which the parent's prompt and Stop hooks stayed
+  quiet about mail the parent never saw (the mail itself stayed unacked).
+  The plugin's SubagentStart/SubagentStop hook now keeps a
+  `<key>.sub-<agent_id>` marker beside the digest while the subagent runs,
+  and the shim holds the hint and the reminder while one is live (markers
+  older than `HOOK_CHILD_TTL` are ignored, swept with stale digests, and
+  removed with the session's digest). Needs `ops/update.ps1 -All`.
+- The coordination check-in served at session start no longer asks a parent
+  to name its subagents by hand, which listed each one twice now that the
+  v50 hooks list them, and no longer says every subagent shares its parent's
+  address (a Codex subagent has its own). Rescored with
+  `evals/coordination_checkin_bench.py` against the text it replaces
+  (artifact `coordination-checkin-bench-checkin-rules-20261002-subagents.json`).
+
+### Changed (2026-10-02 — bounded lease-list reads)
+- Board lease listings fetch the displayed FIFO queues and exact queue counts
+  in two reads for the whole lease page, avoiding two reads per returned lease.
+  Queue display limits, resource-first ordering, settlement and stale holders
+  retain their existing behavior.
+
+### Changed (2026-10-02 — quarantine retyping reads)
+- The second pass over quarantined untyped graph links loads ordered entry
+  text without transferring or decoding embeddings, and reads the relation
+  registry once per pass. Shared-note selection and proposal settlement are
+  unchanged.
+
+### Added (2026-10-02 — `pseudolife-mcp expose` and the `/health` bank fingerprint)
+- `pseudolife-mcp expose tailscale` puts the daemon on the tailnet with one
+  Tailscale Serve TCP forward (`tailscale serve --bg --tcp=<port>
+  tcp://127.0.0.1:<port>`). It refuses a daemon whose `/health` does not
+  report `"auth": true` (a redirect or a non-JSON answer on the port is not
+  the daemon), a Tailscale that is not installed or not running, and a
+  tailnet port that already serves anything else or has Funnel (public
+  internet) on; it shows the command and client URL and asks first
+  (`--yes` skips the question, no terminal without it exits 2). A
+  permission refusal names the fix for the OS (Linux:
+  `sudo tailscale set --operator=$USER`). A serve the status does not show
+  afterwards is removed again (exit 5), and a status that cannot be read
+  back is reported for checking rather than undone (exit 5); the probe of `<url>/health` through
+  the tailnet is advisory and never rolls back. `expose off` removes only a
+  forward to `127.0.0.1:<port>`, and `expose status` prints the client URL.
+  Standard library only, so it runs from a shim runtime. Guide:
+  `docs/guide/remote-bank.md`.
+- `/health` reports `bank`: the first 16 hex characters of the SHA-256 of
+  the coordination bank id, so two daemons' banks can be told apart. It is
+  `null` until storage has started and the id exists; `/health` never
+  starts storage for it, reads the meta row only after its database ping
+  succeeded (so a stalled database costs no second connect timeout), on
+  its own short-lived connection (never the service lock), at most once a
+  minute while it is absent, and caches it once found. The cache is dropped
+  when a reconnect finds that another writer held the bank.
+
+### Changed (2026-10-02 — Cortex Console v3 replaces the classic console)
+- `/ui/` now serves the rebuilt console, with every view native: Observatory,
+  Cortex, World, Lessons, Stream, Recall, Graph, Review, Insight, Board,
+  Episodes and Settings. The classic vanilla-JS console
+  (`pseudolife_memory/web/static/js`, `css`, `fonts`) is removed and
+  `/ui/next/` is gone; old `/ui/#/...` bookmarks land on the matching view
+  (`#/console` opens Settings, `#/atlas` the Graph, `#/coordination` the
+  Board). Nothing the classic console could do was dropped: every read,
+  every write and its confirmation step was ported, and the graph review
+  queue, formerly a drawer inside the Graph view, is now its own Review view.
+- A review decision answered with HTTP 200 `{"error": ...}` is now reported
+  as a refusal; the classic console counted it as done.
+- `GET /api/config` adds `saved` to a restart-required knob whose value in
+  `config.yaml` differs from the running one, and Settings measures edits
+  against it: a restart knob saved by mistake can be put back from the
+  console (typing the old value used to look like no change), and the row
+  says which value the next start will use.
+- The content column is centred on wide windows. On phones, touch screens
+  get ~44 px controls and 16 px form text (no zoom on focus), the topbar
+  drops the squeezed view-jump field, and the More tab marks a view that has
+  no tab of its own.
+- The build (Vite base `/ui/`) is committed under
+  `pseudolife_memory/web/static/`. The vendored 3D graph bundle moved to
+  `frontend/public/vendor/` and is copied into the build unchanged.
+- CI gains a `frontend` job: type check, unit tests (vitest, which replace
+  the node-based tests over the classic sources), and a rebuild that must
+  match the committed output. `.gitattributes` checks the console's sources
+  out with LF on every OS so a Windows build reproduces the CI one.
+
+### Fixed (2026-10-02 — bench records keep words that contain the user name)
+- The memory-policy and coordination check-in benches redact the OS user name
+  from each saved record only as a whole word. A short name such as `dev`
+  used to be replaced inside ordinary words, so `device` was saved as
+  `<redacted>ice`. A name next to punctuation, curly quotes or an escaped
+  control character is still redacted, and a non-ASCII user name or home
+  path, which was never matched before, is now removed too. Both match in
+  any case, as a Windows home does (a lower-cased home path is the same home).
+
 ### Changed (2026-10-01 — Cortex Console v3 brand)
 - The console at `/ui/next/` uses the Pseudolife-MCP logo for the Observatory
   hero and the sidebar mark, and takes its two accents from it: the lavender

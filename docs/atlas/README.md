@@ -3,7 +3,7 @@
 A hand-curated architecture map of Pseudolife-MCP: every significant
 component, the typed edges between them, and the six end-to-end flows
 (store, search/recall, dream, briefing, console, deploy). It complements —
-and is distinct from — the Cortex Console's Atlas view, which visualizes the
+and is distinct from — the Cortex Console's Graph view, which visualizes the
 *memory bank's* knowledge graph; this atlas describes the *codebase*.
 
 - **`atlas.json`** — the canonical data: `meta`, `groups`, `nodes`, `edges`,

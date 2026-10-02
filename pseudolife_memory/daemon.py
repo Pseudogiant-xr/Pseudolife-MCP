@@ -172,6 +172,27 @@ def _dream_stall(svc) -> dict | None:
         return None
 
 
+def _bank_fingerprint(svc) -> str | None:
+    """The first 16 hex characters of the SHA-256 of the coordination bank
+    id, or ``None`` while it is unknown: before storage has started (this
+    never starts it), on file-mode storage, or before the board has created
+    the id. Called only after the storage ping succeeded. Not secret; it
+    tells two daemons' banks apart, which ``version`` and ``schema``
+    cannot. Never raises."""
+    read = getattr(getattr(svc, "_storage", None), "cached_bank_id", None)
+    if read is None:
+        return None
+    try:
+        bank_id = read()
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
+    if not isinstance(bank_id, str) or not bank_id:
+        return None
+    import hashlib
+
+    return hashlib.sha256(bank_id.encode("utf-8")).hexdigest()[:16]
+
+
 def _warn_near_memory_limit(memory: dict) -> None:
     global _last_memory_warning
     now = _monotonic()
@@ -210,6 +231,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         "schema": SCHEMA_META_VERSION,
         "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
         "auth": token_present,
+        # Which bank this is (see _bank_fingerprint); null means unknown.
+        # Filled in after the storage ping below succeeds.
+        "bank": None,
         # Durable-save failures since start (see service.PersistenceError);
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
@@ -351,6 +375,9 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         try:
             storage.ping()
             payload["db"] = "ok"
+            # Only after a successful ping: a stalled database has already
+            # cost this probe one connect timeout, never a second.
+            payload["bank"] = _bank_fingerprint(svc)
         except Exception as exc:  # noqa: BLE001 — surface, don't raise
             payload["status"] = "degraded"
             payload["db"] = f"error: {exc}"

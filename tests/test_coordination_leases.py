@@ -16,7 +16,7 @@ import pytest
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 from tests.test_repository_claims import repositories  # noqa: F401
 from pseudolife_memory.storage.coordination import (
-    COORDINATION_SCHEMA_SQL, LEASE_GRANT_WINDOW, LEASE_QUEUE_MAX, CoordinationError,
+    COORDINATION_SCHEMA_SQL, LEASE_GRANT_WINDOW, LEASE_LIST_QUEUE, LEASE_QUEUE_MAX, CoordinationError,
     CoordinationStore, audit_events, verify_audit_chain,
 )
 
@@ -273,6 +273,74 @@ def test_list_settles_an_expired_hold_before_reporting(store):
     [lease] = store.list_leases()["leases"]
     assert lease["holder"]["agent_id"] == b["agent_id"] and lease["queued"] == 0
     assert [e["event"] for e in events(store)][-2:] == ["lease_expire", "lease_grant"]
+
+
+def test_list_queue_pages_preserve_exact_payload_and_bounds(store):
+    holder = store.register("alice", label="holder")
+    # Labels and enqueue times deliberately tie: ticket order is authoritative.
+    waiters = sorted([store.register("alice", label="waiter")
+                      for _ in range(LEASE_LIST_QUEUE + 3)],
+                     key=lambda agent: agent["agent_id"], reverse=True)
+    names = ["claim:file:example", "gpu", "full-suite", "coordinator:example"]
+    held = {name: store.acquire_lease(*creds(holder), name=name, ttl=120,
+                                     expect=10, purpose=name) for name in names}
+    queued = {"full-suite": waiters, "gpu": waiters[:1],
+              "coordinator:example": [], "claim:file:example": waiters[:2]}
+    for name, agents in queued.items():
+        for index, agent in enumerate(agents):
+            store.acquire_lease(*creds(agent), name=name, ttl=120, purpose=f"turn {index}")
+    # A left join must keep both a departed waiter and a missing holder.
+    store.storage.conn.execute("DELETE FROM coordination_agents WHERE agent_id=%s",
+                               (waiters[0]["agent_id"],))
+    store.storage.conn.execute("DELETE FROM coordination_agents WHERE agent_id=%s",
+                               (holder["agent_id"],))
+    store.test_time[0] = 1121.0  # read-only listing keeps the expired hold
+
+    def expected(name):
+        owner = dict(held[name]["holder"], label="")
+        return {"name": name, "holder": owner, "fence": held[name]["fence"],
+                "expires_at": 1120.0, "expected_end": 1010.0, "stale": True,
+                "queued": len(queued[name]),
+                "queue": [{"agent_id": agent["agent_id"],
+                           "label": "" if index == 0 else "waiter",
+                           "enqueued_at": 1000.0, "purpose": f"turn {index}"}
+                          for index, agent in enumerate(queued[name][:LEASE_LIST_QUEUE])]}
+
+    before = events(store)
+    assert store.list_leases(limit=2, settle=False) == {
+        "leases": [expected("coordinator:example"), expected("full-suite")], "truncated": True}
+    assert store.list_leases(settle=False) == {
+        "leases": [expected(name) for name in
+                   ("coordinator:example", "full-suite", "gpu", "claim:file:example")],
+        "truncated": False}
+    assert store.list_leases(name="gpu", settle=False) == {
+        "leases": [expected("gpu")], "truncated": False}
+    assert store.list_leases(name="missing", settle=False) == {"leases": [], "truncated": False}
+    assert events(store) == before
+
+
+@pytest.mark.parametrize("lease_count", [1, 3, 50])
+def test_list_queue_reads_do_not_grow_with_the_lease_page(store, monkeypatch, lease_count):
+    holder, waiter = store.register("alice"), store.register("alice")
+    for index in range(lease_count):
+        name = f"resource:{index:02d}"
+        store.acquire_lease(*creds(holder), name=name, ttl=120)
+        store.acquire_lease(*creds(waiter), name=name, ttl=120)
+    reads = []
+    for method in ("_one", "_all"):
+        original = getattr(store, method)
+
+        def counted(*args, _original=original, **kwargs):
+            reads.append(1)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(store, method, counted)
+    result = store.list_leases(settle=False)
+    assert len(result["leases"]) == lease_count
+    assert all(lease["queued"] == 1 and lease["queue"][0]["agent_id"] == waiter["agent_id"]
+               for lease in result["leases"])
+    # One lease page plus two batched queue reads, independent of page size.
+    assert len(reads) <= 3
 
 
 def test_list_agents_carries_the_leases(store):

@@ -92,6 +92,18 @@ AGENT=${AGENT%$'\r'}
 case "$AGENT" in ''|*[!0123456789abcdef]*) exit 0 ;; esac
 [ "${#AGENT}" -eq 32 ] || exit 0
 
+# <key>.sub-<agent_id>, from start to stop: while one is live the shim holds
+# its tool-result mail hint, which a subagent's call would otherwise spend
+# for the parent (the parent's prompt and Stop hooks then stay quiet about
+# mail it never saw). Before the request, so a down daemon still leaves it;
+# never written through a link.
+MARKER="$DIGEST_DIR/$KEY.sub-$CHILD"
+if [ "$EVENT" = start ]; then
+    [ -L "$MARKER" ] || : > "$MARKER"
+else
+    rm -f "$MARKER"
+fi
+
 # A bearer file the hook may read: a regular, owner-only, single-link file
 # of bounded size under no symlinked directory. The same check as
 # stop-wake.sh and coordination-start.sh.
