@@ -104,25 +104,28 @@ if ($target -eq 'local') {
     $code = $LASTEXITCODE
 } else {
     function Quote([string]$s) { "'" + $s.Replace("'", "'\''") + "'" }
-    $lines = @('set -euo pipefail')
-    if ($env:PSEUDOLIFE_MCP_TOKEN) { $lines += 'export PSEUDOLIFE_MCP_TOKEN=' + (Quote $env:PSEUDOLIFE_MCP_TOKEN) }
-    if ($cfg['daemon_url']) { $lines += 'export PSEUDOLIFE_MCP_DAEMON_URL=' + (Quote $cfg['daemon_url']) }
-    $lines += @(
-        'repo="' + $cfg['repo'].Replace('~', '$HOME') + '"',
-        'sha=' + (Quote $sha), 'name=' + (Quote $name), 'memory=' + (Quote $cfg['memory']),
-        'envfile="' + $(if ($cfg['env']) { $cfg['env'].Replace('~', '$HOME') } else { '' }) + '"',
-        'git -C "$repo" fetch --quiet origin "$sha"',
-        'git -C "$repo" update-ref "refs/heads/suite/$name" "$sha"',
-        'script="$(mktemp)"; trap ''rm -f -- "$script"'' EXIT',
-        'git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"',
-        'if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi',
-        'export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"',
-        'export PATH="$PATH:$HOME/.local/bin"',
-        # exec: PowerShell ends piped stdin with CRLF, and bash must never
-        # read on past the run (a stray "\r" line would replace pytest's code).
-        'trap - EXIT',
-        'exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"'
-    )
+    # One Add per line: a list cannot nest the way `+=` of an array literal
+    # did here (the whole block arrived as one line, 2026-10-02).
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('set -euo pipefail')
+    if ($env:PSEUDOLIFE_MCP_TOKEN) { $lines.Add('export PSEUDOLIFE_MCP_TOKEN=' + (Quote $env:PSEUDOLIFE_MCP_TOKEN)) }
+    if ($cfg['daemon_url']) { $lines.Add('export PSEUDOLIFE_MCP_DAEMON_URL=' + (Quote $cfg['daemon_url'])) }
+    $lines.Add('repo="' + $cfg['repo'].Replace('~', '$HOME') + '"')
+    $lines.Add('sha=' + (Quote $sha))
+    $lines.Add('name=' + (Quote $name))
+    $lines.Add('memory=' + (Quote $cfg['memory']))
+    $lines.Add('envfile="' + $(if ($cfg['env']) { $cfg['env'].Replace('~', '$HOME') } else { '' }) + '"')
+    $lines.Add('git -C "$repo" fetch --quiet origin "$sha"')
+    $lines.Add('git -C "$repo" update-ref "refs/heads/suite/$name" "$sha"')
+    $lines.Add('script="$(mktemp)"')
+    $lines.Add('git -C "$repo" show "$sha:ops/wsl-suite.sh" > "$script"')
+    $lines.Add('if [ -n "$envfile" ] && [ -f "$envfile" ]; then set -a; . "$envfile"; set +a; fi')
+    $lines.Add('export PSEUDOLIFE_SUITE_COMMIT="$sha" PSEUDOLIFE_SUITE_GIT_COMMON="$repo/.git" PSEUDOLIFE_SUITE_NAME="$name"')
+    $lines.Add('export PATH="$PATH:$HOME/.local/bin"')
+    # exec: PowerShell ends piped stdin with CRLF, and bash must never read
+    # on past the run (a stray "\r" line would replace pytest's exit code).
+    # The inner shell deletes the script copy and keeps pytest's code.
+    $lines.Add('exec sudo --preserve-env systemd-run --quiet --scope -p MemoryMax="$memory" --uid="$(id -u)" --gid="$(id -g)" -- env HOME="$HOME" PATH="$PATH" bash -c ''bash "$1" "${@:2}"; code=$?; rm -f -- "$1"; exit $code'' _ "$script" "$@"')
     $body = ($lines -join "`n") + "`n"
     $quotedArgs = ($args | ForEach-Object { Quote ([string]$_) }) -join ' '
     $body | & ssh -o BatchMode=yes $remote "bash -s -- $quotedArgs" 2>&1 | Tee-Object -FilePath $log
