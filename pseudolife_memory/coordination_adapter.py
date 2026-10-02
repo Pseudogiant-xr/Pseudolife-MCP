@@ -204,6 +204,8 @@ class CoordinationAdapter:
         # that mail is pending and unshown.
         self._ring_timer = None
         self._ring_offer = None
+        self._attention_pending = False
+        self._last_attention = None
         self._last_ring = None
         self._ring_unwritten = None
         self._agent_written = None
@@ -328,6 +330,18 @@ class CoordinationAdapter:
         if not isinstance(wake, dict):
             return
         decision, reason, ring_at = wake.get("decision"), wake.get("reason"), wake.get("ring_at")
+        if (decision == "attention" and "codex" in self._registration["capabilities"]
+                and isinstance(reason, str) and type(ring_at) in (int, float)
+                and math.isfinite(ring_at)):
+            attention = (reason, float(ring_at))
+            self._attention_pending = True
+            self._ring_offer = None
+            if attention != self._last_attention:
+                self._last_attention = attention
+                self._ledger("attention", self._digest_watermark, 0,
+                             "no_steer_path pending recipient_state_unknown")
+            self._refresh_digest()
+            return
         if (decision != "rung" or not isinstance(reason, str)
                 or isinstance(ring_at, bool) or not isinstance(ring_at, (int, float))
                 or not math.isfinite(ring_at)):
@@ -422,6 +436,8 @@ class CoordinationAdapter:
         preview = result.get("pending_preview")
         self._pending_preview = (preview if isinstance(preview, list)
                                  and all(_preview_entry(entry) for entry in preview) else [])
+        if self._pending_count == 0:
+            self._attention_pending = False
         self._refresh_digest()
         if not self._pending_count:
             self._ring_offer = None   # nothing left to ring for
@@ -454,6 +470,10 @@ class CoordinationAdapter:
         if self._closing:
             return  # the file is being removed; nothing may put it back
         text = render_digest(self._pending_count or 0, self._pending_preview)
+        if text and self._attention_pending:
+            from .codex_doorbell import attention_text
+            text += ("\nCoordination attention: no_steer_path; mail pending for hint/pull, "
+                     "recipient turn state unknown.\n" + attention_text(self._pending_count))
         if text == self._digest_text and self._digest_written and not self._digest_due():
             return
         if text != self._digest_text:

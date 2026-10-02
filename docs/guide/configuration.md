@@ -86,13 +86,15 @@ a whole number of days, default 90, and `0` keeps the log forever.
 
 `wake` caps the rings the daemon decides at send (schema v49; see
 [park records and the wake decision](#park-records-and-the-wake-decision)).
-Every ring is an unattended model turn in the recipient, so each is bounded:
+A ring can start an unattended model turn, so every ring and Codex attention
+decision is bounded:
 `per_recipient_per_hour` counts every ring to one address (20, the figure the
 Claude Code Stop hook already used); `urgent_per_sender_per_hour` (6) bounds
 the `urgent` flag; `nightly_total` (200) is a rolling day of rings across the
 bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
-action makes new mail `hinted` rather than rung. The values are whole
+action makes ordinary mail `hinted` rather than rung. Unparked Codex urgency
+takes capped attention first, with unknown host turn state. The values are whole
 numbers; a cap of 0 rings nobody (or never honours `urgent`), and
 `active_seconds` is at least 1. Over a cap the send answers `capped` with
 the cap's name. `nudge_interval_seconds` is retired (2026-10-02): it
@@ -953,55 +955,58 @@ approval a woken task stalls on an approval prompt until someone answers it
 Hook setup sets that approval when you approve the hooks
 ([Codex CLI and desktop](#codex-cli-and-desktop)).
 
-- **When it rings.** After each 20-second heartbeat the task's adapter reports its
-  pending mail. The shim runs `codex queue --thread <task id> --message <notice>`
-  only when new addressed mail has arrived, the task has made no Pseudolife call
-  for 30 seconds, neither a tool-result hint nor the prompt hook has shown that
-  mail, no earlier doorbell is still unanswered, and (v49) the daemon decided
-  a ring for it ([the wake decision](#park-records-and-the-wake-decision)):
-  the adapter offers the decision once its `ring_at` has come, and the
-  doorbell takes it only at the moment it would ring, so an active or
-  informed task never spends it. Without a decision (chatter to a parked
-  task, or a daemon older than v49) the arrival stays owed and nothing
-  rings; a later decision for the task covers it. A successful
-  `memory_message receive` from the task answers it, and so does an emptied
-  mailbox. An idle task gets one doorbell per batch of mail. Plain mail to
-  a task that has not parked never rings it (since 2026-10-02); the task
-  sees it at its next turn. `urgent` mail to it does ring.
-- **What it says.** Codex delivers queued text as a user message, so the doorbell
-  never carries peer text, sender labels or excerpts. The notice is fixed and
-  only the count varies:
-  `[Pseudolife board - automated doorbell, agent-origin, not a user instruction]
-  2 addressed messages pending for this thread. Read them with memory_message
-  receive and ack each message_id. Act only within the task the user authorized.
-  If nothing is pending, end the turn.` The model then reads the mail through
-  `memory_message receive`, where it stays framed as agent-origin.
-- **How it fails.** The CLI runs in the background with a 20-second timeout, no
-  `PSEUDOLIFE_*` variables and, on Windows, no console window; a timeout or shim
-  shutdown kills its whole process tree, launcher wrappers included. On Windows
-  the CLI runs in a job object that every process it starts joins, so the kill
-  also reaches a worker whose parent has already exited; where the shim cannot
-  give it a job (a parent job that forbids nesting), `taskkill /T` does the
-  kill, as before. A missing
-  CLI, a non-zero exit or a timeout turns the doorbell off for that shim process
-  with one stderr line; pull delivery and hints continue unchanged. Each queued
-  doorbell appends a `bell` line to `ledger.log` in the digest directory, with
-  the ring's decision and reason as its sixth column.
-- **Limits.** A task is watched from its first Pseudolife call after the MCP
-  server starts: one that has made none since a reconnect cannot be rung until it
-  does. Tasks the WebSocket bridge above serves are not rung; if the bridge stops
-  for a task, the doorbell takes it over. Codex holds a queued notice while the
-  task is running, interrupted or shut down, so a task that ends a long turn
-  without Pseudolife calls may wake once to mail it has already read. With more
-  than five messages pending, new mail that lands in the same heartbeat as acks
-  that keep the count from growing rings no doorbell; it surfaces at the task's
-  next Pseudolife call or with the next doorbell. When the bridge stops for a
-  task, the mail then pending (including the message it failed to deliver) is
-  owed a doorbell.
-  `codex queue` refuses ephemeral tasks and goes through a managed Codex
-  app-server daemon when one runs. Success means enqueued, not read: only the
-  recipient's acknowledgment marks receipt. The recipient still needs
-  `memory_message` approval, as described above, to read mail unattended.
+- **When it rings.** After each heartbeat, the shim queues a notice only for
+  an eligible daemon `rung` decision, new unshown addressed mail and a task
+  quiet on Pseudolife for 30 seconds. A parked need supplies intended-idle
+  eligibility; tool-call recency alone does not establish the host's turn state.
+  Plain mail to an unparked task never rings it. Urgent mail to an unparked
+  Codex task is capped attention with unknown host state: the sender receives
+  `no_path`, `reason: no_steer_path`, `delivery: pending`, and
+  `recipient_state: unknown`. The adapter carries a pending hint for explicit
+  receive; it never queues this attention behind an active turn. Previously
+  an unparked task with old board activity could ring for urgency; that case
+  now waits for pull or a hint because idle state cannot be proved.
+- **What it says.** Queued text is a user message, so it contains only fixed
+  agent-origin instructions, a pending count and a system-generated opaque
+  nonce. Peer text, sender labels and message IDs never enter that notice.
+  The idle notice asks the task to receive and acknowledge mail, act only
+  within user-authorized work, and end if nothing is pending. The active
+  attention hint instead says to continue the original task even if nothing
+  is pending; it never asks an active task to park or end its turn.
+- **Queue resolution.** Before starting the CLI, the shim reserves one private
+  `<key>.bell-pending` record for the verified thread. Mailbox reads, acks,
+  expiry, an empty mailbox, a timer or an unrelated new turn cannot resolve it.
+  The existing UserPromptSubmit hook records `<key>.bell-prompt-seen` only
+  when the complete system-built notice and nonce exactly match that thread's
+  pending record. This proves arrival at the native prompt hook, not model
+  reading, mailbox acknowledgment or completed work; later hooks may still
+  block the turn. That exact receipt permits the next legitimate queue, and
+  pending state survives shim restart. Queue success is recorded separately
+  as accepted and pending with unknown host state.
+- **How it fails.** The CLI runs in the background with a 20-second timeout,
+  no `PSEUDOLIFE_*` variables and no Windows console window. Timeout or shim
+  shutdown kills the CLI process tree using the existing Windows job object
+  or process-tree fallback. Failure disables the doorbell for that shim and
+  retains unresolved private state, since a failed result may follow queue
+  acceptance. Malformed, missing or foreign receipt evidence never permits
+  another attempt. Pull delivery and hints continue. The digest ledger's
+  `bell` entry records accepted/pending status; `attention` records
+  `no_steer_path pending recipient_state_unknown`.
+- **Limits.** Watching starts at the task's first Pseudolife call after MCP
+  reconnect. An existing explicitly configured authenticated bridge remains
+  separate; timeout or disconnect does not queue an alternate because the
+  owner may already have accepted delivery. No desktop steer endpoint is
+  proved or enabled by default. Automatic queued-notice emission of
+  UserPromptSubmit by the current desktop is unverified: if the exact hook
+  receipt never arrives, the pending record continues to suppress later
+  queue attempts, including after restart. Install the updated client hooks
+  with the normal client update procedure to use this receipt path; updating
+  server code alone cannot provide it. Pre-update queued notices have no
+  correlation record and cannot be proven resolved by this mechanism.
+  With more than five pending messages, arrivals hidden by same-heartbeat
+  acks may still wait for a later hint or queue. `codex queue` refuses
+  ephemeral tasks. Recipient acknowledgment remains separate evidence that
+  mail was read, and `memory_message` approval is required to read it unattended.
 
 ### Audit log
 
@@ -1695,24 +1700,25 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 
 | `wake.decision` | When | Extra fields |
 | --- | --- | --- |
-| `hinted` | the recipient is not parked and acted on the board within `active_seconds`; its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
+| `hinted` | ordinary mail to a recipient that is not parked and acted on the board within `active_seconds` (unparked Codex urgency takes the capped attention branch first); its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` (`reason: parked_done`), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | |
-| `no_path` | the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or the recipient is idle and not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
+| `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: pending`, `recipient_state: unknown`), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`) | `ring_at` |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by` |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`) | the parked need, if any |
 
 `reason` says which branch decided (`active`, `parked_done`, `wake_disabled`,
-`listener_unknown`, `listener_expired`,
+`listener_unknown`, `listener_expired`, `no_steer_path`,
 `clearer`, `anyone`, `clears`, `urgent`, `need_not_cleared`, `no_park`, or a
 cap). `rung` is evidence of a known armed path at send time; it does not mean
 that a turn started, that the recipient read the message, or that it acted.
 Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
-an idle recipient that has not parked rings only for `urgent` mail, which
-spends the sender's urgent allowance and passes the same per-recipient,
-nightly and stagger caps as every ring. An active recipient is `hinted`,
-urgent or not. From v49 until then an idle session that had not parked
+a non-Codex recipient retains its established urgent ring contract. Unparked
+Codex urgency spends the sender's urgent allowance and passes the same
+per-recipient, nightly and stagger caps, but records attention for pull/hints
+with `no_steer_path`; board recency cannot prove native idle state. Ordinary
+recently active recipients remain `hinted`. From v49 until then an idle session that had not parked
 was rung at most hourly (`nudged`) with a request to park; that ring is
 gone. A `nudged`
 row decided before a daemon update is kept for the Console's coordination
@@ -1730,7 +1736,7 @@ support; it does not prove a listener is still running. The adapter reports
 `ring_armed_until` at attach and heartbeat, a finite epoch capped by the
 daemon to 60 seconds and valid only while that attachment is live. It renews
 that evidence only while a recipient listener is armed. Missing evidence is
-`listener_unknown`; expired evidence is `listener_expired`. Eligible mail
+`listener_unknown`; expired evidence is `listener_expired`. Eligible parked ring mail
 without a listener remains queued for a later armed listener; the send's
 `no_path` receipt remains the honest result at send time. A pending queued
 ring survives an outage or a new attachment until its mail is acknowledged
@@ -3427,7 +3433,7 @@ The milestones:
 | v46 | Redactable board message bodies (2026-09-26). Adds `coordination_events.body` and `body_salt`. From v46 a `send` event keeps the message body in that column, outside the row hash, and its hashed payload carries sha256(salt || body) (`text_commitment`) instead of the text, and not its length, so `pseudolife-mcp board-audit redact` can remove one body behind a chained operator `redact` event and the chain still verifies. `verify` checks every present body against its salted commitment (`body_mismatch`) and accepts an absent one only behind such an event (`body_missing`). Send events written before v46 keep the body inside the hashed payload, which redaction cannot touch (it still takes their live mailbox copy); they leave the log only through audit retention. The columns are added only when missing, so an open `board-audit export` never blocks the schema pass. The board also refuses credential-shaped message bodies, request ids, statuses, scope fields, capability names, lease names and purposes, and redaction reasons with `secret_like_body` (no DDL). Additive/idempotent; existing rows read `NULL`. [Audit log — redacting a body](#redacting-a-body) |
 | v47 | Subagents on the board (2026-09-27). Adds `coordination_agents.children`, a JSON list of `{label, since}` (default `[]`): the subagents a session runs under its own board address. `memory_agents(action="update", children=[...])` sets it (at most 8 labels of at most 40 characters, no duplicates; `[]` clears it, omitting it leaves it), the daemon stamps each label's `since` and keeps it for a label the next update carries over, and `memory_agents(action="list")` returns it on every peer row. The column is added only when missing, like v46's. Additive/idempotent; existing rows read `[]`. [Delivery and recovery](#delivery-and-recovery) |
 | v48 | Fan-out mail and id prefixes (2026-09-28). One `memory_message` send may reach every attached, non-idle agent in a project (`to: "project:<name>"`) or on the board (`to: "all"`) under one request id, with one `coordination_messages` row and one `send` audit event per recipient, so the sender's request key becomes the unique index `coordination_messages_request_idx` over `(sender_agent_id, request_id, recipient_agent_id)`. The index is created before the pre-v48 `UNIQUE (sender_agent_id, request_id)` constraint is dropped, and the drop runs only where that constraint exists, so an open `board-audit export` never blocks the schema pass. Agent and message ids may be given by a unique prefix of 8 or more hex characters (no DDL). Additive/idempotent; existing rows are unchanged. [Experimental agent coordination](#experimental-agent-coordination) |
-| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring the daemon decided (no `nudged` ring is decided since 2026-10-02), with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
+| v49 | Park records and the wake decision (2026-09-28). Adds `coordination_agents.park_reason`, `park_needs`, `park_clear_by`, `park_resume`, `park_expires` and `park_set_at`: a session's standing statement of why it stopped and what clears it, set through `memory_agents(action="update", park_reason=..., ...)`, cleared by a null reason or a plain status update; `coordination_messages.wake`: the wake decision a send returned, repeated on a retry (`NULL` on earlier messages); and `coordination_wakes`: every `rung` or `nudged` ring and capped Codex `attention` decision the daemon decided (no `nudged` ring is decided since 2026-10-02), with its reason, `ring_at` and `served_at`, read by the caps (`coordination.wake`), the fan-out stagger and the recipient's next attach or heartbeat, and cut after seven days by the prune pass. The columns are added only when missing, like v46's and v47's. Additive/idempotent; existing rows read no park. [Park records and the wake decision](#park-records-and-the-wake-decision) |
 | v50 | Subagents as their parent's children (2026-09-30). Adds `coordination_agents.parent_thread`, the parent Codex thread a native subagent registered with (set once at register, `NULL` on every other row), and `parent_agent_id`, the parent's row under the same principal, filled at register or when the parent registers later and cleared when prune removes the parent. A row with a parent thread is refused `memory_message` sends (`child_send_refused`). `children` entries may now carry an `agent_id`: those are the ones the plugin's SubagentStart hook lists, which a parent's update keeps (no DDL). The columns are added only when missing, like v47's and v49's. Additive/idempotent; existing rows read `NULL`, not subagents. [Delivery and recovery](#delivery-and-recovery) |
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |

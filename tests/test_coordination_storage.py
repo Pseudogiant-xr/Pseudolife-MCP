@@ -1834,3 +1834,72 @@ def test_a_null_park_expiry_is_refused(store):
     with pytest.raises(CoordinationError, match="invalid_park"):
         store.update(*creds(a), park_reason="blocked", park_needs="GPU", park_expires=None)
     assert store.authenticate(*creds(a))["park_reason"] is None
+
+@pytest.mark.parametrize("recent", [True, False])
+def test_codex_urgent_unknown_turn_reports_attention_without_queue_path(store, recent):
+    """Board-call age cannot prove that a desktop task is idle."""
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"codex": False, "ring": True})
+    attached = store.attach(*creds(recipient), attachment_id="codex", ring=True,
+                            ring_armed_until=1060.0)
+    if not recent:
+        _idle(store, recipient)
+    receipt = store.send(*creds(sender), to=recipient["agent_id"], text="urgent dependency",
+                         request_id="urgent-codex", urgent=True)
+    assert receipt["state"] == "queued"  # mailbox queued, not a host notice
+    assert receipt["wake"]["decision"] == "no_path"
+    assert receipt["wake"]["reason"] == "no_steer_path"
+    assert receipt["wake"]["attention"] is True
+    assert receipt["wake"]["delivery"] == "pending"
+    assert receipt["wake"]["recipient_state"] == "unknown"
+    answer = store.heartbeat(*creds(recipient), attachment_id="codex",
+                             generation=attached["generation"])
+    assert answer["wake"] == {"decision": "attention", "reason": "urgent", "ring_at": 1000.0}
+    assert store.receive(*creds(recipient), for_delivery=True)["messages"] == []
+    assert len(store.receive(*creds(recipient))["messages"]) == 1
+
+
+def test_codex_attention_spends_caps_and_preserves_done_and_ordinary_mail(store):
+    from pseudolife_memory.storage.coordination import WakePolicy
+
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"codex": False})
+    assert _wake(store, sender, recipient) == {"decision": "hinted", "reason": "active"}
+    store.wake = WakePolicy(urgent_per_sender_per_hour=1)
+    assert _wake(store, sender, recipient, urgent=True)["reason"] == "no_steer_path"
+    assert _wake(store, sender, recipient, urgent=True) == {
+        "decision": "capped", "reason": "urgent_sender_hour"}
+    store.update(*creds(recipient), park_reason="done")
+    assert _wake(store, sender, recipient, urgent=True) == {
+        "decision": "not_needed", "reason": "parked_done"}
+
+
+@pytest.mark.parametrize("limit, reason", [("per_recipient_per_hour", "recipient_hour"),
+                                           ("nightly_total", "nightly")])
+def test_codex_attention_preserves_recipient_and_nightly_caps(store, limit, reason):
+    from pseudolife_memory.storage.coordination import WakePolicy
+
+    store.wake = WakePolicy(**{limit: 1})
+    sender = store.register("alice")
+    recipient = store.register("alice", capabilities={"codex": False})
+    assert _wake(store, sender, recipient, urgent=True)["reason"] == "no_steer_path"
+    assert _wake(store, sender, recipient, urgent=True) == {"decision": "capped", "reason": reason}
+
+
+def test_codex_attention_staggers_while_eligible_parked_wake_keeps_queue_path(store):
+    sender = store.register("alice")
+    peers = [store.register("alice", capabilities={"codex": False, "ring": True})
+             for _ in range(3)]
+    for peer in peers:
+        store.attach(*creds(peer), attachment_id=peer["agent_id"][:8], ring=True,
+                     ring_armed_until=1060.0)
+    first = _wake(store, sender, peers[0], urgent=True)
+    second = _wake(store, sender, peers[1], urgent=True)
+    assert (first["reason"], second["reason"]) == ("no_steer_path", "no_steer_path")
+    assert (first["ring_at"], second["ring_at"]) == (1000.0, 1030.0)
+    store.update(*creds(peers[2]), park_reason="blocked", park_needs="the review",
+                 park_clear_by="maintainer")
+    assert _wake(store, sender, peers[2])["decision"] == "withheld"
+    parked = _wake(store, sender, peers[2], clears="the review")
+    assert parked["decision"] == "rung" and parked["reason"] == "clears"
+    assert parked["ring_at"] == 1060.0

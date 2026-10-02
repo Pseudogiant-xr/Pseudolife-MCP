@@ -48,6 +48,19 @@ independent of that limitation.
 
 ## Queue doorbell (2026-09-23)
 
+Current behavior (2026-10-03): eligible parked wakes retain the queue path.
+Unparked Codex urgency is capped attention with unknown host state and returns
+`no_steer_path` for pull/hints; board recency cannot establish native idle state.
+A private per-thread reservation precedes queue launch and survives restart.
+Only the complete generated notice plus opaque nonce matching the owning
+UserPromptSubmit hook permits a later queue. Reads, acks, expiry and unrelated
+turns cannot resolve it. This proves prompt-pipeline arrival, not model reading.
+Automatic queued-notice hook emission by the current desktop remains unverified;
+missing receipt evidence keeps the reservation pending. Ambiguous bridge failure
+never authorizes an alternate queue. The historical probes below did not record
+this hook path, and do not establish desktop steer support.
+
+
 Codex's first-party `codex queue` command reaches idle tasks the bridge cannot,
 the desktop app's included, but Codex delivers its text as a user message. The
 optional doorbell therefore keeps the rule above by content rather than by

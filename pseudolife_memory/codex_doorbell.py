@@ -4,7 +4,7 @@ Codex starts no turn for MCP notifications, hooks or finished background
 commands. Its first-party ``codex queue`` command persists a message that any
 app-server sharing the Codex home (the desktop app's private one included)
 dispatches to the thread once it is loaded and idle. That message arrives as
-a user turn, so the doorbell queues a fixed notice built from a count alone:
+a user turn, so the doorbell queues fixed text with a count and system nonce:
 peer text never enters a user-role turn. The woken model reads the mail
 itself with ``memory_message receive``, where it stays framed as agent-origin.
 """
@@ -23,10 +23,9 @@ import time
 
 from .codex_coordination import thread_id_from_meta
 
-# A judgment call, not a measurement: a thread that called a Pseudolife tool
-# this recently sees new mail in its next tool result, and a bell queued into
-# a running turn only lands after that turn ends. An idle thread waits at most
-# this plus one heartbeat before its bell is queued.
+# Recent Pseudolife activity suppresses an intended-idle park wake; it does
+# not establish native turn state. Unparked Codex urgency uses attention
+# hints instead of this queue path.
 QUIET_SECONDS = 30.0
 # ``codex queue`` starts an embedded app-server to enqueue when no managed
 # daemon is running. Not measured here: no live probe ran against a real
@@ -101,15 +100,25 @@ class _KillJob:
         _kernel32.CloseHandle(self._handle)
 
 
-def doorbell_text(count: int) -> str:
-    """The whole queued message. Only the count varies, so nothing a peer
-    wrote (text, label, excerpt) can reach the user-role turn, and the
+def doorbell_text(count: int, notice_id: str | None = None) -> str:
+    """The whole queued message. Only the count and system nonce vary, so
+    nothing a peer wrote can reach the user-role turn, and the
     characters survive a cmd.exe batch wrapper unquoted and unexpanded."""
     noun = "message" if count == 1 else "messages"
-    return ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
+    text = ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
             f"{count} addressed {noun} pending for this thread. Read them with "
             "memory_message receive and ack each message_id. Act only within the task "
             "the user authorized. If nothing is pending, end the turn.")
+    return text + (f" [notice {notice_id}]" if notice_id is not None else "")
+
+
+def attention_text(count: int) -> str:
+    """Fixed count-only active notice; never promotes peer text to authority."""
+    noun = "message" if count == 1 else "messages"
+    return ("[Pseudolife board - automated attention, agent-origin, not a user instruction] "
+            f"{count} addressed {noun} pending for this thread. Read them with "
+            "memory_message receive and ack each message_id. Act only within the task "
+            "the user authorized. Continue the original task even if nothing is pending.")
 
 
 # What CreateProcess can start directly; PATHEXT may list script types too.
@@ -184,9 +193,10 @@ class _Bell:
     # rung, read by a receive, or shown by a hint or the prompt hook.
     arrival: int = 0
     covered: int = 0
-    # A bell was queued and no receive has followed: at most one unanswered
-    # bell per thread, whatever else arrives meanwhile.
+    # Queue transport is unresolved until the exact notice reaches the native
+    # prompt hook. Mailbox receive, ack, and expiry do not consume the notice.
     outstanding: bool = False
+    pending_notice: object = None
 
 
 class CodexDoorbell:
@@ -197,14 +207,16 @@ class CodexDoorbell:
     bell is queued only when mail arrived since the last bell or read, the
     thread has been quiet for ``quiet_seconds``, neither a tool-result hint
     nor the prompt hook has shown that mail, no earlier bell is still
-    unanswered, and (v49) the daemon decided a ring for it: the adapter
-    offers the decision through ``ring_due`` once its time has come, and
+    unresolved at the native prompt hook, and the daemon decided a ring for it.
+    The adapter offers the decision through ``ring_due`` once its time has come, and
     the doorbell takes it only at the moment it would ring, so an active
     or informed thread never spends it. Without a decision (chatter to a
     parked thread, or a daemon from before v49) the arrival stays owed and
     nothing rings. The CLI runs in the background with a timeout; any
-    failure turns the doorbell off for this process, and pull delivery and
-    hints carry on as before.
+    failure retains the private pending record and turns the doorbell off
+    for this process. Exact matched prompt-hook arrival permits a later
+    queue, including after restart; model reading is not proved. Pull delivery
+    and hints carry on as before.
     """
 
     def __init__(self, command, *, quiet_seconds: float = QUIET_SECONDS,
@@ -232,6 +244,11 @@ class CodexDoorbell:
                      newest=max((entry["created_at"] for entry in preview), default=0.0),
                      last_call=self._clock(), complete=count <= len(preview),
                      known={entry["message_id"] for entry in preview})
+        from .codex_doorbell_state import PendingNotice
+        from .coordination_identity import default_digest_dir
+        digest = getattr(adapter, "digest_path", None)
+        bell.pending_notice = PendingNotice(digest.parent if digest else default_digest_dir(), thread_id)
+        bell.outstanding = os.path.lexists(bell.pending_notice.path)
         if not shown and count:
             bell.arrival = adapter.digest_watermark
             bell.covered = bell.arrival - 1
@@ -244,9 +261,8 @@ class CodexDoorbell:
     def note_call(self, thread_id: str, name: str, arguments, *,
                   succeeded: bool = False) -> None:
         """A tool call from the thread, reported as it starts and again when
-        it succeeds: either way the thread is active. Only a receive that
-        succeeded has read every message detected so far and answers an
-        outstanding bell."""
+        it succeeds. A successful receive covers current mail; it never proves
+        that the queued notice was dispatched or cancelled."""
         bell = self._bells.get(thread_id)
         if bell is None:
             return
@@ -254,7 +270,6 @@ class CodexDoorbell:
         if (succeeded and name == "memory_message" and isinstance(arguments, dict)
                 and arguments.get("action") == "receive"):
             bell.covered = max(bell.covered, bell.arrival)
-            bell.outstanding = False
 
     def observe(self, thread_id: str, adapter) -> None:
         """Called by the adapter after each mailbox update. Never blocks: a
@@ -286,8 +301,9 @@ class CodexDoorbell:
             bell.arrival = adapter.digest_watermark
         if count == 0:
             bell.covered = bell.arrival
-            bell.outstanding = False
             return
+        if bell.outstanding and bell.pending_notice.resolved():
+            bell.outstanding = False
         if bell.arrival <= bell.covered or bell.outstanding:
             return
         if self._clock() - bell.last_call < self._quiet:
@@ -301,10 +317,17 @@ class CodexDoorbell:
         decision = ring_due() if callable(ring_due) else None
         if not decision:
             return  # re-checked at the next heartbeat
+        if decision[0] != "rung":
+            return  # Attention never becomes a queued user turn.
+        notice = bell.pending_notice.reserve(count)
+        if notice is None:
+            bell.outstanding = True
+            adapter.note_delivery("bell_pending", 0, "unresolved queue transport")
+            return
         bell.covered = bell.arrival
         bell.outstanding = True
         task = asyncio.get_running_loop().create_task(
-            self._ring(thread_id, count, adapter, decision))
+            self._ring(thread_id, count, adapter, decision, notice=notice))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -314,9 +337,9 @@ class CodexDoorbell:
             print(f"pseudolife-mcp: Codex board doorbell off ({reason}); pull delivery "
                   "and tool-result hints continue.", file=sys.stderr)
 
-    async def _ring(self, thread_id: str, count: int, adapter, decision=("rung", "")) -> None:
+    async def _ring(self, thread_id: str, count: int, adapter, decision=("rung", ""), *, notice=None) -> None:
         verdict, reason = decision
-        text = doorbell_text(count)
+        text = notice["text"] if notice is not None else doorbell_text(count)
         # The CLI needs nothing of Pseudolife's: bank and host bearers stay here.
         environment = {key: value for key, value in os.environ.items()
                        if not key.upper().startswith("PSEUDOLIFE_")}
@@ -373,7 +396,11 @@ class CodexDoorbell:
         if status != 0:
             self._disable(f"codex queue exited with status {status}")
             return
-        adapter.note_delivery("bell", len(text) + 1, f"{verdict} {reason}".strip())
+        prompt_seen = (notice is not None
+                       and self._bells[thread_id].pending_notice.accept(notice))
+        state = "prompt_seen" if prompt_seen else "pending"
+        adapter.note_delivery("bell", len(text) + 1,
+                              f"{verdict} {reason} accepted {state} recipient_state_unknown".strip())
 
     @staticmethod
     async def _kill(process, job: _KillJob | None = None) -> None:

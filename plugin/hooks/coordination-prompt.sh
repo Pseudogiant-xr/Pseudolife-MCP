@@ -19,6 +19,17 @@ if [ -n "$SID" ] && [ -d "$DIGEST_DIR" ]; then
     # A pipeline's status is its last command's, so the fallback lives
     # inside the group, not after it.
     KEY=$(printf '%s' "$SID" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null; } | cut -c1-64)
+    # A generic turn stamp is not queue consumption. The local helper checks
+    # the complete system-generated prompt against this thread's nonce.
+    PENDING="$DIGEST_DIR/$KEY.bell-pending"
+    if [ -f "$PENDING" ] && [ ! -L "$PENDING" ]; then
+        LAUNCHER="${PSEUDOLIFE_SHIM_LAUNCHER:-${XDG_DATA_HOME:-${HOME:-${USERPROFILE:-~}}/.local/share}/pseudolife-mcp/bin/pseudolife-mcp}"
+        if [ -f "$LAUNCHER" ]; then
+            printf '%s' "$INPUT" | "$LAUNCHER" doorbell-prompt-seen >/dev/null 2>&1 || true
+        elif command -v pseudolife-mcp >/dev/null 2>&1; then
+            printf '%s' "$INPUT" | pseudolife-mcp doorbell-prompt-seen >/dev/null 2>&1 || true
+        fi
+    fi
     # The record is followed only while it is confirmed for this very
     # session (line 2). The env id equals the stdin id only in a hook Claude
     # Code started for this session; a host run from a Claude Bash command

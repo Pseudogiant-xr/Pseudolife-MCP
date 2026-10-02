@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — Codex queue notices retain unresolved transport state)
+- Reading or acknowledging mail, mailbox expiry and a new turn no longer
+  permit a second queued notice while the first native queue is unresolved.
+  Private per-thread reservations survive restart; only the exact generated
+  notice and nonce reaching that thread's prompt hook permit another queue.
+  Queue acceptance and prompt-hook arrival remain separate from reading mail.
+- Urgent unparked Codex mail now takes capped attention before ordinary
+  recent-activity hints. With no proved steer path it reports
+  `no_steer_path` and pending unknown host state, and waits for pull/hints
+  rather than queuing behind a potentially active turn. Eligible parked
+  wakes retain the queue path. Active hints resume the original task.
+- An ambiguous bridge failure no longer queues an alternate notice. Current
+  desktop queued-notice prompt-hook emission remains unverified; missing
+  exact receipts retain pending state. The client hooks must be updated to
+  use the correlation path.
+
 ### Added (2026-10-02 — full suites on a second machine, one per machine)
 - Full test suites took ~20-25 minutes each and queued one at a time on
   the maintainer's workstation. `ops/remote-suite.ps1` now runs a

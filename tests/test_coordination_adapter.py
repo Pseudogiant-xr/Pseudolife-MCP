@@ -1760,3 +1760,31 @@ def test_turn_and_marker_files_leave_with_the_digest(tmp_path):
         assert not (tmp_path / "digest.turn").exists()
 
     asyncio.run(drive())
+
+
+def test_codex_attention_offer_reports_pending_without_a_ring_marker(tmp_path):
+    daemon = FakeDaemon()
+    answers = iter([(0, [], None), (1, _preview("m1"),
+                    {"decision": "attention", "reason": "urgent", "ring_at": 0.0})])
+
+    def hook(action, body):
+        if action not in {"attach", "heartbeat"}:
+            return None
+        count, preview, wake = next(answers)
+        return httpx.Response(200, json={"generation": 3, "lease_until": "later",
+                                        "pending_count": count, "pending_preview": preview,
+                                        "wake": wake})
+    daemon.hook = hook
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt",
+                                      delivery_transport="codex")
+        async with client, coordination:
+            await coordination._heartbeat()
+            assert coordination.ring_due() is None
+            assert "no_steer_path" in coordination.unread_hint
+            assert "pending" in coordination.unread_hint
+            assert not (tmp_path / "digest.ring").exists()
+            assert "no_steer_path" in (tmp_path / "ledger.log").read_text(encoding="utf-8")
+
+    asyncio.run(drive())

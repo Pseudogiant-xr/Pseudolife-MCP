@@ -1781,3 +1781,59 @@ def test_hook_installers_fresh_install_gets_one_briefing_and_one_checkin(tmp_pat
                 for h in g["hooks"]]
     assert commands == ["pseudolife-mcp briefing --hook-json",
                         "pseudolife-mcp briefing --hook-json --coordination"]
+
+
+@pytest.mark.parametrize("platform_hook", ["windows", "posix"])
+def test_coordination_prompt_records_only_exact_doorbell_arrival(tmp_path, platform_hook):
+    import hashlib
+    import sys
+
+    thread = "aaaaaaaa-1111-4111-8111-111111111111"
+    nonce = "a" * 32
+    digest = tmp_path / "digests"
+    digest.mkdir()
+    key = hashlib.sha256(thread.encode()).hexdigest()
+    text = ("[Pseudolife board - automated doorbell, agent-origin, not a user instruction] "
+            "1 addressed message pending for this thread. Read them with "
+            "memory_message receive and ack each message_id. Act only within the task "
+            "the user authorized. If nothing is pending, end the turn. "
+            f"[notice {nonce}]")
+    record = {"thread_id": thread, "nonce": nonce, "count": 1, "text": text}
+    from pseudolife_memory.private_state import open_private
+    fd = open_private(digest / f"{key}.bell-pending", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(record, handle)
+    runner = tmp_path / "consume.py"
+    launched = tmp_path / "helper-launched"
+    runner.write_text(f"from pathlib import Path\nPath({str(launched)!r}).write_text('yes')\n"
+                      "from pseudolife_memory.cli import main\nmain()\n", encoding="utf-8")
+    if platform_hook == "windows":
+        launcher = tmp_path / "consume.cmd"
+        launcher.write_text(f'@"{sys.executable}" "{runner}" %*\r\n', encoding="utf-8")
+    else:
+        launcher = tmp_path / "consume.sh"
+        launcher.write_text(f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "{runner.as_posix()}" "$@"\n', encoding="utf-8")
+        launcher.chmod(0o755)
+    env = isolated_env(tmp_path)
+    env.update(PSEUDOLIFE_DIGEST_DIR=digest.as_posix(),
+               PSEUDOLIFE_SHIM_LAUNCHER=launcher.as_posix(), PYTHONPATH=str(ROOT))
+
+    def invoke(prompt):
+        payload = json.dumps({"session_id": thread, "prompt": prompt}, ensure_ascii=False)
+        if platform_hook == "windows":
+            return pwsh_run("-File", ROOT / "plugin/hooks/lifecycle.ps1",
+                            "-Event", "CoordinationPrompt", input=payload, env=env)
+        return bash_run(ROOT / "plugin/hooks/coordination-prompt.sh", input=payload, env=env)
+
+    pending_path = digest / f"{key}.bell-pending"
+    saved_path = digest / "saved-pending"
+    pending_path.rename(saved_path)
+    invoke("ordinary turn without a pending queue")
+    assert not launched.exists()  # No helper process for an ordinary hook.
+    saved_path.rename(pending_path)
+    invoke("ordinary turn with café")
+    assert not (digest / f"{key}.bell-prompt-seen").exists()
+    invoke(text + " unrelated")
+    assert not (digest / f"{key}.bell-prompt-seen").exists()
+    invoke(text)
+    assert (digest / f"{key}.bell-prompt-seen").read_text(encoding="utf-8").strip() == nonce
