@@ -15,7 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--board` / `--no-board` (kept on a re-invite unless given), `--replace`
   (a new code for a paired machine; its old token works until it is
   redeemed), `--list` (never a token or a code) and `--revoke` (effective
-  within 10 seconds). `--list` and `--revoke` need no running daemon
+  within 10 seconds, 60 at worst while the daemon cannot read its database). `--list` and `--revoke` need no running daemon
   (`--bank <fingerprint>` confirms the database); with a Docker daemon
   container stopped they run through `psql` in the Postgres container. Names are lowercase
   `[a-z0-9][a-z0-9._-]{0,63}`; `default`, `daemon`, `maintainer` and any name

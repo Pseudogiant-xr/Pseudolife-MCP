@@ -212,10 +212,12 @@ The rules:
   or `PSEUDOLIFE_MCP_TIER_MAP` (the environment always wins). `--tier
   minimal|core|full` sets its default toolset tier; `--board` /
   `--no-board` its board access. Re-inviting a name keeps both unless
-  given.
+  given. A tier sets which tools a client sees at first, not what it may
+  call: `memory_toolset` expands any session to the full set.
 - `invite --list` shows each name, whether it is paired or pending, its
   tier, board access and times: never a token or a code.
-  `invite --revoke laptop` takes the token away within 10 seconds.
+  `invite --revoke laptop` takes the token away within 10 seconds, or
+  within 60 seconds at worst while the daemon cannot read its database.
   Neither needs a running daemon, so access can be withdrawn while it is
   down; `--bank <fingerprint>` makes them check the database is the bank
   you mean. With a Docker install's daemon container stopped, they run
