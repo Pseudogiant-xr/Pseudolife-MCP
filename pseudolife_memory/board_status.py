@@ -30,6 +30,11 @@ _REASONS = {
 }
 
 
+def reason_hint(reason: str) -> str | None:
+    """The plain-language line for a daemon refusal ``reason``, or None."""
+    return _REASONS.get(reason)
+
+
 def board_status(url: str, token: str | None, *, timeout: float = 2.0) -> tuple[bool, str]:
     """``(on, line)`` for ``token`` against the daemon at ``url``.
 

@@ -9749,7 +9749,11 @@ Plain HTTP is acceptable only inside a private network you trust.
   address; the token requirement then applies directly.
 - **Reverse proxy:** terminate TLS at the proxy and forward to
   `127.0.0.1:8765`. The token relaxes the `Host` check, so the proxy's
-  hostname needs no further configuration.
+  hostname needs no further configuration. Pass the daemon's error
+  responses through unchanged, `Content-Length` included. The stdio shim
+  trusts a `503 principals_unavailable` (no tool ran) only in the daemon's
+  exact small JSON form; a rewritten one reads as an operation that may
+  have completed.
 
 ## Adding a machine: `invite` and `pair`
 
@@ -9826,8 +9830,11 @@ on its own connection. If that read has failed for over 60 seconds, a
 bearer that matches nothing in the environment gets `503 {"error":
 "principals_unavailable"}` rather than 401, so a valid invited token is
 never reported as wrong. A tool call whose bearer stops resolving between
-the gate and the tool (revoked meanwhile) gets the JSON-RPC error
-`principals_unavailable` and is never run as the default principal.
+the gate and the tool is never run as the default principal. It gets the
+JSON-RPC error `principals_unavailable` (-32003) when the table cannot be
+checked, and `unauthorized` (-32004) when the token was revoked or
+replaced (`invite --replace`) meanwhile. The stdio shim passes both on as refusals in which no tool
+ran.
 
 Redemption (`POST /api/pair`) refuses any request with an `Origin` header,
 takes only JSON bodies up to 1 KiB, answers every failure with the same
