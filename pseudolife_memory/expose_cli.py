@@ -380,9 +380,9 @@ def _expose(args, report: _Report) -> int:
     report.data.update(state="exposed", url=url)
     report.say(f"exposed: clients use {url}")
     _probe(report, url, health.get("bank"))
-    report.note("next, on each joining machine: give it its own token (docs/guide/remote-bank.md, "
-                f"\"One identity per remote client\"), then run `pseudolife-mcp connect {url} "
-                "--token-file <file>`")
+    report.note("next, for each joining machine: run `pseudolife-mcp invite <machine>` here, then "
+                "give the code it prints to that machine's installer (option 2), or run "
+                f"`pseudolife-mcp pair {url} <code>` there")
     report.note(f"to remove the forward: pseudolife-mcp expose off --port {port}")
     return report.finish(EXIT_OK)
 

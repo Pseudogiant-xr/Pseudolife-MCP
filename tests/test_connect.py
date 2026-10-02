@@ -55,6 +55,12 @@ class Daemon:
         self.tokens = set(tokens)
         self.board = board
         self.requests: list[tuple[str, str]] = []
+        # POST /api/pair: each body, the status to answer, and the hashes it
+        # paired (a bearer whose SHA-256 is one of them authenticates).
+        self.pairs: list[bytes] = []
+        self.pair_status = 200
+        self.principal = "laptop"
+        self.hashes: set[str] = set()
         daemon = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -65,7 +71,8 @@ class Daemon:
                 bearer = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
                 daemon.requests.append((self.path, bearer))
                 allowed = not daemon.health["auth"] or any(
-                    hmac.compare_digest(bearer, token) for token in daemon.tokens)
+                    hmac.compare_digest(bearer, token) for token in daemon.tokens) or (
+                    hashlib.sha256(bearer.encode()).hexdigest() in daemon.hashes)
                 if self.path == "/health":
                     body, status = json.dumps(daemon.health).encode(), 200
                 elif self.path.startswith("/api/episodes"):
@@ -81,6 +88,25 @@ class Daemon:
                 self.send_response(status)
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                daemon.requests.append((self.path, ""))
+                if self.path != "/api/pair":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                daemon.pairs.append(body)
+                if daemon.pair_status == 200:
+                    daemon.hashes.add(json.loads(body)["token_sha256"])
+                    answer = {"principal": daemon.principal, "tier": None, "bank": None}
+                else:
+                    answer = {"error": "pairing_refused"}
+                data = json.dumps(answer).encode()
+                self.send_response(daemon.pair_status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(data)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
@@ -957,3 +983,133 @@ def test_a_credential_bearing_url_is_never_echoed(machine, daemon, capsys, monke
         assert code == 0, out
         assert SECRET not in out
     assert "127.0.0.1:1" in out  # the host is still named
+
+
+# -- --code: pair, then connect with the new token file ----------------------------------------------
+
+CODE = "ABCD-EFGH-JKMN"
+
+
+def paired_files(machine) -> list[Path]:
+    directory = machine.home / ".pseudolife-mcp"
+    return sorted(directory.glob("*.token")) if directory.exists() else []
+
+
+def test_code_dry_run_never_redeems_or_mints(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--dry-run")
+    assert code == 0, out
+    assert daemon.pairs == [] and paired_files(machine) == []
+    change = one(report, client="claude-code", place="registration")["changes"][FILE_KEY]
+    assert change[1] == "~/.pseudolife-mcp/<principal>.token (name from the daemon)"
+    assert CODE not in out
+
+
+def test_code_with_nothing_to_repoint_stops_before_redeeming(machine, daemon, capsys):
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--yes")
+    assert code == 3
+    assert daemon.pairs == [] and paired_files(machine) == []
+    assert "--pairing-code" in report["error"] and "installer" in report["error"]
+
+
+def test_code_redeems_once_then_repoints_at_the_real_file(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--yes")
+    assert code == 0, out
+    assert len(daemon.pairs) == 1
+    target = machine.home / ".pseudolife-mcp" / "laptop.token"
+    assert paired_files(machine) == [target]
+    token = target.read_text(encoding="utf-8")
+    assert json.loads(daemon.pairs[0])["token_sha256"] == hashlib.sha256(token.encode()).hexdigest()
+    env = json.loads(machine.claude_json.read_text())["mcpServers"]["pseudolife-memory"]["env"]
+    assert env[FILE_KEY] == str(target)
+    settings = json.loads(machine.settings.read_text())["env"]
+    assert settings[FILE_KEY] == str(target)
+    assert machine.handshakes == [(daemon.url, ("file", str(target)))]
+    assert token not in out and CODE not in out
+
+
+def test_code_with_a_token_file_pairs_into_that_path(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    target = machine.home / "chosen.token"
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--token-file", str(target), "--yes")
+    assert code == 0, out
+    assert target.exists() and paired_files(machine) == []
+    env = json.loads(machine.claude_json.read_text())["mcpServers"]["pseudolife-memory"]["env"]
+    assert env[FILE_KEY] == str(target)
+
+
+def test_code_warns_when_several_clients_would_share_one_principal(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    machine.register_gemini({URL_KEY: OLD_URL})
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--dry-run")
+    assert code == 0, out
+    assert any("share one principal" in warning and "invite" in warning for warning in report["warnings"])
+
+
+def test_code_on_one_client_does_not_warn_about_sharing(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--dry-run")
+    assert code == 0, out
+    assert not any("share one principal" in warning for warning in report["warnings"])
+
+
+def test_a_refused_code_is_exit_4_and_writes_nothing(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    before = machine.snapshot()
+    daemon.pair_status = 400
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--yes")
+    assert code == 4, out
+    assert len(daemon.pairs) == 1
+    assert machine.snapshot() == before
+
+
+def test_an_unverified_pairing_is_exit_4_and_names_the_kept_file(machine, daemon, capsys, monkeypatch):
+    machine.register_claude({URL_KEY: OLD_URL})
+    before = machine.claude_json.read_bytes()
+    monkeypatch.setattr(connect_cli, "credential_valid", lambda url, token: False)
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--yes")
+    assert code == 4, out
+    target = machine.home / ".pseudolife-mcp" / "laptop.token"
+    assert target.exists() and str(target) in report["error"]
+    assert machine.claude_json.read_bytes() == before
+
+
+def test_code_needs_a_daemon_with_auth(machine, capsys):
+    stub = Daemon(auth=False)
+    machine.register_claude({URL_KEY: OLD_URL})
+    try:
+        code, report, out = run_json(capsys, stub.url, "--code", CODE, "--yes")
+    finally:
+        stub.close()
+    assert code == 4 and stub.pairs == []
+
+
+@pytest.mark.parametrize("argv", [["--code", CODE, "--read-token", "--token-file", "x.token"],
+                                  ["--code", CODE, "--read-code"],
+                                  ["--code", "not-a-code"]])
+def test_code_usage_errors_exit_2(machine, daemon, capsys, monkeypatch, argv):
+    machine.register_claude({URL_KEY: OLD_URL})
+    monkeypatch.setattr("sys.stdin", io.StringIO(CODE + "\n"))
+    code, report, out = run_json(capsys, daemon.url, *argv, "--yes")
+    assert code == 2, out
+    assert daemon.pairs == []
+
+
+def test_read_code_takes_the_code_from_stdin(machine, daemon, capsys, monkeypatch):
+    machine.register_claude({URL_KEY: OLD_URL})
+    monkeypatch.setattr("sys.stdin", io.StringIO(CODE + "\n"))
+    code, report, out = run_json(capsys, daemon.url, "--read-code", "--yes")
+    assert code == 0, out
+    assert json.loads(daemon.pairs[0])["code"] == CODE.replace("-", "")
+
+
+def test_an_existing_token_file_with_code_is_refused_before_redeeming(machine, daemon, capsys):
+    machine.register_claude({URL_KEY: OLD_URL})
+    existing = machine.token()
+    code, report, out = run_json(capsys, daemon.url, "--code", CODE, "--token-file", existing, "--yes")
+    assert code == 2 and daemon.pairs == []
+
+
+def test_the_board_hint_names_invite():
+    assert "pseudolife-mcp invite" in connect_cli._BOARD_HINT
