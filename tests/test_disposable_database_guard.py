@@ -580,6 +580,18 @@ def test_every_harness_guard_allows_a_replay_copy(harness, clean_env):
 _REAP_ALL = "pg_terminate_backend(pid) FROM pg_stat_activity"
 _TRUNCATE_HEAD = "TRUNCATE "
 
+# Production reaps the guard deliberately does not cover, each with its
+# reason. They act on a live bank on purpose, at the operator's request, and
+# never run from the suite; assert_disposable_database would refuse exactly
+# the database they exist to act on. An entry that no longer matches a
+# finding fails the test, so the list cannot outlive its code.
+_PRODUCTION_REAPS = {
+    ("pseudolife_memory/move_cli.py", "terminate_sql"):
+        "pseudolife-mcp move cuts the SOURCE bank's other connections off "
+        "before its final dump and after the fence (spec Part 3, step 5); "
+        "the bank is being moved away, and its daemon is already stopped",
+}
+
 
 def _candidate_python_files() -> list[Path]:
     """Tracked plus untracked-but-not-ignored, so a new reset site is held
@@ -649,8 +661,10 @@ def test_every_reap_and_full_bank_truncate_is_guarded_first():
         ("tests/test_graph.py", "svc"),
         ("tests/test_dream_ack_storage.py", "_truncate"),
     }
+    stale = set(_PRODUCTION_REAPS) - {(f, fn) for f, fn, _, _ in found}
+    assert not stale, f"exempted production reaps no longer found: {sorted(stale)}"
     unguarded = [f"{f}::{fn} (line {line})" for f, fn, line, guard in found
-                 if guard is None or guard > line]
+                 if (guard is None or guard > line) and (f, fn) not in _PRODUCTION_REAPS]
     assert not unguarded, (
         "these functions reap backends or TRUNCATE the whole bank without "
         "calling schema.assert_disposable_database(conn) first:\n  "
