@@ -150,9 +150,13 @@ seconds versus milliseconds differ and integer versus float differs. Normalize
 only named fixture-generated nondeterminism; never turn all positive epochs
 into one sentinel. Duplicate JSON object keys are detected before parsing a
 candidate response and are recorded as a difference.
-Symbol normalization for fixture epochs, HLC values and cursor tokens preserves
-type, unit, sign and magnitude class, but masks exact digit width and precision;
-it does not establish exact numeric or token-byte parity at those named paths.
+Epoch symbols mask exact values and fractional precision while retaining the
+type, unit and magnitude checks above. HLC values become symbols after format
+and declared continuity/order checks, so their component values and digit widths
+are not compared and no HLC unit or magnitude parity is established. Mailbox
+cursors retain their numeric suffix exactly while replacing the validated agent
+identity with a symbol; no exact byte parity is established for that replaced
+identity.
 
 Every published performance value comes from a script under `evals/` and an
 artifact under `evals/results/`. Record the oracle and candidate commits, dirty
