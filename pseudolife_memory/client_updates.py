@@ -896,10 +896,20 @@ def _marketplace_source(codex_home: Path) -> tuple[str | None, str | None]:
     ``.codex-marketplace-install.json`` (written by Codex's upgrade)."""
     table: dict = {}
     try:
+        text = (codex_home / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    try:
         import tomllib
-        table = ((tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
-                  .get("marketplaces") or {}).get(MARKETPLACE) or {})
-    except (ModuleNotFoundError, OSError, ValueError, AttributeError):
+        table = (tomllib.loads(text).get("marketplaces") or {}).get(MARKETPLACE) or {}
+    except ImportError:
+        # Python 3.10 has no tomllib: read the table's plain string keys,
+        # as Codex writes them (`key = "value"` or `key = 'value'`).
+        header = re.search(rf"^\[marketplaces\.\"?{re.escape(MARKETPLACE)}\"?\]\s*$", text, re.M)
+        body = text[header.end():].split("\n[", 1)[0] if header else ""
+        table = {m.group(1): m.group(3) for m in re.finditer(
+            r"^\s*([A-Za-z_]+)\s*=\s*([\"'])(.*?)\2\s*$", body, re.M)}
+    except (ValueError, AttributeError):
         pass
     if not isinstance(table, dict) or not table.get("source"):
         table = _read_json(codex_home / ".tmp" / "marketplaces" / MARKETPLACE / ".codex-marketplace-install.json")
@@ -925,7 +935,10 @@ def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
     source, ref = _marketplace_source(codex_home)
     if not source:
         return None, f"no git source for the {MARKETPLACE} marketplace in the Codex home's config.toml"
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    # No prompt may hold the update: git's own, Git Credential Manager's,
+    # or ssh's (a passphrase or host key, read from the terminal, not stdin).
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
     with tempfile.TemporaryDirectory(prefix="pseudolife-codex-marketplace-", ignore_cleanup_errors=True) as tmp:
         clone = str(Path(tmp) / "m")
         branch = ["--branch", ref] if ref else []

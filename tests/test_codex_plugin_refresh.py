@@ -91,6 +91,7 @@ class FakeCodex:
         self.answer: tuple[int, str] | None = None
         self.calls: list[tuple[list[str], dict]] = []
         self.git_calls: list[list[str]] = []
+        self.git_kwargs: list[dict] = []
         self.remote_hooks: str | None = None     # the branch's hooks.json, when not the served tree's
         self.exe = cli.tools["codex"]
         cli.tools["git"] = str(Path(cli.tools["codex"]).with_name(f"git{EXE}"))
@@ -102,7 +103,7 @@ class FakeCodex:
         argv = [str(a) for a in argv]
         name = Path(argv[0]).name.lower().removesuffix(".exe")
         if name == "git":
-            return self._git(argv)
+            return self._git(argv, **kw)
         if name != "codex":
             return self.cli(argv, **kw)
         self.calls.append((argv, kw))
@@ -123,8 +124,9 @@ class FakeCodex:
         # Codex warns on stderr (seen under a temp-dir CODEX_HOME).
         return 0, json.dumps(report, indent=2) + "\nWARNING: proceeding, even though we could not create PATH aliases\n"
 
-    def _git(self, argv):
+    def _git(self, argv, **kw):
         self.git_calls.append(argv)
+        self.git_kwargs.append(kw)
         if "clone" in argv:
             Path(argv[-1]).mkdir(parents=True)
             return 0, ""
@@ -296,6 +298,57 @@ def test_the_branch_is_read_in_a_private_clone_never_codexs(cli, monkeypatch):
     assert show[-2:] == ["show", "HEAD:plugin/hooks/hooks.json"] and show[2] == clone[-1]
     private = Path(clone[-1]).resolve()
     assert codex_home.resolve() not in private.parents and not private.exists()   # removed afterwards
+
+
+def test_the_read_never_waits_on_a_prompt(cli, monkeypatch):
+    """No terminal, SSH or Git Credential Manager prompt can hold the
+    update: a source that wants credentials fails and stays behind."""
+    _installed(cli)
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    codex = FakeCodex(cli, monkeypatch)
+    uc.check_codex_hooks(ROOT, refresh=True)
+    for kw in codex.git_kwargs:
+        env = kw["env"]
+        assert env["GIT_TERMINAL_PROMPT"] == "0" and env["GCM_INTERACTIVE"] == "never"
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
+
+
+def test_a_pinned_ref_is_the_branch_read(cli, monkeypatch):
+    """``codex plugin marketplace add --ref`` writes ``ref`` to config.toml
+    and ``ref_name`` to the clone's install record (Codex 0.160.0,
+    2026-10-03)."""
+    codex_home = _installed(cli)
+    config = codex_home / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8") + 'ref = "stable"\n', encoding="utf-8")
+    codex = FakeCodex(cli, monkeypatch)
+    assert uc.check_codex_hooks(ROOT, refresh=True)["state"] == "refreshed"
+    clone = codex.git_calls[0]
+    assert clone[clone.index("--branch") + 1] == "stable" and clone[-2] == SOURCE
+
+
+def test_the_install_record_names_the_source_when_the_config_cannot(cli, monkeypatch):
+    """Python 3.10 has no tomllib, and a config may carry no source: the
+    clone's install record (written by Codex's upgrade) names it then."""
+    codex_home = _installed(cli)
+    config = codex_home / "config.toml"
+    config.write_text(config.read_text(encoding="utf-8").split("\n[marketplaces.")[0], encoding="utf-8")
+    (_clone(codex_home).parent / ".codex-marketplace-install.json").write_text(json.dumps({
+        "source_type": "git", "source": SOURCE, "ref_name": "master", "sparse_paths": [],
+        "revision": "0" * 40}), encoding="utf-8")
+    codex = FakeCodex(cli, monkeypatch)
+    assert uc.check_codex_hooks(ROOT, refresh=True)["state"] == "refreshed"
+    clone = codex.git_calls[0]
+    assert clone[clone.index("--branch") + 1] == "master" and clone[-2] == SOURCE
+
+
+def test_the_source_is_read_without_tomllib(cli, monkeypatch):
+    """pyproject allows Python 3.10, which has no tomllib: the marketplace
+    table is still read from config.toml."""
+    _installed(cli)
+    monkeypatch.setitem(sys.modules, "tomllib", None)        # import tomllib raises, as on 3.10
+    codex = FakeCodex(cli, monkeypatch)
+    assert uc.check_codex_hooks(ROOT, refresh=True)["state"] == "refreshed"
+    assert codex.git_calls[0][-2] == SOURCE
 
 
 def test_a_branch_that_cannot_be_read_is_not_upgraded(cli, monkeypatch):
