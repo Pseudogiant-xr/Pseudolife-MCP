@@ -195,7 +195,7 @@ def test_a_signal_to_the_launcher_stops_the_run_and_its_leftovers(tmp_path):
             f"the run's detached child {leftover} outlived the launcher")
     finally:
         if launcher is not None and launcher.poll() is None:
-            launcher.kill()
-            launcher.communicate(timeout=10)
+            launcher.kill()  # pytest's stand-in still holds its pipes
+            launcher.wait(timeout=10)
         if leftover is not None and _alive(leftover):
             os.kill(leftover, signal.SIGKILL)

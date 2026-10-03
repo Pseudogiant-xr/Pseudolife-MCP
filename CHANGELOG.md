@@ -22,7 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PSEUDOLIFE_SUITE_RUN_ID`, and after pytest exits, also on Ctrl+C or a
   hangup, stops every process still carrying that marker, naming each on
   stderr. Processes the run did not start, such as the live daemon or
-  another run, are never touched. The exit code is still pytest's.
+  another run, are never touched. The exit code is still pytest's, and an
+  interrupt, hangup or TERM sent to the launcher alone is passed on to
+  pytest at once, as when the launcher exec'd it.
 
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before

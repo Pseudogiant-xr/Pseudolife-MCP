@@ -152,8 +152,13 @@ export PSEUDOLIFE_SUITE_RUN_ID
 
 # Stops every other process carrying this run's marker. Reads /proc without
 # forking, so no helper of its own carries the marker while it scans; does
-# nothing where there is no /proc (macOS).
+# nothing where there is no /proc (macOS). It runs as the EXIT trap, so
+# neither a failed command nor a closed stderr (the run's reader gone) nor a
+# second signal may cut it short: the leftovers are signalled before
+# anything is printed.
 stop_leftovers() {
+    set +e
+    trap '' HUP INT TERM PIPE
     [[ -r /proc/self/environ ]] || return 0
     local marker="PSEUDOLIFE_SUITE_RUN_ID=$PSEUDOLIFE_SUITE_RUN_ID"
     local dir pid entry
@@ -163,14 +168,14 @@ stop_leftovers() {
         [[ "$pid" != "$$" && -r "$dir/environ" ]] || continue
         while IFS= read -r -d '' entry; do
             if [[ "$entry" == "$marker" ]]; then left+=("$pid"); break; fi
-        done 2>/dev/null < "$dir/environ" || true
+        done 2>/dev/null < "$dir/environ"
     done
     (( ${#left[@]} )) || return 0
+    kill -TERM "${left[@]}" 2>/dev/null
     echo "wsl-suite: the run left ${#left[@]} process(es) behind; stopping them:" >&2
     for pid in "${left[@]}"; do
-        echo "  $pid $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-200)" >&2
+        echo "  $pid $(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" | cut -c1-200)" >&2
     done
-    kill -TERM "${left[@]}" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         alive=()
         for pid in "${left[@]}"; do
@@ -179,16 +184,27 @@ stop_leftovers() {
         (( ${#alive[@]} )) || return 0
         sleep 1
     done
-    kill -KILL "${alive[@]}" 2>/dev/null || true
+    kill -KILL "${alive[@]}" 2>/dev/null
 }
 
-# pytest runs as a child, not through exec, so the sweep runs after it
-# exits, also after Ctrl+C or a hangup. The test copy's lock (descriptor 9)
-# is held until then.
+# pytest runs as a background child, not through exec, so the sweep runs
+# after it exits, and so a signal to this shell acts at once (bash runs a
+# trap only between commands, and `wait` returns when one arrives) and is
+# passed on. A background job starts with SIGINT ignored and Python keeps an
+# ignored SIGINT, so the subshell resets it: an interrupt still reaches
+# pytest as KeyboardInterrupt and its teardown runs. The test copy's lock
+# (descriptor 9) is held until the sweep is done.
 trap stop_leftovers EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+( trap - INT; exec "$venv/bin/python" -m pytest "$@" ) &
+pytest_pid=$!
+pass_on() {
+    kill "-$1" "$pytest_pid" 2>/dev/null
+    wait "$pytest_pid" || true
+    exit "$2"
+}
+trap 'pass_on HUP 129' HUP
+trap 'pass_on INT 130' INT
+trap 'pass_on TERM 143' TERM
 code=0
-"$venv/bin/python" -m pytest "$@" || code=$?
+wait "$pytest_pid" || code=$?
 exit "$code"
