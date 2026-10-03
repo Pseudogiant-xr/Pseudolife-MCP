@@ -186,18 +186,24 @@ def validate() -> dict:
                      "ONNX-PREREQUISITE"}
     for row in required_rows:
         assert f"| {row} |" in register, f"missing required surface row: {row}"
-    status_index = None
+    status_index = mode_index = None
+    checked_cli_modes = set()
     for line in register.splitlines():
         if not line.startswith("|"):
-            status_index = None
+            status_index = mode_index = None
             continue
         if line.startswith("|---"):
             continue
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         if "Status" in cells:
             status_index = cells.index("Status")
+            mode_index = cells.index("Mode") if "Mode" in cells else None
         elif status_index is not None:
             assert cells[status_index] in {"ported", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
+            if mode_index is not None:
+                checked_cli_modes.add(cells[mode_index])
+    for mode in inventory["cli_modes"]:
+        assert mode in checked_cli_modes, f"CLI mode outside status table: {mode}"
     for name in set(re.findall(r'`(?:tests/)?(test_[A-Za-z0-9_]+\.py)`', register)):
         assert (ROOT / "tests" / name).is_file(), f"obsolete test reference: {name}"
     return {"test_files": len(files), "buckets": counts, "candidate_nodes": len(selected),

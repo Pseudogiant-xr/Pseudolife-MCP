@@ -31,6 +31,18 @@ def test_literal_parameterization_keeps_concrete_ids(tmp_path, monkeypatch):
         "test_example.py::test_help[--help]", "test_example.py::test_help[help]"}
 
 
+@pytest.mark.parametrize("mode", ["invite", "pair", "expose", "move"])
+@pytest.mark.parametrize("status", ["deferred", "complete"])
+def test_audit_rejects_detached_cli_rows(monkeypatch, mode, status):
+    original = inventory.source
+    register = original("rust/PARITY.md").replace("\n\n| invite |", "\n| invite |")
+    row = f"| {mode} | 2 | deferred |"
+    register = register.replace(row, f"\n| {mode} | 2 | {status} |")
+    monkeypatch.setattr(inventory, "source", lambda path: register if path == "rust/PARITY.md" else original(path))
+    with pytest.raises(AssertionError, match="CLI mode outside status table"):
+        inventory.validate()
+
+
 @pytest.mark.parametrize("fault", ["missing-file", "duplicate-file", "missing-node", "unsupported-node", "missing-surface", "invalid-status"])
 def test_audit_rejects_incomplete_or_invalid_inventory(monkeypatch, fault):
     original = inventory.source

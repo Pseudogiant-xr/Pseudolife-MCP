@@ -1,12 +1,14 @@
 # Python baseline instrument
 
 The [phase-0b Linux matrix](../results/rust-phase0b-daemon-scaling-linux.json)
-uses `scaling.py` to measure the pinned schema-53 oracle on Linux with
+uses `scaling.py` to measure the pinned schema-53 oracle on Linux (WSL2) with
 2,000 and 20,000 generated entries, three fresh-bank repeats, warm and cold
 queries, and two fp32 thread policies. The one-thread policy remains the named
 baseline. The production-thread policy leaves OpenMP and MKL thread variables
 unset, matching the daemon image, and records torch's actual resolved counts.
 Both policies pin CPU and fp32; the production dtype `auto` is not measured.
+The production daemon runs in a Linux container; WSL2 is the recorded baseline
+platform, so comparisons require a matched platform or a new baseline.
 
 The shipped flat band has capacity 5,250. The 2,000-entry arm keeps that capacity;
 the 20,000-entry stress arm explicitly raises only capacity to 20,000 so hydration
@@ -28,6 +30,21 @@ resident RSS delta and its idle-adjusted counterpart are measured separately:
 they include index allocations, entry/text objects and allocator effects, and
 cannot exclusively attribute the delta to vectors. PostgreSQL RSS is excluded.
 
+## Phase 3 comparison set
+
+The named daemon baseline is CPU, one-thread fp32 on Linux (WSL2), with three
+fresh-bank repeats for each cell in
+[the phase 0b receipt](../results/rust-phase0b-daemon-scaling-linux.json):
+
+| Resident entries | Query arm | Search latency | Daemon RSS |
+|---|---|---|---|
+| 2,000 | Warm cache | p50 and p95 | Idle, hydrated and under search load |
+| 2,000 | Cold queries | p50 and p95 | Idle, hydrated and under search load |
+| 20,000 | Warm cache | p50 and p95 | Idle, hydrated and under search load |
+| 20,000 | Cold queries | p50 and p95 | Idle, hydrated and under search load |
+
+The production-thread fp32 cells (four resolved threads on this WSL2 host) are
+separate matched comparisons, not substitutes for the one-thread baseline.
 Phase 3 compares search p50/p95 and idle/hydrated/load RSS only within the same
 platform, source inputs, model/dtype, cache arm, actual thread counts, capacity
 configuration and request count. Compare the resident delta and vector lower

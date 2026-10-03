@@ -46,7 +46,7 @@ named path.
 
 Historical schema-52 selfcheck R6 and full-bank R5 remain unchanged. Selfcheck
 R4/R5 were archived outside the working tree and remain recoverable from PR
-#540's original Git history. The source-reconstruction manifest retains the
+#540's original Git history at `f2ee1524`. The source-reconstruction manifest retains the
 recorded source digests and line-ending recipes for historical evidence; these
 are not current-oracle results.
 

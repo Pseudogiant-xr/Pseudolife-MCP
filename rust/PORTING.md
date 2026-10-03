@@ -111,8 +111,9 @@ equivalence claim follows from comparator support alone.
 
 ## Measurement and acceptance
 
-Daemon oracle captures and baselines run on Linux, matching the production
-container. Shim and CLI captures run on Windows and Linux. Every capture receipt
+Daemon oracle captures and baselines run on Linux; the current phase 0b receipts
+were captured on WSL2, while the production daemon runs in a Linux container.
+Shim and CLI captures run on Windows and Linux. Every capture receipt
 records its platform; a missing platform is a validation failure. Historical
 PR #540 captures retain their original commit and platform and cannot stand in
 for the phase 0b pin.
@@ -149,6 +150,9 @@ seconds versus milliseconds differ and integer versus float differs. Normalize
 only named fixture-generated nondeterminism; never turn all positive epochs
 into one sentinel. Duplicate JSON object keys are detected before parsing a
 candidate response and are recorded as a difference.
+Symbol normalization for fixture epochs, HLC values and cursor tokens preserves
+type, unit, sign and magnitude class, but masks exact digit width and precision;
+it does not establish exact numeric or token-byte parity at those named paths.
 
 Every published performance value comes from a script under `evals/` and an
 artifact under `evals/results/`. Record the oracle and candidate commits, dirty
@@ -172,7 +176,7 @@ bank adapter documented in `evals/rust_port/README.md`; arbitrary production
 servers cannot be pointed at a bank. This acceptance covers the selected
 synthetic corpora, not every registered surface or a production Rust port.
 
-The phase 3 daemon reference is the Linux 2,000/20,000-entry matrix in
+The phase 3 daemon reference is the Linux (WSL2) 2,000/20,000-entry matrix in
 `evals/results/rust-phase0b-daemon-scaling-linux.json`, with three repeats per
 bank/thread combination and separate warm/cold arms. Both policies use CPU
 fp32; the production-thread policy resolves to four threads on the recorded
