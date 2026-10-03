@@ -418,7 +418,8 @@ def test_the_operator_designates_a_coordinator_until_it_expires(store):
                    "fence": 1, "expires_at": 4600.0, "replaced": None}
     [row] = events(store, "lease_designate")
     assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
-    assert payload(row) == {"name": "designated:coordinator:proj", "fence": 1, "hold": 3600}
+    assert payload(row) == {"name": "designated:coordinator:proj", "fence": 1, "hold": 3600,
+                            "replaced": None}
     [lease] = store.list_leases()["leases"]
     assert (lease["name"], lease["holder"]["agent_id"]) == ("designated:coordinator:proj",
                                                            a["agent_id"])
@@ -428,11 +429,30 @@ def test_the_operator_designates_a_coordinator_until_it_expires(store):
     # A new designation replaces the old one and says whom it replaced.
     out = store.designate_coordinator("proj", b["agent_id"], hold=60)
     assert (out["replaced"], out["fence"], out["expires_at"]) == (a["agent_id"], 2, 1060.0)
+    # The export names the session that lost the role, not only the CLI.
+    assert payload(events(store, "lease_designate")[1])["replaced"] == a["agent_id"]
     store.test_time[0] = 1061.0
     assert store.list_leases()["leases"] == []
     [expired] = events(store, "lease_expire")
     assert (expired["agent_id"], payload(expired)["name"]) == (b["agent_id"],
                                                              "designated:coordinator:proj")
+
+
+def test_a_designation_drops_a_waiter_queued_before_the_namespace_was_reserved(store):
+    """A bank upgraded from before ``designated:`` was reserved may hold a
+    waiter for it; the operator's designation must not grant it first."""
+    early, a = store.register("alice"), store.register("alice", project="proj")
+    store.storage.conn.execute(
+        "INSERT INTO coordination_leases (name) VALUES ('designated:coordinator:proj')")
+    store.storage.conn.execute(
+        "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+        "VALUES ('designated:coordinator:proj',%s,'alice',3600,900)", (early["agent_id"],))
+    store.designate_coordinator("proj", a["agent_id"], hold=3600)
+    assert events(store, "lease_grant") == []
+    [dequeued] = events(store, "lease_dequeue")
+    assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
+    [lease] = store.list_leases()["leases"]
+    assert (lease["holder"]["agent_id"], lease["queued"]) == (a["agent_id"], 0)
 
 
 def test_a_designated_coordinator_may_resign_and_the_operator_may_revoke(store):
@@ -447,6 +467,9 @@ def test_a_designated_coordinator_may_resign_and_the_operator_may_revoke(store):
 @pytest.mark.parametrize("project, agent, hold, code", [
     ("", "self", 3600, "invalid_project"),
     ("  ", "self", 3600, "invalid_project"),
+    (" proj", "self", 3600, "invalid_project"),
+    ("proj ", "self", 3600, "invalid_project"),
+    ("p" * 98, "self", 3600, "invalid_project"),
     ("proj", "nobody", 3600, "instance_not_found"),
     ("proj", "revoked", 3600, "agent_revoked"),
     ("proj", "self", 59, "invalid_ttl"),

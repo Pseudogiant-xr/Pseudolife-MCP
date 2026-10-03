@@ -1954,7 +1954,10 @@ class CoordinationStore:
         designation. The hold is the lease ``designated:coordinator:<project>``,
         so it expires, shows on the board and is revoked with ``break_lease``
         like any lease; the designee may release it, never take or renew it."""
-        if not isinstance(project, str) or not project.strip():
+        # A project the recipient's row can carry exactly: no surrounding
+        # whitespace (it would never match), and short enough for the name.
+        if (not isinstance(project, str) or not project or project != project.strip()
+                or len(COORDINATOR_DESIGNATION + project) > MAX_LEASE_NAME):
             raise CoordinationError("invalid_project")
         if type(hold) is not int or not DESIGNATION_MIN <= hold <= DESIGNATION_MAX:
             raise CoordinationError("invalid_ttl")
@@ -1962,23 +1965,31 @@ class CoordinationStore:
         self._lease_args(name)
         with self.storage._txn():
             agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
-            agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s FOR UPDATE",
-                              (agent_id,))
+            now = self.clock()
+            # The lease row is locked first and the agent row only read, the
+            # order release and prune take (a lease, then its holder's row).
+            self.storage.conn.execute(
+                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (name,))
+            self._one("SELECT name FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
+            agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
             if agent is None:
                 raise CoordinationError("instance_not_found")
             if agent["credential_hash"] is None:
                 raise CoordinationError("agent_revoked")
-            now = self.clock()
-            self.storage.conn.execute(
-                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
-                (name,))
-            events = []
+            # A waiter queued before the namespace was reserved never takes
+            # it: dropped here, before the settle below could grant it.
+            events = [self._event("lease_dequeue", {"name": name, "reason": "reserved"},
+                                  actor="daemon", agent_id=r["agent_id"])
+                      for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
+                                         "RETURNING agent_id", (name,))]
             row = self._settle(name, now, events)
             replaced = row["holder_agent_id"]
             row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
                               expect=None, purpose="designated by the operator")
             events.append(self._event("lease_designate",
-                                      {"name": name, "fence": row["fence"], "hold": hold},
+                                      {"name": name, "fence": row["fence"], "hold": hold,
+                                       "replaced": replaced},
                                       actor="operator", agent_id=agent_id,
                                       project=agent["project"], task=agent["task"]))
             self._append(events, now)

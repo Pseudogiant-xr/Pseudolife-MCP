@@ -703,8 +703,8 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
 
 # How long a model's claim holds between renewals. A model renews by claiming
 # again, and a session can sit between turns for hours, so a claim on a work
-# area (``claim:<path>``) lasts a day and any other session-held lease (the
-# coordinator role, renewed hourly) an hour: the starting values the
+# area (``claim:<path>``) lasts a day and any other session-held lease (such
+# as ``coordinator:<project>``, renewed hourly) an hour: the starting values the
 # Coordination v2 design set on 2026-09-25, not measurements. Expiry, not a
 # heartbeat, frees them when a session dies. ``pseudolife-mcp lease run``
 # holds process leases with a short ttl it renews itself.
