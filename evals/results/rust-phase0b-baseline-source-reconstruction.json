@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "receipt": "evals/results/rust-phase0b-daemon-scaling-linux.json",
+  "receipt_sha256": "7a8065e9ceb2d3f5337ceab2e34127e1384c90ddd2b16ad6059d3f704ba55d68",
+  "source_head": "3691f5cb75487d3fda54a6bde6fab35dcf32c681",
+  "source_schema": 53,
+  "platform": "Linux",
+  "rule": "Exact canonical LF Python source bytes; no CRLF reconstruction needed.",
+  "current_baseline_files_match_receipt_after_lf_normalization": true,
+  "dependency": {
+    "logical_path": "evals/rust_port/provenance.py",
+    "reconstruct_from": "evals/results/rust-phase0b-baseline-runtime-provenance-32740c866530c6b4.py",
+    "sha256": "32740c866530c6b4b9f9fb1bb17ab7fe1ecab29b83596e649eadac37e696ec69",
+    "reason": "Shared capture provenance evolved after the baseline instrument was frozen; preserve its exact imported bytes.",
+    "changes_after_capture": "source_metadata gained instrument_dirty and validates the additional Git status subprocess.",
+    "baseline_runtime_functions_unchanged": {
+      "module_command": true,
+      "runtime_metadata": true
+    }
+  },
+  "process_helper_matches_current_canonical_source": true
+}

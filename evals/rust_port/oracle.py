@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from evals.rust_port.fixtures import FixtureService
-from evals.rust_port.provenance import ROOT, require_historical_source, require_import_root, runtime_metadata
+from evals.rust_port.provenance import ROOT, require_oracle_source as require_historical_source, require_import_root, runtime_metadata
 
 
 def run_fixture(sock):

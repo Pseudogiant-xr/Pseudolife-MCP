@@ -43,11 +43,9 @@ def source_metadata(root=ROOT):
     if head.returncode or current_difference.returncode not in (0, 1) or untracked.returncode:
         raise RuntimeError("historical oracle source comparison unavailable")
     instrument = _git(ROOT, "rev-parse", "HEAD")
-    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline")
-    if instrument.returncode or instrument_status.returncode:
+    if instrument.returncode:
         raise RuntimeError("instrument source provenance unavailable")
     return {"source_head": head.stdout.strip(), "instrument_head": instrument.stdout.strip(),
-            "instrument_dirty": bool(instrument_status.stdout.strip()),
             "instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted([*Path(__file__).parent.glob("*.py"),
                                                       *Path(__file__).parent.glob("*.json")])},

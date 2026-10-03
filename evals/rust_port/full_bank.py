@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
+from contextlib import ExitStack
 from datetime import datetime
 import json
 import math
@@ -12,8 +14,9 @@ import random
 import re
 import sys
 
-from .harness import HttpClient, Policy, compare, isolated_env, write_new
-from .provenance import require_historical_source, source_metadata, runtime_metadata
+from .harness import (HttpClient, Policy, compare, isolated_env, write_new, strict_json_loads,
+                      capture_platform, HTTP_HEADER_ALLOWLIST, NORMALIZATION_RULES)
+from .provenance import require_oracle_source as require_historical_source, source_metadata, runtime_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 SEED = json.loads(Path(__file__).with_name("full_seed.json").read_text(encoding="utf-8"))["seed"]
@@ -100,7 +103,9 @@ class Normalizer:
         # Epoch values vary between equivalent banks; their exact JSON numeric
         # types remain part of the response contract after normalization.
         if kind in {"epoch", "nullable_epoch"} and value is not None:
-            return f"<{name}:{type(value).__name__}>"
+            magnitude = math.floor(math.log10(value))
+            unit = "seconds" if 8 <= magnitude <= 10 else "milliseconds" if 11 <= magnitude <= 13 else "other"
+            return f"<{name}:{type(value).__name__}:epoch-unit={unit}:magnitude={magnitude}>"
         return f"<{name}>"
 
     def apply(self, raw, rules):
@@ -108,7 +113,7 @@ class Normalizer:
         embedded = []
         for path in rules.get("json_text_paths", []):
             for parent, key, value in locations(document, path):
-                parent[key] = json.loads(value)
+                parent[key] = strict_json_loads(value)
                 embedded.append((parent, key))
         for path, kind in rules.get("times", {}).items():
             for _, _, value in locations(document, path):
@@ -213,7 +218,7 @@ def full_corpus(seed=SEED):
     http("receive-after-ack", "/api/coordination/receive", {"limit": 8}, identity="recipient")
     http("receive-wrong-identity", "/api/coordination/receive", {"limit": 8}, identity="wrong-recipient", status=403)
     return {"schema": 1, "seed": seed, "fixture_entries": fixture_entries(seed), "cases": cases,
-            "scope": "real Python daemon, real CPU embedder, two newly minted PostgreSQL banks; no Rust daemon"}
+            "scope": "real Python oracle and candidate over HTTP/MCP; identically seeded fresh disposable banks"}
 
 
 FACT_CLOCKS = {"asserted_at": "epoch", "last_confirmed": "epoch", "superseded_at": "nullable_epoch",
@@ -301,8 +306,9 @@ def normalize_payload(normal, payload, operation):
     return normal.apply(payload, rules)
 
 
-def observe(corpus, url, token):
-    normal, client, records = Normalizer(), HttpClient(url, timeout=120), []
+def observe(corpus, url, token, *, candidate=False):
+    from .wire import normalize_content_length
+    normal, client, records = Normalizer(), HttpClient(url, timeout=120, retain_wire=True), []
     for case in corpus["cases"]:
         request = normal.resolve(case["request"])
         auth = request.get("auth", "valid")
@@ -314,25 +320,37 @@ def observe(corpus, url, token):
             key_actor = "sender" if identity == "wrong-recipient" else identity
             headers.update({"X-PL-Agent": normal.bindings[actor + ".agent_id"],
                             "X-PL-Agent-Key": normal.bindings[key_actor + ".credential"]})
-        response = client.execute(request, case["surface"], runtime_headers=headers)
-        if response["status"] != case["expect"]["status"]:
+        try:
+            response = client.execute(request, case["surface"], runtime_headers=headers)
+        except ValueError as exc:
+            if not candidate:
+                raise
+            records.append({**case, "response": {"boundary_error": type(exc).__name__}})
+            continue
+        raw = response.pop("_wire_body", None)
+        original_body = copy.deepcopy(response["body"])
+        if response["status"] != case["expect"]["status"] and not candidate:
             raise ValueError("response status contract failed: " + case["id"])
         if case["surface"] == "mcp" and response["body"] and "result" in response["body"]:
             result = response["body"]["result"]
-            if bool(result.get("isError")) != case["expect"].get("tool_error", False):
+            envelope_matches = bool(result.get("isError")) == case["expect"].get("tool_error", False)
+            if not envelope_matches and not candidate:
                 raise ValueError("tool contract failed: " + case["id"])
-            if "structuredContent" in result:
+            if "structuredContent" in result and envelope_matches:
                 result["structuredContent"] = normalize_payload(normal, result["structuredContent"], case["operation"])
             for item in result.get("content", []):
-                if item.get("type") == "text" and not result.get("isError"):
-                    payload = normalize_payload(normal, json.loads(item["text"]), case["operation"])
+                if item.get("type") == "text" and not result.get("isError") and envelope_matches:
+                    payload = normalize_payload(normal, strict_json_loads(item["text"]), case["operation"])
                     item["text"] = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         elif response["status"] == 200 and case["surface"] == "http":
             response["body"] = normalize_payload(normal, response["body"], case["operation"])
+        if raw is not None:
+            normalize_content_length(response, raw, original_body)
         records.append({**case, "response": response})
         serialized = json.dumps(records[-1], allow_nan=False)
         credentials = [v for name, v in normal.bindings.items() if normal.kinds[name] == "credential"]
-        if any(secret in serialized for secret in [token, *credentials]):
+        raw_text = base64.b64decode(response.get("raw_mcp_body_b64", "")).decode("utf-8")
+        if any(secret in serialized or secret in raw_text for secret in [token, *credentials]):
             raise ValueError("credential escaped response normalization")
         print(json.dumps({"case": case["id"], "observed": True}), flush=True)
     return records
@@ -356,7 +374,9 @@ def private_home_overrides(private):
     return overrides
 
 
-def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *, offline_resource_checked_at=None):
+def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *,
+        offline_resource_checked_at=None, candidate_url=None, candidate_command=None, candidate_nonce=None,
+        validate_controls=False, validate_url_candidate=False):
     require_historical_source(oracle_root)
     from evals.rust_baseline.common import lease_gate
     from evals.rust_baseline.daemon import disposable_database, launched_daemon, private_directory
@@ -368,25 +388,64 @@ def run(corpus, board_checked_at=None, score_abs_tol=1e-6, oracle_root=ROOT, *, 
         raise RuntimeError("baseline launcher needs source_root oracle interface")
     resource = (lease_gate(board_checked_at, offline_resource_checked_at=offline_resource_checked_at)
                 if offline_resource_checked_at else lease_gate(board_checked_at))
-    passes, cleanup_results = [], []
-    for _ in range(2):
-        with disposable_database() as dsn, private_directory() as private:
-            with launched_daemon(dsn, private, env_extra=private_home_overrides(private), source_root=oracle_root) as (_, url, cleanup):
-                passes.append(observe(corpus, url, TOKEN))
-            cleanup_results.append({**cleanup, "database_dropped": False})
+    if candidate_url and candidate_command:
+        raise ValueError("candidate URL and owned command are mutually exclusive")
+    from .candidate import command_identity, launched_candidate, external_candidate
+    from .controls import capture_controls
+    candidate_identity = (command_identity(candidate_command) if candidate_command else
+        {"kind": "external-url" if candidate_url else "python-reference"})
+    passes, cleanup_results, control_results = [], [], {}
+    for arm in (["oracle", "candidate", "url-reference"] if validate_url_candidate else ["oracle", "candidate"]):
+        resource = (lease_gate(board_checked_at, offline_resource_checked_at=offline_resource_checked_at)
+                    if offline_resource_checked_at else lease_gate(board_checked_at))
+        with disposable_database() as dsn, private_directory() as private, ExitStack() as adapters:
+            overrides = private_home_overrides(private)
+            adapter_cleanup = None
+            if arm == "url-reference":
+                from .url_reference import reference_adapter
+                reference_url, reference_nonce, adapter_cleanup = adapters.enter_context(reference_adapter(oracle_root))
+                launcher = external_candidate(reference_url, dsn, TOKEN, candidate_nonce=reference_nonce)
+            elif arm == "candidate" and candidate_command:
+                launcher = launched_candidate(candidate_command, dsn, private, source_root=oracle_root,
+                                               cache_overrides=overrides)
+            elif arm == "candidate" and candidate_url:
+                launcher = external_candidate(candidate_url, dsn, TOKEN, candidate_nonce=candidate_nonce)
+            else:
+                launcher = launched_daemon(dsn, private, env_extra=overrides, source_root=oracle_root)
+            with launcher as launched:
+                url, cleanup = launched[-2:]
+                # Non-reference candidates are allowed to produce differences;
+                # the Python oracle must satisfy the corpus's own assertions.
+                if arm == "url-reference" or arm == "candidate" and (candidate_command or candidate_url):
+                    passes.append(observe(corpus, url, TOKEN, candidate=True))
+                else:
+                    passes.append(observe(corpus, url, TOKEN))
+                if arm == "oracle" and validate_controls:
+                    control_results = capture_controls(corpus, passes[-1], url, TOKEN)
+            adapters.close()
+            if adapter_cleanup is not None:
+                cleanup["reference_adapter"] = adapter_cleanup
+            cleanup_results.append({**cleanup, "arm": arm, "database_dropped": False,
+                                    "resource_check": resource})
         cleanup_results[-1]["database_dropped"] = True
     differences = []
     policy = Policy(abs_tol=score_abs_tol, score_paths=("/body/entries/*/score", "/body/result/structuredContent/entries/*/score",
         "/body/result/content/*/text/entries/*/score"), json_text_paths=("/body/result/content/*/text",),
         ranking_paths=("/body/entries", "/body/result/structuredContent/entries", "/body/result/content/*/text/entries"))
-    for expected, actual in zip(*passes):
-        case_policy = Policy(abs_tol=score_abs_tol) if expected["expect"].get("tool_error") else policy
-        differences.extend({"case": expected["id"], **difference} for difference in compare(
-            expected["response"], actual["response"], case_policy))
-    return {"schema": 1, "records": passes[0]}, {"schema": 1, "status": "passed" if not differences else "failed",
+    for index, candidate_records in enumerate(passes[1:], start=1):
+        for expected, actual in zip(passes[0], candidate_records):
+            case_policy = Policy(abs_tol=score_abs_tol) if expected["expect"].get("tool_error") else policy
+            differences.extend({"case": expected["id"], "arm": index, **difference} for difference in compare(
+                expected["response"], actual["response"], case_policy))
+    return {"schema": 1, "capture_platform": capture_platform(), "records": passes[0]}, {
+        "schema": 1, "capture_platform": capture_platform(), "status": "passed" if not differences else "failed",
         "cases": len(passes[0]), "differences": differences, "cleanup": cleanup_results,
         "resource_check": resource, "environment": environment_metadata(oracle_root), "seed": corpus["seed"],
         "scope": corpus["scope"], "score_abs_tolerance": policy.abs_tol,
+        "candidate": candidate_identity, "graded_controls": control_results,
+        "url_candidate_validation": "passed" if validate_url_candidate and not any(d["arm"] == 2 for d in differences)
+                                    else "failed" if validate_url_candidate else "not-run",
+        "compared_http_headers": list(HTTP_HEADER_ALLOWLIST), "normalization_rules": list(NORMALIZATION_RULES),
         "ranking_order": "strict; sequential integer memory IDs retained exactly"}
 
 
@@ -399,6 +458,13 @@ def main():
     clearance.add_argument("--offline-resource-checked-at")
     parser.add_argument("--score-abs-tol", type=float, default=1e-6)
     parser.add_argument("--oracle-root", type=Path, default=ROOT)
+    candidate = parser.add_mutually_exclusive_group()
+    candidate.add_argument("--candidate-url", help="loopback eval adapter with disposable-bank binding endpoints")
+    candidate.add_argument("--candidate-command-json", help="JSON argv for runner-owned candidate")
+    candidate.add_argument("--python-candidate", action="store_true", help="exercise the owned-command path with Python")
+    parser.add_argument("--validate-controls", action="store_true")
+    parser.add_argument("--candidate-nonce", help="private readiness nonce from the externally owned adapter")
+    parser.add_argument("--validate-url-candidate", action="store_true", help="prove the URL lane with another fresh Python bank")
     args = parser.parse_args()
     corpus = full_corpus()
     write_new(args.out_dir / "corpus.json", corpus)
@@ -410,10 +476,18 @@ def main():
     if not (args.board_checked_at or args.offline_resource_checked_at):
         parser.error("run requires the lead's board or independent offline resource clearance timestamp")
     try:
+        from .provenance import module_command
+        command = (module_command("evals.rust_baseline.daemon_child", args.oracle_root.resolve())
+                   if args.python_candidate else json.loads(args.candidate_command_json)
+                   if args.candidate_command_json else None)
         transcript, receipt = run(corpus, args.board_checked_at, args.score_abs_tol, args.oracle_root.resolve(),
-                                  offline_resource_checked_at=args.offline_resource_checked_at)
+                                  offline_resource_checked_at=args.offline_resource_checked_at,
+                                  candidate_url=args.candidate_url, candidate_command=command,
+                                  candidate_nonce=args.candidate_nonce, validate_controls=args.validate_controls,
+                                  validate_url_candidate=args.validate_url_candidate)
     except Exception as exc:
-        write_new(args.out_dir / "run.json", {"schema": 1, "status": "failed", "error_type": type(exc).__name__,
+        write_new(args.out_dir / "run.json", {"schema": 1, "capture_platform": capture_platform(),
+                                             "status": "failed", "error_type": type(exc).__name__,
                                              "scope": corpus["scope"]})
         raise
     write_new(args.out_dir / "python-oracle.json", transcript)
