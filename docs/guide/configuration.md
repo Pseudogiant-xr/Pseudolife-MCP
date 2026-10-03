@@ -702,13 +702,21 @@ re-grant with `lease delegate` (a 0.16.0 grant lasted at most 7 days anyway).
 The old hold stays on the board until it expires; `lease break` it to clear
 it. Wake rows recorded as `coordinator` before the upgrade stay as history:
 they still count against the sender's authority budget for their hour and a
-queued reopen is still served.
+queued reopen is still served. 0.16.0 let a session hold an ordinary lease
+named `delegate:<project>`; such a hold grants nothing after the upgrade (a
+delegate counts only with the operator's `lease_delegate` record for its
+current fence), but check `pseudolife-mcp lease list` before deploying and
+`lease break` any `delegate:` lease you find, so the board shows only real
+grants. The new park-gate wording in the plugin's hook fallbacks reaches
+clients only through the update's client step.
 
 **Upgrading from 2026-10-03's first version**, where holding
 `coordinator:<project>` was the role: after the upgrade **no session can
 reopen a done park as delegate until one is granted**; run the command above
-for the coordinating session. A `designated:` lease that code let a session
-claim grants nothing now; `lease break` it to clear it from the board.
+for the coordinating session. Before deploying, check that `pseudolife-mcp
+lease list` shows no `designated:` or `delegate:` lease held or queued: that
+code let any session claim one. Neither grants anything now, but `lease
+break` it so the board shows only the operator's grants.
 
 Sessions hold leases too, from the model's side, with no process and no OS lock
 behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,

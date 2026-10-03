@@ -36,7 +36,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `pseudolife-mcp lease delegate PROJECT AGENT --for 7d` (in the Docker tier,
   inside the daemon container). Clear a leftover
   `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
-  or let it expire.
+  or let it expire. Before deploying, run `pseudolife-mcp lease list` and
+  `lease break` any `delegate:` lease: 0.16.0 let any session hold one under
+  that name. Such a hold grants nothing after the upgrade either, since a
+  delegate counts only with the operator's `lease_delegate` audit record for
+  the lease's current fence (coordinator review of #559). The hook fallback
+  wording under `plugin/hooks/` needs the update's client step.
 
 ### Fixed (2026-10-04 — `pseudolife-mcp update` no longer deletes the shim runtime it runs from)
 - On Linux and macOS, `pseudolife-mcp update` could never finish its

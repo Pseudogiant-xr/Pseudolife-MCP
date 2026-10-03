@@ -2285,16 +2285,32 @@ class CoordinationStore:
         operator listed, ``delegate`` when the operator made the sending
         agent the maintainer's delegate for the recipient's (non-empty)
         project (the live ``delegate:<project>`` hold), else None. Read from
-        the authenticated sender row and the lease table only: nothing a
-        message says can claim either, and holding the open
+        the authenticated sender row, the lease table and the audit log only:
+        nothing a message says can claim either, and holding the open
         ``coordinator:<project>`` lease counts for nothing. An expired grant
-        counts for nothing even before a settle vacates it."""
+        counts for nothing even before a settle vacates it.
+
+        The hold counts only with the operator's ``lease_delegate`` record
+        for its current fence (coordinator review of #559, 2026-10-04):
+        0.16.0 reserved only ``designated:``, so a session could hold an
+        ordinary lease named ``delegate:<project>`` across the upgrade.
+        Fences come from one sequence and only the daemon writes the audit
+        log, so no session can match one; the purpose text is the holder's
+        and proves nothing. The audit scan runs only for a sender that holds
+        such a lease. An audit window shorter than the grant
+        (``audit_retention_days`` under 7) can end the authority early,
+        never extend it."""
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
         if project and self._one(
-                "SELECT 1 AS hit FROM coordination_leases WHERE name=%s "
-                "AND holder_agent_id=%s AND expires_at>%s",
+                "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=%s "
+                "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
+                "FROM coordination_events e WHERE e.event='lease_delegate' "
+                "AND e.actor='operator' AND e.agent_id=l.holder_agent_id "
+                "AND CASE WHEN e.event='lease_delegate' THEN "
+                "e.payload::jsonb->>'name'=l.name "
+                "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
                 (DELEGATE_PREFIX + project, sender["agent_id"], now)) is not None:
             return "delegate"
         return None

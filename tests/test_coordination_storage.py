@@ -2475,6 +2475,46 @@ def test_a_designation_from_before_the_rename_grants_nothing(store):
         store.acquire_lease(*creds(old), name="designated:coordinator:proj", ttl=3600)
 
 
+def _agent_held(store, agent, name, purpose="granted by the operator"):
+    """A lease ``name`` held by ``agent`` the way 0.16.0's acquire_lease
+    would have granted it (``delegate:`` was not reserved then), with a
+    fresh fence and a purpose the agent chose."""
+    store.storage.conn.execute(
+        "INSERT INTO coordination_leases (name,holder_agent_id,holder_principal,purpose,fence,"
+        "acquired_at,expires_at) VALUES (%s,%s,'alice',%s,nextval('coordination_lease_fence'),"
+        "%s,%s) ON CONFLICT (name) DO UPDATE SET holder_agent_id=EXCLUDED.holder_agent_id,"
+        "holder_principal=EXCLUDED.holder_principal,purpose=EXCLUDED.purpose,"
+        "fence=EXCLUDED.fence,acquired_at=EXCLUDED.acquired_at,expires_at=EXCLUDED.expires_at,"
+        "freed_at=NULL",
+        (name, agent["agent_id"], purpose, store.test_time[0], store.test_time[0] + 86400))
+
+
+def test_a_delegate_lease_an_agent_took_before_the_upgrade_grants_nothing(store):
+    """0.16.0 let any session acquire an ordinary lease named
+    ``delegate:<project>``; a hold taken then must not become reopen
+    authority after the upgrade (coordinator review of #559). Only the
+    operator's grant, recorded as ``lease_delegate`` for the lease's
+    current fence, counts; the purpose text is the agent's and proves
+    nothing."""
+    squatter = store.register("alice", project="proj")
+    _agent_held(store, squatter, "delegate:proj")
+    b = _done(store)
+    assert _wake(store, squatter, b, urgent=True)["reason"] == "parked_done"
+
+
+def test_a_regrant_counts_and_a_revoked_grant_cannot_be_revived(store):
+    delegate = _delegate(store)
+    store.grant_delegate("proj", delegate["agent_id"], hold=3600)   # a new fence
+    b = _done(store)
+    assert _wake(store, delegate, b, urgent=True)["reason"] == "delegate"
+    # Revoked, then the same agent holds the name again by any other route:
+    # its old grant was for an earlier fence, so it counts for nothing.
+    store.break_lease("delegate:proj")
+    _agent_held(store, delegate, "delegate:proj")
+    c = _done(store)
+    assert _wake(store, delegate, c, urgent=True)["reason"] == "parked_done"
+
+
 def test_authority_rings_from_before_the_rename_still_spend_the_budget(store):
     from pseudolife_memory.storage.coordination import WakePolicy
     store.wake = WakePolicy(authority_per_sender_per_hour=1)
