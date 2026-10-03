@@ -1405,9 +1405,10 @@ class WakeConfig:
     ring (2026-10-02, regular mail never wakes): a config.yaml that still
     names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
     ``authority_per_sender_per_hour`` bounds the urgent rings one sender
-    may cause as the maintainer or a project's coordinator (2026-10-03),
-    which reopen done parks and no longer spend the plain urgent
-    allowance; the per-recipient, nightly and stagger caps still apply.
+    may cause as the maintainer or the maintainer's delegate for a project
+    (2026-10-03), which reopen done parks and no longer spend the plain
+    urgent allowance; the per-recipient, nightly and stagger caps still
+    apply.
     """
 
     per_recipient_per_hour: int = 20
@@ -1417,7 +1418,7 @@ class WakeConfig:
     active_seconds: int = 60
     # A starting value, not a measurement: twice the largest burst the board
     # has carried (six recipients, a host fix sent to every session on
-    # 2026-09-27), so a coordinator can relay one incident decision and a
+    # 2026-09-27), so a delegate can relay one incident decision and a
     # follow-up to every session in an hour; on 2026-10-03 such relays came
     # back capped under the 6-an-hour urgent allowance.
     authority_per_sender_per_hour: int = 12

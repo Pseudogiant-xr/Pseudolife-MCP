@@ -97,7 +97,7 @@ bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
 action makes ordinary mail `hinted` rather than rung;
 `authority_per_sender_per_hour` (12) bounds the urgent rings one sender causes
-as the maintainer or a project's designated coordinator, which spend it instead of
+as the maintainer or the maintainer's delegate for a project, which spend it instead of
 `urgent_per_sender_per_hour` (see [Reopening a done park](#reopening-a-done-park)).
 Unparked Codex urgency
 takes capped attention first, with unknown host turn state. The values are whole
@@ -671,32 +671,52 @@ lease to the next waiter, and logs a `lease_break` with the operator as its
 actor. It frees the board's record only: a process still holding the local lock
 keeps it until it exits.
 
-`pseudolife-mcp lease designate PROJECT AGENT [--for DURATION]` is the
-operator's way to name a project's coordinator: the one session whose urgent
-mail [reopens a done park](#reopening-a-done-park) in that project. It opens
-the bank the same way, grants AGENT (its id, or a unique prefix of 8 or more
-characters) the lease `designated:coordinator:<PROJECT>` for DURATION (default
-1d, at most 7d), replacing any current designation, and logs a
-`lease_designate` with the operator as its actor. Leases named `designated:`
-are the operator's alone: a session's claim of one is refused
-`reserved_lease`, so a designee cannot renew its own. It may release it to
-resign; revoke it with `pseudolife-mcp lease break
-designated:coordinator:<PROJECT>`. A freed designation is never granted to a
-queued session: any waiter leaves the queue (`lease_dequeue`, reason
-`reserved`). In the Docker tier, run both inside the daemon container, where
-the bank's URL is set:
+`pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` is the
+operator's way to name the maintainer's delegate for a project: the one
+session whose urgent mail [reopens a done park](#reopening-a-done-park) in
+that project. It opens the bank the same way, grants AGENT (its id, or a
+unique prefix of 8 or more characters) the lease `delegate:<PROJECT>` for
+DURATION (default 1d, at most 7d), replacing any current delegate, and logs a
+`lease_delegate` with the operator as its actor. Leases named `delegate:` (and
+`designated:`, their name before 0.16.1) are the operator's alone: a
+session's claim of one is refused `reserved_lease`, so a delegate cannot
+renew its own. It may release it to resign; revoke it with
+`pseudolife-mcp lease break delegate:<PROJECT>`. A freed grant is never
+passed to a queued session: any waiter leaves the queue (`lease_dequeue`,
+reason `reserved`). In the Docker tier, run both inside the daemon container,
+where the bank's URL is set:
 
 ```sh
-docker exec <daemon container> pseudolife-mcp lease designate PROJECT AGENT --for 7d
+docker exec <daemon container> pseudolife-mcp lease delegate PROJECT AGENT --for 7d
 ```
 
+The delegate is not the coordinator: `coordinator:<project>` is the open role
+any session may claim to say it is coordinating, and it grants nothing.
+`pseudolife-mcp lease designate`, the command's name in 0.16.0, still works
+and prints one line naming `lease delegate`.
+
+**Upgrading from 0.16.0**, where the grant was the lease
+`designated:coordinator:<project>` and its rings were `reason: coordinator`:
+a grant made under the old name reopens nothing after the upgrade, so
+re-grant with `lease delegate` (a 0.16.0 grant lasted at most 7 days anyway).
+The old hold stays on the board until it expires; `lease break` it to clear
+it. Wake rows recorded as `coordinator` before the upgrade stay as history:
+they still count against the sender's authority budget for their hour and a
+queued reopen is still served. 0.16.0 let a session hold an ordinary lease
+named `delegate:<project>`; such a hold grants nothing after the upgrade (a
+delegate counts only with the operator's `lease_delegate` record for its
+current fence), but check `pseudolife-mcp lease list` before deploying and
+`lease break` any `delegate:` lease you find, so the board shows only real
+grants. The new park-gate wording in the plugin's hook fallbacks reaches
+clients only through the update's client step.
+
 **Upgrading from 2026-10-03's first version**, where holding
-`coordinator:<project>` was the role: after the upgrade **no session has
-coordinator power until one is designated**; run the command above for the
-coordinating session. Before deploying, check that `pseudolife-mcp lease
-list` shows no `designated:` lease held or queued: the older code let any
-session claim one, and a holder keeps the role until its hold expires
-(`lease break` it first).
+`coordinator:<project>` was the role: after the upgrade **no session can
+reopen a done park as delegate until one is granted**; run the command above
+for the coordinating session. Before deploying, check that `pseudolife-mcp
+lease list` shows no `designated:` or `delegate:` lease held or queued: that
+code let any session claim one. Neither grants anything now, but `lease
+break` it so the board shows only the operator's grants.
 
 Sessions hold leases too, from the model's side, with no process and no OS lock
 behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
@@ -704,7 +724,7 @@ expect=SECONDS)` takes or queues for a session-held lease, such as
 `coordinator:<project>` or `claim:<path>` for a work area; claiming again renews
 it, and `action="release"` frees it or leaves its queue. `coordinator:<project>`
 says who is coordinating, for peers to read; it grants nothing, since any
-session can claim it (the operator's designation does). A `claim:` lease lasts
+session can claim it (the operator's `delegate:` grant does). A `claim:` lease lasts
 a day between renewals, any other an hour. A claim is advisory: it tells peers,
 it blocks no edit. A queued session is not told when its turn comes: it sees
 the grant the next time it lists or claims, and must renew within the same
@@ -1768,8 +1788,8 @@ The **park record** lives on the agent row and is set through
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
 Use `done` only when no follow-up is expected; urgent mail from the
-maintainer, the project's designated coordinator or your named clearer still
-rings it. Waiting on a merge click or a review that may still bring fixes? Park
+maintainer, the maintainer's delegate for the project or your named clearer
+still rings it. Waiting on a merge click or a review that may still bring fixes? Park
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
 `maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
 a live listener. Check the sender's wake receipt; `no_path` means mail is
@@ -1816,7 +1836,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | ordinary mail to a recipient that is not parked and acted on the board within `active_seconds` (unparked Codex urgency takes the capped attention branch first); its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` and the mail does not reopen it (`reason: parked_done`; see [Reopening a done park](#reopening-a-done-park)), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | `reopen_by` for `parked_done`: who could reopen it |
 | `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: queue_pending`, `recipient_state: unknown`, `queue_allowed: true` for a capped unknown-state bell), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path; `fallback` (text) and `fallback_paths`, the other ways to reach that client: `codex_doorbell` and `maintainer_types` for a Codex thread, `claude_desktop_send_message` and `maintainer_types` for a Claude Code session; `reopened` for a reopened done park |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the recipient project's designated coordinator is `reason: maintainer` or `coordinator` and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the maintainer's delegate for the recipient's project is `reason: maintainer` or `delegate` (`coordinator` on rows recorded before 0.16.1) and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by`, `retry` (what would ring it: `urgent`, or `clears` naming the need) |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `authority_sender_hour`) | the parked need, if any |
 
@@ -1829,7 +1849,7 @@ Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
 a non-Codex recipient retains its established urgent ring contract. Unparked
 Codex urgency spends the sender's urgent allowance (the authority budget
-when the sender is the maintainer or a designated coordinator) and passes the same
+when the sender is the maintainer or the project's delegate) and passes the same
 per-recipient, nightly and stagger caps, and records attention with
 `no_steer_path`. An armed queue listener may queue one fixed bell labelled
 `turn state unknown`; neither its acceptance nor board recency proves native
@@ -1885,13 +1905,13 @@ needs to reach it. `urgent` mail reopens it when the sender is one of:
 
 - **the maintainer**: the sender's bearer principal is listed in
   `coordination.maintainer_principals` (`reason: maintainer`);
-- **the project's designated coordinator**: the operator designated the
-  sending session coordinator of the recipient's own, non-empty `project`
-  with [`pseudolife-mcp lease designate`](#leases-pseudolife-mcp-lease), and the designation has
-  not expired, been released or been revoked (`reason: coordinator`). The
-  designation names one agent id, not a principal, and no session can take
-  it, so it is a credential the maintainer hands out, not a board convention;
-  a ring it causes still grants nothing;
+- **the maintainer's delegate for the project**: the operator made the
+  sending session the delegate for the recipient's own, non-empty `project`
+  with [`pseudolife-mcp lease delegate`](#leases-pseudolife-mcp-lease), and the grant has
+  not expired, been released or been revoked (`reason: delegate`). The
+  grant names one agent id, not a principal, and no session can take it, so
+  it is a credential the maintainer hands out, not a board convention; a
+  ring it causes still grants nothing;
 - **the park's named clearer**: `park_clear_by` is the sender's agent id, or
   a lease the sender just released (`reason: clearer`).
 
@@ -1911,24 +1931,24 @@ mail authority it was never given, a lease passed between sessions spread
 the authority budget over several senders, and the first holder kept the
 real coordinator out for up to a day. A session that holds it now is a
 peer under the plain urgent allowance, and it blocks nothing, since the
-designation is a separate lease no session can take. A principal list
+delegate's grant is a separate lease no session can take. A principal list
 (`coordinator_principals`) was not used for the same reason: it would name
 every session on a host. The board-audit export's `send` events name the
 authority each ring used (`wake_reason`).
 
 The trust boundary is access to the bank's database, as for `lease break`
-and `board-audit redact`: no MCP tool or REST action designates. A session
-whose shell can reach the database can designate itself: on the lite tier,
-where the bank is local, or wherever it can read `ops/.env` or run
-`docker exec` on the daemon host. Keep that access away from sessions you
-would not trust as coordinator. Designate one session's own address, never
-a shared one: the Claude Desktop app's own MCP server, for example, is one
-board address shared by every Desktop conversation, so designating it would
-make all of them the coordinator.
+and `board-audit redact`: no MCP tool or REST action grants it. A session
+whose shell can reach the database can make itself the delegate: on the
+lite tier, where the bank is local, or wherever it can read `ops/.env` or
+run `docker exec` on the daemon host. Keep that access away from sessions
+you would not trust as your delegate. Grant one session's own address,
+never a shared one: the Claude Desktop app's own MCP server, for example, is
+one board address shared by every Desktop conversation, so granting it would
+make all of them the delegate.
 
-Maintainer and coordinator urgency, to a done park or any other, spends the
+Maintainer and delegate urgency, to a done park or any other, spends the
 sender's `wake.authority_per_sender_per_hour` (12) instead of the plain
-urgent allowance (6), so a coordinator relaying an incident decision to
+urgent allowance (6), so a delegate relaying an incident decision to
 every session is not capped halfway; the per-recipient, nightly and stagger
 caps still bind it. A burst (`to: project:<name>` or `all`) reaches only
 peers active within the last three hours, so address a session that parked
@@ -2129,7 +2149,7 @@ also capped (below, and by the daemon's `wake` caps under
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
   park_resume=...). Use done only when no follow-up is expected; urgent mail
-  from the maintainer, the project's designated coordinator or your named
+  from the maintainer, the maintainer's delegate for the project or your named
   clearer still rings it. Waiting on a merge click or a review that may still
   bring fixes? Park needs_approval with park_clear_by set to the reviewer's
   agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires

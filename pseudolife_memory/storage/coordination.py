@@ -166,29 +166,38 @@ _PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "pa
 # 2026-10-03: a coordinator's review of a finished PR could not reach the
 # session that opened it). Urgent mail reopens it when the sender is the
 # maintainer (a principal in ``coordination.maintainer_principals``), the
-# session the operator designated coordinator of the recipient's project, or
-# the agent the park names in ``park_clear_by``. Each comes from the sender's
-# authenticated bearer, the lease table or the recipient's own park, never
-# from anything a message says. The first two are AUTHORITY_REASONS, which
-# spend their own hourly budget instead of the plain urgent allowance.
-AUTHORITY_REASONS = ("maintainer", "coordinator")
+# maintainer's delegate for the recipient's project, or the agent the park
+# names in ``park_clear_by``. Each comes from the sender's authenticated
+# bearer, the lease table or the recipient's own park, never from anything a
+# message says. The first two are AUTHORITY_REASONS, which spend their own
+# hourly budget instead of the plain urgent allowance.
+AUTHORITY_REASONS = ("maintainer", "delegate")
 REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
-# Leases only the operator grants (``pseudolife-mcp lease designate``, which
+# 0.16.0 recorded the delegate's rings as ``coordinator`` (renamed
+# 2026-10-04, maintainer decision: the open ``coordinator:<project>`` role
+# keeps that word). Rows written before the upgrade are history that still
+# counts against the authority budget and is still served.
+_AUTHORITY_ROW_REASONS = (*AUTHORITY_REASONS, "coordinator")
+_REOPEN_ROW_REASONS = (*REOPEN_REASONS, "coordinator")
+# Leases only the operator grants (``pseudolife-mcp lease delegate``, which
 # opens the bank directly like ``lease break``): an agent's acquire is
 # refused ``reserved_lease``, while its release (resigning) and the
-# operator's break work as for any lease. Coordinator power is the live
-# ``designated:coordinator:<project>`` hold, one agent id, never the open
+# operator's break work as for any lease. The power to reopen done parks is
+# the live ``delegate:<project>`` hold, one agent id, never the open
 # ``coordinator:<project>`` lease: any session can claim that one, and every
 # session on a host may share one principal (review of #549, 2026-10-03).
-DESIGNATED_PREFIX = "designated:"
-COORDINATOR_DESIGNATION = DESIGNATED_PREFIX + "coordinator:"
-# A designation lasts at least a minute and at most a week (the longest park
-# and expected end); the CLI's default is a day. Starting values, not
+# ``designated:`` was the namespace before 0.16.1 and stays reserved; a
+# ``designated:coordinator:<project>`` hold left on an upgraded bank grants
+# nothing (the operator re-grants with ``lease delegate``).
+DELEGATE_PREFIX = "delegate:"
+RESERVED_LEASE_PREFIXES = (DELEGATE_PREFIX, "designated:")
+# A grant lasts at least a minute and at most a week (the longest park and
+# expected end); the CLI's default is a day. Starting values, not
 # measurements.
-DESIGNATION_MIN = 60
-DESIGNATION_MAX = 7 * 86400
+DELEGATION_MIN = 60
+DELEGATION_MAX = 7 * 86400
 # What a send to a done park is told would reopen it.
-DONE_REOPEN_BY = ("urgent mail from the maintainer, the project's designated coordinator, "
+DONE_REOPEN_BY = ("urgent mail from the maintainer, the maintainer's delegate for the project, "
                   "or the park's named clearer")
 # What a withheld send is told would ring the park.
 WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
@@ -1717,7 +1726,7 @@ class CoordinationStore:
             for agent in gone:
                 events.append(self._event("lease_dequeue", {"name": name, "reason": "departed"},
                                           actor="daemon", agent_id=agent))
-            if name.startswith(DESIGNATED_PREFIX):
+            if name.startswith(RESERVED_LEASE_PREFIXES):
                 # Only the operator grants these; a waiter queued under older
                 # code leaves instead of inheriting the role (review of #550).
                 self._drop_reserved_waiters(name, events)
@@ -1740,7 +1749,7 @@ class CoordinationStore:
         return row
 
     def _drop_reserved_waiters(self, name, events):
-        """Empty the queue of an operator-only (``designated:``) lease, one
+        """Empty the queue of an operator-only (``delegate:``) lease, one
         ``lease_dequeue`` (reason ``reserved``) per waiter. Only an agent
         queued before the namespace was reserved can be there."""
         for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
@@ -1805,7 +1814,7 @@ class CoordinationStore:
         nobody queued is the caller's at once; otherwise the caller joins the
         queue, and asking again keeps its place and writes nothing."""
         self._lease_args(name, ttl, expect, purpose)
-        if name.startswith(DESIGNATED_PREFIX):
+        if name.startswith(RESERVED_LEASE_PREFIXES):
             raise CoordinationError("reserved_lease")
         with self.storage._txn():
             agent = self._auth(principal, agent_id, credential)
@@ -1961,21 +1970,21 @@ class CoordinationStore:
             self._append(events, now)
         return {"name": name, "broken": True, "was_held_by": row["holder_agent_id"]}
 
-    def designate_coordinator(self, project, agent_id, *, hold):
+    def grant_delegate(self, project, agent_id, *, hold):
         """Operator only (the offline CLI; never exposed to agents): make
-        ``agent_id`` (or a unique prefix of a registered one) the coordinator
-        of ``project`` for ``hold`` seconds, replacing any current
-        designation. The hold is the lease ``designated:coordinator:<project>``,
-        so it expires, shows on the board and is revoked with ``break_lease``
-        like any lease; the designee may release it, never take or renew it."""
+        ``agent_id`` (or a unique prefix of a registered one) the
+        maintainer's delegate for ``project`` for ``hold`` seconds, replacing
+        any current one. The hold is the lease ``delegate:<project>``, so it
+        expires, shows on the board and is revoked with ``break_lease`` like
+        any lease; the delegate may release it, never take or renew it."""
         # A project the recipient's row can carry exactly: no surrounding
         # whitespace (it would never match), and short enough for the name.
         if (not isinstance(project, str) or not project or project != project.strip()
-                or len(COORDINATOR_DESIGNATION + project) > MAX_LEASE_NAME):
+                or len(DELEGATE_PREFIX + project) > MAX_LEASE_NAME):
             raise CoordinationError("invalid_project")
-        if type(hold) is not int or not DESIGNATION_MIN <= hold <= DESIGNATION_MAX:
+        if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
             raise CoordinationError("invalid_ttl")
-        name = COORDINATOR_DESIGNATION + project
+        name = DELEGATE_PREFIX + project
         self._lease_args(name)
         with self.storage._txn():
             agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
@@ -1998,8 +2007,8 @@ class CoordinationStore:
             row = self._settle(name, now, events)
             replaced = row["holder_agent_id"]
             row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
-                              expect=None, purpose="designated by the operator")
-            events.append(self._event("lease_designate",
+                              expect=None, purpose="granted by the operator")
+            events.append(self._event("lease_delegate",
                                       {"name": name, "fence": row["fence"], "hold": hold,
                                        "replaced": replaced},
                                       actor="operator", agent_id=agent_id,
@@ -2187,7 +2196,7 @@ class CoordinationStore:
         serve_values = (ring_allowed, park_seq or 0) if codex else ()
         if reopen_only:
             serve_guard += " AND decision='rung' AND reason=ANY(%s)"
-            serve_values += (list(REOPEN_REASONS),)
+            serve_values += (list(_REOPEN_ROW_REASONS),)
         if not codex and self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
@@ -2210,7 +2219,7 @@ class CoordinationStore:
             (park_seq or 0, agent_id, codex, now))
         if reopen_only:
             rows = [item for item in rows if park_seq is not None and item["decision"] == "rung"
-                    and item["reason"] in REOPEN_REASONS and item["park_authorized"]]
+                    and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"]]
         if not rows:
             return None
         if codex:
@@ -2273,21 +2282,37 @@ class CoordinationStore:
 
     def _authority(self, sender, recipient, now):
         """``maintainer`` when the sender's bearer principal is one the
-        operator listed, ``coordinator`` when the operator designated the
-        sending agent coordinator of the recipient's (non-empty) project
-        (the live ``designated:coordinator:<project>`` hold), else None.
-        Read from the authenticated sender row and the lease table only:
+        operator listed, ``delegate`` when the operator made the sending
+        agent the maintainer's delegate for the recipient's (non-empty)
+        project (the live ``delegate:<project>`` hold), else None. Read from
+        the authenticated sender row, the lease table and the audit log only:
         nothing a message says can claim either, and holding the open
-        ``coordinator:<project>`` lease counts for nothing. An expired
-        designation counts for nothing even before a settle vacates it."""
+        ``coordinator:<project>`` lease counts for nothing. An expired grant
+        counts for nothing even before a settle vacates it.
+
+        The hold counts only with the operator's ``lease_delegate`` record
+        for its current fence (coordinator review of #559, 2026-10-04):
+        0.16.0 reserved only ``designated:``, so a session could hold an
+        ordinary lease named ``delegate:<project>`` across the upgrade.
+        Fences come from one sequence and only the daemon writes the audit
+        log, so no session can match one; the purpose text is the holder's
+        and proves nothing. The audit scan runs only for a sender that holds
+        such a lease. An audit window shorter than the grant
+        (``audit_retention_days`` under 7) can end the authority early,
+        never extend it."""
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
         if project and self._one(
-                "SELECT 1 AS hit FROM coordination_leases WHERE name=%s "
-                "AND holder_agent_id=%s AND expires_at>%s",
-                (COORDINATOR_DESIGNATION + project, sender["agent_id"], now)) is not None:
-            return "coordinator"
+                "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=%s "
+                "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
+                "FROM coordination_events e WHERE e.event='lease_delegate' "
+                "AND e.actor='operator' AND e.agent_id=l.holder_agent_id "
+                "AND CASE WHEN e.event='lease_delegate' THEN "
+                "e.payload::jsonb->>'name'=l.name "
+                "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
+                (DELEGATE_PREFIX + project, sender["agent_id"], now)) is not None:
+            return "delegate"
         return None
 
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id):
@@ -2304,11 +2329,11 @@ class CoordinationStore:
         sender set ``urgent`` (each within its cap), else ``withheld`` with
         the need and ``retry`` so the sender knows what would wake it.
         A done park rings only for ``urgent`` mail from the maintainer, the
-        project's coordinator or the park's named clearer (``reopened``;
-        2026-10-03), else ``not_needed`` with ``reopen_by``. Urgent mail
-        from the maintainer or the coordinator is decided ``maintainer`` or
-        ``coordinator`` wherever plain urgency would ring, and spends the
-        sender's ``authority_per_sender_per_hour`` instead of its urgent
+        maintainer's delegate for the project or the park's named clearer
+        (``reopened``; 2026-10-03), else ``not_needed`` with ``reopen_by``.
+        Urgent mail from the maintainer or the delegate is decided
+        ``maintainer`` or ``delegate`` wherever plain urgency would ring,
+        and spends the sender's ``authority_per_sender_per_hour`` instead of its urgent
         allowance; the per-recipient, nightly and stagger caps bind every
         ring alike. Unparked Codex
         urgency is capped attention with explicit one-bell queue permission,
@@ -2375,7 +2400,7 @@ class CoordinationStore:
             # (maintainer decision 2026-10-02).
             return {"decision": "not_needed", "reason": "no_park"}
         # A named clearer reopening a done park spends the plain urgent
-        # allowance: it is the park's own designation, not an authority.
+        # allowance: the park itself names it; it is not an authority.
         counts_urgent = how == "urgent" or (done and how == "clearer")
         if counts_urgent:
             sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
@@ -2386,7 +2411,7 @@ class CoordinationStore:
         elif how in AUTHORITY_REASONS:
             sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
                              "sender_agent_id=%s AND reason=ANY(%s) AND created_at>%s",
-                             (sender["agent_id"], list(AUTHORITY_REASONS), hour))["n"]
+                             (sender["agent_id"], list(_AUTHORITY_ROW_REASONS), hour))["n"]
             if sent >= policy.authority_per_sender_per_hour:
                 return {"decision": "capped", "reason": "authority_sender_hour", **need}
         decision, reason = ("attention" if attention else "rung"), how
@@ -2808,7 +2833,8 @@ class CoordinationStore:
                         self._wake_decision(sender, recipient, now, clears=clears,
                                             urgent=urgent, message_id=message_id))
                 # The send event names the authority a ring used (maintainer,
-                # coordinator, clearer, urgent, ...), so board-audit export
+                # delegate, clearer, urgent, ...; ``coordinator`` on events
+                # from before the 2026-10-04 rename), so board-audit export
                 # shows it without the wake table, which it does not carry.
                 ring = wake.pop("_ring", None)
                 audited = {"wake_reason": ring} if ring is not None else {}

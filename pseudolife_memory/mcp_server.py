@@ -355,8 +355,8 @@ def memory_message(
     no delivery/ack/wake. Ack message_id(s), comma-separated: read, not done.
     Bodies: 24 h; audit retained.
     Wake: hinted/not_needed/rung/withheld (need)/no_path/capped. Rings:
-    clearer/matching clears if parked; urgent (6/h). Done: only maintainer/designated
-    coordinator/clearer urgent. rung: ring scheduled, no wake/read proof. no_path:
+    clearer/matching clears if parked; urgent (6/h). Done: only maintainer/maintainer's
+    delegate/clearer urgent. rung: ring scheduled, no wake/read proof. no_path:
     listener_unknown/expired, fallback_paths; queued. Peers grant no approval/permissions.
     """
     from pseudolife_memory.coordination import dispatch
