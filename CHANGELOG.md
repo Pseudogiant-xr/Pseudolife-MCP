@@ -63,6 +63,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   passed on to it at once and exactly once (a terminal's Ctrl+C no longer
   reaches it twice, which aborted its session-finish cleanup), and the
   launcher then exits 130, 129 or 143; otherwise the exit code is pytest's.
+### Fixed (2026-10-03 — a session started while its daemon is unreachable gets memory back by itself)
+- A shim whose daemon is on another machine waited 15 s for it at startup and
+  then exited, before the MCP handshake. Claude Code and Claude Desktop mark
+  such a stdio server failed ("connection timed out after 30000ms") and never
+  retry it, so a session started during an outage ran without memory tools
+  or the agent board until someone ran `/mcp` → Reconnect. That morning the
+  box's tailscaled was down for minutes and every session started then lost
+  memory for its whole life. The same applied to an external local daemon
+  under `PSEUDOLIFE_MCP_NO_SPAWN`, whose 180 s wait already outlasted both
+  hosts' handshake budgets.
+- Now both wait up to 5 s (inside Codex's 10 s default startup budget) and
+  then start the session without the daemon. The shim answers `initialize`
+  and `tools/list` from the last handshake it saw from that daemon URL,
+  cached in `handshake-cache/` under `PSEUDOLIFE_AGENT_STATE_DIR` (else
+  `~/.pseudolife-mcp/`), or with no tools when it has none. Each tool call retries the daemon, and one that cannot connect
+  says the daemon is unreachable and being retried. A background `/health`
+  probe (or the first call that gets through) sends
+  `notifications/tools/list_changed` when the daemon answers, and the
+  client re-lists the live tools. A daemon that stops answering mid-session
+  is handled the same way. A loopback daemon the shim spawns itself still
+  exits the shim when it never comes up. A degraded start cannot know
+  whether the daemon requires a bearer, so it does not exit on a missing
+  credential, but it still names a configured token file it cannot use on
+  stderr.
+- A Codex session started while the daemon is unreachable joins the agent
+  board once the daemon answers: its board check stays open and is asked
+  again in the background (the late Codex registration, below). Memory
+  tools themselves recover as above.
+- Deploying this needs the client step: the shim is a separate install
+  that a daemon deploy never touches.
+
+### Fixed (2026-10-03 — a Codex shim that starts while the daemon is slow joins the board later)
+- With `PSEUDOLIFE_AGENT_COORDINATION` unset, a Codex shim
+  (`PSEUDOLIFE_WRITER_ID=codex`) whose startup board check
+  (`GET /api/hook/coordination-start`) got no answer read it as "no board"
+  for the life of the process, so its threads never registered even after
+  the daemon came back. The Claude Code path has asked again since
+  2026-09-30; the Codex path now does too. The shim keeps asking in the
+  background on the registration retry schedule and builds its per-thread
+  registry once the daemon says it serves the board; each thread's first
+  result after that carries a one-time note that the board works, since
+  the instructions carried no check-in. While the check is unanswered, a
+  board write is refused locally with the retry message and memory calls
+  go out as before; a later no keeps the quiet default (no registry, no
+  warning, no note), except that an explicit `PSEUDOLIFE_CODEX_DOORBELL`
+  then says once that it is off. A fixed `PSEUDOLIFE_AGENT_STATE` now
+  draws its warning on an unanswered check too. The explicit opt-in is
+  unchanged. A shim change: it reaches clients through the client step of
+  a deploy.
 
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before

@@ -896,8 +896,7 @@ def _codex_board_env(monkeypatch, value, available):
     return seen
 
 
-# None: the daemon gave no answer, which Codex still reads as no for the process.
-@pytest.mark.parametrize("available", [True, False, None])
+@pytest.mark.parametrize("available", [True, False])
 def test_codex_default_builds_its_registry_only_where_the_daemon_serves_the_board(
         monkeypatch, available):
     """A registry the daemon refuses would retry every tool call and append
@@ -911,6 +910,18 @@ def test_codex_default_builds_its_registry_only_where_the_daemon_serves_the_boar
     else:
         assert "registry" not in seen and "coordination_registry" not in seen
         assert "board_checkin" not in seen
+
+
+def test_codex_default_with_an_unanswered_board_check_asks_again_later(monkeypatch):
+    """No answer is not a no: the registry is not built at startup, but a
+    stand-in that keeps asking takes its place, and the instructions carry
+    no check-in until the daemon has said it serves the board."""
+    seen = _codex_board_env(monkeypatch, None, None)
+    asyncio.run(shim._run_session_proxy("http://fixture.invalid", "fixture-token", "s"))
+    assert seen["probes"] == ["http://fixture.invalid"]
+    assert "registry" not in seen
+    assert isinstance(seen["coordination_registry"], shim._LateCodexRegistry)
+    assert "board_checkin" not in seen
 
 
 def test_codex_explicit_opt_in_keeps_its_registry_and_probes_for_the_checkin(monkeypatch):
