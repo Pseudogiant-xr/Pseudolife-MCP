@@ -87,16 +87,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whether the daemon requires a bearer, so it does not exit on a missing
   credential, but it still names a configured token file it cannot use on
   stderr.
-- Known regression, fixed separately by #544 (a late board registration
-  on the Codex path): a Codex session started while
-  the daemon is unreachable for more than 5 s never joins the agent board,
-  even after the daemon returns. Its board probe goes unanswered, and the
-  Codex path, unlike Claude Code's, has no late registration. Before, the
-  180 s no-spawn wait fit inside the `startup_timeout_sec = 240` the README
-  recommends for Codex, so a Codex session started while Docker booted
-  could still join. Memory tools themselves recover as above.
+- A Codex session started while the daemon is unreachable joins the agent
+  board once the daemon answers: its board check stays open and is asked
+  again in the background (the late Codex registration, below). Memory
+  tools themselves recover as above.
 - Deploying this needs the client step: the shim is a separate install
   that a daemon deploy never touches.
+
 ### Fixed (2026-10-03 — a Codex shim that starts while the daemon is slow joins the board later)
 - With `PSEUDOLIFE_AGENT_COORDINATION` unset, a Codex shim
   (`PSEUDOLIFE_WRITER_ID=codex`) whose startup board check
