@@ -30,7 +30,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whether the daemon requires a bearer, so it does not exit on a missing
   credential, but it still names a configured token file it cannot use on
   stderr.
-- Known regression, follow-up in progress: a Codex session started while
+- Known regression, fixed separately by #544 (a late board registration
+  on the Codex path): a Codex session started while
   the daemon is unreachable for more than 5 s never joins the agent board,
   even after the daemon returns. Its board probe goes unanswered, and the
   Codex path, unlike Claude Code's, has no late registration. Before, the
