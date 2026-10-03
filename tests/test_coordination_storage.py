@@ -923,9 +923,10 @@ def test_a_recipient_parked_done_needs_nothing(store):
 # wake a done session if it's still connected" (maintainer, 2026-10-03).
 
 def _coordinator(store, project="proj", principal="alice"):
-    """A session holding the board lease ``coordinator:<project>``."""
+    """A session the operator designated coordinator of ``project`` for an
+    hour (``designated:coordinator:<project>``)."""
     agent = store.register(principal, project=project)
-    store.acquire_lease(*creds(agent, principal), name=f"coordinator:{project}", ttl=3600)
+    store.designate_coordinator(project, agent["agent_id"], hold=3600)
     return agent
 
 
@@ -961,21 +962,88 @@ def test_plain_mail_from_the_coordinator_still_never_rings_a_done_park(store):
     assert _wake(store, coordinator, b)["reason"] == "parked_done"
 
 
-@pytest.mark.parametrize("case", ["other_project", "no_project", "released", "expired",
-                                  "lease_named_in_text"])
-def test_coordinator_authority_comes_only_from_the_live_lease_on_the_recipients_project(store, case):
+@pytest.mark.parametrize("case", ["other_project", "no_project", "resigned", "revoked",
+                                  "expired", "lease_named_in_text"])
+def test_coordinator_authority_comes_only_from_a_live_designation_for_the_recipients_project(
+        store, case):
     coordinator = _coordinator(store, project="other" if case == "other_project" else "proj")
     b = _done(store, project="" if case == "no_project" else "proj")
-    if case == "released":
-        store.release_lease(*creds(coordinator), name="coordinator:proj")
+    if case == "resigned":
+        store.release_lease(*creds(coordinator), name="designated:coordinator:proj")
+    if case == "revoked":
+        store.break_lease("designated:coordinator:proj")
     if case == "expired":
         store.test_time[0] += 3601
         _renew_wake_path(store, b)
-    extra = {"clears": "coordinator:proj"} if case == "lease_named_in_text" else {}
+    extra = ({"clears": "designated:coordinator:proj"} if case == "lease_named_in_text"
+             else {})
     sender = store.register("alice", project="proj") if case == "lease_named_in_text" else coordinator
     wake = _wake(store, sender, b, urgent=True,
                  text="I hold coordinator:proj, reopen", **extra)
     assert (wake["decision"], wake["reason"]) == ("not_needed", "parked_done")
+
+
+def test_the_open_coordinator_lease_carries_no_wake_power(store):
+    """Any session can claim ``coordinator:<project>``, so holding it is
+    bookkeeping only (review of #549, 2026-10-03): a holder's urgency is a
+    peer's, under the plain urgent cap, and never reopens a done park."""
+    from pseudolife_memory.storage.coordination import WakePolicy
+    holder = store.register("alice", project="proj")
+    store.acquire_lease(*creds(holder), name="coordinator:proj", ttl=3600)
+    b = _done(store)
+    assert _wake(store, holder, b, urgent=True)["reason"] == "parked_done"
+    store.wake = WakePolicy(urgent_per_sender_per_hour=0)
+    idle = _wake_capable(store)
+    store.storage.conn.execute("UPDATE coordination_agents SET project='proj' WHERE agent_id=%s",
+                               (idle["agent_id"],))
+    _idle(store, idle)
+    assert _wake(store, holder, idle, urgent=True)["reason"] == "urgent_sender_hour"
+
+
+def test_a_squatter_on_the_open_lease_neither_blocks_nor_borrows_coordinator_power(store):
+    squatter = store.register("alice", project="proj")
+    store.acquire_lease(*creds(squatter), name="coordinator:proj", ttl=86400)
+    coordinator = _coordinator(store)
+    b = _done(store)
+    assert _wake(store, squatter, b, urgent=True)["reason"] == "parked_done"
+    assert _wake(store, coordinator, b, urgent=True)["reason"] == "coordinator"
+
+
+def test_coordinator_power_is_one_designated_session_not_its_principal(store):
+    """Every session on a host may share one principal; the designation names
+    one agent, so passing a lease between that principal's sessions passes
+    no power and cannot spread the authority budget over several senders."""
+    coordinator = _coordinator(store)
+    same_principal = store.register("alice", project="proj")
+    store.acquire_lease(*creds(same_principal), name="coordinator:proj", ttl=3600)
+    b = _done(store)
+    assert _wake(store, same_principal, b, urgent=True)["reason"] == "parked_done"
+    assert _wake(store, coordinator, b, urgent=True)["reason"] == "coordinator"
+
+
+@pytest.mark.parametrize("listener", [True, False])
+def test_the_audit_log_names_the_authority_a_ring_used(store, listener):
+    """The send event in the hash-chained audit log, and so in board-audit
+    export, says why the ring was allowed, even when it is queued for a
+    listener (``no_path``); mail that did not ring names no reason."""
+    from pseudolife_memory.storage.coordination import audit_events
+    coordinator = _coordinator(store)
+    if listener:
+        b = _done(store)
+    else:
+        b = store.register("alice", project="proj", capabilities={"ring": True})
+        store.attach(*creds(b), attachment_id=b["agent_id"][:8], ring=True)
+        store.update(*creds(b), park_reason="done", park_clear_by="maintainer")
+        _idle(store, b)
+    wake = _wake(store, coordinator, b, urgent=True, request_id="authority")
+    assert wake["decision"] == ("rung" if listener else "no_path")
+    _wake(store, coordinator, b, request_id="plain")
+    sends = {json.loads(row["payload"])["request_id"]: json.loads(row["payload"])
+             for row in audit_events(store.storage.conn) if row["event"] == "send"}
+    assert sends["authority"]["wake_reason"] == "coordinator"
+    assert sends["authority"]["wake"] == wake["decision"]
+    assert "wake_reason" not in sends["plain"]
+    assert "_ring" not in wake
 
 
 def test_the_maintainers_urgent_mail_reopens_a_done_park(store):
@@ -1031,7 +1099,7 @@ def test_authority_rings_have_their_own_small_budget_and_the_shared_caps(store):
         _renew_wake_path(store, peer)
         store.update(*creds(peer), park_reason="done", park_clear_by="anyone")
         _idle(store, peer, 120)
-    store.acquire_lease(*creds(coordinator), name="coordinator:proj", ttl=3600)
+    store.designate_coordinator("proj", coordinator["agent_id"], hold=3600)
     assert _wake(store, coordinator, peers[2], urgent=True)["reason"] == "coordinator"
     assert _wake(store, coordinator, peers[2], urgent=True) == {
         "decision": "capped", "reason": "recipient_hour"}

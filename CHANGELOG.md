@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-03 — only an operator-designated coordinator reopens a done session)
+- The first version below made the holder of the `coordinator:<project>`
+  lease the coordinator, and any session can claim a free one, possibly
+  steered by text it read. Its urgent mail to `all` then rang every done
+  session in the project as `reason: coordinator`, lending it authority it
+  was never given. Passing the lease between one principal's sessions
+  spread the 12-an-hour authority budget over several senders. And the
+  first holder kept the real coordinator out for up to a day (review of
+  #549). Coordinator power is now the lease
+  `designated:coordinator:<project>`, granted to one agent id by the
+  operator with `pseudolife-mcp lease designate PROJECT AGENT [--for
+  DURATION]` (default 1d, at most 7d). Like `lease break`, it opens the
+  bank directly and logs a `lease_designate` with the operator as actor.
+  Revoke it with `lease break`; the designee may release it to resign.
+  Leases named `designated:` are refused to agents (`reserved_lease`).
+- Holding `coordinator:<project>` now grants nothing: it stays as
+  bookkeeping, its holder's urgency is a peer's under the plain urgent
+  allowance, and it blocks nothing, since the designation is a separate
+  lease. The maintainer and named-clearer paths are unchanged. A principal
+  list was rejected because every session on a host shares a principal
+  today.
+- A `send` audit event whose mail rang (`rung`, or `no_path` with the ring
+  queued) carries `wake_reason`, the authority it used, so
+  `board-audit export` shows which ring was a maintainer, coordinator or
+  clearer reopen. No schema change.
+
 ### Changed (2026-10-03 — the maintainer and the coordinator can reopen a done session)
 - A session parked `done` was unreachable: on 2026-10-03 a coordinator's
   urgent review of PR #548, with two required changes, came back
@@ -14,7 +40,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `urgent` mail reopens it when the sender is the maintainer (a bearer
   principal listed in the new `coordination.maintainer_principals`, empty
   by default; `default` and `daemon` are refused), the holder of the live
-  `coordinator:<project>` lease for the recipient's own project, or the
+  `coordinator:<project>` lease for the recipient's own project
+  (superseded the same day by an operator designation, above), or the
   park's named clearer. The ring's reason is `maintainer`, `coordinator`
   or `clearer`, and the receipt carries `reopened: true`. Plain mail still
   never rings a done park, and neither does a peer's urgency (`anyone`

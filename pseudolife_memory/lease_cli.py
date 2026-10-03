@@ -1607,6 +1607,18 @@ def _list(args, transport) -> int:
 def _break(args) -> int:
     """Free a held lease through the bank itself (operator only). Prints the
     store's answer as JSON; 1 when no bank is found or the break failed."""
+    return _operator("break", lambda store: store.break_lease(args.name))
+
+
+def _designate(args) -> int:
+    """Designate a project's coordinator through the bank itself (operator
+    only), as ``break`` does. Prints the store's answer as JSON; 1 when no
+    bank is found or the designation was refused."""
+    return _operator("designate", lambda store: store.designate_coordinator(
+        args.project, args.agent, hold=args.hold))
+
+
+def _operator(verb, act) -> int:
     from pseudolife_memory.backup_cli import _default_data_dir
     from pseudolife_memory.transfer_cli import _resolve_dsn
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
@@ -1623,12 +1635,12 @@ def _break(args) -> int:
             _say(f"cannot open the bank ({type(exc).__name__})")
             return 1
         try:
-            result = CoordinationStore(storage).break_lease(args.name)
+            result = act(CoordinationStore(storage))
         except CoordinationError as exc:
-            _say(f"break refused: {exc.code}")
+            _say(f"{verb} refused: {exc.code}")
             return 1
         except Exception as exc:  # noqa: BLE001
-            _say(f"break failed ({type(exc).__name__}); nothing was changed")
+            _say(f"{verb} failed ({type(exc).__name__}); nothing was changed")
             return 1
         finally:
             storage.close()
@@ -1802,7 +1814,24 @@ def _parsers():
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
-    return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking}
+    designating = actions.add_parser(
+        "designate", help="(operator) make one session a project's coordinator",
+        description="Operator only: make the session AGENT (its id, or a unique prefix) the "
+                    "coordinator of PROJECT for DURATION, replacing any current one. Its "
+                    "urgent mail then reopens done parks in that project; holding the open "
+                    "coordinator:<project> lease grants nothing. The designation is the "
+                    "board lease designated:coordinator:<project>, which no session can "
+                    "take: it opens the bank directly, like break, and the audit log "
+                    "records it with the operator as its actor. Revoke it with: "
+                    "lease break designated:coordinator:<project>.")
+    designating.add_argument("project", type=_lease_name, metavar="PROJECT",
+                             help="the project, as sessions set it on the board")
+    designating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
+    designating.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
+                             metavar="DURATION",
+                             help="how long the designation lasts (default 1d, at most 7d)")
+    return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking,
+                         "designate": designating}
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -1819,8 +1848,8 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         args = parser.parse_args(argv)
         if args.action is None:
             parser.print_usage(sys.stderr)
-            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list or "
-                                    "break (--help explains each)\n")
+            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list, "
+                                    "break or designate (--help explains each)\n")
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
@@ -1836,4 +1865,6 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _list(args, transport)
     if args.action == "break":
         return _break(args)
+    if args.action == "designate":
+        return _designate(args)
     return _run(args, command, transport)

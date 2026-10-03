@@ -4971,11 +4971,26 @@ lease to the next waiter, and logs a `lease_break` with the operator as its
 actor. It frees the board's record only: a process still holding the local lock
 keeps it until it exits.
 
+`pseudolife-mcp lease designate PROJECT AGENT [--for DURATION]` is the
+operator's way to name a project's coordinator: the one session whose urgent
+mail [reopens a done park](#reopening-a-done-park) in that project. It opens
+the bank the same way, grants AGENT (its id, or a unique prefix of 8 or more
+characters) the lease `designated:coordinator:<PROJECT>` for DURATION (default
+1d, at most 7d), replacing any current designation, and logs a
+`lease_designate` with the operator as its actor. Leases named `designated:`
+are the operator's alone: a session's claim of one is refused
+`reserved_lease`, so a designee cannot renew its own. It may release it to
+resign; revoke it with `pseudolife-mcp lease break
+designated:coordinator:<PROJECT>`. In the Docker tier, run both inside the
+daemon container, where the bank's URL is set.
+
 Sessions hold leases too, from the model's side, with no process and no OS lock
 behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
 expect=SECONDS)` takes or queues for a session-held lease, such as
 `coordinator:<project>` or `claim:<path>` for a work area; claiming again renews
-it, and `action="release"` frees it or leaves its queue. A `claim:` lease lasts
+it, and `action="release"` frees it or leaves its queue. `coordinator:<project>`
+says who is coordinating, for peers to read; it grants nothing, since any
+session can claim it (the operator's designation does). A `claim:` lease lasts
 a day between renewals, any other an hour. A claim is advisory: it tells peers,
 it blocks no edit. A queued session is not told when its turn comes: it sees
 the grant the next time it lists or claims, and must renew within the same
@@ -5467,7 +5482,13 @@ pseudolife-mcp board-audit verify
 `export` writes one JSON object per line, oldest first, to stdout or to a new
 `--out` file, which it never overwrites. Each line carries the row's columns,
 the payload parsed, and `body` and `body_salt` (`null` except on a v46
-`send` that has not been redacted). Prefer `--out` for anything you keep: a
+`send` that has not been redacted). A `send` whose mail rang (a `rung`
+decision, or `no_path` with the ring queued for a listener) carries
+`wake_reason` in its payload: what allowed the ring (`maintainer`,
+`coordinator` or `clearer` for an authority or a named clearer, else
+`anyone`, `clears` or `urgent`), so an export shows which authority reopened
+a session without the wake table, which it does not carry. Sends logged
+before 2026-10-03 have none. Prefer `--out` for anything you keep: a
 PowerShell 5 `>` redirect writes UTF-16. The filters are `--project`, `--task`,
 `--agent` (the acting agent or a message's recipient: a full id, or a unique
 prefix of 8 or more characters, resolved against registered addresses and
@@ -6149,13 +6170,13 @@ needs to reach it. `urgent` mail reopens it when the sender is one of:
 
 - **the maintainer**: the sender's bearer principal is listed in
   `coordination.maintainer_principals` (`reason: maintainer`);
-- **the project's coordinator**: the sender holds the live board lease
-  `coordinator:<project>` for the recipient's own, non-empty `project`
-  (`reason: coordinator`). The lease is the role: whoever holds it when
-  the mail is sent, and nobody once it is released or has expired. Any
-  admitted session can claim a free `coordinator:<project>` lease, so the
-  role is a board convention, not a credential: its reach is the authority
-  budget and the shared caps, and a ring it causes grants nothing;
+- **the project's designated coordinator**: the operator designated the
+  sending session coordinator of the recipient's own, non-empty `project`
+  with [`pseudolife-mcp lease designate`](#leases-pseudolife-mcp-lease), and the designation has
+  not expired, been released or been revoked (`reason: coordinator`). The
+  designation names one agent id, not a principal, and no session can take
+  it, so it is a credential the maintainer hands out, not a board convention;
+  a ring it causes still grants nothing;
 - **the park's named clearer**: `park_clear_by` is the sender's agent id, or
   a lease the sender just released (`reason: clearer`).
 
@@ -6166,6 +6187,19 @@ other: the receipt carries `reopened: true`, the recipient's next turn
 starts with the mail, and the Stop hook's park gate asks it to park again.
 Waking grants nothing: the mail is still agent-origin, and approval still
 comes from the maintainer in the session itself.
+
+Holding the open `coordinator:<project>` lease counts for nothing here
+(review of the first version, 2026-10-03, where it was the role): any
+session can claim a free one, possibly steered by text it read, and every
+session on a host may share one principal, so the lease lent its holder's
+mail authority it was never given, a lease passed between sessions spread
+the authority budget over several senders, and the first holder kept the
+real coordinator out for up to a day. A session that holds it now is a
+peer under the plain urgent allowance, and it blocks nothing, since the
+designation is a separate lease no session can take. A principal list
+(`coordinator_principals`) was not used for the same reason: it would name
+every session on a host. The board-audit export's `send` events name the
+authority each ring used (`wake_reason`).
 
 Maintainer and coordinator urgency, to a done park or any other, spends the
 sender's `wake.authority_per_sender_per_hour` (12) instead of the plain
@@ -10476,7 +10510,7 @@ after a move that ended that way, read it and run its `manual_rollback`
 lines in order.
 
 **Don't run commands that write the database directly during a move**
-(`lease break`, `board-audit redact`, `coordination-recovery`, a `psql`
+(`lease break`, `lease designate`, `board-audit redact`, `coordination-recovery`, a `psql`
 session). The move cuts such connections off before the final dump and
 fences the database right after it, but the dump has to connect first, so
 a write landing in those seconds would miss the dump.

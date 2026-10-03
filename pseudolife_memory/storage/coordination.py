@@ -166,17 +166,30 @@ _PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "pa
 # 2026-10-03: a coordinator's review of a finished PR could not reach the
 # session that opened it). Urgent mail reopens it when the sender is the
 # maintainer (a principal in ``coordination.maintainer_principals``), the
-# holder of the recipient project's ``coordinator:<project>`` lease, or the
-# agent the park names in ``park_clear_by``. Each comes from the sender's
+# session the operator designated coordinator of the recipient's project, or
+# the agent the park names in ``park_clear_by``. Each comes from the sender's
 # authenticated bearer, the lease table or the recipient's own park, never
 # from anything a message says. The first two are AUTHORITY_REASONS, which
 # spend their own hourly budget instead of the plain urgent allowance.
 AUTHORITY_REASONS = ("maintainer", "coordinator")
 REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
-COORDINATOR_LEASE_PREFIX = "coordinator:"
+# Leases only the operator grants (``pseudolife-mcp lease designate``, which
+# opens the bank directly like ``lease break``): an agent's acquire is
+# refused ``reserved_lease``, while its release (resigning) and the
+# operator's break work as for any lease. Coordinator power is the live
+# ``designated:coordinator:<project>`` hold, one agent id, never the open
+# ``coordinator:<project>`` lease: any session can claim that one, and every
+# session on a host may share one principal (review of #549, 2026-10-03).
+DESIGNATED_PREFIX = "designated:"
+COORDINATOR_DESIGNATION = DESIGNATED_PREFIX + "coordinator:"
+# A designation lasts at least a minute and at most a week (the longest park
+# and expected end); the CLI's default is a day. Starting values, not
+# measurements.
+DESIGNATION_MIN = 60
+DESIGNATION_MAX = 7 * 86400
 # What a send to a done park is told would reopen it.
-DONE_REOPEN_BY = ("urgent mail from the maintainer, the holder of the coordinator:<project> "
-                  "lease, or the park's named clearer")
+DONE_REOPEN_BY = ("urgent mail from the maintainer, the project's designated coordinator, "
+                  "or the park's named clearer")
 # What a withheld send is told would ring the park.
 WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
 # The ways to reach a session the board cannot ring right now, by client.
@@ -1778,6 +1791,8 @@ class CoordinationStore:
         nobody queued is the caller's at once; otherwise the caller joins the
         queue, and asking again keeps its place and writes nothing."""
         self._lease_args(name, ttl, expect, purpose)
+        if name.startswith(DESIGNATED_PREFIX):
+            raise CoordinationError("reserved_lease")
         with self.storage._txn():
             agent = self._auth(principal, agent_id, credential)
             now = self.clock()
@@ -1931,6 +1946,44 @@ class CoordinationStore:
             self._settle(name, now, events)
             self._append(events, now)
         return {"name": name, "broken": True, "was_held_by": row["holder_agent_id"]}
+
+    def designate_coordinator(self, project, agent_id, *, hold):
+        """Operator only (the offline CLI; never exposed to agents): make
+        ``agent_id`` (or a unique prefix of a registered one) the coordinator
+        of ``project`` for ``hold`` seconds, replacing any current
+        designation. The hold is the lease ``designated:coordinator:<project>``,
+        so it expires, shows on the board and is revoked with ``break_lease``
+        like any lease; the designee may release it, never take or renew it."""
+        if not isinstance(project, str) or not project.strip():
+            raise CoordinationError("invalid_project")
+        if type(hold) is not int or not DESIGNATION_MIN <= hold <= DESIGNATION_MAX:
+            raise CoordinationError("invalid_ttl")
+        name = COORDINATOR_DESIGNATION + project
+        self._lease_args(name)
+        with self.storage._txn():
+            agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+            agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s FOR UPDATE",
+                              (agent_id,))
+            if agent is None:
+                raise CoordinationError("instance_not_found")
+            if agent["credential_hash"] is None:
+                raise CoordinationError("agent_revoked")
+            now = self.clock()
+            self.storage.conn.execute(
+                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (name,))
+            events = []
+            row = self._settle(name, now, events)
+            replaced = row["holder_agent_id"]
+            row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
+                              expect=None, purpose="designated by the operator")
+            events.append(self._event("lease_designate",
+                                      {"name": name, "fence": row["fence"], "hold": hold},
+                                      actor="operator", agent_id=agent_id,
+                                      project=agent["project"], task=agent["task"]))
+            self._append(events, now)
+        return {"name": name, "agent_id": agent_id, "fence": row["fence"],
+                "expires_at": row["expires_at"], "replaced": replaced}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -2197,18 +2250,20 @@ class CoordinationStore:
 
     def _authority(self, sender, recipient, now):
         """``maintainer`` when the sender's bearer principal is one the
-        operator listed, ``coordinator`` when the sender holds the live
-        ``coordinator:<project>`` lease for the recipient's (non-empty)
-        project, else None. Read from the authenticated sender row and the
-        lease table only: nothing a message says can claim either. An
-        expired hold counts for nothing even before a settle vacates it."""
+        operator listed, ``coordinator`` when the operator designated the
+        sending agent coordinator of the recipient's (non-empty) project
+        (the live ``designated:coordinator:<project>`` hold), else None.
+        Read from the authenticated sender row and the lease table only:
+        nothing a message says can claim either, and holding the open
+        ``coordinator:<project>`` lease counts for nothing. An expired
+        designation counts for nothing even before a settle vacates it."""
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
         if project and self._one(
                 "SELECT 1 AS hit FROM coordination_leases WHERE name=%s "
                 "AND holder_agent_id=%s AND expires_at>%s",
-                (COORDINATOR_LEASE_PREFIX + project, sender["agent_id"], now)) is not None:
+                (COORDINATOR_DESIGNATION + project, sender["agent_id"], now)) is not None:
             return "coordinator"
         return None
 
@@ -2332,6 +2387,10 @@ class CoordinationStore:
             (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
              counts_urgent, ring_at, now))
         reopened = {"reopened": True} if done else {}
+        # Why this ring was allowed, for the send's audit event (``send``
+        # pops it before the decision is stored or returned): a ``no_path``
+        # receipt's own reason names the missing listener instead.
+        ring = {"_ring": reason}
         if attention:
             # Codex's desktop owner uses private stdio; a queue capability
             # proves neither actual idle state nor a supported steer route.
@@ -2339,7 +2398,8 @@ class CoordinationStore:
                     "attention": True, "delivery": "queue_pending", "recipient_state": "unknown",
                     "queue_allowed": True,
                     "ring_at": ring_at,
-                    "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering."}
+                    "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering.",
+                    **ring}
         missing = self._listener_path(recipient, now)
         if missing is not None:
             codex = "codex" in (recipient.get("capabilities") or {})
@@ -2348,8 +2408,8 @@ class CoordinationStore:
                     "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
                     "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
                                            else FALLBACK_PATHS_CLAUDE),
-                    **need, **reopened}
-        return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened}
+                    **need, **reopened, **ring}
+        return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
 
     def park_gate(self, agent_id, principal, *, since=None):
         """What the Stop hook asks when a turn ends (v49): ``block`` when the
@@ -2724,6 +2784,11 @@ class CoordinationStore:
                 wake = (dict(DAEMON_NOTICE_WAKE) if notice else
                         self._wake_decision(sender, recipient, now, clears=clears,
                                             urgent=urgent, message_id=message_id))
+                # The send event names the authority a ring used (maintainer,
+                # coordinator, clearer, urgent, ...), so board-audit export
+                # shows it without the wake table, which it does not carry.
+                ring = wake.pop("_ring", None)
+                audited = {"wake_reason": ring} if ring is not None else {}
                 self.storage.conn.execute("UPDATE coordination_agents SET next_sequence=%s "
                                           "WHERE agent_id=%s", (seq, recipient["agent_id"]))
                 rows.append(self._one(
@@ -2744,7 +2809,7 @@ class CoordinationStore:
                     "send", {"text_commitment": body_commitment(salt, text),
                              "reply_to": reply_to, "request_id": request_id,
                              "recipient_sequence": seq, "expires_at": expiry,
-                             "wake": wake["decision"], **marker},
+                             "wake": wake["decision"], **audited, **marker},
                     principal=principal, agent_id=agent_id, recipient=recipient["agent_id"],
                     project=sender["project"], task=sender["task"], message_id=message_id,
                     hlc=hlc, body=text, body_salt=salt))

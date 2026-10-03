@@ -396,6 +396,74 @@ def test_operator_break_frees_the_lease_and_grants_the_next(store):
         "name": "never-existed", "broken": False, "was_held_by": None}
 
 
+# --- operator-designated roles (2026-10-03) ------------------------------------
+# Any session can claim ``coordinator:<project>``, so the lease cannot carry
+# wake power (review of #549). The operator designates the coordinator
+# instead, as a ``designated:`` lease no agent can take.
+
+def test_an_agent_cannot_take_a_designated_lease(store):
+    a = store.register("alice", project="proj")
+    for name in ("designated:coordinator:proj", "designated:anything"):
+        with pytest.raises(CoordinationError, match="^reserved_lease$"):
+            store.acquire_lease(*creds(a), name=name, ttl=3600)
+    assert events(store, "lease_acquire") == [] and events(store, "lease_queue") == []
+    assert store.list_leases()["leases"] == []
+
+
+def test_the_operator_designates_a_coordinator_until_it_expires(store):
+    a = store.register("alice", project="proj")
+    b = store.register("alice", project="proj")
+    out = store.designate_coordinator("proj", a["agent_id"][:8], hold=3600)
+    assert out == {"name": "designated:coordinator:proj", "agent_id": a["agent_id"],
+                   "fence": 1, "expires_at": 4600.0, "replaced": None}
+    [row] = events(store, "lease_designate")
+    assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
+    assert payload(row) == {"name": "designated:coordinator:proj", "fence": 1, "hold": 3600}
+    [lease] = store.list_leases()["leases"]
+    assert (lease["name"], lease["holder"]["agent_id"]) == ("designated:coordinator:proj",
+                                                           a["agent_id"])
+    # The designee cannot renew it through the board, only the operator can.
+    with pytest.raises(CoordinationError, match="^reserved_lease$"):
+        store.acquire_lease(*creds(a), name="designated:coordinator:proj", ttl=3600)
+    # A new designation replaces the old one and says whom it replaced.
+    out = store.designate_coordinator("proj", b["agent_id"], hold=60)
+    assert (out["replaced"], out["fence"], out["expires_at"]) == (a["agent_id"], 2, 1060.0)
+    store.test_time[0] = 1061.0
+    assert store.list_leases()["leases"] == []
+    [expired] = events(store, "lease_expire")
+    assert (expired["agent_id"], payload(expired)["name"]) == (b["agent_id"],
+                                                             "designated:coordinator:proj")
+
+
+def test_a_designated_coordinator_may_resign_and_the_operator_may_revoke(store):
+    a = store.register("alice", project="proj")
+    store.designate_coordinator("proj", a["agent_id"], hold=3600)
+    assert store.release_lease(*creds(a), name="designated:coordinator:proj")["released"]
+    store.designate_coordinator("proj", a["agent_id"], hold=3600)
+    assert store.break_lease("designated:coordinator:proj")["was_held_by"] == a["agent_id"]
+    assert store.list_leases()["leases"] == []
+
+
+@pytest.mark.parametrize("project, agent, hold, code", [
+    ("", "self", 3600, "invalid_project"),
+    ("  ", "self", 3600, "invalid_project"),
+    ("proj", "nobody", 3600, "instance_not_found"),
+    ("proj", "revoked", 3600, "agent_revoked"),
+    ("proj", "self", 59, "invalid_ttl"),
+    ("proj", "self", 7 * 86400 + 1, "invalid_ttl"),
+])
+def test_a_designation_needs_a_project_a_live_agent_and_a_bounded_hold(store, project, agent,
+                                                                       hold, code):
+    a = store.register("alice", project="proj")
+    if agent == "revoked":
+        store.storage.conn.execute("UPDATE coordination_agents SET credential_hash=NULL "
+                                   "WHERE agent_id=%s", (a["agent_id"],))
+    agent_id = "f" * 32 if agent == "nobody" else a["agent_id"]
+    with pytest.raises(CoordinationError, match=f"^{code}$"):
+        store.designate_coordinator(project, agent_id, hold=hold)
+    assert events(store, "lease_designate") == []
+
+
 def test_status_expectation_marks_a_status_overdue(store):
     a, b = store.register("alice"), store.register("alice")
     store.update(*creds(a), status="suite=running", expect=1200)
