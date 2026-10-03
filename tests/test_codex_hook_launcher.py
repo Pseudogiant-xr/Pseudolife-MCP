@@ -332,15 +332,34 @@ def test_real_codex_keeps_trusting_the_manual_hooks_across_a_refresh(tmp_path, m
     setup.vet_manual(ours, home)
 
 
-# ── the plugin's hooks.json: what Codex approves ────────────────────────────
+# ── the plugin's hooks.json: raw definition review guard ────────────────────
 
-# sha256 over the fields Codex approves for each plugin handler, in order.
-# Changing any of them makes every Codex user approve that handler again,
-# and a new handler position is a new approval too: put new behaviour in an
-# existing handler's script instead (Codex does not hash scripts). When a
-# change here is unavoidable, update this pin and say in the CHANGELOG that
-# Codex users approve the hooks once more.
-CODEX_APPROVED_HOOKS = "f819d5977d299ebcdf94715d4d7b6eb3233066ea60f5b961aed7c6b87e0bc439"
+# sha256 over raw plugin handler fields, in order. Codex hashes normalized
+# definitions: SessionEnd/Interrupt timeouts normalize before hashing, so a
+# clamp-only 10 -> 3 change leaves trust unchanged (openai/codex b741e480,
+# discovery.rs, confirmed 2026-10-03). Scripts are not hashed. When a raw
+# definition changes, update this review pin, check Codex's normalized trust
+# behavior and describe it in the CHANGELOG; approve only if Codex asks.
+CODEX_APPROVED_HOOKS = "639c4367cc121ce9d7fb755b0a514559949ab41b5803c4ba0f5b7bc10332b265"
+
+
+@pytest.mark.parametrize("event, cap", [
+    ("UserPromptSubmit", None), ("SessionStart", None), ("SessionEnd", 3),
+    ("Stop", None), ("SubagentStart", None), ("SubagentStop", None), ("PreToolUse", None),
+])
+def test_plugin_handlers_fit_codex_event_timeout_caps(event, cap):
+    """Codex clamps only SessionEnd/Interrupt, not the other events.
+
+    Confirmed 2026-10-03 in openai/codex b741e480, hooks/src/engine/
+    discovery.rs normalize_command_hook: other events use the configured
+    value (600 seconds by default), with no upper cap.
+    """
+    manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    for group in manifest[event]:
+        for handler in group["hooks"]:
+            assert handler["timeout"] >= 1
+            if cap is not None:
+                assert handler["timeout"] <= cap
 
 
 def _codex_approved_fields() -> list:
@@ -356,7 +375,8 @@ def _codex_approved_fields() -> list:
 def test_the_plugins_codex_approved_hook_definitions_are_pinned():
     digest = hashlib.sha256(json.dumps(_codex_approved_fields(), sort_keys=True).encode()).hexdigest()
     assert digest == CODEX_APPROVED_HOOKS, (
-        "plugin/hooks/hooks.json changed a field Codex approves (command, commandWindows, timeout, async, "
-        "statusMessage, matcher) or added a handler: every Codex user must approve it again. Prefer putting "
-        "the behaviour in an existing handler's script, which Codex does not hash. If the change is needed, "
-        f"set CODEX_APPROVED_HOOKS = {digest!r} and say so in the CHANGELOG.")
+        "plugin/hooks/hooks.json changed raw handler fields (command, commandWindows, timeout, async, "
+        "statusMessage, matcher) or added a handler. Codex hashes normalized definitions, so a raw change "
+        "may preserve trust. Prefer putting behavior in a script, which Codex does not hash. If needed, "
+        f"set CODEX_APPROVED_HOOKS = {digest!r}, check Codex's normalized trust behavior and describe it "
+        "in the CHANGELOG; approve only if Codex asks.")

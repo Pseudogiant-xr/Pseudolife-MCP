@@ -7,8 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
-- When Codex runs the plugin's hooks and only the scripts changed (its
-  `hooks.json` is current), the client step (`pseudolife-mcp update`,
+- When Codex runs the plugin's hooks and its approved definitions remain
+  equivalent, the client step (`pseudolife-mcp update`,
   `ops/update.ps1 -All`, `ops/update.sh --all`, `ops/update_clients.py`)
   now runs Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
   and reports `refreshed`, where it used to report `behind` and ask for a
@@ -16,24 +16,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throwaway Codex home: the upgrade fetches the marketplace and replaces
   its clone and the installed copy, leaves `config.toml` byte-identical,
   and `hooks/list` reports the same keys and hashes, so approvals carry
-  over. A changed `hooks.json` is never upgraded automatically and still
-  names the approval steps. The marketplace serves its branch, which can
-  carry a `hooks.json` the checkout or the deployed release does not, so
-  the update first reads that branch's `hooks.json` from a private,
+  over. A changed approved definition is not knowingly upgraded automatically
+  and still names the approval steps. If the branch moves between inspection
+  and Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with those approval steps. The marketplace serves its branch,
+  which can carry a `hooks.json` the checkout or the deployed release does
+  not, so the update first reads that branch's `hooks.json` from a private,
   blob-less clone in a temporary directory (never Codex's own clone) and
-  upgrades only when it matches the installed one. When the upgrade cannot
-  run (no Codex CLI or git found, a failed fetch, the branch changes
-  `hooks.json`, nothing newer on the branch) the step stays `behind` and
-  says why. Manual hook copies are refreshed as before.
+  upgrades only when its normalized definitions match the installed ones.
+  When the upgrade cannot run (no Codex CLI or git found, a failed fetch,
+  the branch changes an approved definition, nothing newer on the branch)
+  the step stays `behind` and says why. Advice to upgrade manually promises
+  approval carryover only when the branch's normalized definitions were
+  checked and matched; otherwise it says that the upgrade may change the
+  definition and need approval. Manual hook
+  copies are refreshed as before.
 - The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
   Windows desktop app's build folder, or in the standalone package the
   desktop app keeps under the Codex home
-  (`packages/standalone/current/bin`).
+  (`packages/standalone/current/bin`). A missing or relative configured
+  `PSEUDOLIFE_CODEX_BIN` is reported as a setup error, without falling back
+  to another binary. The git used to inspect the marketplace is resolved
+  only from absolute PATH entries, excluding implicit working-directory
+  lookup, and its `hooks.json` is decoded as UTF-8 on every platform.
 - The Codex hooks check now compares the installed copy Codex runs hooks
   from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
   back to the marketplace clone when there is no installed copy. Codex
   replaces that single copy in place, as its plugin manager does, so there
   is no older copy kept beside it.
+- The shared plugin's SessionEnd timeout now matches Codex's enforced
+  3-second cap, removing the startup clamp warning. Its bash hook makes
+  one request with a 2-second total and 1-second connection timeout, without
+  retries. A missed close is reaped after 30 minutes of inactivity plus
+  the next sweep (5-minute default); Claude Code's plugin SessionEnd budget
+  is 1.5 seconds regardless of the manifest. Codex builds that hash the
+  clamped timeout keep approval for the 10-to-3-second change; approve only
+  if Codex asks. The updater compares normalized SessionEnd/Interrupt
+  timeouts at each consent check and on read-back, so clamp-only changes
+  refresh automatically. Every other field and timeout remains compared,
+  and malformed or unsupported definitions are not refreshed automatically.
 
 ### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
 - Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved

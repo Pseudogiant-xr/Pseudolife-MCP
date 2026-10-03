@@ -3410,23 +3410,34 @@ Codex runs only hook handlers it has approved, and it approves a handler by
 its definition in `hooks.json` (the command, timeout, `async` and
 `statusMessage`), not by the script the command runs: measured on Codex
 0.158.0 on 2026-09-30, editing a script left the approval in place and
-editing the command asked again. So an update whose scripts changed but
-whose `hooks.json` did not needs no approval:
+editing the command asked again. Codex bounds SessionEnd and Interrupt
+timeouts to 1..3 seconds before hashing the definition; on builds with that
+normalization, the 10-to-3-second SessionEnd change retains approval. Approve
+only if Codex asks ([verified source and updater behavior](providers.md)).
+So an update whose normalized definitions remain equivalent needs no approval:
 
 - A plugin copy with older scripts is refreshed by the update itself,
   through Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
   (state `refreshed`), and its approvals carry over. It first checks that
-  the marketplace's branch would not also change `hooks.json`. When that
+  the marketplace's normalized definitions match the installed ones. The same
+  comparison governs initial eligibility and read-back; raw clamp-only file
+  changes still trigger a refresh. Every other field, JSON type and event's
+  timeout stays compared, and malformed or unsupported definitions are not
+  refreshed automatically. When that
   cannot run (no Codex CLI or git found, a failed fetch, a branch that
-  changes `hooks.json`, nothing newer on the branch) the copy is reported as
+  changes an approved definition, nothing newer on the branch) the copy is reported as
   `behind` with the reason; updating the
   plugin in Codex's plugin manager does the same
-  ([the plugin copy](providers.md)).
+  ([the plugin copy](providers.md)). A changed approved definition is not knowingly
+  upgraded automatically; if the branch moves between inspection and
+  Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with approval steps. A manual upgrade may change `hooks.json`
+  and need approval when the branch has not been inspected.
 - Manual copies (`setup-codex-hooks.py --source manual`) run through a
   launcher whose commands never change, and the update refreshes them
   itself ([the launcher](providers.md)).
 
-An approval is due only when `hooks.json` changed, when a new handler
+An approval is due only when a normalized hook definition changed, when a new handler
 position appears, or when a manual copy from before 2026-09-30 still names
 a script bundle in its commands (one last approval moves it to the
 launcher). When the scripts cannot be compared at all (release mode with no
@@ -3447,8 +3458,8 @@ session, or `python ops/setup-codex-hooks.py --source plugin --trust yes` /
 then (the handlers Codex has not approved), and the check:
 `pseudolife-mcp doctor` reports `codex_hooks = current`, or
 `bundle-present` for a manual copy. `tests/test_codex_hook_launcher.py`
-pins the fields Codex approves in the plugin's `hooks.json`, so a change
-that would ask every Codex user again is a deliberate one. An update that
+pins the plugin's raw definitions so edits remain deliberate; a clamp-only
+timeout edit need not change Codex's trust identity. An update that
 needs no approval says nothing about it, and neither does one that finds no
 marketplace clone at all. A daemon-only update (`ops/update.ps1` without
 `-All`, `update --daemon-only`) whose hook scripts changed says in one

@@ -213,15 +213,24 @@ def test_plugin_hook_wiring_session_end():
     script = _read("plugin/hooks/session-end.sh")
     assert "/api/hook/session-end" in script
     assert "curl" in script and "--max-time" in script
-    # Same transient-stall retry contract as session-start.sh.
-    assert re.search(r"--retry\s+\d+", script), \
-        "retry count must be set; retry flags without --retry <n> are no-ops"
-    assert "--retry-delay" in script
+    # Preserve the existing two-second Codex request opportunity and leave
+    # one second within its cap for local work. Claude's plugin deadline is
+    # independently capped at 1.5 seconds and can stop the script earlier.
+    budget = min(h["timeout"] for g in groups for h in g["hooks"])
+    budgets = re.findall(r"CURL_BUDGET=\(([^)]*)\)", script)
+    assert budgets and '"${CURL_BUDGET[@]}"' in script
+    for options in budgets:
+        assert "--retry" not in options
+        max_time = float(re.search(r"--max-time\s+([\d.]+)", options).group(1))
+        assert max_time == 2
+        connect_time = re.search(r"--connect-timeout\s+([\d.]+)", options)
+        assert connect_time, "SessionEnd must bound connection setup explicitly"
+        assert 0 < float(connect_time.group(1)) <= max_time
+        assert max_time + 1 <= min(budget, 3)
     # Banned on the command itself (comments may name it to explain why):
     # it breaks option parsing outright on curl < 7.71, common on LTS hosts.
     assert not any("--retry-all-errors" in ln for ln in script.splitlines()
                    if not ln.lstrip().startswith("#"))
-    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionEnd"])
     assert "-X POST" in script
     # Pin bearer-token forwarding in the actual curl invocation
     assert '"${AUTH[@]}"' in script

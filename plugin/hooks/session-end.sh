@@ -255,18 +255,15 @@ if [ -z "$CONNECTION_ERROR" ] && [ -n "$TOKEN" ]; then
 fi
 
 if [ -n "$SID" ] && [ -z "$CONNECTION_ERROR" ]; then
-    # One retry bridges short daemon maintenance stalls (autosave/sweep
-    # lock holds; measured 2026-09-01). Plain --retry treats a timeout as
-    # transient; --retry-all-errors would break curl < 7.71 outright.
-    # Worst case 3+1+3=7s, inside the hook's 10s budget (guard-tested in
-    # tests/test_plugin_packaging.py). The idle reaper backstops a miss.
-    CURL_BUDGET=(--max-time 3 --retry 1 --retry-delay 1)
-    if [ -n "$CODEX_HOOK_CONTEXT" ]; then
-        # Codex caps SessionEnd at three seconds (ops/setup-codex-hooks.py):
-        # one two-second attempt and no retry, as lifecycle.ps1 does; the
-        # idle reaper backstops a miss (guard-tested in tests/test_codex_hooks.py).
-        CURL_BUDGET=(--max-time 2)
-    fi
+    # Codex caps SessionEnd at 3s (openai/codex b741e480,
+    # normalize_command_hook, confirmed 2026-10-03). Preserve Codex's 2s
+    # request opportunity (1.25s fixture regression, 2026-10-03), with
+    # connection setup inside that total and 1s left for POSIX local work.
+    # Git Bash alone pays native ACL checks; Windows Codex uses lifecycle.ps1.
+    # Claude's plugin deadline is separately 1.5s, regardless of this file's
+    # timeout (measured 2026-09-27). No retry or delay; a miss waits for the
+    # idle reaper (30min idle plus the next 5min sweep by default).
+    CURL_BUDGET=(--max-time 2 --connect-timeout 1)
     curl -L --max-redirs 0 -sf "${CURL_BUDGET[@]}" \
         "${AUTH[@]}" -X POST \
         -H "content-type: application/json" \
