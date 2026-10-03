@@ -155,7 +155,16 @@ def ensure_runtime(store: ProfileStore, version: str = VERSION, *, readiness=Non
 
 def _process_identity(pid: int) -> dict:
     process = psutil.Process(pid)
-    return {'pid': pid, 'created': process.create_time(), 'exe': process.exe(), 'argv': process.cmdline()}
+    # Popen returns at execve's point of no return, before Linux publishes the
+    # new image's arguments, so a just-launched child can briefly read an empty
+    # command line. An identity recorded then never matches the child again.
+    # Measured 2026-10-03 in WSL2: 10 of 1,732 test launches (0.6%).
+    argv = process.cmdline()
+    deadline = time.monotonic() + 5
+    while not argv and time.monotonic() < deadline and process.status() != psutil.STATUS_ZOMBIE:
+        time.sleep(0.005)
+        argv = process.cmdline()
+    return {'pid': pid, 'created': process.create_time(), 'exe': process.exe(), 'argv': argv}
 
 
 def _bridge_sources() -> dict[str, bytes]:

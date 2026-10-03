@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a tunnel child launched mid-exec stays recognised)
+- The tunnel supervisor records each child's identity (pid, start time,
+  executable, arguments) right after starting it. On Linux, `Popen`
+  returns before the kernel has published the new program's arguments, so
+  the identity could be recorded with an empty argument list. Every later
+  ownership check then refused the supervisor's own child: a refresh
+  answered "owned tunnel changed before refresh" and left the old child
+  running, cancellation cleanup skipped the child and leaked it, and
+  `tunnel status` reported it as not running. The identity is now read
+  once the arguments appear (bounded at 5 seconds, and not for a child
+  that has already exited). Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  launches hit the empty window. Over 1,250 cancellation-test runs under
+  the same load, the unfixed code failed 8 and the fixed code failed none.
+  This was the intermittent `all_reaped` failure (and the 30-second
+  timeout) in `test_refresh_cancellation_reaps_actual_children_and_private_launch`.
+
 ### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
 - When Codex runs the plugin's hooks and only the scripts changed (its
   `hooks.json` is current), the client step (`pseudolife-mcp update`,

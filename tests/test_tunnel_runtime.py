@@ -220,6 +220,40 @@ def test_unregistered_launch_reaps_inspectable_descendant(tmp_path, monkeypatch)
                     runtime._terminate_owned_tree(descendant)
 
 
+def test_launch_identity_waits_out_the_exec_window(tmp_path, monkeypatch):
+    # Popen returns at execve's point of no return, before Linux publishes the
+    # new image's arguments, so a just-launched child can read an empty command
+    # line. An identity captured then never matches the child again: refresh
+    # refuses it and cancellation cleanup skips it as a stranger.
+    import subprocess
+    store, profile = _ready_profile(tmp_path)
+    children = []
+    real_popen = subprocess.Popen
+    def launch_fixture(args, **kwargs):
+        child = real_popen([CHILD_PYTHON, '-c', 'import time; time.sleep(60)'], **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(runtime.subprocess, 'Popen', launch_fixture)
+    exec_window = [True]
+    class ExecWindow(runtime.psutil.Process):
+        def cmdline(self):
+            if exec_window:
+                exec_window.pop()
+                return []
+            return super().cmdline()
+    monkeypatch.setattr(runtime.psutil, 'Process', ExecWindow)
+    with runtime.runtime_profile(profile, store, ['synthetic-shim']) as config:
+        try:
+            process, identity = runtime._launch_child(profile, Path(CHILD_PYTHON), config, store, owned_children=[])
+            assert identity['argv'] == [CHILD_PYTHON, '-c', 'import time; time.sleep(60)']
+            assert runtime._owned_process(identity) is not None
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.terminate()
+                    child.wait(timeout=10)
+
+
 def archive(name='tunnel-client.exe', data=b'synthetic-binary'):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as zipped:
