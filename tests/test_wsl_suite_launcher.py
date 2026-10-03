@@ -1,7 +1,6 @@
 """ops/wsl-suite.sh: its guard for runs dispatched to a second machine, and
 its sweep of the processes a run leaves behind.
 
-
 ops/remote-suite.ps1 runs a commit's own ops/wsl-suite.sh on another
 machine with PSEUDOLIFE_SUITE_DISPATCHED=1. On the maintainer's homelab box
 127.0.0.1:5433 is the live bank's server, and a fixed

@@ -91,9 +91,9 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     # lacked the next one's commit (exit 128 before pytest, 2026-10-02).
     root="$base/work/$mirror_key-$name"
     # One run at a time per test copy: a second run of the same checkout
-    # would check out and clean under the first. The descriptor passes to
-    # pytest through exec, so the lock lasts the run; Python's subprocesses
-    # close it, so a leaked test daemon cannot keep it.
+    # would check out and clean under the first. This shell holds the
+    # descriptor until pytest has exited and its leftovers are stopped;
+    # Python's subprocesses close it, so a leaked test daemon cannot keep it.
     exec 9>"$root.lock"
     if ! flock -n 9; then
         echo "wsl-suite: another run is using the test copy of $name; waiting" >&2
@@ -136,4 +136,59 @@ export PIP_BREAK_SYSTEM_PACKAGES=1
 if [[ $# -eq 0 ]]; then
     set -- tests/ -q -rs
 fi
-exec "$venv/bin/python" -m pytest "$@"
+
+# Every process the run starts inherits this marker, so whatever outlives
+# pytest can be found by it and stopped, and nothing without it is touched
+# (the live daemon, another run). A detached process escapes the run's
+# process group: the shim's autostarted daemon starts its own session, and
+# one outlived every Linux run until 2026-10-03, when 14 had piled up in
+# WSL (28 of its 39 GB) and 5 on the second machine had exhausted its
+# memory and swap. On that machine each also held its run's systemd scope
+# open. The test reaps its daemon itself; this catches what a killed run,
+# or a future test, leaves behind.
+PSEUDOLIFE_SUITE_RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
+    || printf '%s-%s-%s' "$$" "$RANDOM" "$(date +%s%N)")"
+export PSEUDOLIFE_SUITE_RUN_ID
+
+# Stops every other process carrying this run's marker. Reads /proc without
+# forking, so no helper of its own carries the marker while it scans; does
+# nothing where there is no /proc (macOS).
+stop_leftovers() {
+    [[ -r /proc/self/environ ]] || return 0
+    local marker="PSEUDOLIFE_SUITE_RUN_ID=$PSEUDOLIFE_SUITE_RUN_ID"
+    local dir pid entry
+    local -a left=() alive=()
+    for dir in /proc/[0-9]*; do
+        pid="${dir#/proc/}"
+        [[ "$pid" != "$$" && -r "$dir/environ" ]] || continue
+        while IFS= read -r -d '' entry; do
+            if [[ "$entry" == "$marker" ]]; then left+=("$pid"); break; fi
+        done 2>/dev/null < "$dir/environ" || true
+    done
+    (( ${#left[@]} )) || return 0
+    echo "wsl-suite: the run left ${#left[@]} process(es) behind; stopping them:" >&2
+    for pid in "${left[@]}"; do
+        echo "  $pid $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-200)" >&2
+    done
+    kill -TERM "${left[@]}" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        alive=()
+        for pid in "${left[@]}"; do
+            [[ -d "/proc/$pid" ]] && alive+=("$pid")
+        done
+        (( ${#alive[@]} )) || return 0
+        sleep 1
+    done
+    kill -KILL "${alive[@]}" 2>/dev/null || true
+}
+
+# pytest runs as a child, not through exec, so the sweep runs after it
+# exits, also after Ctrl+C or a hangup. The test copy's lock (descriptor 9)
+# is held until then.
+trap stop_leftovers EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+code=0
+"$venv/bin/python" -m pytest "$@" || code=$?
+exit "$code"
