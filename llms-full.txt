@@ -9740,16 +9740,19 @@ this, a session started during a few minutes' tailnet outage ran without
 memory tools for its whole life unless `/mcp` reconnected it.
 
 - **Handshake.** The shim answers `initialize` and `tools/list` from the last
-  handshake it saw from that daemon URL, kept in
-  `~/.pseudolife-mcp/handshake-cache/` (one file per URL, the 16 most
-  recently written kept). With no cache it serves no tools until the daemon
+  handshake it saw from that daemon URL, kept in `handshake-cache/` under
+  `PSEUDOLIFE_AGENT_STATE_DIR` (which the installers set per client), else
+  under `~/.pseudolife-mcp/` (one file per URL, the 16 most recently written
+  kept). With no cache it serves no tools until the daemon
   answers. The served instructions open with a line saying the daemon did not
   answer at startup.
 - **Calls.** Each tool call tries the daemon. One that cannot connect returns
   an MCP error saying the daemon is unreachable and being retried; nothing ran.
   A connection attempt gives up after 5 s.
 - **Recovery.** The shim probes `/health` in the background at growing
-  intervals (1, 2, 5, 10 and 30 s apart, then every 60 s). When the daemon answers, or a call gets
+  intervals (1, 2, 5, 10 and 30 s apart, then every 60 s; the intervals keep
+  growing until a request actually gets through, so a `/health` that answers
+  while `/mcp` still fails cannot make the client re-list every second). When the daemon answers, or a call gets
   through, it sends `notifications/tools/list_changed`, and the client's next
   `tools/list` returns the live tools. The instructions stay as served: MCP
   has no notification for changed instructions. A daemon that stops answering

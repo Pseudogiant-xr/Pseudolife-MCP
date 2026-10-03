@@ -36,7 +36,9 @@ def _shim_env(port: int, data_dir, **extra) -> dict:
     """The environment a shim subprocess is driven with: point it at a daemon
     URL/port and a data dir, and drop the token (loopback needs none). The
     runner's host identity is dropped too: run from a Claude Code session,
-    the shim would otherwise key its calls by that live session's id."""
+    the shim would otherwise key its calls by that live session's id. Its
+    agent state dir, which holds the handshake cache, sits under ``data_dir``,
+    so a test shim never pushes the real daemon's entry out of the user's."""
     inherited = {name: value for name, value in os.environ.items()
                  if name not in ("CLAUDE_CODE_SESSION_ID", "PSEUDOLIFE_WRITER_ID")}
     env = {
@@ -45,6 +47,7 @@ def _shim_env(port: int, data_dir, **extra) -> dict:
         "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
         "PSEUDOLIFE_MCP_PORT": str(port),
         "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
+        "PSEUDOLIFE_AGENT_STATE_DIR": os.path.join(str(data_dir), "agent-state"),
         **extra,
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
@@ -1239,7 +1242,7 @@ def test_run_shim_starts_the_proxy_without_a_daemon_it_could_not_reach(monkeypat
 def test_handshake_cache_round_trips_per_daemon_url(monkeypatch, tmp_path):
     from pseudolife_memory import shim
 
-    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
     tool = {"name": "memory_search", "inputSchema": {"type": "object"},
             "annotations": {"readOnlyHint": True}}
     shim._store_handshake_cache("http://100.64.0.2:8765", instructions="Use it.")
@@ -1257,15 +1260,71 @@ def test_handshake_cache_is_best_effort(monkeypatch, tmp_path):
     cache must never be what stops a session."""
     from pseudolife_memory import shim
 
-    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
     shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")
     path = shim._handshake_cache_path("http://100.64.0.2:8765")
     path.write_text("{not json", encoding="utf-8")
     assert shim._load_handshake_cache("http://100.64.0.2:8765") == {}
     blocked = tmp_path / "file-not-dir"
     blocked.write_text("", encoding="utf-8")
-    monkeypatch.setattr(shim, "_state_dir", lambda: blocked)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(blocked))
     shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")  # no raise
+
+
+def test_handshake_cache_lives_under_the_agent_state_dir(monkeypatch, tmp_path):
+    """Under ``PSEUDOLIFE_AGENT_STATE_DIR`` when set (the installers give each
+    client its own, so clients with different tool tiers keep their own
+    lists), else under ``~/.pseudolife-mcp``. Test shims set it, so a test
+    run never evicts the user's real entry."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agents"))
+    path = shim._handshake_cache_path("http://100.64.0.2:8765")
+    assert path.parent == tmp_path / "agents" / "handshake-cache"
+    monkeypatch.delenv("PSEUDOLIFE_AGENT_STATE_DIR")
+    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path / "home-state")
+    path = shim._handshake_cache_path("http://100.64.0.2:8765")
+    assert path.parent == tmp_path / "home-state" / "handshake-cache"
+    assert _shim_env(1, tmp_path)["PSEUDOLIFE_AGENT_STATE_DIR"].startswith(str(tmp_path))
+
+
+def test_handshake_cache_leaves_no_scratch_file_when_the_replace_fails(
+        monkeypatch, tmp_path):
+    """On Windows ``os.replace`` fails while another shim has the target open
+    for reading; the scratch file must not pile up beside the cache."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
+
+    def refuse(src, dst):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(shim.os, "replace", refuse)
+    shim._store_handshake_cache("http://100.64.0.2:8765", instructions="x")
+    assert list((tmp_path / "handshake-cache").iterdir()) == []
+
+
+def test_remote_startup_wait_is_bounded_from_the_first_probe(monkeypatch):
+    """The whole wait, first probe included, ends inside ``_REMOTE_WAIT_S``
+    plus one sleep step, however slowly an unreachable link fails each probe
+    (a silently dropped packet costs the full probe timeout). Counting from
+    after the first probe, with full-length probes past the deadline, it
+    reached ~9.5 s against Codex's 10 s handshake budget (review, 2026-10-03)."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(shim.time, "time", lambda: clock["now"])
+    monkeypatch.setattr(shim.time, "sleep",
+                        lambda s: clock.__setitem__("now", clock["now"] + s))
+
+    def dropped(url, timeout=0.25):
+        clock["now"] += timeout  # every probe times out
+        return None
+
+    monkeypatch.setattr(shim, "probe_health", dropped)
+    assert shim.ensure_daemon("http://100.64.0.2:8765") is None
+    assert clock["now"] - 1000.0 <= shim._REMOTE_WAIT_S + 0.5
 
 
 def test_handshake_cache_keeps_only_the_most_recent_urls(monkeypatch, tmp_path):
@@ -1273,7 +1332,7 @@ def test_handshake_cache_keeps_only_the_most_recent_urls(monkeypatch, tmp_path):
     every test shim on a random port would otherwise leave one behind."""
     from pseudolife_memory import shim
 
-    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path)
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path))
     for port in range(shim._HANDSHAKE_CACHE_KEEP + 5):
         shim._store_handshake_cache(f"http://127.0.0.1:{9000 + port}", instructions="x")
         os.utime(shim._handshake_cache_path(f"http://127.0.0.1:{9000 + port}"),
@@ -1337,10 +1396,10 @@ def _fixture_daemon(tool_name: str, instructions: str):
 
 def _degraded_shim_env(port: int, home) -> dict:
     """A real shim aimed at an external (no-spawn) daemon on ``port``, with
-    its home, and so its handshake cache, under ``home``."""
+    its agent state dir, and so its handshake cache, under ``home``."""
     env = _shim_env(port, home / "data", PSEUDOLIFE_MCP_NO_SPAWN="1",
                     PSEUDOLIFE_AGENT_COORDINATION="0",
-                    HOME=str(home), USERPROFILE=str(home))
+                    PSEUDOLIFE_AGENT_STATE_DIR=str(home / "agent-state"))
     env.pop("PSEUDOLIFE_MCP_TOKEN_FILE", None)
     return env
 
@@ -1380,7 +1439,7 @@ def test_shim_caches_the_handshake_of_a_healthy_daemon(tmp_path, monkeypatch):
         http.shutdown()
         http.server_close()
         worker.join(timeout=2)
-    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path / ".pseudolife-mcp")
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agent-state"))
     cached = shim._load_handshake_cache(url)
     assert cached["instructions"] == "Daemon instructions."
     assert [t["name"] for t in cached["tools"]] == ["cached_tool"]
@@ -1405,7 +1464,7 @@ def test_shim_starts_without_its_daemon_and_recovers_when_it_answers(
 
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
-    monkeypatch.setattr(shim, "_state_dir", lambda: tmp_path / ".pseudolife-mcp")
+    monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE_DIR", str(tmp_path / "agent-state"))
     if cached:
         shim._store_handshake_cache(
             url, instructions="Cached daemon instructions.",
@@ -1564,3 +1623,76 @@ def test_remote_daemon_probes_use_the_remote_timeout(monkeypatch):
     shim.ensure_daemon("http://100.64.0.2:8765")
     assert len(timeouts) == 3
     assert min(timeouts) >= 2.0, timeouts
+
+
+def test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list(tmp_path):
+    """/health answering is not the daemon answering: a proxy that passes
+    plain GETs but resets every /mcp POST makes each re-list fail again. The
+    watcher's backoff must keep growing across those false recoveries, not
+    restart at 1 s, or the client re-lists every second or two for as long as
+    it lasts (review, 2026-10-03). Here the schedule allows 3 notices in 12 s
+    (after 1, 2 and 5 s); a restarting backoff sends one every ~1.5 s."""
+    import asyncio
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import mcp.types as types
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            body = json.dumps({"status": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.close_connection = True  # drop it: no response at all
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        changed = asyncio.Event()
+
+        async def on_message(message) -> None:
+            if isinstance(getattr(message, "root", message),
+                          types.ToolListChangedNotification):
+                changed.set()
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(http.server_port, tmp_path))
+        notices = 0
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w, message_handler=on_message) as client:
+                await asyncio.wait_for(client.initialize(), timeout=20)
+                assert (await client.list_tools()).tools == []  # nothing cached
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + 12
+                while (left := deadline - loop.time()) > 0:
+                    try:
+                        await asyncio.wait_for(changed.wait(), timeout=left)
+                    except (TimeoutError, asyncio.TimeoutError):
+                        break
+                    changed.clear()
+                    notices += 1
+                    await client.list_tools()  # what a real client does
+        return notices
+
+    try:
+        notices = asyncio.run(asyncio.wait_for(drive(), timeout=60))
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+    assert 1 <= notices <= 4, notices

@@ -19,8 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Now both wait up to 5 s (inside Codex's 10 s default startup budget) and
   then start the session without the daemon. The shim answers `initialize`
   and `tools/list` from the last handshake it saw from that daemon URL,
-  cached in `~/.pseudolife-mcp/handshake-cache/`, or with no tools when it
-  has none. Each tool call retries the daemon, and one that cannot connect
+  cached in `handshake-cache/` under `PSEUDOLIFE_AGENT_STATE_DIR` (else
+  `~/.pseudolife-mcp/`), or with no tools when it has none. Each tool call retries the daemon, and one that cannot connect
   says the daemon is unreachable and being retried. A background `/health`
   probe (or the first call that gets through) sends
   `notifications/tools/list_changed` when the daemon answers, and the

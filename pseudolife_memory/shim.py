@@ -676,8 +676,15 @@ _HANDSHAKE_CACHE_KEEP = 16
 
 
 def _handshake_cache_path(url: str):
+    """Under ``PSEUDOLIFE_AGENT_STATE_DIR`` when set (the installers give each
+    client its own, so clients on different tool tiers keep their own lists),
+    else under :func:`_state_dir`."""
+    from pathlib import Path
+
+    configured = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    root = Path(configured).expanduser() if configured else _state_dir()
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    return _state_dir() / "handshake-cache" / f"{digest}.json"
+    return root / "handshake-cache" / f"{digest}.json"
 
 
 def _load_handshake_cache(url: str) -> dict:
@@ -700,19 +707,26 @@ def _load_handshake_cache(url: str) -> dict:
 def _store_handshake_cache(url: str, **fields) -> None:
     """Merge ``instructions=`` and/or ``tools=`` into ``url``'s cache.
     Best-effort: a cache must never be what stops a session."""
+    scratch = None
     try:
         path = _handshake_cache_path(url)
         path.parent.mkdir(parents=True, exist_ok=True)
         cached = {**_load_handshake_cache(url), **fields}
         scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         scratch.write_text(json.dumps({"url": url, **cached}), encoding="utf-8")
+        # On Windows this fails while another shim has the file open to read.
         os.replace(scratch, path)
+        scratch = None
         files = sorted(path.parent.glob("*.json"),
                        key=lambda p: p.stat().st_mtime, reverse=True)
         for stale in files[_HANDSHAKE_CACHE_KEEP:]:
             stale.unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
-        pass
+        if scratch is not None:
+            try:
+                scratch.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _spawn_detached(argv: list[str], log) -> int:
@@ -875,6 +889,7 @@ def ensure_daemon(url: str) -> dict | None:
     spawns that never comes up still exits."""
     url = _validated_daemon_url(url)
     remote = not _is_loopback_url(url)
+    started = time.time()
     health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S) if remote else probe_health(url)
     if health is not None:
         return _accept_health(url, health)
@@ -889,10 +904,14 @@ def ensure_daemon(url: str) -> dict | None:
             f"local daemon for a remote URL...",
             file=sys.stderr,
         )
-        start = time.time()
-        while time.time() - start < _REMOTE_WAIT_S:
+        # The whole wait, first probe included, ends by the deadline: a link
+        # that drops packets costs every probe its full timeout, so a late
+        # probe gets only the time left (counted from after the first probe it
+        # could reach ~9.5 s of Codex's 10 s handshake budget: review, 2026-10-03).
+        deadline = started + _REMOTE_WAIT_S
+        while (left := deadline - time.time() - 0.5) >= 0.25:
             time.sleep(0.5)
-            health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S)
+            health = probe_health(url, timeout=min(_REMOTE_PROBE_TIMEOUT_S, left))
             if health is not None:
                 return _accept_health(url, health)
         _report_unreachable_remote(url)
@@ -1458,7 +1477,12 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     # served from the cached handshake and a background probe watches
     # /health; the first sign of life flips it back and has the client
     # re-list. ``session`` is the downstream session, kept for that notice.
-    link = {"up": not daemon_unreachable, "watcher": None, "session": None}
+    # ``backoff`` indexes the probe schedule and survives the watcher: a
+    # /health that answers while every /mcp connection still fails would
+    # otherwise restart it at 1 s and have the client re-list every second or
+    # two (review, 2026-10-03). Only a request that got through resets it.
+    link = {"up": not daemon_unreachable, "watcher": None, "session": None,
+            "backoff": 0}
 
     def _cached_tools():
         tools = []
@@ -1487,11 +1511,10 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     async def _watch_daemon():
         # The adapter's re-attach schedule, reused rather than tuned.
         timeout = 0.5 if _is_loopback_url(url) else _REMOTE_PROBE_TIMEOUT_S
-        attempt = 0
         while not link["up"]:
             await asyncio.sleep(_ADAPTER_RETRY_DELAYS[
-                min(attempt, len(_ADAPTER_RETRY_DELAYS) - 1)])
-            attempt += 1
+                min(link["backoff"], len(_ADAPTER_RETRY_DELAYS) - 1)])
+            link["backoff"] += 1
             if await asyncio.to_thread(probe_health, url, timeout) is not None:
                 await _daemon_answered()
 
@@ -1536,6 +1559,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                 raise
             _daemon_lost()
             return _cached_tools()
+        link["backoff"] = 0
         if params is None or not getattr(params, "cursor", None):
             _store_handshake_cache(url, tools=[
                 tool.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -1649,6 +1673,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             raise
         except Exception as exc:
             raise _transport_error(exc, attempt, "call") from None
+        link["backoff"] = 0
         await _daemon_answered()  # a no-op unless the daemon was unreachable
         if noted_thread is not None and not result.is_error:
             # Only a receive that succeeded has read the mailbox.
