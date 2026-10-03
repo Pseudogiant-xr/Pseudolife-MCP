@@ -157,3 +157,72 @@ original assertions and SystemExit expectations are unchanged. Broader CLI,
 shim and storage routing remain pending. Protocol negotiation records what the
 installed MCP SDK actually supports; initializing a requested July-2026 protocol
 that falls back to an older revision does not establish modern support.
+# Phase 1 stdio judge
+
+Run the bounded shim judge from a checkout installed with `[dev,lite]`:
+
+```sh
+python -m evals.rust_port.phase1 --candidate-json '["/absolute/path/pseudolife-stdio"]' --out /private/phase1.json --public-out evals/results/phase1.json --offline-resource-checked-at VERIFIED_UTC_TIME
+```
+
+Omit `--candidate-json` for Python self-replay. The command selects eight public
+stdio test functions without changing their assertions, runs both protocol eras
+on fresh guarded disposable PostgreSQL banks, and exercises EOF, refusal,
+credential rotation, recovery and graded forwarding controls. PostgreSQL must
+already be available through the existing `tests.pg_defaults` resolver or
+`PSEUDOLIFE_BENCH_ADMIN_URL`. The clearance timestamp is the lead's independent
+resource check; the runner also checks the local full-suite lease. No full test
+suite runs.
+
+For a CI runner with `[lite]` installed and no prestarted PostgreSQL, use
+`python -m evals.rust_port.phase1_ci` with the same arguments. It provisions a
+fresh owned embedded instance through the existing provider, supplies disposable
+test/admin URLs internally, and stops the listener before writing
+`<private-receipt>.postgres.json`. It never prints database credentials.
+
+`--port-stdio-json` and `PSEUDOLIFE_PORT_STDIO_JSON` select the candidate for the
+external pytest adapter. Unmapped functions and private Python entrypoints are
+rejected. Without these switches, tests retain their Python default. Only public
+default, `shim` and `channel` launches can be replaced.
+For a full-suite gate, add `--port-full-suite` with `--port-stdio-json`:
+all mapped stdio nodes use Rust, and every other collected node runs its original
+Python assertions. This mode reports both counts and refuses a selection with
+zero mapped stdio nodes. The default explicit selection still rejects unmapped
+nodes; neither mode skips or deselects assertions.
+
+The `stdio-raw-compared` policy retains and compares stdout bytes, including
+member order, spacing, integer spelling and line framing. It changes only named
+source newline spans at `/body/result/tools/*/description` and
+`/body/result/instructions`. Stderr's allowlist is empty and exit codes are exact.
+`eof-observed-final-pair-orders` permits only the observed final two connection
+errors to swap; their bytes, multiplicity and all preceding frames stay exact.
+Each platform supplies its own byte oracle. Frozen Windows observations authorize
+only the observed ID order sets on Linux, not stream newline normalization.
+
+Generic HTTP controls use the exact per-case comparison Policy used for the
+real candidate, including embedded JSON and ranking checks. Malformed responses
+pass through the shared boundary observation wrapper and generic comparator.
+The identity proxy seeds a fresh bank and must make zero mutations and produce
+zero differences. HTTP raw bodies remain retained but ignored until Phase 3.
+Deterministic test embeddings establish protocol and storage execution, not
+model or retrieval parity. Per-function Rust equivalents remain pending until
+their own executable evidence passes.
+
+After merging newer Python source, keep the oracle at its recorded pin. Prepare
+an isolated oracle from the current checkout-installed dependency runtime:
+
+```sh
+python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
+cd /private/new-phase1-oracle/source
+export PATH="$PWD/../runtime/bin:$PATH"
+../runtime/bin/python -m evals.rust_port.phase1_ci --oracle-root . --candidate-json '["/absolute/current/rust/target/release/pseudolife-stdio"]' --out /private/new-result.json --public-out /absolute/current/evals/results/new-result.json --offline-resource-checked-at VERIFIED_UTC_TIME
+```
+
+On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
+directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
+creates a detached clone at `0b015f9279a778f996e71ee78510695e5fee7196`, overlays
+only the current harness instruments, and installs that oracle editable without
+dependencies in a private runtime. It checks both source bytes and imported
+package/version identity. The candidate is the current absolute binary path;
+the immutable test functions execute from the pinned source. Dependency paths
+come from the caller's installed `[dev,lite]` runtime. The destination must be new.

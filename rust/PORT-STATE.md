@@ -1,7 +1,10 @@
 # Rust port state
 
-The Python oracle for phases 0b and 1 is pinned to master
-`3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53).
+The Python oracle for phase 1 is pinned to master
+`0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53).
+The historical phase 0b oracle remains
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53);
+existing phase 0b receipts retain that source identity.
 Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 [PR #546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546).
 The final appendix review and all ten CI checks passed at `9a62ed02`.
@@ -18,14 +21,20 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
-| 2: Client CLI leaves | deferred | — | CLI rows and 25-mode checklist in PARITY.md |
+| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | — | Preliminary Rust judges pass on both platforms; internal equivalents, native fallback and final phase gates are in progress; no Rust acceptance claimed |
+| 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
 
 ## Decisions and constraints
 
+- Phase 1 starts from master `0b015f92` on `codex/rust-phase1`.
+  PR #546 was still open at branch creation; its branch head `31f8475e`
+  was merged into the phase 1 branch at `93012944`, as the phase 1 brief
+  permits. PR #546 and its branch are unchanged. The maintainer owns its merge.
+- The phase 1 work window ends at 2026-10-04 12:30 AEDT (01:30 UTC).
+  Incomplete work will retain explicit pending evidence and a draft PR.
 - The phase 0b brief re-pins the oracle to master at phase start. The port makes
   no DDL changes, adds no tables and repurposes no columns. Upstream schema bumps
   follow CLAUDE.md's seven-place checklist and a new phase pin.
@@ -34,13 +43,13 @@ No production Rust surface has been accepted.
   captures run on Windows and Linux. Every receipt records its platform and uses anonymous host
   labels with hardware/software details.
 - Existing tests and conftest stay immutable; candidate routing uses the external
-  pytest plugin and the concrete nodes in test-buckets.json only.
+  pytest plugin and the concrete nodes in phase1-test-buckets.json only.
 - The old Console was replaced by Console v3 on master, with /ui/next/ removed.
   Other proposed simplifications remain open and are not implemented by the port.
 - Historical captures keep their recorded source identity. R6 selfcheck and
   full-bank R5 remain in-tree; superseded R4/R5 selfchecks are preserved outside
   the tree and recoverable from PR #540's recorded tree at `f2ee1524`.
-- The daemon baseline uses the phase oracle above. Hosted CI noise controls use
+- The phase 0b daemon baseline uses its historical `3691f5cb` oracle. Hosted CI noise controls use
   the reviewed PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e` and
   Actions run 37090575829; their distinct source identity remains recorded.
   The receipt rust-phase0b-ci-same-head.json includes successful attempts 1, 3
@@ -74,7 +83,39 @@ No production Rust surface has been accepted.
 
 ## Resume
 
-Phase 0 is complete, with all five gap implementations, measurement receipts,
-final appendix review and ten passing CI checks recorded at `9a62ed02` in
-PR #546. Subsequent PR updates require fresh review and current-merge-ref CI.
-Phase 1 parity rows stay deferred until phase 0b is merged.
+Phase 1 implementation uses the `0b015f92` oracle and the stacked phase 0b
+branch described above. Python self-comparison and control proofs have passed
+on Windows and Linux in disposable environments; their summaries are
+`evals/results/rust-port-phase1-windows-ci-r1.json` and
+`evals/results/rust-port-phase1-linux-ci-r3.json`. These are oracle/instrument
+proofs, not Rust acceptance. Preliminary Rust comparisons pass with zero
+differences in `evals/results/rust-port-phase1-rust-windows-r3.json` and
+`evals/results/rust-port-phase1-rust-linux-r1.json`; their eight public
+subprocess tests pass on each platform and cleanup is verified. The historical
+and Phase 1 inventory audits pass separately. The integrated harness/audit
+selection passed 202 tests after the mixed-suite routing addition; the separate
+historical and Phase 1 audit selection passed 42 tests. The explicit mixed-suite
+routing mode passes eight focused checks and keeps every unmapped Python
+assertion active. Existing tracked test files remain unchanged.
+
+The guarded non-Board candidate passes 108 Windows and 104 Linux targeted tests;
+its selected Python SDK capability check is preserved before daemon traffic.
+Board completion passes 74 Windows and 75 Linux targeted tests. The final
+non-Board assertion selection passes 33 tests on each platform, including
+configured shim/channel instructions for ready and unready Board adapters.
+The manifest records mappings for all 125 scoped internal assertions;
+mapping coverage does not establish acceptance. Four additional
+public file-claim preparation/recovery tests pass on each platform, including
+Git-child timeout and cancellation cleanup. Windows doorbell validation passes
+35 targeted tests: 26 completion tests, three immutable tests and six native
+helper tests, including job-failure fallback. Linux validation passes all
+29 targeted tests, including the repaired ENOEXEC shell-fallback assertion
+and ELF/shebang execution with PID=SID=PGID. Both platforms report zero owned
+processes after fixture cleanup. These targeted results do not
+replace frozen whole-candidate validation, and all Phase 1 acceptance rows
+remain deferred.
+Final frozen Rust comparisons on both platforms, measurements, committed
+full-suite validation and independent whole-branch review remain open.
+Phase 1 parity rows stay deferred until phase 0b is merged and the
+required judges pass. Subsequent PR updates require fresh review and
+current-merge-ref CI.

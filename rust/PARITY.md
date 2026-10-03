@@ -1,6 +1,7 @@
 # Behaviour parity register
 
-Oracle: Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`, schema 53.
+Phase 1 oracle: Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
+Historical phase 0b receipts retain Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`.
 Recount at this pin: 38 MCP tools, 62 ConsoleRoutes registrations plus the
 separate POST /api/pair route, eight hook endpoints, 15 coordination actions
 and 25 CLI modes. The current Console is v3 at /ui/; /ui/next/ is absent.
@@ -31,8 +32,8 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | MCP-TIER | 1/3 | Principal-scoped list filtering, 12h TTL/precedence, cumulative 9/24/38 visibility, hidden calls accepted, list_changed. `toolset_tiers.py`, `mcp_server.py` | `test_shim.py` notification nodes P; `test_toolset_tiers.py`, `test_mcp_server.py` I; add 38-tool differential schema/argument/error corpus | deferred |
 | SHIM-LIFECYCLE | 1 | Canonical origin validation, discovery/probe, local spawn/reuse, no-spawn waiting, ownership, child exit and recovery, version notices and gated client updates. `shim.py`, `daemon_url.py`, `runtimes.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py`, `test_connection_loss_recovery.py`, `test_shim_runtimes.py` mixed; `test_client_environment.py`, `test_credentials.py`, `test_version_handshake.py`, `test_update_offer.py` I/mixed | deferred |
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | deferred |
-| SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; standalone channel mode remains phase 4. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | deferred |
-| CLI-DISPATCH | 1/2/3/4/5 | All 25 modes, aliases, unknown-mode exit 2, help bytes and runtime version metadata, light import/startup. `cli.py` and help fixture | `test_cli_dispatch.py`, `test_release_ux.py`, `test_client_install_ux.py` I/A; add argv subprocess records | deferred |
+| SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | deferred |
+| CLI-DISPATCH | 1/2/3/4/5 | All 26 modes, aliases, unknown-mode exit 2, help bytes and runtime version metadata, light import/startup. `cli.py` and help fixture | `test_cli_dispatch.py`, `test_release_ux.py`, `test_client_install_ux.py` I/A; add argv subprocess records | deferred |
 | CLI-LEASE | 2 | OS lock truth, crash release, FIFO tickets, board mirror, check/run/hold/list/break and child status. `lease_cli.py`, `os_lock.py` | `test_lease_cli.py`, `test_lease_cli_board.py`, `test_coordination_leases.py`, `test_coordination_leases_api.py` mixed/I; subprocess nodes suitable after dispatcher audit | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
@@ -41,7 +42,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | CLI-AUDIT | 2 | Export/verify/redact/stats, chain/head semantics, reports and body-expiry distinctions. `board_audit_cli.py`, `board_audit_stats.py`, `storage/coordination.py` | `test_board_audit_cli.py`, `test_board_audit_stats.py`, `test_coordination_audit.py`, `test_coordination_report.py` I/mixed | deferred |
 | CLI-BACKUP | 2 | pg_dump + compressed state, no create-on-backup, exclusions and post-success-only own-file rotation. `backup_cli.py` | `test_backup_cli.py`, `test_ops_backup_integrity.py`, `test_bank_dumps.py` I/mixed; add fake pg_dump subprocess fixtures | deferred |
 | CLI-TRANSFER | 2 | ZIP/JSONL manifest; exact exported/excluded table rosters in the transfer appendix; float4/ids/HLC/JSONB/time/sequences; import refuses a non-empty bank (only meta and builtin relations are exempt), dimension/column mismatches and other live connections. `transfer_cli.py` | `test_transfer_cli.py` direct calls I/DB; add real CLI export/import against disposable banks | deferred |
-| CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 25 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 4; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
+| CLI-MODE-OWNERSHIP | 1/2/3/4/5 | All 26 modes have explicit ownership in the CLI checklist: help/version/shim phase 1; tunnel and coordination-recovery phase 2; channel phase 1/2; doorbell-prompt-seen phase 1/2; serve phase 3/4; embedded phase 3/5; update phase 5. `cli.py`, `tunnel_*.py`, `channel.py`, `coordination_recovery.py` | `test_tunnel_cli.py`, `test_tunnel_service.py`, `test_tunnel_bridge.py`, `test_tunnel_profiles.py`, `test_tunnel_runtime.py`, `test_coordination_recovery.py`, `test_channel.py` I/mixed; no supported mode disappears by implication | deferred |
 | HTTP-SECURITY | 3 | Health public/degraded semantics; MCP/REST bearer gates on UTF-8/Latin-1 bytes, fail-closed map, remote bind/trust policy, DNS/Origin/rebinding, JSON/body limits, error status, redirect refusal. `daemon.py`, `web/api.py`, `principals.py`, `utils/no_redirect.py` | `test_daemon_http.py` P/I; `test_web.py`, `test_principals.py`, `test_extractor_no_redirect.py`, `test_shim_transport_recovery.py`, `test_dim_mismatch_health.py` I/mixed | deferred |
 | HTTP-STATIC | 3 | Root redirect, Console v3 assets at /ui/; /ui/next/ is absent at this pin, traversal/security/content types. `web/api.py`, `web/static/`, `frontend/` | `test_web.py` I/mixed; `test_console_build.py`, `test_console_source_guards.py` A; preserve current Console v3 behavior | deferred |
 | HTTP-READS | 3 | Every GET Console route including configuration, episodes, graph/review/provenance and telemetry reads. `web/routes.py`, `web/config_io.py` | `test_web.py`, `test_coordination_console.py`, `test_coordination_web.py`, `test_web_hardening.py` I/mixed; add HTTP corpus for every GET route | deferred |
@@ -276,7 +277,7 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 | shim | 1 | deferred | No accepted Rust evidence |
 | serve | 3/4 | deferred | No accepted Rust evidence |
 | embedded | 3/5 | deferred | No accepted Rust evidence |
-| channel | 4 | deferred | No accepted Rust evidence |
+| channel | 1/2 | deferred | Process boundary in phase 1; only named internal channel remainder may defer to phase 2 |
 | coordination-recovery | 2 | deferred | No accepted Rust evidence |
 | board-audit | 2 | deferred | No accepted Rust evidence |
 | briefing | 2 | deferred | No accepted Rust evidence |
@@ -291,6 +292,7 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 | episode-start | 2 | deferred | No accepted Rust evidence |
 | episode-end | 2 | deferred | No accepted Rust evidence |
 | wait-mail | 2 | deferred | No accepted Rust evidence |
+| doorbell-prompt-seen | 1/2 | deferred | Doorbell receipt correlation; no accepted Rust evidence |
 | lease | 2 | deferred | No accepted Rust evidence |
 | invite | 2 | deferred | No accepted Rust evidence |
 | pair | 2 | deferred | No accepted Rust evidence |
@@ -299,7 +301,9 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 
 ## Test-file buckets
 
-The pinned oracle contains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Candidate coverage is exactly 5 concrete nodes from `test_cli_dispatch.py`; unlisted nodes stay oracle-only. Every internal file explicitly records its Rust unit/wire equivalent as `pending`; the bucket inventory establishes no implemented parity. Run `python rust/contract_inventory.py` and `python -m pytest rust/test_contract_inventory.py -q`.
+The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
+
+The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases, retaining their individual scope and pending equivalents. These mappings establish no passing Rust coverage or implemented parity. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 ## Health, HTTP bodies and logical transfer
 
@@ -463,6 +467,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_SUITE_NAME` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_PYTHON` | `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_REMOTE` | `ops/remote-suite.ps1` |
+| `PSEUDOLIFE_SUITE_RUN_ID` | `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_SLOTS` | `ops/wsl-suite.ps1` |
 | `PSEUDOLIFE_SUITE_VENV` | `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_WHERE` | `ops/remote-suite.ps1` |

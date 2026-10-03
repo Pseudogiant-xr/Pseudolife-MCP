@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
+
 ## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
 
 ### Fixed (2026-10-04 — the memory_message description names the designated coordinator)

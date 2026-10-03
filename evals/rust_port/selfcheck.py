@@ -30,7 +30,7 @@ def probe_runtime(home, root=ROOT):
 
 def plugin_proof(directory, binary, root=ROOT):
     manifest = json.loads((ROOT / "evals/rust_port/oracle_tests.json").read_text(encoding="utf-8"))
-    selected = list(manifest["mapped"])
+    selected = [node for node, boundary in manifest["mapped"].items() if boundary == "cli-main-process"]
     watched = ["tests/test_cli_dispatch.py", "tests/conftest.py"]
     hashes = lambda: {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in watched}
     before = hashes()

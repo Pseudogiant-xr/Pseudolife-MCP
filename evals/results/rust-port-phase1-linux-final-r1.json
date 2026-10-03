@@ -1,0 +1,420 @@
+{
+  "schema": 1,
+  "oracle_head": "0b015f9279a778f996e71ee78510695e5fee7196",
+  "oracle_schema": 53,
+  "production_source_matches_pin": true,
+  "capture_platform": {
+    "os": "Linux",
+    "architecture": "x86_64"
+  },
+  "captured_at_utc": "2026-10-03T18:40:14Z",
+  "instrument_sha256": {
+    "acceptance.py": "13bde2500fa238aff6604815be7d7e4b1f31ddef1fbbf8000671b670c78532fa",
+    "broken_stdio.py": "063e3c7a8f0420a494bfbfcb43fbe70fe11b2590eaa4156f4aa7f2740c00e6c2",
+    "candidate.py": "4ac9b559c06179a9750ffc4c8b1c99c7c27ad8b08f0c3680ff5eb138a07452f3",
+    "controls.py": "b6623e718706564571dfaf56ca0d01b0c21d68ee36edbf64b275be7337101293",
+    "fixtures.py": "f227ae6216d4ecaeb05fbe0930312f77835a55228595cd489a649920e40bb534",
+    "full_bank.py": "728892c3e0478d10fb1cacc422494bf9d8fa1066250021ff6ad9f8cdae7e9089",
+    "harness.py": "6618d726787136a5221acc66fdf774c28293d696c92cc2121949e3bb50a90d86",
+    "oracle.py": "e5b61f5ee1255d5f8dc195289a8f87a3ebc2e8e31c9c0c5f2e4460055e086f18",
+    "phase1.py": "26394488e2d519cbcf727e88d89da442dd447d954ff51fd9a243bfe4b2fba483",
+    "phase1_inventory.py": "abdde177c5c9f25b75bd98be062ffee34d110570fd6cf4f998722d05e8d739bc",
+    "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+    "provenance.py": "40111feb624be0fbb875e8b74d7112d8875cc95524aab4b3a12fb6ec993e2c8e",
+    "pytest_plugin.py": "31a67a77364f8cf898a0a8a635f42ac26275ad4267291620e90f7a8e0ba5816a",
+    "selfcheck.py": "80e8eda1b4df3443f24b2e1d2f9d483ea93d489aa823ebbc713b40338e9c4d61",
+    "stdio.py": "922310c6b9e10ec1d98f97dac06cbc4c18d69c6cbfd8bf2e5bc7c430838337eb",
+    "stdio_capture.py": "355e64222e963ac5cb73114813d4f29e41077102812354efc43169f5f9e343db",
+    "stdio_corpus.py": "e2f84b1b550f589f1c39ea9be8df7ec61360281d4090c6f3f83a6c68f9af7a6e",
+    "stdio_daemon.py": "7e9946034ebe844f8ca7d79ceead077970ae719acd12547c871c6eaae5875ea9",
+    "stdio_eof.py": "26bbfb3fa5138ab6e0f832c58a18cb7e4b51ad8d5cd712eb5fd58611c856006d",
+    "stdio_faults.py": "be4429ac807c6ab826e902369b4030a61a30d8f9093fe2b216106036c18bd740",
+    "stdio_fixture.py": "e2e55debd1dbffd0a82d03b3b4884bac2ff2737a0088ad4053d284b43d0ac466",
+    "stdio_judge.py": "06ef3e3b4be80760aeb6ede9816ac2f43e9a0b5490c7bf552350955fce76c8bf",
+    "stdio_minimal_daemon.py": "4b8fe5e24bec5a87623a08ddfd4693d5e00296bed41f0ad7bb64f8e18e214439",
+    "stdio_process_controls.py": "07491a431c809b5f5747e2efe1db5c894620c57747f41e75b96b21a3eadf6468",
+    "test_boundary_regressions.py": "84d58e620a65dc7bf6b441949fc5f939dfb7bdb0d95715396059a7b13e986ed1",
+    "test_candidate.py": "2aff48e87c393d39e03338890c1a5eae31dc025571c4553a51dcf5ec908ae4c3",
+    "test_capture_provenance.py": "8c70af011145941e705c16f296fa2903ae565be22356fdb8e7d9d97de1d874ab",
+    "test_full_bank.py": "f48bd63ed14cdb75aa09fccf3128e4316ff3755799a690d6d9e4b0d39df3dd9f",
+    "test_harness.py": "28c2586056733adf7e1706f02eb8ccb528ea6a30e8333f67fe81a3618fa369d0",
+    "test_instrument_routing.py": "46c2a1e12325e74155bb517ba3d8f917d469e45443b2fe5c746b66d2e9d9e4fb",
+    "test_oracle_boundary.py": "9af7c4a00d930eef2a7123e5e4ada9856282421492368819407b1869cf6316cf",
+    "test_phase0b.py": "7a89ace735dbedeadd3f9a2efdca099ea48415fc555926abe8a832b66f207176",
+    "test_processes.py": "4092b1d694accf7f10086b83e33bc2f4a8e3a8223aedbf26e2d9ed3cf2adc3b3",
+    "test_provenance.py": "580e131155b8986369cdcf579ff0c2f330b309424a86dd35f7af56bbd2aaa3de",
+    "test_runtime_provenance.py": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+    "test_stdio_judge.py": "9e69b9025b937531495e546a39a5d99ef25b993b48903a72fd66ed79b9d35175",
+    "test_wire.py": "5cca5b3f31ed2dee545afa68bd776cb6a75cf613e1a3d033e2b8490c75a07db3",
+    "url_reference.py": "178f4270a7d448fc2d4f7d80f1addcad83d3082535754925ba0788d923460991",
+    "wire.py": "1a8d94382ad0ee105b299dda7a4a4a6b2e7cd39c44214ec6af74aec63b97ac37",
+    "__init__.py": "5578c93d5121b343984c99936d30ee2e9dafb9f7c13dd3d8bf8b4b016401bd5f"
+  },
+  "process_tests": {
+    "nodes": [
+      "tests/test_shim.py::test_shim_forwards_initialize_instructions_and_tool_annotations",
+      "tests/test_shim.py::test_shim_survives_idle_gap",
+      "tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand",
+      "tests/test_shim.py::test_shim_forwards_stringified_list_param",
+      "tests/test_shim.py::test_shim_surfaces_the_daemons_real_error_message",
+      "tests/test_shim.py::test_claude_code_session_through_the_shim_keeps_one_root_episode",
+      "tests/test_shim.py::test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list",
+      "tests/test_shim.py::test_a_call_that_gets_through_announces_the_recovery_itself"
+    ],
+    "exit_code": 0,
+    "passed": true,
+    "reused_receipt_sha256": "5b2cdc0f90cf68f22fa08b45def3f6b90fb62f65b1c40d15a860747ee024955a"
+  },
+  "differences": [],
+  "resource_check": {
+    "checked_at_utc": "2026-10-03T18:40:14Z",
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "offline_resource_checked_at_utc": "2026-10-03T17:55:00Z",
+    "offline_resource_clearance_used": true,
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+  },
+  "policy": "stdio-raw-compared",
+  "named_normalizations": [
+    "source-text-lf"
+  ],
+  "graded_controls": {
+    "tool-description": {
+      "expected_difference": "value",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/frames/1",
+          "reason": "value"
+        },
+        {
+          "path": "/json/1/result/tools/0/description",
+          "reason": "value"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    },
+    "error-as-success": {
+      "expected_difference": "tool_error_envelope",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/frames/6",
+          "reason": "value"
+        },
+        {
+          "path": "/json/6/result/isError",
+          "reason": "tool_error_envelope"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    },
+    "duplicate-key": {
+      "expected_difference": "duplicate_json_key",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/",
+          "reason": "duplicate_json_key"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    },
+    "raw-whitespace": {
+      "expected_difference": "value",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/frames/1",
+          "reason": "value"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    },
+    "wrong-exit": {
+      "expected_difference": "value",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/exit_code",
+          "reason": "value"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    },
+    "unexpected-stderr": {
+      "expected_difference": "value",
+      "rejected": true,
+      "differences": [
+        {
+          "path": "/stderr",
+          "reason": "value"
+        }
+      ],
+      "policy": "stdio-raw-compared"
+    }
+  },
+  "status": "passed",
+  "eof": {
+    "differences": [],
+    "frozen_oracle_observations": 35,
+    "evidence_sha256": "2c55f5bab304f4afcaa0feccfb33ccebbded00a4733f70fe232e83725b63867f",
+    "normalization_rule": "eof-observed-final-pair-orders",
+    "byte_oracle": "same-platform; frozen order evidence does not normalize line framing"
+  },
+  "faults": {
+    "differences": [],
+    "limitation": "Storage-free fault fixtures; unchanged 8-node tests cover watcher schedules and recovery assertions."
+  },
+  "process_controls": {
+    "identity": {
+      "passed": true,
+      "policy": "stdio-raw-compared",
+      "differences": []
+    },
+    "wrong-protocol": {
+      "passed": true,
+      "policy": "stdio-raw-compared",
+      "differences": [
+        {
+          "path": "/frames/0",
+          "reason": "value"
+        },
+        {
+          "path": "/json/0/result/protocolVersion",
+          "reason": "value"
+        }
+      ]
+    },
+    "duplicate-key": {
+      "passed": true,
+      "policy": "stdio-raw-compared",
+      "differences": [
+        {
+          "path": "/",
+          "reason": "duplicate_json_key"
+        }
+      ]
+    }
+  },
+  "generic_controls": {
+    "status": "passed",
+    "cases": 25,
+    "differences": [],
+    "identity_proxy_validation": "passed",
+    "oracle_source_check": {
+      "oracle_head": "0b015f9279a778f996e71ee78510695e5fee7196",
+      "oracle_schema": 53,
+      "production_source_matches_pin": true
+    },
+    "graded_controls": {
+      "missing-key": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/cortex",
+            "reason": "field_presence"
+          },
+          {
+            "path": "/body/count",
+            "reason": "field_presence"
+          },
+          {
+            "path": "/body/entries/0/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/2/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/content_length/compared",
+            "reason": "value"
+          },
+          {
+            "path": "/headers/content-length",
+            "reason": "value"
+          }
+        ],
+        "expected_difference": "field_presence",
+        "correct_status": true
+      },
+      "ranking-order": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/cortex",
+            "reason": "field_presence"
+          },
+          {
+            "path": "/body/entries",
+            "reason": "ranking_order"
+          },
+          {
+            "path": "/body/entries/0/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/0/id",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/0/score",
+            "reason": "score_tolerance"
+          },
+          {
+            "path": "/body/entries/0/surprise_score",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/0/text",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/id",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/score",
+            "reason": "score_tolerance"
+          },
+          {
+            "path": "/body/entries/1/surprise_score",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/text",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/2/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/content_length/compared",
+            "reason": "value"
+          },
+          {
+            "path": "/headers/content-length",
+            "reason": "value"
+          }
+        ],
+        "expected_difference": "ranking_order",
+        "correct_status": true
+      },
+      "epoch-milliseconds": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/cortex",
+            "reason": "field_presence"
+          },
+          {
+            "path": "/body/entries/0/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/0/timestamp",
+            "reason": "epoch_unit"
+          },
+          {
+            "path": "/body/entries/1/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/2/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/content_length/compared",
+            "reason": "value"
+          },
+          {
+            "path": "/headers/content-length",
+            "reason": "value"
+          }
+        ],
+        "expected_difference": "epoch_unit",
+        "correct_status": true
+      },
+      "integer-float": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/cortex",
+            "reason": "field_presence"
+          },
+          {
+            "path": "/body/count",
+            "reason": "type"
+          },
+          {
+            "path": "/body/entries/0/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/1/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/body/entries/2/access_count",
+            "reason": "value"
+          },
+          {
+            "path": "/content_length/compared",
+            "reason": "value"
+          },
+          {
+            "path": "/headers/content-length",
+            "reason": "value"
+          }
+        ],
+        "expected_difference": "type",
+        "correct_status": true
+      },
+      "error-as-success": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/result/isError",
+            "reason": "tool_error_envelope"
+          }
+        ],
+        "expected_difference": "tool_error_envelope",
+        "correct_status": true
+      },
+      "tool-description": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/body/result/tools/0/description",
+            "reason": "value"
+          }
+        ],
+        "expected_difference": "value",
+        "correct_status": true
+      },
+      "duplicate-key": {
+        "rejected": true,
+        "differences": [
+          {
+            "path": "/",
+            "reason": "duplicate_json_key"
+          }
+        ],
+        "expected_difference": "duplicate_json_key",
+        "correct_status": true
+      }
+    }
+  }
+}

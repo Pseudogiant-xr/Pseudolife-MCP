@@ -1,7 +1,9 @@
 # Porting contract
 
-The behavioural oracle is Python 0.15.0 at
-`3691f5cb75487d3fda54a6bde6fab35dcf32c681`, using PostgreSQL schema 53.
+The phase 1 behavioural oracle is Python 0.16.0 at
+`0b015f9279a778f996e71ee78510695e5fee7196`, using PostgreSQL schema 53.
+Historical phase 0b evidence remains bound to Python 0.15.0 at
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681` and its recorded runtime.
 This rulebook governs an incremental port at executable and daemon-subsystem
 boundaries. A compiling translation does not establish parity.
 
@@ -23,6 +25,14 @@ Ports own complete boundaries: use no Python/Rust function bridge, pyo3 or FFI
 between implementations. Keep the Python oracle available through cutover.
 Worker output is evidence to verify, not automatic acceptance; only the lead
 updates parity rows and phase state.
+
+The experimental shim retains the oracle's Python MCP SDK startup preflight.
+It invokes `PSEUDOLIFE_MCP_PYTHON` when selected, otherwise `python` on `PATH`,
+and requires the `mcp.server.subscriptions` capability before daemon traffic.
+Missing or older SDK environments preserve the oracle's diagnostic and exit 1;
+a successful preflight is silent. Rust owns the subsequent stdio protocol and
+HTTP lifecycle. Measurements include the preflight process and its memory.
+The parity lane supplies the pinned Python 3.11 / MCP 2.1.1 environment.
 
 ## Types and serialization
 
@@ -62,6 +72,63 @@ review before acceptance. Do not replace OS lock semantics with an in-memory
 mutex or a PID-file existence check. Use bounded build parallelism and respect
 the shared full-suite queue. Dependency choices remain provisional until their
 supported protocol versions and platform behaviour are demonstrated.
+
+The Phase 1 shim uses `#![deny(unsafe_code)]` with narrow module-local exceptions:
+`credentials::windows_security` validates opened credential and coordination
+state handles and sets protected owner-only access for new private state;
+`lifecycle::posix_session` calls `setsid` in the child before execution. Private
+state contents must not be written until its handle has the required owner and
+ACL. The Windows module must keep descriptor storage alive while inspecting
+borrowed owner/ACL pointers, validate buffer bounds, and release each owned
+allocation and handle exactly once without closing borrowed handles. Repository
+directory identity lookup is read-only and must not change its permissions.
+The Unix callback
+must use only async-signal-safe operations between fork and exec. These
+exceptions preserve the operating-system behavior of the Python oracle; their
+presence does not establish parity. Each requires targeted platform evidence
+and independent review before acceptance.
+
+`shim/src/board/doorbell_windows.rs` is a further local exception for Windows
+subprocess handling. The Windows module exposes safe `QueueProcess::spawn`,
+`wait`, and `kill` methods around job assignment, suspended-child adoption and
+thread resumption. Successful native handles transfer into `OwnedHandle`; a
+separate process-handle clone pins the leader identity through cleanup, and
+thread ownership is checked before resumption. Job creation or assignment
+refusal preserves a runnable CLI and selects the native `taskkill /T /F /PID`
+fallback. Failed suspended adoption terminates and reaps the child before
+reporting definite preexecution failure; timeout and cancellation use bounded
+cleanup, while successful launcher completion leaves its worker running.
+Closing a job does not kill successful workers. The fallback retains the Python
+limitation for workers already orphaned without a job. Injected threads and
+failure after partial multi-thread resumption remain outside the current
+fixture coverage.
+
+`shim/src/board/doorbell_posix.rs` is a local exception for an execve-only
+Doorbell command wrapper, registered after `ProcessSession` installs its
+`setsid` callback. Before fork, the parent prepares owned NUL-terminated
+program, argument and environment strings and their NULL-terminated pointer
+tables. The private `PreparedExec` Send/Sync implementations rely on immutable
+tables pointing into those owned allocations for the closure's full lifetime.
+With Rust 1.94 and pinned libc 0.2.190, the child callback calls `libc::execve`
+and captures raw errno on failure;
+it must not allocate, lock, format, mutate the environment or run destructors.
+It always returns an error after failed execution, preventing execvp's shell
+fallback on ENOEXEC. Rust retains the spawn error channel and failed-child
+reaping; Tokio and process-wrap retain successful process and group ownership.
+This wrapper applies only to Doorbell's resolved executable, ordinary argv0
+and inherited environment with explicit changes; it does not support
+`env_clear`, argv0 overrides or subsequent callbacks. Targeted Linux validation
+passes the native error, ELF/shebang and session-identity assertions;
+frozen whole-candidate validation and independent review remain required
+before acceptance.
+
+Board label normalization follows the pinned Python 3.11 Unicode 14.0.0
+behavior: casefold, then NFC, with category-C inputs rejected. The pinned
+`unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
+casefold differences. `shim/src/board/unicode14.rs` records those corrections
+and the 701 category-C ranges, with dedicated normalization assertions.
+This compatibility table preserves the oracle's label policy; it does not
+authorize normalization at other boundaries.
 
 ## HTTP and authentication
 
@@ -108,6 +175,32 @@ it lacks a supplied ONNX artifact. Phase 3 must first produce and identify the
 same graph and tokenizer inputs, compare it with the Python oracle, and record
 the observed error before accepting a tolerance. No bit-identical or embedding
 equivalence claim follows from comparator support alone.
+
+## Phase 1 stdio comparison
+
+The candidate is `pseudolife-stdio` (`pseudolife-stdio.exe` on Windows), built
+from the `rust/shim` crate in the `rust/Cargo.toml` workspace. Rust 1.94.0 is
+pinned by `rust-toolchain.toml`. The initial targets are
+`x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`; no installation path
+selects this candidate. The dependency choices and build commands are recorded
+in `rust/README.md`.
+
+The named `stdio-raw-compared` policy retains and compares stdout bytes on the
+capture platform. It applies `source-text-lf` only to escaped newline token
+spans at `/body/result/tools/*/description` and `/body/result/instructions`.
+All other whitespace, key ordering and numeric spelling remain exact; the
+comparator does not reserialize a parsed object to manufacture byte equality.
+The stderr message allowlist is currently empty, so every stderr byte is
+compared. Exit codes are exact. This policy does not change the phase 0b
+daemon HTTP/MCP `raw-mcp-retained-not-compared` policy.
+
+The named `eof-observed-final-pair-orders` rule admits only the final two connection-closed error
+frames in orders actually observed in the frozen Python capture set. Both
+orders occurred in five repeats per protocol era; all preceding frames, error
+bytes and frame multiplicity remain exact. A pending modern subscription
+produced exactly one acknowledgement before its final `-32000` error in all
+five repeats. The rule is not a general frame sorter and does not permit extra
+acknowledgements. Evidence remains platform-specific.
 
 ## Measurement and acceptance
 
