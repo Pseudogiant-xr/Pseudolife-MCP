@@ -152,3 +152,10 @@ with CRLF only at the listed one-based inclusive line ranges, and verify the
 recorded raw hash. Other bytes remain unchanged; the baseline instrument files
 used LF bytes. Do not normalize all files or treat a different digest as equivalent.
 Historical captures remain unchanged.
+
+The same recipe applies to capture bytes: `receipts` covers the six execution
+receipts, and `referenced_artifacts` covers the four full-bank/selfcheck corpus
+and oracle artifacts. Reconstruct each from its Git blob before checking its
+historical `sha256` (also named `recorded_raw_sha256`). The four baseline receipts
+use CRLF on every terminated line; all six port artifacts use LF. These explicit
+recipes work on a clean Linux checkout without Windows checkout filters.

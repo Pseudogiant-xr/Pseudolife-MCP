@@ -42,7 +42,12 @@ the final LF with CRLF only on the one-based lines in `crlf_line_ranges`
 `recorded_raw_sha256`. This also preserves the mixed line endings in
 `test_processes.py`; a uniform conversion does not recover its captured digest.
 The manifest identifies historical oracle files separately and leaves every
-capture unchanged. Executable and response hashes are outside this source recipe.
+capture unchanged. Apply the same recipe to `receipts` and `referenced_artifacts`
+before checking their historical `sha256`/`recorded_raw_sha256`: together they
+cover all ten tracked captures, including both corpus and oracle files. Four
+baseline receipts require the declared CRLF ranges; the six port artifacts use
+LF. Git objects and these recipes suffice on a clean Linux checkout. Untracked
+executable hashes and semantic synthetic-corpus digests are separate observations.
 
 Runtime provenance distinguishes `parent_runtime` from `actual_child_runtime`.
 The fixture child reports its own metadata; the full-bank adapter retains the

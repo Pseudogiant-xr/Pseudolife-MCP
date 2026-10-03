@@ -1,33 +1,77 @@
 {
   "schema": 1,
-  "scope": "Exact historical source bytes for baseline R5, full-bank R5 and selfcheck R4; captures remain unchanged.",
-  "canonical_source": "Read each Git object with git cat-file blob <git_blob_oid>; do not read checkout bytes or apply Git checkout filters.",
+  "scope": "Exact historical source and capture artifact bytes for baseline R5, full-bank R5 and selfcheck R4; captures remain unchanged.",
+  "canonical_source": "For files, receipts and referenced_artifacts, read each Git object with git cat-file blob <git_blob_oid>; do not read checkout bytes or apply Git checkout filters.",
   "reconstruction": "Verify canonical_blob_sha256. Number canonical LF-terminated lines from 1. Replace the final LF with CRLF only on lines in crlf_line_ranges; ranges are inclusive. Leave every other byte, including a final unterminated line, unchanged. Verify recorded_raw_sha256.",
-  "exclusions": "Interpreter/executable binaries, synthetic corpus digests and response/artifact digests are not Git source bindings.",
+  "exclusions": "Untracked interpreter/executable binaries and semantic synthetic-corpus digests are not Git artifact-byte bindings. All ten tracked capture artifacts are covered by receipts and referenced_artifacts; source bindings are covered by files.",
   "receipts": [
     {
       "path": "evals/results/rust-rewrite-baseline-ci-20261003-r5.json",
-      "sha256": "f8d03c8aad589da4528b27a1f94d4882c21e00bb4f400bc2eb0b7adfcb4c0479"
+      "sha256": "f8d03c8aad589da4528b27a1f94d4882c21e00bb4f400bc2eb0b7adfcb4c0479",
+      "git_blob_oid": "511a80ff5bda6e5f0032cccda0319eaef1797f76",
+      "canonical_blob_sha256": "11ac7cfb646e777172643fd296c809008363fa33260bc96f5da7ec20fa24a01a",
+      "recorded_raw_sha256": "f8d03c8aad589da4528b27a1f94d4882c21e00bb4f400bc2eb0b7adfcb4c0479",
+      "crlf_line_ranges": [
+        [
+          1,
+          2904
+        ]
+      ]
     },
     {
       "path": "evals/results/rust-rewrite-baseline-daemon-20261003-r5.json",
-      "sha256": "016f6d8604e1691fd479e8375fa1a06c4dcd227aaba8ede9686302158a409401"
+      "sha256": "016f6d8604e1691fd479e8375fa1a06c4dcd227aaba8ede9686302158a409401",
+      "git_blob_oid": "0d176752c1d7ecaa5d05f3b70d2679c9242e443d",
+      "canonical_blob_sha256": "b01d5f44b1bb98eb607cc97981a6d4d9d90e9c110cff8f11da0c57a571b9f50a",
+      "recorded_raw_sha256": "016f6d8604e1691fd479e8375fa1a06c4dcd227aaba8ede9686302158a409401",
+      "crlf_line_ranges": [
+        [
+          1,
+          1264
+        ]
+      ]
     },
     {
       "path": "evals/results/rust-rewrite-baseline-daemon-smoke-20261003-r5.json",
-      "sha256": "25167ffc7efdb3e769e6e02fb24721276b272508a941e667b91f22db6178d096"
+      "sha256": "25167ffc7efdb3e769e6e02fb24721276b272508a941e667b91f22db6178d096",
+      "git_blob_oid": "8947f4f904325750edde94664964d0920b6404d8",
+      "canonical_blob_sha256": "a53c01a32f135145451ec1f83e52b6b9a02a884131faeea9a6369b4860e83a9e",
+      "recorded_raw_sha256": "25167ffc7efdb3e769e6e02fb24721276b272508a941e667b91f22db6178d096",
+      "crlf_line_ranges": [
+        [
+          1,
+          326
+        ]
+      ]
     },
     {
       "path": "evals/results/rust-rewrite-baseline-shim-20261003-r5.json",
-      "sha256": "1d675d1bbdfa590dace9ac03da24fdc2d586a29d173e17b237d6bc5a4be3d647"
+      "sha256": "1d675d1bbdfa590dace9ac03da24fdc2d586a29d173e17b237d6bc5a4be3d647",
+      "git_blob_oid": "a7ddf073f0e8102cecdc2947bffc0b2f546151cd",
+      "canonical_blob_sha256": "3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581",
+      "recorded_raw_sha256": "1d675d1bbdfa590dace9ac03da24fdc2d586a29d173e17b237d6bc5a4be3d647",
+      "crlf_line_ranges": [
+        [
+          1,
+          1227
+        ]
+      ]
     },
     {
       "path": "evals/results/rust-port-phase0-full-bank-r5/run.json",
-      "sha256": "c1be1f7d66e8c7369f03c19698060619cab3f0afc5348a132566e82c662a37a3"
+      "sha256": "c1be1f7d66e8c7369f03c19698060619cab3f0afc5348a132566e82c662a37a3",
+      "git_blob_oid": "ebafa5aa30a73a5545b79d9145f52549bc91f7db",
+      "canonical_blob_sha256": "c1be1f7d66e8c7369f03c19698060619cab3f0afc5348a132566e82c662a37a3",
+      "recorded_raw_sha256": "c1be1f7d66e8c7369f03c19698060619cab3f0afc5348a132566e82c662a37a3",
+      "crlf_line_ranges": []
     },
     {
       "path": "evals/results/rust-port-phase0-selfcheck-r4/selfcheck.json",
-      "sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb"
+      "sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb",
+      "git_blob_oid": "8aacc63b37d77c27fb12582105f085f655134f25",
+      "canonical_blob_sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb",
+      "recorded_raw_sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb",
+      "crlf_line_ranges": []
     }
   ],
   "source_binding_occurrences": 152,
@@ -308,5 +352,40 @@
       ],
       "source_commit": "136a34ae95e981a691fcc31ba9fb4f35d83d4249"
     }
-  ]
+  ],
+  "referenced_artifacts": [
+    {
+      "path": "evals/results/rust-port-phase0-full-bank-r5/corpus.json",
+      "sha256": "2ca6d6a4c9021b1f49b20d5b99fe82621074e6e5f725da72916405eac1bbde34",
+      "git_blob_oid": "e1c3467dac7e3af89bb8574205ee7ef6e344240c",
+      "canonical_blob_sha256": "2ca6d6a4c9021b1f49b20d5b99fe82621074e6e5f725da72916405eac1bbde34",
+      "recorded_raw_sha256": "2ca6d6a4c9021b1f49b20d5b99fe82621074e6e5f725da72916405eac1bbde34",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-full-bank-r5/python-oracle.json",
+      "sha256": "a9aeed6c2a04ac5af8e24014971af44636ad9c858e50ed8f45686c4ce31f8fdd",
+      "git_blob_oid": "0eaa7435b523f60e65550873762353287ab4f5b1",
+      "canonical_blob_sha256": "a9aeed6c2a04ac5af8e24014971af44636ad9c858e50ed8f45686c4ce31f8fdd",
+      "recorded_raw_sha256": "a9aeed6c2a04ac5af8e24014971af44636ad9c858e50ed8f45686c4ce31f8fdd",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-selfcheck-r4/corpus.json",
+      "sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "git_blob_oid": "e8864190833ae1e0a981c0a56c06b43fbd41585a",
+      "canonical_blob_sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "recorded_raw_sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-selfcheck-r4/python-oracle.json",
+      "sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "git_blob_oid": "667c1b257448565723ffce7ba989c6461393f33a",
+      "canonical_blob_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "recorded_raw_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "crlf_line_ranges": []
+    }
+  ],
+  "capture_artifacts": 10
 }
