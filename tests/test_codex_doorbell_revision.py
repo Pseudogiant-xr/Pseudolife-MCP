@@ -1,6 +1,7 @@
 """Offline queue-policy and recovery regressions; no native Codex home is used."""
 import asyncio
 from contextlib import contextmanager, suppress
+import errno
 import json
 import os
 from pathlib import Path
@@ -820,3 +821,102 @@ def test_reservation_rechecks_existing_target_after_staging(tmp_path, monkeypatc
     assert pending.path.read_bytes() == contents
     assert not list(tmp_path.glob(".bell-*"))
     assert pending.reserve(3) is None
+
+
+def test_directory_sync_failure_retries_one_ordinary_queue_submission(tmp_path, monkeypatch):
+    import pseudolife_memory.codex_doorbell_state as module
+
+    command, log = _stub(tmp_path)
+    async def drive():
+        now = [0.0]
+        adapter = CoordinationAdapter("http://127.0.0.1:1", "fixture", delivery_transport="codex", digest_path=tmp_path / "digest.txt")
+        bell = CodexDoorbell(command, clock=lambda: now[0])
+        bell.watch(THREAD, adapter)
+        pending = bell._bells[THREAD].pending_notice
+        published = []
+        def fail_directory_sync(directory):
+            published.append(pending._current())  # Complete staging write and rename succeeded.
+            raise OSError(errno.EIO, "fixture post-publication directory sync failure")
+
+        try:
+            now[0] = 60
+            answer = mailbox("m1", offer=1)
+            with monkeypatch.context() as patch:
+                patch.setattr(module, "_sync_directory", fail_directory_sync)
+                adapter._update_pending_count(answer)
+                await _settle(bell)
+            assert len(published) == 1
+            assert not pending.path.exists()
+            assert not bell._bells[THREAD].outstanding
+            assert adapter._ring_offer is not None
+            assert not _calls(log)
+            adapter._update_pending_count(answer)
+            await _settle(bell)
+            assert len(_calls(log)) == 1
+            assert pending._current()["nonce"] != published[0]["nonce"]
+            adapter._update_pending_count(mailbox("m1", "m2", offer=2))
+            await _settle(bell)
+            assert len(_calls(log)) == 1
+        finally:
+            await bell.aclose()
+            if adapter._ring_timer:
+                adapter._ring_timer.cancel()
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("state", ["other_nonce", "changed_record", "foreign", "accepted", "prompt_seen"])
+def test_directory_sync_rollback_preserves_other_or_accepted_state(tmp_path, monkeypatch, state):
+    import pseudolife_memory.codex_doorbell_state as module
+
+    pending = PendingNotice(tmp_path, THREAD)
+    protected = []
+    def write_private(path, data):
+        fd = module.open_private(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+
+    def fail_after_publication(directory):
+        record = pending._current()
+        if state == "other_nonce":
+            record["nonce"] = "b" * 32
+            record["text"] = module.notice_text(record["count"], record["nonce"], version=2)
+            write_private(pending.path, json.dumps(record).encode())
+        elif state == "changed_record":
+            record["count"] = 2
+            record["text"] = module.notice_text(2, record["nonce"], version=2)
+            write_private(pending.path, json.dumps(record).encode())
+        elif state == "foreign":
+            record["thread_id"] = "bbbbbbbb-2222-4222-8222-222222222222"
+            write_private(pending.path, json.dumps(record).encode())
+        else:
+            marker = pending.accepted_path if state == "accepted" else pending.prompt_seen_path
+            write_private(marker, record["nonce"].encode())
+        protected.append(pending.path.read_bytes())
+        # The producer's original lock must remain held through rollback.
+        with PendingNotice(tmp_path, THREAD)._locked() as taken:
+            assert not taken
+        raise OSError(errno.EIO, "fixture directory sync failure with protected state")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_sync_directory", fail_after_publication)
+        assert pending.reserve(1) is None
+    assert len(protected) == 1 and pending.path.read_bytes() == protected[0]
+    if state != "prompt_seen":
+        assert pending.reserve(3) is None
+
+
+def test_expiry_directory_sync_failure_keeps_the_old_reservation(tmp_path, monkeypatch):
+    import pseudolife_memory.codex_doorbell_state as module
+
+    pending = PendingNotice(tmp_path, THREAD)
+    first = pending.reserve(1, expires_at=2000, now=1000)
+    contents = pending.path.read_bytes()
+    def fail_receipt_directory_sync(directory):
+        assert json.loads(pending.expired_path.read_text())["nonce"] == first["nonce"]
+        raise OSError(errno.EIO, "fixture expiry receipt directory sync failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "_sync_directory", fail_receipt_directory_sync)
+        assert pending.reserve(2, expires_at=90000, now=2000) is None
+    assert pending.path.read_bytes() == contents
+    assert pending.reserve(2, expires_at=90000, now=2000)

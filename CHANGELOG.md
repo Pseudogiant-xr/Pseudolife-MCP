@@ -32,7 +32,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   receipt recording retries brief real lock contention.
 - New reservations are fully written and flushed in a private temporary file
   before publication under the per-thread lock. Interrupted or failed writes
-  cannot leave a partial pending record that blocks later notices.
+  cannot leave a partial pending record that blocks later notices. A directory
+  sync failure after publication releases only the exact new, unaccepted record
+  under the same lock, allowing ordinary delivery to retry.
 - Ambiguous bridge failure never queues an alternate for that snapshot and restores
   a guarded listener for later eligible arrivals. Current desktop queued-notice
   hook emission remains unverified; missing receipts use the recorded expiry

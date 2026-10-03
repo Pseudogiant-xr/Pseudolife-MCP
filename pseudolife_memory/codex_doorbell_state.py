@@ -52,6 +52,10 @@ def _sync_directory(directory):
         os.close(fd)
 
 
+class _ReservationSyncError(OSError):
+    """A new reservation was published but its directory sync failed."""
+
+
 class PendingNotice:
     """One unresolved notice per thread, preserved across shim restarts.
 
@@ -166,7 +170,12 @@ class PendingNotice:
             if exclusive and os.path.lexists(path):
                 raise FileExistsError(path)
             os.replace(temporary, path)
-            _sync_directory(path.parent)
+            try:
+                _sync_directory(path.parent)
+            except OSError as exc:
+                if exclusive:
+                    raise _ReservationSyncError("reservation directory sync failed") from exc
+                raise
         finally:
             with suppress(OSError):
                 os.unlink(temporary)
@@ -205,8 +214,14 @@ class PendingNotice:
                                               recipient_state=recipient_state)}
                 if expires_at is None:
                     record["legacy_first_seen"] = now
-                self._write_atomic(self.path, json.dumps(record, separators=(",", ":")),
-                                   exclusive=True)
+                try:
+                    self._write_atomic(self.path, json.dumps(record, separators=(",", ":")),
+                                       exclusive=True)
+                except _ReservationSyncError:
+                    # No queue launch occurred; retain the lock while proving
+                    # this is still our exact, unaccepted new reservation.
+                    self._rollback_unstarted_locked(record)
+                    raise
                 return record
         except (OSError, ValueError, PrivateStateError):
             return None
@@ -248,22 +263,23 @@ class PendingNotice:
     def resolved(self):
         return self.resolution() is not None
 
+    def _rollback_unstarted_locked(self, record):
+        current = self._current()
+        if current != record or self._prompt_seen(current):
+            return False
+        try:
+            if self._read(self.accepted_path).strip() == record["nonce"]:
+                return False
+        except FileNotFoundError:
+            pass
+        self.path.unlink()
+        return True
+
     def rollback_unstarted(self, record):
         """Release only this reservation after definite pre-execution failure."""
         try:
             with self._locked() as taken:
-                if not taken:
-                    return False
-                current = self._current()
-                if current["nonce"] != record["nonce"] or self._prompt_seen(current):
-                    return False
-                try:
-                    if self._read(self.accepted_path).strip() == record["nonce"]:
-                        return False
-                except FileNotFoundError:
-                    pass
-                self.path.unlink()
-                return True
+                return self._rollback_unstarted_locked(record) if taken else False
         except (OSError, ValueError, PrivateStateError):
             return False
 
