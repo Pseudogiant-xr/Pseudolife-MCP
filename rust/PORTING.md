@@ -1,7 +1,7 @@
 # Porting contract
 
 The behavioural oracle is Python 0.15.0 at
-`136a34ae95e981a691fcc31ba9fb4f35d83d4249`, using PostgreSQL schema 52.
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681`, using PostgreSQL schema 53.
 This rulebook governs an incremental port at executable and daemon-subsystem
 boundaries. A compiling translation does not establish parity.
 
@@ -66,7 +66,12 @@ supported protocol versions and platform behaviour are demonstrated.
 ## HTTP and authentication
 
 Preserve constant-time bearer comparison for both byte encodings, fail-closed
-token parsing, loopback-only hooks and the existing DNS-rebinding policy.
+token parsing and the existing DNS-rebinding policy. Hooks use the tokenless
+Host and Origin header check in `web/api.py:_browser_gate`; it is skipped when
+authentication is configured and does not check the peer address. With no
+headers present the gate passes. The MCP mount separately applies the SDK's
+token-aware transport-security policy: loopback Host/Origin patterns with
+rebinding protection when tokenless, protection disabled with configured auth.
 Redirect refusal applies to every credential-bearing header, including custom
 identity headers. Use explicit timeouts and cancellation; preserve streaming,
 long-poll and backpressure semantics. Protocol negotiation must cover the
@@ -80,8 +85,10 @@ credential defaults from the caller's installed client configuration.
 
 ## SQL and durable state
 
-Read and write schema 52 without DDL changes, new tables or repurposed columns
-during phases 1–4. Use bound parameters, explicit transaction ownership and
+Read and write the recorded phase-start schema (53 for phases 0b and 1) without
+DDL changes, new tables or repurposed columns. Re-pin the oracle to master at
+each phase start; any upstream schema bump follows CLAUDE.md's seven-place
+checklist and is never made by the port itself. Use bound parameters, explicit transaction ownership and
 oracle-equivalent isolation/locking behaviour. Preserve HLC ordering, contender
 selection, audit-chain bytes, mail cursors, lease fencing and FIFO queue rules.
 Hydration and clean-exit flush are part of the contract, not optional caches.
@@ -103,6 +110,34 @@ the observed error before accepting a tolerance. No bit-identical or embedding
 equivalence claim follows from comparator support alone.
 
 ## Measurement and acceptance
+
+Daemon oracle captures and baselines run on Linux, matching the production
+container. Shim and CLI captures run on Windows and Linux. Every capture receipt
+records its platform; a missing platform is a validation failure. Historical
+PR #540 captures retain their original commit and platform and cannot stand in
+for the phase 0b pin.
+
+The named `source-text-lf` rule normalizes CRLF and CR to LF only for text
+originating in source (tool descriptions, docstrings and help) on both sides.
+CLI stdout and stderr, including raw CLI help bytes, remain byte-exact on the
+capture platform. `source-text-lf` applies to parsed source-derived text fields,
+never a silent global normalization of streams. Captured raw MCP text bytes remain beside the
+parsed form for later stricter comparison without recapture.
+
+The HTTP header comparison allowlist is `content-type`, `content-length`,
+`cache-control`, `location`, `www-authenticate`, `allow`, `retry-after`,
+`mcp-protocol-version`, `mcp-session-id` and `x-pl-board`. Header names are
+case-insensitive; missing and present headers differ. MCP session IDs may be
+fixture-symbolic under a named rule. `content-length` is excluded only where
+one side uses fixed framing and the other chunked framing, with the exclusion
+recorded in the receipt. The coordination-start hook deliberately sets
+`x-pl-board`; transport-generated `date` and `server` are outside this allowlist.
+
+Epoch normalization preserves numeric type, sign, unit and magnitude class:
+seconds versus milliseconds differ and integer versus float differs. Normalize
+only named fixture-generated nondeterminism; never turn all positive epochs
+into one sentinel. Duplicate JSON object keys are detected before parsing a
+candidate response and are recorded as a difference.
 
 Every published performance value comes from a script under `evals/` and an
 artifact under `evals/results/`. Record the oracle and candidate commits, dirty
