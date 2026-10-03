@@ -199,3 +199,82 @@ def test_a_signal_to_the_launcher_stops_the_run_and_its_leftovers(tmp_path):
             launcher.wait(timeout=10)
         if leftover is not None and _alive(leftover):
             os.kill(leftover, signal.SIGKILL)
+
+
+@_LINUX_ONLY
+def test_ctrl_c_on_a_terminal_interrupts_pytest_once(tmp_path):
+    """Ctrl+C on the launcher's terminal reaches pytest exactly once.
+
+    The terminal sends SIGINT to its whole foreground process group, and the
+    launcher passes the interrupt on as well. Were pytest in that group, it
+    would take two: the second aborted its session-finish cleanup (private
+    banks undropped, the suite lease unreleased) in 5 of 5 reproductions
+    (review of #541, 2026-10-03). pytest's stand-in counts the interrupts it
+    takes during a 2 s cleanup.
+    """
+    import fcntl
+    import termios
+    import threading
+
+    venv_bin = tmp_path / "venv" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    ints, ready = tmp_path / "ints", tmp_path / "ready"
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        f"trap 'echo int >> {ints}' INT\n"
+        f"touch {ready}\n"
+        "sleep 60 & wait $!\n"
+        "end=$((SECONDS + 2))\n"
+        "while (( SECONDS < end )); do sleep 0.1 & wait $!; done\n"
+        "exit 0\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    master, slave = os.openpty()
+
+    def own_terminal():
+        # start_new_session has already made this child a session leader;
+        # the pty becomes its controlling terminal, its group the foreground.
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    launcher = subprocess.Popen(
+        [BASH, str(SCRIPT)], stdin=slave, stdout=slave, stderr=slave,
+        start_new_session=True, preexec_fn=own_terminal,
+        env=hermetic_env(HOME=str(tmp_path / "home"),
+                         PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+                         PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"),
+                         PSEUDOLIFE_SUITE_COMMIT=None,
+                         PSEUDOLIFE_SUITE_DISPATCHED=None))
+    os.close(slave)
+    output = bytearray()
+
+    def drain():
+        while True:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            output.extend(chunk)
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists():
+            assert time.monotonic() < deadline, output.decode(errors="replace")
+            time.sleep(0.1)
+        os.write(master, b"\x03")  # Ctrl+C
+        launcher.wait(timeout=60)
+        taken = ints.read_text(encoding="ascii").split() if ints.exists() else []
+        assert taken == ["int"], (taken, output.decode(errors="replace"))
+        assert launcher.returncode == 130, output.decode(errors="replace")
+    finally:
+        if launcher.poll() is None:
+            launcher.kill()
+            launcher.wait(timeout=10)
+        os.close(master)
+        reader.join(timeout=10)
