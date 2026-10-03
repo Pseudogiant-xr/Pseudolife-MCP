@@ -86,8 +86,9 @@ modes:
                  (FIFO queue, holder, expected end); `lease hold NAME
                  --while-pid PID` holds one for a process already running;
                  `lease check NAME` exits 1 while it is held (a launch gate);
-                 `lease list` shows them; `lease break NAME` (operator)
-                 frees a stuck one
+                 `lease list` shows them; operator only: `lease break NAME`
+                 frees a stuck one, `lease designate PROJECT AGENT` makes
+                 one session a project's coordinator
   version       print the package version, and the shim runtime it runs
                 from with that runtime's source commit (also --version)
   help          show this message (also -h / --help)
