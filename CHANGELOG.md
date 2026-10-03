@@ -20,15 +20,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   DURATION]` (default 1d, at most 7d). Like `lease break`, it opens the
   bank directly and logs a `lease_designate` with the operator as actor.
   Revoke it with `lease break`; the designee may release it to resign.
-  Leases named `designated:` are refused to agents (`reserved_lease`).
+  Leases named `designated:` are refused to agents (`reserved_lease`), and a
+  freed one is never granted to a queued session (`lease_dequeue`, reason
+  `reserved`). The trust boundary is database access: a session that can
+  reach the bank (lite tier, `ops/.env`, `docker exec`) could designate
+  itself.
+- **Upgrade: no session has coordinator power until one is designated.**
+  In the Docker tier: `docker exec <daemon container> pseudolife-mcp lease
+  designate PROJECT AGENT --for 7d`. Before deploying, check that
+  `pseudolife-mcp lease list` shows no `designated:` lease held or queued
+  (older code let any session claim one; `lease break` it).
 - Holding `coordinator:<project>` now grants nothing: it stays as
   bookkeeping, its holder's urgency is a peer's under the plain urgent
   allowance, and it blocks nothing, since the designation is a separate
   lease. The maintainer and named-clearer paths are unchanged. A principal
   list was rejected because every session on a host shares a principal
   today.
-- A `send` audit event whose mail rang (`rung`, or `no_path` with the ring
-  queued) carries `wake_reason`, the authority it used, so
+- A `send` audit event whose mail rang (`rung`, a Codex `attention` grant,
+  or `no_path` with the ring queued) carries `wake_reason`, the authority it used, so
   `board-audit export` shows which ring was a maintainer, coordinator or
   clearer reopen. No schema change.
 

@@ -675,8 +675,22 @@ characters) the lease `designated:coordinator:<PROJECT>` for DURATION (default
 are the operator's alone: a session's claim of one is refused
 `reserved_lease`, so a designee cannot renew its own. It may release it to
 resign; revoke it with `pseudolife-mcp lease break
-designated:coordinator:<PROJECT>`. In the Docker tier, run both inside the
-daemon container, where the bank's URL is set.
+designated:coordinator:<PROJECT>`. A freed designation is never granted to a
+queued session: any waiter leaves the queue (`lease_dequeue`, reason
+`reserved`). In the Docker tier, run both inside the daemon container, where
+the bank's URL is set:
+
+```sh
+docker exec <daemon container> pseudolife-mcp lease designate PROJECT AGENT --for 7d
+```
+
+**Upgrading from 2026-10-03's first version**, where holding
+`coordinator:<project>` was the role: after the upgrade **no session has
+coordinator power until one is designated**; run the command above for the
+coordinating session. Before deploying, check that `pseudolife-mcp lease
+list` shows no `designated:` lease held or queued: the older code let any
+session claim one, and a holder keeps the role until its hold expires
+(`lease break` it first).
 
 Sessions hold leases too, from the model's side, with no process and no OS lock
 behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
@@ -1177,7 +1191,8 @@ pseudolife-mcp board-audit verify
 `--out` file, which it never overwrites. Each line carries the row's columns,
 the payload parsed, and `body` and `body_salt` (`null` except on a v46
 `send` that has not been redacted). A `send` whose mail rang (a `rung`
-decision, or `no_path` with the ring queued for a listener) carries
+decision, a Codex `attention` grant, or `no_path` with the ring queued for a
+listener) carries
 `wake_reason` in its payload: what allowed the ring (`maintainer`,
 `coordinator` or `clearer` for an authority or a named clearer, else
 `anyone`, `clears` or `urgent`), so an export shows which authority reopened
@@ -1894,6 +1909,16 @@ designation is a separate lease no session can take. A principal list
 (`coordinator_principals`) was not used for the same reason: it would name
 every session on a host. The board-audit export's `send` events name the
 authority each ring used (`wake_reason`).
+
+The trust boundary is access to the bank's database, as for `lease break`
+and `board-audit redact`: no MCP tool or REST action designates. A session
+whose shell can reach the database can designate itself: on the lite tier,
+where the bank is local, or wherever it can read `ops/.env` or run
+`docker exec` on the daemon host. Keep that access away from sessions you
+would not trust as coordinator. Designate one session's own address, never
+a shared one: the Claude Desktop app's own MCP server, for example, is one
+board address shared by every Desktop conversation, so designating it would
+make all of them the coordinator.
 
 Maintainer and coordinator urgency, to a done park or any other, spends the
 sender's `wake.authority_per_sender_per_hour` (12) instead of the plain

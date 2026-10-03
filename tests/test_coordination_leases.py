@@ -455,6 +455,30 @@ def test_a_designation_drops_a_waiter_queued_before_the_namespace_was_reserved(s
     assert (lease["holder"]["agent_id"], lease["queued"]) == (a["agent_id"], 0)
 
 
+@pytest.mark.parametrize("frees", ["break", "release", "expiry"])
+def test_a_freed_designation_is_never_granted_to_a_queued_waiter(store, frees):
+    """A waiter queued for a ``designated:`` lease under older code must not
+    inherit the role when the operator revokes it, the designee resigns or
+    it expires (coordinator review of #550, 2026-10-03): it leaves the
+    queue instead."""
+    a = store.register("alice", project="proj")
+    early = store.register("alice", project="proj")
+    store.designate_coordinator("proj", a["agent_id"], hold=3600)
+    store.storage.conn.execute(
+        "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+        "VALUES ('designated:coordinator:proj',%s,'alice',3600,900)", (early["agent_id"],))
+    if frees == "break":
+        store.break_lease("designated:coordinator:proj")
+    elif frees == "release":
+        store.release_lease(*creds(a), name="designated:coordinator:proj")
+    else:
+        store.test_time[0] += 3601
+    assert store.list_leases()["leases"] == []
+    assert events(store, "lease_grant") == []
+    [dequeued] = events(store, "lease_dequeue")
+    assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
+
+
 def test_a_designated_coordinator_may_resign_and_the_operator_may_revoke(store):
     a = store.register("alice", project="proj")
     store.designate_coordinator("proj", a["agent_id"], hold=3600)

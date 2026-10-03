@@ -1717,6 +1717,11 @@ class CoordinationStore:
             for agent in gone:
                 events.append(self._event("lease_dequeue", {"name": name, "reason": "departed"},
                                           actor="daemon", agent_id=agent))
+            if name.startswith(DESIGNATED_PREFIX):
+                # Only the operator grants these; a waiter queued under older
+                # code leaves instead of inheriting the role (review of #550).
+                self._drop_reserved_waiters(name, events)
+                return row
             waiter = self._one(
                 "SELECT w.* FROM coordination_lease_waiters w JOIN coordination_agents a "
                 "ON a.agent_id=w.agent_id AND a.credential_hash IS NOT NULL "
@@ -1733,6 +1738,15 @@ class CoordinationStore:
                                     "expect": waiter["expect"], "purpose": waiter["purpose"]},
                     actor="daemon", agent_id=waiter["agent_id"]))
         return row
+
+    def _drop_reserved_waiters(self, name, events):
+        """Empty the queue of an operator-only (``designated:``) lease, one
+        ``lease_dequeue`` (reason ``reserved``) per waiter. Only an agent
+        queued before the namespace was reserved can be there."""
+        for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
+                           "RETURNING agent_id", (name,)):
+            events.append(self._event("lease_dequeue", {"name": name, "reason": "reserved"},
+                                      actor="daemon", agent_id=r["agent_id"]))
 
     def _settle_due(self, now, events, *, name=None):
         """Settle every lease with a lapsed hold or a free lease with waiters,
@@ -1978,11 +1992,9 @@ class CoordinationStore:
             if agent["credential_hash"] is None:
                 raise CoordinationError("agent_revoked")
             # A waiter queued before the namespace was reserved never takes
-            # it: dropped here, before the settle below could grant it.
-            events = [self._event("lease_dequeue", {"name": name, "reason": "reserved"},
-                                  actor="daemon", agent_id=r["agent_id"])
-                      for r in self._all("DELETE FROM coordination_lease_waiters WHERE name=%s "
-                                         "RETURNING agent_id", (name,))]
+            # it; dropped here too, since a held lease's settle keeps its queue.
+            events = []
+            self._drop_reserved_waiters(name, events)
             row = self._settle(name, now, events)
             replaced = row["holder_agent_id"]
             row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
