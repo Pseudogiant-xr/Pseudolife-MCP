@@ -2,7 +2,7 @@
 import json
 import re
 
-from .harness import strict_json_loads
+from .harness import Policy, _matches, _segment, strict_json_loads
 
 
 def spans(text):
@@ -66,23 +66,37 @@ def string_boundaries(token):
     return boundaries
 
 
-def replacements(text, original, normalized):
+def replacements(text, original, normalized, *, source_text_paths=Policy().source_text_paths):
     # `normalized` is the trusted result of the operation's declared Normalizer,
     # never candidate-supplied replacement instructions or a rewritten body.
     locations, changes = spans(text), []
     def visit(old, new, path):
-        if type(old) is type(new) and old == new: return
         if isinstance(old, dict) and isinstance(new, dict) and old.keys() == new.keys():
             for key in old: visit(old[key], new[key], path + (key,))
         elif isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
             for index, (left, right) in enumerate(zip(old, new)): visit(left, right, path + (index,))
+        elif (isinstance(old, str) and isinstance(new, str) and
+              _matches('/body/' + '/'.join(_segment(str(p)) for p in path), source_text_paths)):
+            canonical = lambda value: value.replace('\r\n', '\n').replace('\r', '\n')
+            if canonical(old) != canonical(new):
+                raise ValueError("length adjustment outside authorized normalization")
+            start, end = locations[path]
+            boundaries = string_boundaries(text[start:end])
+            # Only newline escapes are canonicalized; other source bytes,
+            # including Unicode escapes and surrounding whitespace, survive.
+            for match in re.finditer(r'\r\n|\r|\n', old):
+                changes.append((start + boundaries[match.start()],
+                                start + boundaries[match.end()], '\\n'))
+        elif type(old) is type(new) and old == new:
+            return
         elif (isinstance(old, str) and isinstance(new, str) and len(path) >= 3
               and path[-1] == 'text' and path[-3] == 'content'):
             # JSON text is itself escaped inside the MCP envelope: adjust only
             # the inner authorized spans, retaining every outer escape elsewhere.
             start, end = locations[path]
             token, boundaries = text[start:end], string_boundaries(text[start:end])
-            for left, right, replacement in replacements(old, strict_json_loads(old), strict_json_loads(new)):
+            for left, right, replacement in replacements(old, strict_json_loads(old), strict_json_loads(new),
+                                                         source_text_paths=()):
                 escaped = json.dumps(replacement, ensure_ascii=False)[1:-1]
                 changes.append((start + boundaries[left], start + boundaries[right], escaped))
         elif isinstance(new, str) and re.fullmatch(r'<[^>]+>(?::\d+)?', new):

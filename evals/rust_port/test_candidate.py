@@ -83,6 +83,66 @@ def test_external_url_releases_bank_when_candidate_observation_fails(monkeypatch
     assert requests[-1]["path"].endswith("/release")
 
 
+@pytest.mark.parametrize('bind_failure', ['mismatched', 'malformed', 'transport'])
+@pytest.mark.parametrize('release_failure', [None, 'mismatched', 'transport'])
+def test_external_url_releases_selected_bank_after_failed_bind_preserving_primary_error(
+        monkeypatch, bind_failure, release_failure):
+    requests, selected = [], []
+    transport_error = OSError('synthetic bind transport failure')
+    class Client:
+        def __init__(self, url, **kwargs):
+            assert url == 'http://127.0.0.1:1'
+        def execute(self, request, *args, **kwargs):
+            assert kwargs['runtime_headers'] == {'Authorization': 'Bearer synthetic-token'}
+            requests.append(request)
+            if request['path'].endswith('ready'):
+                return {'status': 200, 'body': {'nonce': 'a' * 64, 'disposable': True}}
+            if request['path'].endswith('disposable-bank'):
+                selected.append(request['body']['nonce'])
+                if bind_failure == 'transport':
+                    raise transport_error
+                return {'status': 200, 'body': {'binding': 'wrong'}} if bind_failure == 'mismatched' else {}
+            assert request == {'path': '/_rust_port/disposable-bank/release', 'method': 'POST',
+                               'body': {'nonce': selected.pop()}}
+            if release_failure == 'transport':
+                raise OSError('synthetic release transport failure')
+            return {'status': 200, 'body': {'nonce': request['body']['nonce'],
+                                           'released': release_failure is None}}
+    monkeypatch.setattr(candidate, 'HttpClient', Client)
+    error_type = {'mismatched': RuntimeError, 'malformed': KeyError, 'transport': OSError}[bind_failure]
+    with pytest.raises(error_type) as error:
+        with candidate.external_candidate('http://127.0.0.1:1', 'dbname=plbench_rust_baseline_synthetic',
+                'synthetic-token', candidate_nonce='a' * 64):
+            pytest.fail('failed binding must not yield a candidate')
+    if bind_failure == 'transport':
+        assert error.value is transport_error
+    elif bind_failure == 'mismatched':
+        assert str(error.value) == 'external candidate disposable bank binding not verified'
+    else:
+        assert error.value.args == ('status',)
+    assert not selected
+    assert [request['path'] for request in requests] == [
+        '/_rust_port/ready', '/_rust_port/disposable-bank', '/_rust_port/disposable-bank/release']
+
+
+def test_external_url_successful_bind_surfaces_failed_release(monkeypatch):
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        def execute(self, request, *args, **kwargs):
+            if request['path'].endswith('ready'):
+                return {'status': 200, 'body': {'nonce': 'a' * 64, 'disposable': True}}
+            body = request['body']
+            if request['path'].endswith('disposable-bank'):
+                return {'status': 200, 'body': {key: body[key] for key in ('nonce', 'bank_sha256', 'disposable')}}
+            raise OSError('synthetic release transport failure')
+    monkeypatch.setattr(candidate, 'HttpClient', Client)
+    with pytest.raises(OSError, match='release transport failure'):
+        with candidate.external_candidate('http://127.0.0.1:1', 'dbname=plbench_rust_baseline_synthetic',
+                'synthetic-token', candidate_nonce='a' * 64) as (_, cleanup):
+            assert cleanup['bank_binding_verified']
+    assert not cleanup['bank_released'] and cleanup['bank_release_error'] == 'OSError'
+
+
 @pytest.mark.parametrize("authorization", [None, "Bearer synthetic-invalid"])
 def test_reference_url_forwards_auth_negative_requests(monkeypatch, authorization):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

@@ -97,16 +97,25 @@ def external_candidate(url, dsn, token, *, candidate_nonce):
         raise RuntimeError("external candidate preflight identity not verified; bank credentials withheld")
     expected = {"nonce": nonce, "bank_sha256": fingerprint, "disposable": True}
     cleanup = {"externally_owned_server": True, "bank_binding_verified": False, "bank_released": False}
-    response = client.execute({"path": "/_rust_port/disposable-bank", "method": "POST", "body": {
-        "database_url": dsn, "token": token, **expected}}, "http", runtime_headers=headers)
-    if response["status"] != 200 or response["body"] != expected:
-        raise RuntimeError("external candidate disposable bank binding not verified")
-    cleanup["bank_binding_verified"] = True
+    failed = False
     try:
+        response = client.execute({"path": "/_rust_port/disposable-bank", "method": "POST", "body": {
+            "database_url": dsn, "token": token, **expected}}, "http", runtime_headers=headers)
+        if response["status"] != 200 or response["body"] != expected:
+            raise RuntimeError("external candidate disposable bank binding not verified")
+        cleanup["bank_binding_verified"] = True
         yield url, cleanup
+    except BaseException:
+        failed = True
+        raise
     finally:
-        released = client.execute({"path": "/_rust_port/disposable-bank/release", "method": "POST",
-            "body": {"nonce": nonce}}, "http", runtime_headers=headers)
-        if released["status"] != 200 or released["body"] != {"nonce": nonce, "released": True}:
-            raise RuntimeError("external candidate disposable bank release not verified")
-        cleanup["bank_released"] = True
+        try:
+            released = client.execute({"path": "/_rust_port/disposable-bank/release", "method": "POST",
+                "body": {"nonce": nonce}}, "http", runtime_headers=headers)
+            if released["status"] != 200 or released["body"] != {"nonce": nonce, "released": True}:
+                raise RuntimeError("external candidate disposable bank release not verified")
+            cleanup["bank_released"] = True
+        except BaseException as exc:
+            cleanup["bank_release_error"] = type(exc).__name__
+            if not failed:
+                raise

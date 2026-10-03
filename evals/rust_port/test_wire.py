@@ -82,3 +82,56 @@ def test_duplicate_keys_and_overlapping_or_duplicate_spans_are_refused():
 def test_non_authorized_value_replacement_cannot_adjust_length():
     with pytest.raises(ValueError, match='authorized'):
         replacements('{"stable":3}', {'stable': 3}, {'stable': 4})
+
+
+def source_response(raw, *, content_type='application/json'):
+    original = strict_json_loads(raw)
+    entity = raw if content_type == 'application/json' else b'event: message\r\ndata: ' + raw + b'\r\n\r\n'
+    response = {'status': 200, 'headers': {'content-type': content_type, 'content-length': str(len(entity))},
+                'body': copy.deepcopy(original), 'framing': 'fixed'}
+    normalize_content_length(response, entity, original)
+    return response
+
+
+@pytest.mark.parametrize('content_type', ['application/json', 'text/event-stream'])
+@pytest.mark.parametrize('newline', [r'\r\n', r'\r', r'\u000d\u000a', r'\u000a'])
+def test_fixed_tools_list_source_newlines_have_equal_compared_lengths(content_type, newline):
+    template = r'{"result":{"tools":[{"description":"first%ssecond"}]}}'
+    left = source_response((template % newline).encode(), content_type=content_type)
+    right = source_response((template % r'\n').encode(), content_type=content_type)
+    assert left['content_length']['compared'] == right['content_length']['compared']
+    assert left['headers']['content-length'] == right['headers']['content-length']
+    assert compare(left, right, Policy()) == []
+
+
+def test_source_newline_spans_preserve_every_other_escape_and_whitespace():
+    raw = r'{ "result": {"tools":[{"description":"\u2605 first\r\nsecond\rthird"}]}, "stable":"\r\n" }'
+    original = strict_json_loads(raw)
+    changes = replacements(raw, original, original)
+    assert len(changes) == 2
+    rewritten = raw
+    for start, end, replacement in sorted(changes, reverse=True):
+        rewritten = rewritten[:start] + replacement + rewritten[end:]
+    assert rewritten == r'{ "result": {"tools":[{"description":"\u2605 first\nsecond\nthird"}]}, "stable":"\r\n" }'
+    left = source_response(raw.encode())
+    assert compare(left, source_response(rewritten.encode()), Policy()) == []
+    assert compare(left, source_response(rewritten.replace('{ ', '{', 1).encode()), Policy())
+    assert compare(left, source_response(rewritten.replace(r'\u2605', '★').encode()), Policy())
+
+
+def test_source_newline_rule_does_not_reach_other_fields_or_nested_descriptions():
+    template = r'{"result":{"tools":[{"description":"same","inputSchema":{"description":"first%ssecond"}}]},"stable":"first%ssecond"}'
+    left = source_response((template % (r'\r\n', r'\r\n')).encode())
+    right = source_response((template % (r'\n', r'\n')).encode())
+    assert left['content_length']['adjustment'] == right['content_length']['adjustment'] == 0
+    paths = {difference['path'] for difference in compare(left, right, Policy())}
+    assert '/body/stable' in paths and '/body/result/tools/0/inputSchema/description' in paths
+
+
+def test_source_newline_normalization_still_validates_received_entity_length():
+    raw = b'{"result":{"tools":[{"description":"first\\r\\nsecond"}]}}'
+    original = strict_json_loads(raw)
+    response = {'headers': {'content-type': 'application/json', 'content-length': str(len(raw) - 2)},
+                'body': original}
+    with pytest.raises(ValueError, match='entity bytes'):
+        normalize_content_length(response, raw, original)

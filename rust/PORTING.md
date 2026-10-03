@@ -138,7 +138,7 @@ recorded in the receipt. The coordination-start hook deliberately sets
 The named `content-length-authorized-wire-spans` rule validates a retained
 declared length against the received entity bytes, then adjusts its compared
 value only by the byte deltas of disjoint raw tokens changed by authorized
-identity or clock normalization. Nested JSON escaping is preserved. Raw length,
+identity, clock or source-text line-ending normalization. Nested JSON escaping is preserved. Raw length,
 adjustment and compared length are recorded; bytes outside those tokens still
 count. Whole-body reserialization cannot supply the adjustment. This is
 normalized length parity, not a claim that the raw headers are identical, and

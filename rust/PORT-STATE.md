@@ -14,7 +14,7 @@ close its identified gaps. No production Rust surface has been accepted.
 | 0b / 2.3: Exhaustive register and per-file buckets | Source inventory verified; final branch review pending | — | PARITY.md; test-buckets.json; contract-inventory.json; test_contract_inventory.py; audit: 406 files, five candidate nodes, no missing surfaces; nine audit tests pass |
 | 0b / 2.4: Representative daemon baseline and noise floor | Linux matrix verified; three successful hosted CI repeats pending | — | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; rust-phase0b-baseline-source-reconstruction.json and its preserved helper; CI receipt pending |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; final branch review pending | — | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
-| 0b: Independent review and CI | Integrated selection passed; final review and CI pending | — | pytest evals/rust_port evals/rust_baseline rust/test_contract_inventory.py: 157 passed, 11 subtests passed; reviewed tree and final CI evidence pending |
+| 0b: Independent review and CI | Integrated selection passed; final review and CI pending | — | pytest evals/rust_port evals/rust_baseline rust/test_contract_inventory.py: 178 passed, 11 subtests passed; reviewed tree and final CI evidence pending |
 | 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
 | 2: Client CLI leaves | deferred | — | CLI rows and 25-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |

@@ -308,15 +308,15 @@
   "evidence": {
     "full_bank": {
       "path": "evals/results/rust-port-phase0b-full-bank-linux/run.json",
-      "sha256": "9a41bfc2c95157b569c8df83d9d3158a17035827d5321afaf7bd8c03018d3185"
+      "sha256": "5a7fb5c16694a9958d7268432c5f84e52f9d622818e9150f20291fbea37ec1bf"
     },
     "linux_selfcheck": {
       "path": "evals/results/rust-port-phase0b-selfcheck-linux/selfcheck.json",
-      "sha256": "b1ff5c3bed5b8d99022b61226f56a8afd9ab890fd947fc0e1fce7b9a7f3a12d1"
+      "sha256": "02e7b23ed471d5d2af8f5bddddb820befd1d40a945d1dc9b9b1d2daa8b2c8798"
     },
     "windows_cli": {
       "path": "evals/results/rust-port-phase0b-cli-windows/selfcheck.json",
-      "sha256": "0221d190067317fa9518aa10438048bbcf9dc445da77d7de6651a51de87d656c"
+      "sha256": "1ce86d5ee13cb3067cfe7e9719a558841e3419260edec2afe86668862fed92cf"
     }
   }
 }

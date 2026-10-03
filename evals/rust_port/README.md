@@ -39,8 +39,10 @@ front of the real Python daemon, changing one response per proxy: missing key
 member (`duplicate_json_key`). Each has a unit test and the full-bank receipt
 records the observed differences, preserved status and proxy cleanup. These
 controls make specific near misses load-bearing; they are not an exhaustive
-wrong-port detector. Controls use stateless search/list/error requests on the
-already seeded oracle bank, so they do not repeat storage mutations.
+wrong-port detector. Controls use search/list/error requests on the already
+seeded oracle bank. Searches can update access counts and cortex state; receipts
+retain those additional differences and require the intended rejection at its
+named path.
 
 Historical schema-52 selfcheck R6 and full-bank R5 remain unchanged. Selfcheck
 R4/R5 were archived outside the working tree and remain recoverable from PR
@@ -114,7 +116,8 @@ IDs become per-session symbols after continuity checks. `content-length` is
 retained for fixed framing and omitted from comparison only for an explicitly
 observed fixed-versus-chunked pair. `content-length-authorized-wire-spans`
 first validates the declared length against entity bytes, then adjusts only
-the exact disjoint tokens changed by the declared identity/clock normalization.
+the exact disjoint tokens changed by the declared identity, clock or source-text
+line-ending normalization.
 Nested MCP JSON adjustments retain the original outer escaping. The transcript
 records raw length, adjustment and compared length; all bytes outside those
 tokens still count, including whitespace and Unicode. Whole-body serialization
