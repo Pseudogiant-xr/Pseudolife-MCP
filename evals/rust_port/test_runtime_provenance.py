@@ -42,14 +42,15 @@ def test_actual_child_runtime_uses_current_probe_and_selected_source(tmp_path):
 
 def test_isolated_appdata_child_metadata_drift_cannot_be_labeled_as_parent(tmp_path):
     source_tree(tmp_path)
-    site = tmp_path / "synthetic-site"
-    metadata = site / "pseudolife_mcp-0.7.0.dist-info"
+    # The selected source root is first on the child's import path. Keep its
+    # synthetic distribution metadata there too, ahead of editable-checkout
+    # metadata in the instrument root on every platform.
+    metadata = tmp_path / "pseudolife_mcp-0.7.0.dist-info"
     metadata.mkdir(parents=True)
     (metadata / "METADATA").write_text("Metadata-Version: 2.1\nName: pseudolife-mcp\nVersion: 0.7.0\n")
     env = isolated_env(tmp_path / "isolated-appdata")
     # Synthetic fallback metadata mirrors the stale base installation exposed
     # when APPDATA isolation hides a newer user-site distribution.
-    env["PYTHONPATH"] = str(site)
     result = subprocess.run(provenance.runtime_probe_command(tmp_path), cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0

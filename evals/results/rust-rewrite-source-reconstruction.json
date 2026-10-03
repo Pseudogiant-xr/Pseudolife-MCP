@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "scope": "Exact historical source and capture artifact bytes for baseline R5, full-bank R5 and selfcheck R4; captures remain unchanged.",
+  "scope": "Exact historical source and capture artifact bytes for baseline R5, full-bank R5 and selfchecks R4/R5; captures remain unchanged.",
   "canonical_source": "For files, receipts and referenced_artifacts, read each Git object with git cat-file blob <git_blob_oid>; do not read checkout bytes or apply Git checkout filters.",
   "reconstruction": "Verify canonical_blob_sha256. Number canonical LF-terminated lines from 1. Replace the final LF with CRLF only on lines in crlf_line_ranges; ranges are inclusive. Leave every other byte, including a final unterminated line, unchanged. Verify recorded_raw_sha256.",
-  "exclusions": "Untracked interpreter/executable binaries and semantic synthetic-corpus digests are not Git artifact-byte bindings. All ten tracked capture artifacts are covered by receipts and referenced_artifacts; source bindings are covered by files.",
+  "exclusions": "Untracked interpreter/executable binaries and semantic synthetic-corpus digests are not Git artifact-byte bindings. All thirteen tracked capture artifacts are covered by receipts and referenced_artifacts; source bindings are covered by files.",
   "receipts": [
     {
       "path": "evals/results/rust-rewrite-baseline-ci-20261003-r5.json",
@@ -72,10 +72,18 @@
       "canonical_blob_sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb",
       "recorded_raw_sha256": "1b3fc030c670fdd43233124a2bff029db729c688ad5f9e4f9740ba91ddaebabb",
       "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-selfcheck-r5/selfcheck.json",
+      "sha256": "6fe64bfe23cc2c4df830aeea7c00c4ee95af235b1a4dc56b023fa7e57282b830",
+      "git_blob_oid": "893d76620c26e5d936a1d9bdcac4de06f9445284",
+      "canonical_blob_sha256": "6fe64bfe23cc2c4df830aeea7c00c4ee95af235b1a4dc56b023fa7e57282b830",
+      "recorded_raw_sha256": "6fe64bfe23cc2c4df830aeea7c00c4ee95af235b1a4dc56b023fa7e57282b830",
+      "crlf_line_ranges": []
     }
   ],
-  "source_binding_occurrences": 152,
-  "distinct_sources": 34,
+  "source_binding_occurrences": 185,
+  "distinct_sources": 37,
   "files": [
     {
       "path": "evals/rust_baseline/__init__.py",
@@ -187,7 +195,8 @@
       "git_blob_oid": "3bf0add9e581ad56b58b6ba27f38abe9d6d42e84",
       "canonical_blob_sha256": "01eafddb6db4081c154b894c854875ea5b4bbf7a32bff8de34b4e2e0c8fc24fb",
       "recorded_raw_sha256": "01eafddb6db4081c154b894c854875ea5b4bbf7a32bff8de34b4e2e0c8fc24fb",
-      "crlf_line_ranges": []
+      "crlf_line_ranges": [],
+      "source_commit": "0fe7387880a5aa8832da572b9c302ec17e1c8902"
     },
     {
       "path": "evals/rust_port/oracle_tests.json",
@@ -299,7 +308,8 @@
           1,
           68
         ]
-      ]
+      ],
+      "source_commit": "0fe7387880a5aa8832da572b9c302ec17e1c8902"
     },
     {
       "path": "pseudolife_memory/__init__.py",
@@ -351,6 +361,32 @@
         ]
       ],
       "source_commit": "136a34ae95e981a691fcc31ba9fb4f35d83d4249"
+    },
+    {
+      "path": "evals/rust_port/oracle.py",
+      "git_blob_oid": "7958bdcdcccaeeba2d4dd7f5d317ea55b6cc46ae",
+      "canonical_blob_sha256": "59e714e483b80904d966b4543f34423ae45e1dd10b2d1fba6245895c7766a5d5",
+      "recorded_raw_sha256": "59e714e483b80904d966b4543f34423ae45e1dd10b2d1fba6245895c7766a5d5",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/rust_port/test_oracle_boundary.py",
+      "git_blob_oid": "b0f3d2eb062ee4c533a8198f1ace1365688823d8",
+      "canonical_blob_sha256": "4205f9490a408651fd624c554dea2ade5f1176639a91e624e76a377fc7895db1",
+      "recorded_raw_sha256": "4205f9490a408651fd624c554dea2ade5f1176639a91e624e76a377fc7895db1",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/rust_port/test_runtime_provenance.py",
+      "git_blob_oid": "65cc9b8635e1fa8e699da2cbe5371ee1ee6e538b",
+      "canonical_blob_sha256": "da89105d5de21713ad0222f161fb59343b4a1a83567f9e94ff72c42cf1e895c4",
+      "recorded_raw_sha256": "96041c6b5ddf43521d0f03f88cfd1efed2ab76347d2cd640c18c5e3b5f0fbfe0",
+      "crlf_line_ranges": [
+        [
+          1,
+          69
+        ]
+      ]
     }
   ],
   "referenced_artifacts": [
@@ -385,7 +421,24 @@
       "canonical_blob_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
       "recorded_raw_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
       "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-selfcheck-r5/corpus.json",
+      "sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "git_blob_oid": "e8864190833ae1e0a981c0a56c06b43fbd41585a",
+      "canonical_blob_sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "recorded_raw_sha256": "0f12aff86a48518ff89795780645f91a23da415339cd8613867788e1dedc26af",
+      "crlf_line_ranges": []
+    },
+    {
+      "path": "evals/results/rust-port-phase0-selfcheck-r5/python-oracle.json",
+      "sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "git_blob_oid": "667c1b257448565723ffce7ba989c6461393f33a",
+      "canonical_blob_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "recorded_raw_sha256": "f9645efe6df88a93e9f1e408e9f6b20f76feaa2a40e3b03fc0f5b66de5d15595",
+      "crlf_line_ranges": []
     }
   ],
-  "capture_artifacts": 10
+  "capture_artifacts": 13,
+  "source_identity": "Resolve each source binding by path plus recorded_raw_sha256, never by path alone. Older versions declare source_commit; entries without source_commit belong to the publishing candidate. Distinct versions and original captures remain preserved."
 }

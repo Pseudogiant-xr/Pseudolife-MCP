@@ -3,9 +3,43 @@ import argparse
 import json
 import socket
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from evals.rust_port.fixtures import FixtureService
 from evals.rust_port.provenance import ROOT, require_historical_source, require_import_root, runtime_metadata
+
+
+def run_fixture(sock):
+    """Let the production daemon own transport composition above the service seam."""
+    from pseudolife_memory import daemon, service, web
+    import uvicorn
+
+    fixture = FixtureService()
+    fixture.config.memory.dream = SimpleNamespace(enabled=False)
+    fixture.config.memory.retrieval_log = SimpleNamespace(enabled=False)
+    fixture.config.updates = SimpleNamespace(check_releases=False)
+    # The real entry point starts durability workers; this in-memory service
+    # has neither a model nor persistent state for those workers to operate on.
+    fixture.warmup = lambda: None
+    fixture.autosave_if_changed = lambda: None
+    fixture.reap_idle_sessions = lambda *args: None
+    console_builder = web.build_console_app
+
+    def build_fixture_console(mcp_app, token, health, selected_service, **kwargs):
+        if selected_service is not fixture:
+            raise RuntimeError("production daemon did not use the synthetic service")
+        return console_builder(mcp_app, token, lambda: {"status": "ok", "fixture": True},
+                               selected_service, **kwargs)
+
+    def serve_owned_socket(app, **kwargs):
+        uvicorn.Server(uvicorn.Config(app, log_level="error", access_log=False)).run(sockets=[sock])
+
+    with patch.object(service, "MemoryService", lambda **kwargs: fixture), \
+            patch.object(daemon, "_build_health_payload", lambda *args: {"storage": "fixture"}), \
+            patch.object(web, "build_console_app", build_fixture_console), \
+            patch.object(uvicorn, "run", serve_owned_socket):
+        daemon.run_daemon(host="127.0.0.1", port=sock.getsockname()[1])
 
 
 def main():
@@ -21,16 +55,7 @@ def main():
     sock.bind(("127.0.0.1", args.port))
     print(json.dumps({"port": sock.getsockname()[1],
                       "actual_child_runtime": runtime_metadata(args.oracle_root)}), flush=True)
-    from pseudolife_memory import mcp_server
-    from pseudolife_memory.web.api import build_console_app
-    import uvicorn
-
-    service = FixtureService()
-    mcp_server.service = service
-    mcp_server.apply_transport_security(False)
-    app = build_console_app(mcp_server.build_streamable_http_app(), None,
-                            lambda: {"status": "ok", "fixture": True}, service)
-    uvicorn.Server(uvicorn.Config(app, log_level="error", access_log=False)).run(sockets=[sock])
+    run_fixture(sock)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ equivalent dependency lane. `prepare` can inspect either tree without importing
 the daemon and explicitly reports that no requests executed.
 
 The [source reconstruction manifest](../results/rust-rewrite-source-reconstruction.json)
-maps every historical source digest in baseline R5, full-bank R5 and selfcheck R4
+maps every historical source digest in baseline R5, full-bank R5 and selfchecks R4/R5
 to a canonical Git blob and its exact line endings. Read a blob with
 `git cat-file blob <git_blob_oid>`, verify `canonical_blob_sha256`, then replace
 the final LF with CRLF only on the one-based lines in `crlf_line_ranges`
@@ -44,10 +44,13 @@ the final LF with CRLF only on the one-based lines in `crlf_line_ranges`
 The manifest identifies historical oracle files separately and leaves every
 capture unchanged. Apply the same recipe to `receipts` and `referenced_artifacts`
 before checking their historical `sha256`/`recorded_raw_sha256`: together they
-cover all ten tracked captures, including both corpus and oracle files. Four
-baseline receipts require the declared CRLF ranges; the six port artifacts use
+cover all thirteen tracked captures, including both corpus and oracle files. Four
+baseline receipts require the declared CRLF ranges; the nine port artifacts use
 LF. Git objects and these recipes suffice on a clean Linux checkout. Untracked
 executable hashes and semantic synthetic-corpus digests are separate observations.
+Resolve sources by path plus raw digest, since R4 and R5 retain different
+versions of the oracle and runtime fixture. Older versions declare their
+`source_commit`; never replace an old binding merely because its path repeats.
 
 Runtime provenance distinguishes `parent_runtime` from `actual_child_runtime`.
 The fixture child reports its own metadata; the full-bank adapter retains the
@@ -62,8 +65,11 @@ Earlier receipts contain parent metadata and are preserved without relabeling.
 
 `seed.json` plus `fixtures.py` generate a synthetic in-memory bank and ordered
 request corpus. `oracle.py` runs the real Python `web.api` routes and registered
-`mcp_server` tools in an owned loopback process, injecting `FixtureService`
-after import and before serving. The CLI arm runs `pseudolife_memory.cli` in
+tools in an owned loopback process. The production daemon entry point constructs
+the transport above a synthetic `MemoryService` constructor seam; eval code does
+not import or inspect the MCP projection. Fixture health and service background
+callbacks remain synthetic, and the listener uses the pre-bound owned socket.
+The CLI arm runs `pseudolife_memory.cli` in
 separate processes. No database, embedding model, live bank or client settings
 are used. The service seam validates transport, tool schema and payload
 projection, **not retrieval, storage, authentication or daemon lifecycle parity**.
@@ -78,8 +84,9 @@ Source hashes demonstrate that the selected test file and conftest were not
 edited. No production surface is marked ported by these checks.
 
 The phase-0 receipt, request corpus and oracle transcript are under
-`evals/results/rust-port-phase0-selfcheck-r4/`. None of the eleven cases reaches
-the full daemon or a PostgreSQL bank: two use the real Python CLI, four use the
+`evals/results/rust-port-phase0-selfcheck-r5/`; R4 remains preserved as historical
+evidence with its original sources. None of the eleven cases reaches a real
+bank or model: two use the real Python CLI, four use the
 real HTTP API with a fixture service, and five use real MCP handlers with that
 same service seam. The separate full-bank control below now exercises the real
 daemon, embedding model and PostgreSQL storage.

@@ -146,16 +146,19 @@ identifies the shared metadata observer and current-source bootstrap. On the mea
 checkout, `codex_doorbell.py` had CRLF bytes; its committed Git blob has LF bytes.
 The [source reconstruction manifest](../results/rust-rewrite-source-reconstruction.json)
 provides canonical Git blob IDs/hashes and exact CRLF line ranges for every
-source binding in baseline R5, full-bank R5 and selfcheck R4. Read each object
+source binding in baseline R5, full-bank R5 and selfchecks R4/R5. Read each object
 with `git cat-file blob <git_blob_oid>`, verify its canonical hash, replace LF
 with CRLF only at the listed one-based inclusive line ranges, and verify the
 recorded raw hash. Other bytes remain unchanged; the baseline instrument files
 used LF bytes. Do not normalize all files or treat a different digest as equivalent.
 Historical captures remain unchanged.
 
-The same recipe applies to capture bytes: `receipts` covers the six execution
-receipts, and `referenced_artifacts` covers the four full-bank/selfcheck corpus
+The same recipe applies to capture bytes: `receipts` covers the seven execution
+receipts, and `referenced_artifacts` covers the six full-bank/selfcheck corpus
 and oracle artifacts. Reconstruct each from its Git blob before checking its
 historical `sha256` (also named `recorded_raw_sha256`). The four baseline receipts
-use CRLF on every terminated line; all six port artifacts use LF. These explicit
+use CRLF on every terminated line; all nine port artifacts use LF. These explicit
 recipes work on a clean Linux checkout without Windows checkout filters.
+Source bindings resolve by path plus raw digest. Different selfcheck versions
+retain older source recipes with their declared `source_commit`, while this
+baseline and the full-bank capture remain unchanged.
