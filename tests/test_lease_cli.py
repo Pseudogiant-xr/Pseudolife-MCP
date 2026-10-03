@@ -1023,18 +1023,31 @@ def test_help_exits_0(lease_env, argv, capsys):
 
 def test_the_usage_line_names_every_action(lease_env, capsys):
     """The usage braces come from a hand-written metavar, so a new action
-    (``designate`` shipped without one) must be added there too. A
-    deprecated alias still parses but is not advertised."""
+    (``designate`` shipped without one) must be added there too."""
     parser, _, _ = lease_cli._parsers()
     actions = next(a for a in parser._actions if a.dest == "action").choices
-    assert set(lease_cli.DEPRECATED_ACTIONS) <= set(actions)
     assert _run(["--help"], FakeDaemon()) == 0
     usage = capsys.readouterr().out.split("\n\n", 1)[0]
     braces = re.search(r"\{([a-z,]+)\}", usage)
     assert braces is not None, usage
-    assert braces.group(1).split(",") == [
-        a for a in actions if a not in lease_cli.DEPRECATED_ACTIONS]
+    assert braces.group(1).split(",") == list(actions)
     assert "delegate" in braces.group(1).split(",")
+
+
+def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, capsys):
+    """``designate`` (0.16.0's name for ``delegate``) still runs, but no help
+    text offers it, and every use of it, even ``--help`` or a bad argument,
+    says once which command replaces it."""
+    assert lease_cli.DEPRECATED_ACTIONS == {"designate": "delegate"}
+    assert _run(["--help"], FakeDaemon()) == 0
+    assert "designate" not in capsys.readouterr().out
+    for argv, code in ((["designate", "--help"], 0), (["designate"], lease_cli.EXIT_USAGE)):
+        assert _run(argv, FakeDaemon()) == code
+        captured = capsys.readouterr()
+        notice = [line for line in captured.err.splitlines() if "deprecated" in line]
+        assert notice == ["pseudolife-mcp lease designate is deprecated: use "
+                          "pseudolife-mcp lease delegate"]
+        assert "lease delegate" in captured.out + captured.err
 
 
 # --- lease list -----------------------------------------------------------------

@@ -390,9 +390,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     fat = [(n, s) for n, s in sizes.items() if s > 1600]
     assert fat == [], f"over-long tool descriptions: {fat}"
     # Codex measures serde_json's compact encoding of the normalized schema
-    # (UTF-8, no whitespace); normalization only drops keys, so this is an
-    # upper bound on what Codex counts. Largest on 2026-10-04: memory_search,
-    # 1,956 bytes.
+    # (UTF-8, no whitespace); this approximates what Codex counts, and the
+    # 1,000-byte margin covers normalization. Largest on 2026-10-04:
+    # memory_search, 1,956 bytes.
     schema_bytes = {t.name: len(json.dumps(t.input_schema or {}, separators=(",", ":"),
                                            ensure_ascii=False).encode("utf-8"))
                     for t in tools}

@@ -2817,7 +2817,8 @@ class CoordinationStore:
                         self._wake_decision(sender, recipient, now, clears=clears,
                                             urgent=urgent, message_id=message_id))
                 # The send event names the authority a ring used (maintainer,
-                # coordinator, clearer, urgent, ...), so board-audit export
+                # delegate, clearer, urgent, ...; ``coordinator`` on events
+                # from before the 2026-10-04 rename), so board-audit export
                 # shows it without the wake table, which it does not carry.
                 ring = wake.pop("_ring", None)
                 audited = {"wake_reason": ring} if ring is not None else {}

@@ -142,8 +142,8 @@ DEFAULT_TTL = 120
 MIN_TTL, MAX_TTL = 30, 86400
 MIN_EXPECT, MAX_EXPECT = 1, 604800
 LIST_LIMIT = 50
-# Old action names that still parse, each mapped to the action replacing
-# it: a deprecated one prints one line naming its replacement, then runs it.
+# Old action names that still run, each mapped to the action replacing it:
+# ``main`` prints one line naming the replacement, then runs that instead.
 # ``delegate`` was ``designate`` in 0.16.0 (renamed 2026-10-04).
 DEPRECATED_ACTIONS = {"designate": "delegate"}
 
@@ -1618,9 +1618,6 @@ def _delegate(args) -> int:
     """Make a session the maintainer's delegate for a project through the
     bank itself (operator only), as ``break`` does. Prints the store's
     answer as JSON; 1 when no bank is found or the grant was refused."""
-    if args.action in DEPRECATED_ACTIONS:
-        print(f"pseudolife-mcp lease {args.action} is deprecated: use "
-              f"pseudolife-mcp lease {DEPRECATED_ACTIONS[args.action]}", file=sys.stderr)
     return _operator("delegate", lambda store: store.grant_delegate(
         args.project, args.agent, hold=args.hold))
 
@@ -1822,8 +1819,7 @@ def _parsers():
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
     delegating = actions.add_parser(
-        "delegate", aliases=list(DEPRECATED_ACTIONS),
-        help="(operator) make one session the maintainer's delegate for a project",
+        "delegate", help="(operator) make one session the maintainer's delegate for a project",
         description="Operator only: make the session AGENT (its id, or a unique prefix) the "
                     "maintainer's delegate for PROJECT for DURATION, replacing any current "
                     "one. Its urgent mail then reopens done parks in that project; holding "
@@ -1838,8 +1834,7 @@ def _parsers():
                             metavar="DURATION",
                             help="how long the grant lasts (default 1d, at most 7d)")
     return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking,
-                         "delegate": delegating,
-                         **{alias: delegating for alias in DEPRECATED_ACTIONS}}
+                         "delegate": delegating}
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -1851,6 +1846,12 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
     if "--" in argv:
         split = argv.index("--")
         argv, command = argv[:split], argv[split + 1:]
+    if argv and argv[0] in DEPRECATED_ACTIONS:
+        # Renamed before parsing, so help and every parse error speak of
+        # the new name, and no help text advertises the old one.
+        print(f"pseudolife-mcp lease {argv[0]} is deprecated: use "
+              f"pseudolife-mcp lease {DEPRECATED_ACTIONS[argv[0]]}", file=sys.stderr)
+        argv[0] = DEPRECATED_ACTIONS[argv[0]]
     parser, run, others = _parsers()
     try:
         args = parser.parse_args(argv)
@@ -1873,6 +1874,6 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _list(args, transport)
     if args.action == "break":
         return _break(args)
-    if args.action == "delegate" or args.action in DEPRECATED_ACTIONS:
+    if args.action == "delegate":
         return _delegate(args)
     return _run(args, command, transport)

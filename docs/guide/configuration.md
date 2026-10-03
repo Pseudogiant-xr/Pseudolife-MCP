@@ -707,9 +707,8 @@ queued reopen is still served.
 **Upgrading from 2026-10-03's first version**, where holding
 `coordinator:<project>` was the role: after the upgrade **no session can
 reopen a done park as delegate until one is granted**; run the command above
-for the coordinating session. Before deploying, check that `pseudolife-mcp
-lease list` shows no `designated:` lease held or queued: that code let any
-session claim one.
+for the coordinating session. A `designated:` lease that code let a session
+claim grants nothing now; `lease break` it to clear it from the board.
 
 Sessions hold leases too, from the model's side, with no process and no OS lock
 behind them. `memory_agents(action="claim", lease=NAME, status=PURPOSE,
@@ -1842,7 +1841,7 @@ Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
 a non-Codex recipient retains its established urgent ring contract. Unparked
 Codex urgency spends the sender's urgent allowance (the authority budget
-when the sender is the maintainer or a project's delegate) and passes the same
+when the sender is the maintainer or the project's delegate) and passes the same
 per-recipient, nightly and stagger caps, and records attention with
 `no_steer_path`. An armed queue listener may queue one fixed bell labelled
 `turn state unknown`; neither its acceptance nor board recency proves native

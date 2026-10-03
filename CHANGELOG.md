@@ -32,8 +32,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Codex users approve nothing again), the check-in park sentence, the
   served `memory_message` description, the README and the guides.
 - **Operator step after upgrading:** a grant made under 0.16.0 is not
-  honoured (it lasted at most 7 days, and none is live on the maintainer's
-  bank), so re-grant with
+  honoured (it lasted at most 7 days), so re-grant any live one with
   `pseudolife-mcp lease delegate PROJECT AGENT --for 7d` (in the Docker tier,
   inside the daemon container). Clear a leftover
   `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
