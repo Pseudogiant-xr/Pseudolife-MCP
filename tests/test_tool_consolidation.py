@@ -428,6 +428,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # source delete under the old OR removed a whole source; +160 on a
     # full-tier tool after tightening its docstring: minimal 5,232, core
     # 11,706, full 18,154. Full moves deliberately, 18,000 -> 18,250.
+    # 2026-10-04: memory_message's done-park sentence names the designated
+    # coordinator (+11 for the word, +7 net), paid for by reflowing the
+    # same docstring one line shorter, caps unchanged: minimal 5,232, core
+    # 11,729, full 18,248 (2 to spare).
     budgets = {"minimal": 5250, "core": 11750, "full": 18250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
@@ -614,3 +618,17 @@ def test_recall_surface_carries_trap_avoidance_guidance(
     # The prose is anchored to the flag the tool already returns, so the
     # guidance points at a computed signal rather than a vague heuristic.
     assert "re_verify" in d["memory_lesson_search"]
+
+
+def test_message_description_names_the_designated_coordinator(
+        tmp_path: Path, monkeypatch) -> None:
+    """Since #550 (2026-10-03) only the operator-designated coordinator
+    (the live ``designated:coordinator:<project>`` lease) reopens a done
+    park; holding the open ``coordinator:<project>`` lease, which the
+    memory_agents description tells sessions to claim, grants nothing.
+    A bare "coordinator" in the send's done-park sentence reads, beside
+    that claim line, as if claiming the lease conferred the authority."""
+    d = _descriptions(tmp_path, monkeypatch)
+    assert "Claim coordinator:<project>" in d["memory_agents"]
+    assert "designated coordinator" in d["memory_message"]
+    assert "maintainer/coordinator/" not in d["memory_message"]
