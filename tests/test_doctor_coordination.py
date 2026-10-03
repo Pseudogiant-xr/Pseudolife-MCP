@@ -149,8 +149,8 @@ def test_wake_caps_only_report_known_numeric_fields(monkeypatch):
     # retired cap: it no longer bounds anything, so doctor does not list it.
     result = doctor_cli._wake_report({"coordination": {"wake": {
         "nightly_total": 200, "token": "fixture-secret", "urgent_per_sender_per_hour": "fixture-secret",
-        "nudge_interval_seconds": 3600}}})
-    assert result["caps"] == {"nightly_total": 200}
+        "nudge_interval_seconds": 3600, "authority_per_sender_per_hour": 12}}})
+    assert result["caps"] == {"nightly_total": 200, "authority_per_sender_per_hour": 12}
 
 
 @pytest.mark.parametrize("status,body", [

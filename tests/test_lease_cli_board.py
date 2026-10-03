@@ -227,6 +227,38 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     assert "no bank found" in capsys.readouterr().err
 
 
+def test_the_operator_designates_a_projects_coordinator(board, pg_url, monkeypatch, capsys):
+    """``lease designate`` is the maintainer's only way to give a session
+    coordinator power (review of #549, 2026-10-03): it opens the bank
+    directly, like ``break``, and the session cannot take the lease itself."""
+    bridge, storage = board
+    coordinator = _post(bridge, "register", {"label": "coordinator", "project": "pseudolife-mcp"})
+    as_coordinator = {"X-PL-Agent": coordinator["agent_id"],
+                      "X-PL-Agent-Key": coordinator["credential"]}
+    with httpx.Client(transport=bridge, base_url="http://fixture") as client:
+        refused = client.post("/api/coordination/lease",
+                              json={"name": "designated:coordinator:pseudolife-mcp", "ttl": 3600},
+                              headers={"Authorization": f"Bearer {BEARER}", **as_coordinator})
+    assert (refused.status_code, refused.json()) == (400, {"error": "reserved_lease"})
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    assert lease_cli.main(["designate", "pseudolife-mcp", coordinator["agent_id"][:8],
+                           "--for", "12h"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["name"], out["agent_id"], out["replaced"]) == (
+        "designated:coordinator:pseudolife-mcp", coordinator["agent_id"], None)
+    [lease] = _post(bridge, "leases", {"name": "designated:coordinator:pseudolife-mcp"})["leases"]
+    assert lease["holder"]["agent_id"] == coordinator["agent_id"]
+    [(_, body)] = _events(storage, "lease_designate")
+    assert (body["name"], body["hold"]) == ("designated:coordinator:pseudolife-mcp", 43200)
+    assert storage.conn.execute("SELECT actor FROM coordination_events "
+                                "WHERE event='lease_designate'").fetchone()[0] == "operator"
+    # An unknown agent is refused with nothing changed; revoking is ``break``.
+    assert lease_cli.main(["designate", "pseudolife-mcp", "f" * 32]) == 1
+    assert "designate refused: instance_not_found" in capsys.readouterr().err
+    assert lease_cli.main(["break", "designated:coordinator:pseudolife-mcp"]) == 0
+    assert json.loads(capsys.readouterr().out)["was_held_by"] == coordinator["agent_id"]
+
+
 def test_a_hold_mirrors_the_lease_and_tells_the_peers_concerned(
         board, monkeypatch, capsys, tmp_path, followed_process):
     """``lease hold`` against the real store: the lease is held under the

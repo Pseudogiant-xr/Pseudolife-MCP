@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+from pseudolife_memory.principals import DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL
 
 
 @dataclass
@@ -1404,6 +1404,10 @@ class WakeConfig:
     the hourly ring to an idle, unparked session, is retired with that
     ring (2026-10-02, regular mail never wakes): a config.yaml that still
     names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
+    ``authority_per_sender_per_hour`` bounds the urgent rings one sender
+    may cause as the maintainer or a project's coordinator (2026-10-03),
+    which reopen done parks and no longer spend the plain urgent
+    allowance; the per-recipient, nightly and stagger caps still apply.
     """
 
     per_recipient_per_hour: int = 20
@@ -1411,10 +1415,17 @@ class WakeConfig:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
+    # A starting value, not a measurement: twice the largest burst the board
+    # has carried (six recipients, a host fix sent to every session on
+    # 2026-09-27), so a coordinator can relay one incident decision and a
+    # follow-up to every session in an hour; on 2026-10-03 such relays came
+    # back capped under the 6-an-hour urgent allowance.
+    authority_per_sender_per_hour: int = 12
 
     def __post_init__(self) -> None:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
-                     "fan_out_stagger_seconds", "active_seconds"):
+                     "fan_out_stagger_seconds", "active_seconds",
+                     "authority_per_sender_per_hour"):
             value = getattr(self, name)
             floor = 1 if name == "active_seconds" else 0
             if type(value) is not int or value < floor:
@@ -1445,6 +1456,13 @@ class CoordinationConfig:
     # An operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal here
     # for the scheduled run's bearer (review of #463, 2026-09-29).
     daemon_notice_principals: list[str] = field(default_factory=list)
+    # Principals whose board mail speaks for the maintainer (2026-10-03):
+    # their urgent mail reopens a done park and spends the authority budget
+    # (``wake.authority_per_sender_per_hour``). Empty by default. An
+    # operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal whose
+    # bearer only the maintainer holds; ``default``, every ordinary
+    # session's principal, and the daemon's own sender are refused.
+    maintainer_principals: list[str] = field(default_factory=list)
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1485,6 +1503,18 @@ class CoordinationConfig:
             raise ValueError("coordination.daemon_notice_principals must be a list of names")
         self.daemon_notice_principals = list(dict.fromkeys(
             p.strip().lower() for p in self.daemon_notice_principals))
+        if not isinstance(self.maintainer_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.maintainer_principals
+        ):
+            raise ValueError("coordination.maintainer_principals must be a list of names")
+        self.maintainer_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.maintainer_principals))
+        shared = {DEFAULT_PRINCIPAL, DAEMON_PRINCIPAL} & set(self.maintainer_principals)
+        if shared:
+            raise ValueError(
+                "coordination.maintainer_principals cannot name " + ", ".join(sorted(shared))
+                + ": every ordinary session (default) or the daemon itself would speak "
+                "for the maintainer; name a dedicated token-map principal")
 
 
 @dataclass

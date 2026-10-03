@@ -6,9 +6,111 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-03 — only an operator-designated coordinator reopens a done session)
+- The first version below made the holder of the `coordinator:<project>`
+  lease the coordinator, and any session can claim a free one, possibly
+  steered by text it read. Its urgent mail to `all` then rang every done
+  session in the project as `reason: coordinator`, lending it authority it
+  was never given. Passing the lease between one principal's sessions
+  spread the 12-an-hour authority budget over several senders. And the
+  first holder kept the real coordinator out for up to a day (review of
+  #549). Coordinator power is now the lease
+  `designated:coordinator:<project>`, granted to one agent id by the
+  operator with `pseudolife-mcp lease designate PROJECT AGENT [--for
+  DURATION]` (default 1d, at most 7d). Like `lease break`, it opens the
+  bank directly and logs a `lease_designate` with the operator as actor.
+  Revoke it with `lease break`; the designee may release it to resign.
+  Leases named `designated:` are refused to agents (`reserved_lease`), and a
+  freed one is never granted to a queued session (`lease_dequeue`, reason
+  `reserved`). The trust boundary is database access: a session that can
+  reach the bank (lite tier, `ops/.env`, `docker exec`) could designate
+  itself.
+- **Upgrade: no session has coordinator power until one is designated.**
+  In the Docker tier: `docker exec <daemon container> pseudolife-mcp lease
+  designate PROJECT AGENT --for 7d`. Before deploying, check that
+  `pseudolife-mcp lease list` shows no `designated:` lease held or queued
+  (older code let any session claim one; `lease break` it).
+- Holding `coordinator:<project>` now grants nothing: it stays as
+  bookkeeping, its holder's urgency is a peer's under the plain urgent
+  allowance, and it blocks nothing, since the designation is a separate
+  lease. The maintainer and named-clearer paths are unchanged. A principal
+  list was rejected because every session on a host shares a principal
+  today.
+- A `send` audit event whose mail rang (`rung`, a Codex `attention` grant,
+  or `no_path` with the ring queued) carries `wake_reason`, the authority it used, so
+  `board-audit export` shows which ring was a maintainer, coordinator or
+  clearer reopen. No schema change.
+
+### Changed (2026-10-03 — the maintainer and the coordinator can reopen a done session)
+- A session parked `done` was unreachable: on 2026-10-03 a coordinator's
+  urgent review of PR #548, with two required changes, came back
+  `wake: {decision: not_needed, reason: parked_done}`, and the maintainer
+  had to type into the window. `done` now means "I expect no follow-up":
+  `urgent` mail reopens it when the sender is the maintainer (a bearer
+  principal listed in the new `coordination.maintainer_principals`, empty
+  by default; `default` and `daemon` are refused), the holder of the live
+  `coordinator:<project>` lease for the recipient's own project
+  (superseded the same day by an operator designation, above), or the
+  park's named clearer. The ring's reason is `maintainer`, `coordinator`
+  or `clearer`, and the receipt carries `reopened: true`. Plain mail still
+  never rings a done park, and neither does a peer's urgency (`anyone`
+  included); authority is read from the bearer, the lease table and the
+  park, never from message text. Waking grants nothing.
+- Maintainer and coordinator urgency, to any session, spends a new
+  `coordination.wake.authority_per_sender_per_hour` (12) instead of the
+  6-an-hour urgent allowance, so incident relays are not capped halfway;
+  the per-recipient, nightly and stagger caps still apply. `/health` and
+  `pseudolife-mcp doctor` report the new cap.
+- A `no_path` receipt names the client's other ways in: `fallback_paths`
+  is `codex_doorbell` + `maintainer_types` for a Codex thread and
+  `claude_desktop_send_message` + `maintainer_types` for a Claude Code
+  session, with matching `fallback` text. A `withheld` receipt carries
+  `retry` (resend with `urgent`, or `clears` naming the need), and a
+  `parked_done` one `reopen_by`.
+- A Codex thread parked `done` could not be rung even with an armed
+  doorbell: the daemon served it nothing. It is now served only a reopen
+  sent after its current park, with the audit-sequence proof other Codex
+  grants carry; a grant or attention decided before the park stays
+  unserved and unstamped.
+- `coordination_wakes.urgent` (read by `board-audit stats`, which does not
+  use it, and by anything querying the table) now means "counted against the plain urgent allowance": a maintainer or
+  coordinator ring is stored `urgent = false` with reason `maintainer` /
+  `coordinator`, though its send set `urgent`; a named clearer's reopen
+  is stored `urgent = true`.
+- The Codex doorbell serves CLI threads as well as desktop ones;
+  `capabilities.codex` is the optional live-delivery bridge, not the
+  doorbell. The guide now says so, with what a reopen needs from each
+  client and what to do when the board itself is down.
+- The Stop hook's park prompt (served `PARK_GATE_MESSAGE`, and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks), the park check-in sentence,
+  `memory_message`'s description and `examples/hook-instructions.md` say
+  that done stays reachable. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again; the new prompt text reaches a client
+  with its next plugin update. No schema change.
+
+### Fixed (2026-10-03 — a tunnel child launched mid-exec stays recognised)
+- The tunnel supervisor records each child's identity (pid, start time,
+  executable, arguments) right after starting it. On Linux, `Popen`
+  returns before the kernel has published the new program's arguments, so
+  the identity could be recorded with an empty argument list. Every later
+  ownership check then refused the supervisor's own child: a refresh
+  answered "owned tunnel changed before refresh" and left the old child
+  running, cancellation cleanup skipped the child and leaked it,
+  `tunnel stop` reported `stopped` without stopping it, `tunnel status`
+  reported it as not running, and the bridge and `tunnel update` refused
+  the live tunnel. The identity is now read once the arguments appear.
+  If they have not appeared within 5 seconds and the child is still
+  alive, the launch fails and the child is reaped, rather than recording
+  an identity that can never match. A child that has already exited
+  fails the launch as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  launches hit the empty window. Over 1,250 cancellation-test runs under
+  the same load, the unfixed code failed 8 and the fixed code failed none.
+  This was the intermittent `all_reaped` failure (and the 30-second
+  timeout) in `test_refresh_cancellation_reaps_actual_children_and_private_launch`.
+
 ### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
-- When Codex runs the plugin's hooks and only the scripts changed (its
-  `hooks.json` is current), the client step (`pseudolife-mcp update`,
+- When Codex runs the plugin's hooks and its approved definitions remain
+  equivalent, the client step (`pseudolife-mcp update`,
   `ops/update.ps1 -All`, `ops/update.sh --all`, `ops/update_clients.py`)
   now runs Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
   and reports `refreshed`, where it used to report `behind` and ask for a
@@ -16,24 +118,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throwaway Codex home: the upgrade fetches the marketplace and replaces
   its clone and the installed copy, leaves `config.toml` byte-identical,
   and `hooks/list` reports the same keys and hashes, so approvals carry
-  over. A changed `hooks.json` is never upgraded automatically and still
-  names the approval steps. The marketplace serves its branch, which can
-  carry a `hooks.json` the checkout or the deployed release does not, so
-  the update first reads that branch's `hooks.json` from a private,
+  over. A changed approved definition is not knowingly upgraded automatically
+  and still names the approval steps. If the branch moves between inspection
+  and Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with those approval steps. The marketplace serves its branch,
+  which can carry a `hooks.json` the checkout or the deployed release does
+  not, so the update first reads that branch's `hooks.json` from a private,
   blob-less clone in a temporary directory (never Codex's own clone) and
-  upgrades only when it matches the installed one. When the upgrade cannot
-  run (no Codex CLI or git found, a failed fetch, the branch changes
-  `hooks.json`, nothing newer on the branch) the step stays `behind` and
-  says why. Manual hook copies are refreshed as before.
+  upgrades only when its normalized definitions match the installed ones.
+  When the upgrade cannot run (no Codex CLI or git found, a failed fetch,
+  the branch changes an approved definition, nothing newer on the branch)
+  the step stays `behind` and says why. Advice to upgrade manually promises
+  approval carryover only when the branch's normalized definitions were
+  checked and matched; otherwise it says that the upgrade may change the
+  definition and need approval. Manual hook
+  copies are refreshed as before.
 - The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
   Windows desktop app's build folder, or in the standalone package the
   desktop app keeps under the Codex home
-  (`packages/standalone/current/bin`).
+  (`packages/standalone/current/bin`). A missing or relative configured
+  `PSEUDOLIFE_CODEX_BIN` is reported as a setup error, without falling back
+  to another binary. The git used to inspect the marketplace is resolved
+  only from absolute PATH entries, excluding implicit working-directory
+  lookup, and its `hooks.json` is decoded as UTF-8 on every platform.
 - The Codex hooks check now compares the installed copy Codex runs hooks
   from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
   back to the marketplace clone when there is no installed copy. Codex
   replaces that single copy in place, as its plugin manager does, so there
   is no older copy kept beside it.
+- The shared plugin's SessionEnd timeout now matches Codex's enforced
+  3-second cap, removing the startup clamp warning. Its bash hook makes
+  one request with a 2-second total and 1-second connection timeout, without
+  retries. A missed close is reaped after 30 minutes of inactivity plus
+  the next sweep (5-minute default); Claude Code's plugin SessionEnd budget
+  is 1.5 seconds regardless of the manifest. Codex builds that hash the
+  clamped timeout keep approval for the 10-to-3-second change; approve only
+  if Codex asks. The updater compares normalized SessionEnd/Interrupt
+  timeouts at each consent check and on read-back, so clamp-only changes
+  refresh automatically. Every other field and timeout remains compared,
+  and malformed or unsupported definitions are not refreshed automatically.
 
 ### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
 - Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved

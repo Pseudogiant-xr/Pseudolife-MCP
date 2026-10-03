@@ -84,6 +84,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "coordination_unavailable", "invalid_request",
     "invalid_lease", "invalid_ttl", "invalid_expect", "invalid_purpose",
     "lease_not_held", "lease_queue_full",
+    # An agent's acquire of an operator-only (``designated:``) lease.
+    "reserved_lease",
     "invalid_repository", "invalid_repository_id", "invalid_claim_path",
     "file_claim_requires_local_client",
     # v46: a body, status or lease purpose shaped like a credential (a 400).
@@ -193,7 +195,8 @@ PARK_CHECKIN_SENTENCE = (
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
     "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
     "cleared>), so mail wakes you only when it clears that need. Use done only "
-    "when no follow-up is expected: nothing will ring you. Waiting on a merge "
+    "when no follow-up is expected; urgent mail from the maintainer, the project "
+    "coordinator or your named clearer still rings it. Waiting on a merge "
     "click or a review that may still bring fixes? Park needs_approval with "
     "park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer.")
 # The compact form for MCP initialization, which the shim appends only when
@@ -224,8 +227,9 @@ CHECKIN_INSTRUCTION = (
 PARK_GATE_MESSAGE = (
     "Before ending: update your board status with why you stopped and what you need "
     "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
-    "park_resume=...). Use done only when no follow-up is expected: nothing will "
-    "ring you. Waiting on a merge click or a review that may still bring fixes? "
+    "park_resume=...). Use done only when no follow-up is expected; urgent mail "
+    "from the maintainer, the project coordinator or your named clearer still "
+    "rings it. Waiting on a merge click or a review that may still bring fixes? "
     "Park needs_approval with park_clear_by set to the reviewer's agent id or "
     "maintainer, or waiting_peer. A park records intent; automatic wake requires "
     "a live listener. Check the sender's wake receipt; no_path means mail is "
@@ -478,7 +482,9 @@ def _store(service):
     from pseudolife_memory.storage.coordination import CoordinationStore, WakePolicy
     wake = getattr(service.config.coordination, "wake", None)
     return CoordinationStore(_mailbox(service),
-                             wake=None if wake is None else WakePolicy.from_config(wake))
+                             wake=None if wake is None else WakePolicy.from_config(wake),
+                             maintainer_principals=getattr(
+                                 service.config.coordination, "maintainer_principals", ()))
 
 
 def _dispatch(service, action: str, parameters: dict, *, headers=None,
@@ -697,8 +703,8 @@ def dispatch(service, action: str, parameters: dict, *, headers=None,
 
 # How long a model's claim holds between renewals. A model renews by claiming
 # again, and a session can sit between turns for hours, so a claim on a work
-# area (``claim:<path>``) lasts a day and any other session-held lease (the
-# coordinator role, renewed hourly) an hour: the starting values the
+# area (``claim:<path>``) lasts a day and any other session-held lease (such
+# as ``coordinator:<project>``, renewed hourly) an hour: the starting values the
 # Coordination v2 design set on 2026-09-25, not measurements. Expiry, not a
 # heartbeat, frees them when a session dies. ``pseudolife-mcp lease run``
 # holds process leases with a short ttl it renews itself.
