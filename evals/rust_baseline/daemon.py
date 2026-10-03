@@ -127,15 +127,23 @@ def _daemon_command(source_root):
 
 
 @contextmanager
-def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_timeout=180):
+def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_timeout=180,
+                    configuration=None, thread_policy="one", child_module=None):
     import httpx
     from evals.rust_port.processes import owned_process
     source_root = Path(source_root or ROOT).resolve()
     port = free_port()
     config = Path(private) / "config.yaml"
-    config.write_text("embedding:\n  device: cpu\n  backend: torch\n  cpu_dtype: fp32\n"
+    config.write_text(configuration or "embedding:\n  device: cpu\n  backend: torch\n  cpu_dtype: fp32\n"
                       "memory:\n  dream:\n    enabled: false\nupdates:\n  check_releases: false\n", encoding="utf-8")
     env = child_environment(private)
+    if thread_policy == "production":
+        # The daemon image and Python source set neither variable; use torch's
+        # platform default and observe the resolved count in the child.
+        env.pop("OMP_NUM_THREADS", None)
+        env.pop("MKL_NUM_THREADS", None)
+    elif thread_policy != "one":
+        raise ValueError("unknown thread policy")
     env.update({"PSEUDOLIFE_MCP_DATABASE_URL": dsn, "PSEUDOLIFE_MCP_CONFIG": str(config),
                 "PSEUDOLIFE_MCP_HOST": "127.0.0.1", "PSEUDOLIFE_MCP_PORT": str(port),
                 "PSEUDOLIFE_MCP_TOKEN": TOKEN, "PSEUDOLIFE_EMBEDDING_CPU_DTYPE": "fp32"})
@@ -154,7 +162,12 @@ def launched_daemon(dsn, private, *, env_extra=None, source_root=None, startup_t
     with (Path(private) / "daemon.log").open("w", encoding="utf-8") as log:
         process = None
         try:
-            with owned_process(_daemon_command(source_root), cwd=source_root, env=env,
+            if child_module:
+                from evals.rust_port.provenance import module_command
+                command = module_command(child_module, source_root)
+            else:
+                command = _daemon_command(source_root)
+            with owned_process(command, cwd=source_root, env=env,
                                stdin=subprocess.DEVNULL, stdout=log, stderr=log) as process:
                 deadline = time.monotonic() + startup_timeout
                 while time.monotonic() < deadline:

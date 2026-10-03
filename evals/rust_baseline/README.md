@@ -1,6 +1,75 @@
 # Python baseline instrument
 
-The preferred phase-0 evidence is the r5 capture with verified runtime ownership
+The [phase-0b Linux matrix](../results/rust-phase0b-daemon-scaling-linux.json)
+uses `scaling.py` to measure the pinned schema-53 oracle on Linux with
+2,000 and 20,000 generated entries, three fresh-bank repeats, warm and cold
+queries, and two fp32 thread policies. The one-thread policy remains the named
+baseline. The production-thread policy leaves OpenMP and MKL thread variables
+unset, matching the daemon image, and records torch's actual resolved counts.
+Both policies pin CPU and fp32; the production dtype `auto` is not measured.
+
+The shipped flat band has capacity 5,250. The 2,000-entry arm keeps that capacity;
+the 20,000-entry stress arm explicitly raises only capacity to 20,000 so hydration
+does not evict the corpus. Cadence, promotion and retention properties match the
+shipped flat band. Seeded, resident and configured counts are recorded per run.
+Seed vectors are reproducible normalized random fp32 vectors written to the
+disposable schema after real initialization; they establish storage and scoring
+scale, not semantic retrieval quality. Every query uses the actual Qwen model.
+The generated cold pool contains 1,100 distinct texts, exceeding the 1,024-entry
+LRU cache; measured queries are unique and disjoint from warmups. A child observer
+counts real model encode calls: the warm arm requires zero, the cold arm one per
+request. No fake embedder is substituted. The observer wraps `SentenceTransformer.encode`
+with a counter and leaves its computation unchanged.
+
+RSS is measured with the initialized model on an empty bank, after full hydration
+and index warmup, and every 20 ms under each search arm. Entry-vector tensor bytes
+are the exact `resident_entries * 1024 * 4` lower bound. The paired 2k-to-20k
+resident RSS delta and its idle-adjusted counterpart are measured separately:
+they include index allocations, entry/text objects and allocator effects, and
+cannot exclusively attribute the delta to vectors. PostgreSQL RSS is excluded.
+
+Phase 3 compares search p50/p95 and idle/hydrated/load RSS only within the same
+platform, source inputs, model/dtype, cache arm, actual thread counts, capacity
+configuration and request count. Compare the resident delta and vector lower
+bound at the same actual hydrated counts. Each cell's three same-head median
+range is its descriptive noise floor; a smaller delta is not a finding. These
+controls are not confidence intervals and imply no speedup. A changed model,
+capacity or query workload requires another matched baseline. The old 128-entry,
+warm-cache Windows results below do not gate phase 3.
+
+```console
+python -m unittest evals.rust_baseline.test_scaling
+python -m evals.rust_baseline.scaling --source-root ../oracle --expected-head <pinned-head> --smoke --out evals/results/daemon-scaling-smoke.json
+python -m evals.rust_baseline.scaling --source-root ../oracle --expected-head <pinned-head> --repeats 3 --samples 40 --out evals/results/daemon-scaling.json
+```
+
+The resource gate and ownership rules below apply before every repeat, including
+smoke. The current receipt records source and frozen instrument digests; an
+existing artifact is never overwritten. CPU smoke proves the complete path and
+cleanup, and is not a performance result.
+The [source reconstruction manifest](../results/rust-phase0b-baseline-source-reconstruction.json)
+binds the exact canonical LF bytes. The shared provenance helper gained an
+`instrument_dirty` field after this instrument was frozen; its captured bytes
+are preserved in the hash-addressed artifact named by the manifest. The model
+runtime observer and child-launch bootstrap functions are unchanged.
+
+For hosted CI controls, `ci.py --attempt-input <attempt-1> <attempt-2> <attempt-3>`
+accepts read-only Actions run/job receipts for at least three distinct successful
+attempts. It rejects duplicate attempts, mismatched heads, workflows, job
+dimensions, public runner labels or step names, and incomplete job pagination.
+Use `job_span_s` or `attempt_started_to_last_job_s` for reruns:
+`created_to_last_job_s` includes time before earlier attempts. Hosted hardware
+and load remain unknown; these controls provide no speedup claim.
+
+The repeat reference is the reviewed PR #540 head
+`f2ee15241c29e439c9aaad6fd271683a7a065b3e`, whose pull-request CI queue is
+independent of new master pushes. A repeat of the phase oracle's master run
+was cancelled by a later master push and is not counted. These hosted CI
+observations retain their own source identity; the Linux daemon oracle remains
+`3691f5cb75487d3fda54a6bde6fab35dcf32c681`. The repeat receipt measures noise for
+that fixed CI reference, not the wall time of another revision or its daemon.
+
+The historical phase-0 evidence is the r5 capture with verified runtime ownership
 and child runtime provenance:
 [daemon](../results/rust-rewrite-baseline-daemon-20261003-r5.json),
 [shim](../results/rust-rewrite-baseline-shim-20261003-r5.json), and
@@ -111,7 +180,7 @@ and immutable commit; do not relabel them after updating the instrument.
 To prepare the pinned Python source without changing the instrumentation checkout:
 
 ```console
-git worktree add --detach ../python-baseline-oracle 136a34ae95e981a691fcc31ba9fb4f35d83d4249
+git worktree add --detach ../python-baseline-oracle 3691f5cb75487d3fda54a6bde6fab35dcf32c681
 ```
 
 The daemon command can keep the instrument separate: add

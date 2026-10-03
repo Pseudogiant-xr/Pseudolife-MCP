@@ -12,7 +12,7 @@ close its identified gaps. No production Rust surface has been accepted.
 | 0b / 2.1: Candidate harness and graded HTTP/MCP controls | In progress; final control receipt pending | — | evals/rust_port/; final evidence links pending |
 | 0b / 2.2: Linux daemon and Windows/Linux client captures | In progress; platform-labelled capture/replay evidence pending | — | Final capture paths pending |
 | 0b / 2.3: Exhaustive register and per-file buckets | Source inventory verified; final branch review pending | — | PARITY.md; test-buckets.json; contract-inventory.json; test_contract_inventory.py; audit: 406 files, five candidate nodes, no missing surfaces; nine audit tests pass |
-| 0b / 2.4: Representative daemon baseline and noise floor | In progress; final baseline receipts pending | — | evals/rust_baseline/; final evidence links pending |
+| 0b / 2.4: Representative daemon baseline and noise floor | Linux matrix verified; hosted CI repeats pending | — | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest beside receipt |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented here; harness README pointer/final evidence pending | — | PORTING.md; retained R6 selfcheck and full-bank R5 |
 | 0b: Independent review and CI | Pending final frozen tree and review | — | Lead records final validation and reviewed head |
 | 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
