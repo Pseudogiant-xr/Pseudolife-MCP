@@ -165,7 +165,7 @@ def test_client_update_refreshes_running_tunnels_through_the_new_launcher_after_
     launcher = _launcher(tmp_path, monkeypatch)
     from pseudolife_memory import client_updates
     order = []
-    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo: order.append('shim') or {'state': 'installed:0.15.1', 'detail': 'new runtime'})
+    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo, reinstall=False: order.append('shim') or {'state': 'installed:0.15.1', 'detail': 'new runtime'})
     calls = _cli_calls(monkeypatch)
     real = client_updates.run_cli
     monkeypatch.setattr(client_updates, 'run_cli', lambda argv, **kw: order.append('tunnel') or real(argv, **kw))
@@ -223,7 +223,7 @@ def test_a_failed_shim_step_leaves_running_tunnels_on_their_release(isolated, tm
     _saved_tunnel(isolated, monkeypatch)
     launcher = _launcher(tmp_path, monkeypatch)
     from pseudolife_memory import client_updates
-    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo: {'state': 'failed', 'detail': 'pip failed'})
+    monkeypatch.setattr(client_updates, 'update_shim', lambda source, repo, reinstall=False: {'state': 'failed', 'detail': 'pip failed'})
     calls = _cli_calls(monkeypatch)
     report = client_updates.run_steps(('shim',), repo=None, source='fixture')
     assert calls == []

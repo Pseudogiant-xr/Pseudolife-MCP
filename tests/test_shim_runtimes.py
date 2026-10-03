@@ -348,6 +348,24 @@ def test_the_helper_itself_never_counts_as_holding_a_runtime(tmp_path, shape, to
     assert result["removed"] == [str(old.path)]
 
 
+def test_the_runtime_the_caller_runs_from_is_never_removed(tmp_path, shape, tools, monkeypatch):
+    """An update run by the launcher runs from an older runtime and installs
+    a newer one: removing its own runtime left its lazy imports nothing to
+    import on Linux (ModuleNotFoundError after the shim step, 2026-10-04),
+    where nothing refuses to delete a directory a process runs from."""
+    layout = _layout(tmp_path, shape)
+    old = _install(layout, tools, "0.15.0")
+    new = _install(layout, tools, "0.16.0")
+    monkeypatch.setattr(rt.sys, "prefix", str(old.path))
+    rows = [(os.getpid(), os.getppid(), str(_scripts(old.path, shape) / _python_name(shape)))]
+    result = rt.remove_unused(layout, processes=lambda: rows)
+    assert result["removed"] == [] and old.path.is_dir() and new.path.is_dir()
+    assert result["held"] == [{"path": str(old.path), "processes": 1}]
+    # once the update runs from elsewhere, the idle runtime goes
+    monkeypatch.setattr(rt.sys, "prefix", str(new.path))
+    assert rt.remove_unused(layout, processes=lambda: [])["removed"] == [str(old.path)]
+
+
 def _tunnel_record(home: Path, monkeypatch, runtime: Path, pid: int | None = None, supervisor: int = 4200) -> Path:
     """A running tunnel's process record whose bridge was frozen (the real
     ``snapshot_bridge``) with the site-packages of ``runtime``; its runtime

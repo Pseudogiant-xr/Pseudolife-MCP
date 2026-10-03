@@ -38,6 +38,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
   or let it expire.
 
+### Fixed (2026-10-04 — `pseudolife-mcp update` no longer deletes the shim runtime it runs from)
+- On Linux and macOS, `pseudolife-mcp update` could never finish its
+  client side. The launcher runs the update from the current shim
+  runtime; the shim step installs the new release as a newer runtime and
+  then removes unused ones, and the update's own process was never
+  counted as using its runtime. That runtime was deleted under the
+  running update, whose next lazy import failed
+  (`ModuleNotFoundError: No module named
+  'pseudolife_memory.tunnel_profiles'`) after the plugin and Codex steps,
+  so their outcome was never reported and the run ended with a traceback
+  and exit 1. Windows was spared only
+  because it refuses to rename a directory a process runs from. The
+  runtime this interpreter runs from is now always kept and reported like
+  a runtime a session still runs; a later update removes it once idle.
+- A rerun of the client side (`pseudolife-mcp update --clients-only`,
+  the retry the update names) installed yet another runtime of the same
+  release every time. When the current runtime was installed from that
+  same pinned release, the shim step now reports `current:<version>` and
+  installs nothing (`--reinstall` installs it again). Checkout sources
+  still install every time, since their code changes under one version.
+- **Workaround for 0.16.0 on Linux/macOS**: the 0.16.0 updater still has
+  the bug, so after `pseudolife-mcp update` on 0.16.0, finish the client
+  side from a checkout at v0.16.0 with `python ops/update_clients.py
+  --repo <checkout> --only plugin,codex`. Updating from 0.16.0 to the
+  fixed release runs 0.16.0's updater once more and hits the same crash
+  after installing the new runtime; run `pseudolife-mcp update
+  --clients-only` once afterwards and the fixed code completes the
+  client side.
+
 ## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
 
 ### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
