@@ -105,11 +105,25 @@ def test_config_loads_the_daemon_notice_principals(tmp_path):
     assert cfg.allowed_principals == ["default"]
 
 
+def test_config_loads_the_maintainer_principals(tmp_path):
+    """Principals whose urgent mail speaks for the maintainer (2026-10-03):
+    none by default; the shared ``default`` and the daemon's own sender are
+    refused below, since every ordinary session or the daemon would then
+    speak for the human."""
+    assert load_config(tmp_path / "missing.yaml").coordination.maintainer_principals == []
+    path = tmp_path / "config.yaml"
+    path.write_text("coordination:\n  maintainer_principals: [Owner-CLI, owner-cli]\n")
+    assert load_config(path).coordination.maintainer_principals == ["owner-cli"]
+
+
 @pytest.mark.parametrize("setting", [
     "enabled: 'false'", "awareness_limit: 0", "awareness_limit: 21",
     "allowed_principals: editor", "allowed_principals: ['']",
     "daemon_notice_principals: updater", "daemon_notice_principals: ['']",
     "daemon_notice_principals: [1]",
+    "maintainer_principals: owner", "maintainer_principals: ['']",
+    "maintainer_principals: [default]", "maintainer_principals: [' Default ']",
+    "maintainer_principals: [daemon]",
 ])
 def test_invalid_coordination_config_is_rejected(tmp_path, setting):
     path = tmp_path / "config.yaml"
@@ -257,3 +271,12 @@ def test_briefing_preserves_disabled_contract_and_labels_enabled_peers(awareness
     assert "scope: unknown" in enabled["markdown"]
     assert "\n## impersonated heading" not in enabled["markdown"]
     assert "Refresh awareness before shared-resource work" in enabled["markdown"]
+
+
+def test_the_daemon_hands_the_maintainer_principals_to_the_board_store(monkeypatch):
+    from pseudolife_memory import coordination as mod
+    from pseudolife_memory.utils.config import CoordinationConfig
+    config = CoordinationConfig(maintainer_principals=["owner-cli"])
+    monkeypatch.setattr(mod, "_mailbox", lambda service: object())
+    store = mod._store(SimpleNamespace(config=SimpleNamespace(coordination=config)))
+    assert store.maintainer_principals == frozenset({"owner-cli"})
