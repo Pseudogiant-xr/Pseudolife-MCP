@@ -332,6 +332,9 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
         _reap_daemon(port, tmp_path)
+    # The spawned daemon is detached on purpose, so nothing but the reap ends
+    # it: off Windows it once outlived every run, one ~2.8 GB daemon each.
+    assert _spawned_by(tmp_path) == [], "the autostarted daemon outlived its test"
 
 
 def test_shim_forwards_stringified_list_param(shared_daemon):
@@ -696,18 +699,35 @@ def _reap_daemon(port: int, data_dir) -> None:
             pass
 
 
+def _spawned_by(data_dir) -> list[str]:
+    """Live processes whose environment names ``data_dir``, as ``pid argv``."""
+    import psutil
+
+    found = []
+    for proc in psutil.process_iter():
+        try:
+            if (proc.pid != os.getpid() and proc.environ().get(
+                    "PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir)):
+                found.append(f"{proc.pid} {' '.join(proc.cmdline())}")
+        except psutil.Error:
+            continue
+    return found
+
+
 def test_reap_daemon_kills_only_the_daemon_this_test_started(tmp_path):
-    if sys.platform != "win32":
-        pytest.skip("the reaper only acts on Windows")
     listen = ("import socket, time; s = socket.socket(); "
               "s.bind(('127.0.0.1', 0)); s.listen(); "
               "print(s.getsockname()[1], flush=True); time.sleep(60)")
 
     def listener(data_dir):
+        # Detached as shim.spawn_daemon detaches the daemon: its own session
+        # off Windows, so no signal to this test's group reaches it.
+        detach = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+                  if sys.platform == "win32" else {"start_new_session": True})
         proc = subprocess.Popen(
             [sys.executable, "-c", listen], stdout=subprocess.PIPE, text=True,
             env={**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir)},
-            creationflags=subprocess.CREATE_NO_WINDOW)
+            **detach)
         return proc, int(proc.stdout.readline())
 
     theirs, their_port = listener(tmp_path / "another-session")

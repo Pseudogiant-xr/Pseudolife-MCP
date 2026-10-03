@@ -1,4 +1,6 @@
-"""ops/wsl-suite.sh's guard for runs dispatched to a second machine.
+"""ops/wsl-suite.sh: its guard for runs dispatched to a second machine, and
+its sweep of the processes a run leaves behind.
+
 
 ops/remote-suite.ps1 runs a commit's own ops/wsl-suite.sh on another
 machine with PSEUDOLIFE_SUITE_DISPATCHED=1. On the maintainer's homelab box
@@ -12,7 +14,10 @@ naming another server, and only under that machine's own suite lease
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -85,3 +90,60 @@ def test_a_dispatched_run_with_both_passes_the_guard(tmp_path):
 def test_an_ordinary_run_has_no_such_guard(tmp_path):
     proc = _run(tmp_path)
     assert REFUSAL not in proc.stderr, proc.stderr
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` runs (a zombie, already dead, does not count)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="the sweep reads /proc; setsid is util-linux")
+def test_the_launcher_stops_what_the_run_left_behind(tmp_path):
+    """A detached process the run started dies when the launcher returns.
+
+    The shim's autostarted daemon is detached on purpose (its own session),
+    so neither pytest's exit nor a signal to its process group reaches it.
+    Off Windows one outlived every full run for months (2026-10-03: 14 in
+    WSL, 5 on the second machine, ~2.8 GB each, which exhausted its memory).
+    A process the run did not start, here this test's own, is never touched.
+    """
+    venv_bin = tmp_path / "venv" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    left = tmp_path / "left.pid"
+    # pytest's stand-in: detach a child as the shim does, then fail, so the
+    # launcher must still pass pytest's own exit code through.
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        "setsid sleep 300 </dev/null >/dev/null 2>&1 &\n"
+        f"echo $! > '{left}'\n"
+        "exit 3\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    outsider = subprocess.Popen(["sleep", "300"])
+    leftover = None
+    try:
+        proc = subprocess.run(
+            [BASH, str(SCRIPT)], capture_output=True, text=True, timeout=120,
+            env=hermetic_env(HOME=str(tmp_path / "home"),
+                             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+                             PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"),
+                             PSEUDOLIFE_SUITE_COMMIT=None,
+                             PSEUDOLIFE_SUITE_DISPATCHED=None))
+        assert proc.returncode == 3, proc.stderr
+        leftover = int(left.read_text(encoding="ascii"))
+        assert not _alive(leftover), (
+            f"the run's detached child {leftover} outlived the launcher")
+        assert outsider.poll() is None, "stopped a process outside the run"
+    finally:
+        outsider.kill()
+        outsider.wait(timeout=10)
+        if leftover is not None and _alive(leftover):
+            os.kill(leftover, signal.SIGKILL)
