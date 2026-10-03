@@ -198,7 +198,7 @@ include real names, addresses, secrets or private text in requests/responses.
 
 ## Comparison contract
 
-JSON mapping key order is semantic; every array retains order and multiplicity.
+JSON object key order is ignored; every array retains order and multiplicity.
 Numbers are exact unless a named score path opts into tolerance. Each case's
 `policy` is persisted with the request:
 
