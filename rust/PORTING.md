@@ -117,8 +117,10 @@ records its platform; a missing platform is a validation failure. Historical
 PR #540 captures retain their original commit and platform and cannot stand in
 for the phase 0b pin.
 
-The named `source-text-lf` rule normalizes CRLF and CR to LF only for text
-originating in source (tool descriptions, docstrings and help) on both sides.
+The named `source-text-lf` rule normalizes CRLF and CR to LF on both sides at
+`/body/result/tools/*/description`, the source-derived MCP descriptions in the
+current corpus. Other parsed docstring or help fields require their own named
+paths before this rule applies.
 CLI stdout and stderr, including raw CLI help bytes, remain byte-exact on the
 capture platform. `source-text-lf` applies to parsed source-derived text fields,
 never a silent global normalization of streams. Captured raw MCP text bytes remain beside the
@@ -132,6 +134,15 @@ fixture-symbolic under a named rule. `content-length` is excluded only where
 one side uses fixed framing and the other chunked framing, with the exclusion
 recorded in the receipt. The coordination-start hook deliberately sets
 `x-pl-board`; transport-generated `date` and `server` are outside this allowlist.
+
+The named `content-length-authorized-wire-spans` rule validates a retained
+declared length against the received entity bytes, then adjusts its compared
+value only by the byte deltas of disjoint raw tokens changed by authorized
+identity or clock normalization. Nested JSON escaping is preserved. Raw length,
+adjustment and compared length are recorded; bytes outside those tokens still
+count. Whole-body reserialization cannot supply the adjustment. This is
+normalized length parity, not a claim that the raw headers are identical, and
+does not introduce another header exclusion.
 
 Epoch normalization preserves numeric type, sign, unit and magnitude class:
 seconds versus milliseconds differ and integer versus float differs. Normalize
@@ -150,6 +161,35 @@ Self-validate the differential harness against Python and a deliberately broken
 compiled Rust fixture before trusting it. This proves the comparison mechanism,
 not parity of any production Rust surface. Preserve request/response evidence
 and report precisely which selected tests exercised which implementation.
+
+The phase 0b acceptance receipt is
+`evals/results/rust-port-phase0b-acceptance.json`: the 25-case full-bank corpus
+passes through an owned Python command and an attested external URL, all seven
+graded proxy controls include their expected rejection reason, and the Linux
+selfcheck and Windows CLI replay have zero differences. The compiled garbage
+Rust fixture is rejected on both platforms. URL candidates need the disposable
+bank adapter documented in `evals/rust_port/README.md`; arbitrary production
+servers cannot be pointed at a bank. This acceptance covers the selected
+synthetic corpora, not every registered surface or a production Rust port.
+
+The phase 3 daemon reference is the Linux 2,000/20,000-entry matrix in
+`evals/results/rust-phase0b-daemon-scaling-linux.json`, with three repeats per
+bank/thread combination and separate warm/cold arms. Both policies use CPU
+fp32; the production-thread policy resolves to four threads on the recorded
+host. The 20,000-entry arm raises only flat-band capacity to retain its corpus.
+Generated entry vectors measure resident storage and scoring scale, while query
+embeddings use the real model. RSS scaling includes indexes, entry objects and
+allocator effects; vector tensor bytes are a lower bound. Match these conditions
+and each cell's measured noise floor before making a phase 3 comparison.
+
+The baseline's exact shared provenance helper predates the final harness helper.
+`evals/results/rust-phase0b-baseline-source-reconstruction.json` binds it to
+`evals/results/rust-phase0b-baseline-runtime-provenance-32740c866530c6b4.py`.
+Use those preserved bytes to reconstruct the frozen baseline; do not substitute
+the current helper or relabel the capture. Hosted CI repeats use the reviewed
+PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e`, independently of the
+daemon oracle above. They measure only that fixed CI reference's noise; a
+cancelled master repeat supplies no successful control.
 
 Phase completion is governed by `PORT-STATE.md` and `PARITY.md`. No deferred row
 counts as complete. Maintainer decisions are required to retire behaviour,

@@ -19,7 +19,7 @@ def test_full_bank_retains_complete_caller_and_launcher_hashes(monkeypatch):
 
 def test_full_bank_cli_forwards_offline_clearance_without_a_board_timestamp(tmp_path, monkeypatch):
     calls = []
-    def run(corpus, board_checked_at, tolerance, root, *, offline_resource_checked_at):
+    def run(corpus, board_checked_at, tolerance, root, *, offline_resource_checked_at, **candidate_options):
         calls.append((board_checked_at, offline_resource_checked_at))
         return {}, {"status": "passed"}
     monkeypatch.setattr(full_bank, "run", run)

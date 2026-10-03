@@ -1,7 +1,7 @@
 """Prove Python process replay and reject an already compiled broken fixture."""
 import argparse
 import hashlib
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
 import subprocess
@@ -11,8 +11,9 @@ import time
 import xml.etree.ElementTree as ET
 
 from evals.rust_port.fixtures import corpus
-from evals.rust_port.harness import HttpClient, execute, isolated_env, replay, write_new
-from evals.rust_port.provenance import require_historical_source, module_command, runtime_metadata, runtime_probe_command
+from evals.rust_port.harness import (HttpClient, execute, isolated_env, replay, write_new,
+    capture_platform, HTTP_HEADER_ALLOWLIST, NORMALIZATION_RULES)
+from evals.rust_port.provenance import require_oracle_source as require_historical_source, module_command, runtime_metadata, runtime_probe_command
 from evals.rust_port.processes import owned_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,40 +99,53 @@ def main():
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--validate-plugin", action="store_true")
     parser.add_argument("--oracle-root", type=Path, default=ROOT)
+    parser.add_argument("--cli-only", action="store_true")
+    clearance = parser.add_mutually_exclusive_group(required=True)
+    clearance.add_argument("--board-checked-at")
+    clearance.add_argument("--offline-resource-checked-at")
     args = parser.parse_args()
     root = args.oracle_root.resolve()
     source = require_historical_source(root)
+    from evals.rust_baseline.common import lease_gate
+    resource = lease_gate(args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at)
     if not args.broken_binary.is_file():
         parser.error("broken fixture must already be compiled")
     binary = args.broken_binary.resolve()
     with tempfile.TemporaryDirectory(prefix="rust-port-selfcheck-") as tmp:
         directory = Path(tmp)
-        with oracle_process(directory, root) as (url, child_runtime):
+        target = nullcontext((None, None)) if args.cli_only else oracle_process(directory, root)
+        with target as (url, child_runtime):
             spec = corpus()
+            if args.cli_only:
+                spec["cases"] = [case for case in spec["cases"] if case["surface"] == "cli"]
             python = [sys.executable, "-m", "pseudolife_memory.cli"]
             cli_runtimes = {label: probe_runtime(directory / home, root) for label, home in (
                 ("record", "record-home"), ("replay", "control-home"))}
             records = execute(spec["cases"], cli_prefix=python, base_url=url,
                               cwd=root, home=directory / "record-home")
-            transcript = {"schema": 1, "fixture": spec["fixture"], "records": records}
+            transcript = {"schema": 1, "capture_platform": capture_platform(), "fixture": spec["fixture"], "records": records}
             control = replay(transcript, cli_prefix=python, base_url=url,
                              cwd=root, home=directory / "control-home")
             broken = replay(transcript, cli_prefix=[str(binary)], base_url=url,
                             cwd=root, home=directory / "candidate-home")
             # A transport error response cannot masquerade as successful fixture
             # coverage merely because the same error occurred in both runs.
-            indexed = {r["id"]: r["response"] for r in records}
-            assert indexed["http-search"]["body"]["count"] == 3
-            negotiated = indexed["mcp-initialize"]["body"]["result"]["protocolVersion"]
-            assert isinstance(negotiated, str) and negotiated
-            assert "result" in indexed["mcp-tools"]["body"]
-            search = indexed["mcp-search"]["body"]["result"]
-            assert not search.get("isError", False)
-            assert json.loads(search["content"][0]["text"])["count"] == 3
+            negotiated = None
+            if not args.cli_only:
+                indexed = {r["id"]: r["response"] for r in records}
+                assert indexed["http-search"]["body"]["count"] == 3
+                negotiated = indexed["mcp-initialize"]["body"]["result"]["protocolVersion"]
+                assert isinstance(negotiated, str) and negotiated
+                assert "result" in indexed["mcp-tools"]["body"]
+                search = indexed["mcp-search"]["body"]["result"]
+                assert not search.get("isError", False)
+                assert json.loads(search["content"][0]["text"])["count"] == 3
             assert control["passed"], "Python control replay must pass"
             assert not broken["passed"], "deliberately broken Rust fixture must fail"
             assert {d["case"] for d in broken["differences"]} == {"cli-help", "cli-unknown"}
-        summary = {"schema": 1, "python_control": control, "broken_rust": broken,
+        summary = {"schema": 1, "capture_platform": capture_platform(), "resource_check": resource,
+                   "compared_http_headers": list(HTTP_HEADER_ALLOWLIST), "normalization_rules": list(NORMALIZATION_RULES),
+                   "python_control": control, "broken_rust": broken,
                    "negative_control": {"language": "Rust",
                        "source_sha256": hashlib.sha256((ROOT / "evals/rust_port/broken_fixture.rs").read_bytes()).hexdigest(),
                        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),

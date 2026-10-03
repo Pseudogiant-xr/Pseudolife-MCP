@@ -15,6 +15,8 @@ from evals.rust_port.processes import execution_sources
 ROOT = Path(__file__).resolve().parents[2]
 HISTORICAL_HEAD = "136a34ae95e981a691fcc31ba9fb4f35d83d4249"
 HISTORICAL_SCHEMA = 52
+ORACLE_HEAD = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
+ORACLE_SCHEMA = 53
 SOURCE_PATHS = ("pseudolife_memory", "pyproject.toml", "tests/pg_defaults.py",
                 "tests/test_cli_dispatch.py", "tests/conftest.py")
 
@@ -36,13 +38,16 @@ def _git(root, *arguments):
 def source_metadata(root=ROOT):
     head = _git(root, "rev-parse", "HEAD")
     difference = _git(root, "diff", "--quiet", HISTORICAL_HEAD, "--", *SOURCE_PATHS)
+    current_difference = _git(root, "diff", "--quiet", ORACLE_HEAD, "--", *SOURCE_PATHS)
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "--", *SOURCE_PATHS)
-    if head.returncode or difference.returncode not in (0, 1) or untracked.returncode:
+    if head.returncode or current_difference.returncode not in (0, 1) or untracked.returncode:
         raise RuntimeError("historical oracle source comparison unavailable")
     instrument = _git(ROOT, "rev-parse", "HEAD")
-    if instrument.returncode:
+    instrument_status = _git(ROOT, "status", "--porcelain", "--", "evals/rust_port", "evals/rust_baseline")
+    if instrument.returncode or instrument_status.returncode:
         raise RuntimeError("instrument source provenance unavailable")
     return {"source_head": head.stdout.strip(), "instrument_head": instrument.stdout.strip(),
+            "instrument_dirty": bool(instrument_status.stdout.strip()),
             "instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                                   for path in sorted([*Path(__file__).parent.glob("*.py"),
                                                       *Path(__file__).parent.glob("*.json")])},
@@ -50,6 +55,9 @@ def source_metadata(root=ROOT):
                                       for path in execution_sources()},
             "source_schema": schema_version(Path(root) / "pseudolife_memory/storage/schema.py"),
             "historical_oracle": {"source_head": HISTORICAL_HEAD, "source_schema": HISTORICAL_SCHEMA},
+            "historical_source_comparison_available": difference.returncode in (0, 1),
+            "phase_oracle": {"source_head": ORACLE_HEAD, "source_schema": ORACLE_SCHEMA},
+            "production_source_matches_phase_oracle": current_difference.returncode == 0 and not untracked.stdout.strip(),
             "production_source_matches_historical": difference.returncode == 0 and not untracked.stdout.strip(),
             "source_comparison_paths": list(SOURCE_PATHS)}
 
@@ -59,6 +67,13 @@ def require_historical_source(root=ROOT):
     if metadata["source_schema"] != HISTORICAL_SCHEMA or not metadata["production_source_matches_historical"]:
         raise RuntimeError("historical schema-52 oracle source is required; use a checkout of " + HISTORICAL_HEAD
                            + " selected with --oracle-root; current-source rebaselining is not enabled")
+    return metadata
+
+
+def require_oracle_source(root=ROOT):
+    metadata = source_metadata(root)
+    if metadata["source_schema"] != ORACLE_SCHEMA or not metadata["production_source_matches_phase_oracle"]:
+        raise RuntimeError("phase oracle source and schema required; select the pinned checkout with --oracle-root")
     return metadata
 
 

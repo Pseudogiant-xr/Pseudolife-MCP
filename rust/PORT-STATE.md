@@ -9,11 +9,11 @@ close its identified gaps. No production Rust surface has been accepted.
 |---|---|---|---|
 | 0: Historical inventory, rulebook and disposable trial | Reviewed historical evidence; phase 0 gaps require 0b closure | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540) | Historical source pin 136a34ae; trial corrections retained in PORTING.md |
 | 0: Historical selfcheck and full-bank replay | Retained as evidence about the original oracle, not current Rust parity | #540 | evals/results/rust-port-phase0-selfcheck-r6/; evals/results/rust-port-phase0-full-bank-r5/ |
-| 0b / 2.1: Candidate harness and graded HTTP/MCP controls | In progress; final control receipt pending | — | evals/rust_port/; final evidence links pending |
-| 0b / 2.2: Linux daemon and Windows/Linux client captures | In progress; platform-labelled capture/replay evidence pending | — | Final capture paths pending |
+| 0b / 2.1: Candidate harness and graded HTTP/MCP controls | Acceptance receipt passed; final branch validation/review pending | — | evals/results/rust-port-phase0b-acceptance.json; 25 full-bank cases with zero differences, command and URL lanes passed, seven named controls rejected, garbage Rust rejected |
+| 0b / 2.2: Linux daemon and Windows/Linux client captures | Same-platform Python replays passed; final branch review pending | — | evals/results/rust-port-phase0b-full-bank-linux/run.json; rust-port-phase0b-selfcheck-linux/selfcheck.json (11 cases); rust-port-phase0b-cli-windows/selfcheck.json (two CLI cases); zero replay differences |
 | 0b / 2.3: Exhaustive register and per-file buckets | Source inventory verified; final branch review pending | — | PARITY.md; test-buckets.json; contract-inventory.json; test_contract_inventory.py; audit: 406 files, five candidate nodes, no missing surfaces; nine audit tests pass |
-| 0b / 2.4: Representative daemon baseline and noise floor | Linux matrix verified; hosted CI repeats pending | — | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest beside receipt |
-| 0b / 2.5: Housekeeping and rulebook corrections | Implemented here; harness README pointer/final evidence pending | — | PORTING.md; retained R6 selfcheck and full-bank R5 |
+| 0b / 2.4: Representative daemon baseline and noise floor | Linux matrix verified; three successful hosted CI repeats pending | — | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; rust-phase0b-baseline-source-reconstruction.json and its preserved helper; CI receipt pending |
+| 0b / 2.5: Housekeeping and rulebook corrections | Implemented; final branch review pending | — | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Pending final frozen tree and review | — | Lead records final validation and reviewed head |
 | 1: Stdio shim | deferred; phase 0b must merge before parity rows can flip | — | MCP-WIRE, SHIM-LIFECYCLE and related rows in PARITY.md |
 | 2: Client CLI leaves | deferred | — | CLI rows and 25-mode checklist in PARITY.md |
@@ -36,6 +36,16 @@ close its identified gaps. No production Rust surface has been accepted.
 - Historical captures keep their recorded source identity. R6 selfcheck and
   full-bank R5 remain in-tree; superseded R4/R5 selfchecks are preserved outside
   the tree and recoverable from PR #540's recorded tree.
+- The daemon baseline uses the phase oracle above. Hosted CI noise controls use
+  the reviewed PR #540 head `f2ee15241c29e439c9aaad6fd271683a7a065b3e` and
+  Actions run 37090575829; their distinct source identity remains recorded.
+  The interrupted master repeat is excluded. The hosted repeat receipt and
+  green CI on the final phase 0b head are separate pending gates.
+- The Linux matrix's shared provenance helper was frozen before the final
+  harness helper. Its exact bytes are retained in
+  evals/results/rust-phase0b-baseline-runtime-provenance-32740c866530c6b4.py
+  and bound by rust-phase0b-baseline-source-reconstruction.json; no baseline
+  capture was edited or relabelled.
 - Phase 0b is test/evaluation-only and requires the touched/dependent selection,
   not a local full suite under the brief and CLAUDE.md. When required later,
   full-suite receipts come from ops/wsl-suite.ps1 or ops/remote-suite.ps1 with

@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "fixture": {
+    "schema": 1,
+    "seed": 150052,
+    "entries": 6,
+    "kind": "in-memory-transport-seam"
+  },
+  "cases": [
+    {
+      "id": "cli-help",
+      "surface": "cli",
+      "request": {
+        "argv": [
+          "--help"
+        ]
+      }
+    },
+    {
+      "id": "cli-unknown",
+      "surface": "cli",
+      "request": {
+        "argv": [
+          "bogus"
+        ]
+      }
+    }
+  ]
+}
