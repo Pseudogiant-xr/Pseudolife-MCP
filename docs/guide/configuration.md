@@ -97,7 +97,7 @@ bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
 action makes ordinary mail `hinted` rather than rung;
 `authority_per_sender_per_hour` (12) bounds the urgent rings one sender causes
-as the maintainer or a project's coordinator, which spend it instead of
+as the maintainer or a project's designated coordinator, which spend it instead of
 `urgent_per_sender_per_hour` (see [Reopening a done park](#reopening-a-done-park)).
 Unparked Codex urgency
 takes capped attention first, with unknown host turn state. The values are whole
@@ -190,10 +190,16 @@ The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
 `PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
 asks at startup and otherwise stays quiet. A question the daemon does not
-answer (no connection, a timeout, a 5xx, 408 or 429) is not a no: a Claude Code session's
-shim asks again in the background on the registration retry schedule below,
-registers once the answer is yes, and stays quiet if it is no. A Codex shim
-still reads no answer as no for that process. `PSEUDOLIFE_AGENT_COORDINATION=0`
+answer (no connection, a timeout, a 5xx, 408 or 429) is not a no: the shim
+asks again in the background on the registration retry schedule below. A
+Claude Code session's shim registers once the answer is yes, and stays quiet
+if it is no. A Codex shim builds its per-thread registry once the answer is
+yes, and each thread's first result after that carries a one-time note that
+the board works, since the instructions carried no check-in; until then a
+board write is refused with the retry message and memory calls go out as
+usual. A later no keeps the quiet default (no registry, no warning, no
+note), except that an explicit `PSEUDOLIFE_CODEX_DOORBELL=1` then says once
+on stderr that the doorbell is off. `PSEUDOLIFE_AGENT_COORDINATION=0`
 (any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
 `=1` skips the question and reports any refusal on stderr.
 
@@ -1810,7 +1816,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | ordinary mail to a recipient that is not parked and acted on the board within `active_seconds` (unparked Codex urgency takes the capped attention branch first); its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` and the mail does not reopen it (`reason: parked_done`; see [Reopening a done park](#reopening-a-done-park)), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | `reopen_by` for `parked_done`: who could reopen it |
 | `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: queue_pending`, `recipient_state: unknown`, `queue_allowed: true` for a capped unknown-state bell), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path; `fallback` (text) and `fallback_paths`, the other ways to reach that client: `codex_doorbell` and `maintainer_types` for a Codex thread, `claude_desktop_send_message` and `maintainer_types` for a Claude Code session; `reopened` for a reopened done park |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the recipient project's coordinator is `reason: maintainer` or `coordinator` and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the recipient project's designated coordinator is `reason: maintainer` or `coordinator` and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by`, `retry` (what would ring it: `urgent`, or `clears` naming the need) |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `authority_sender_hour`) | the parked need, if any |
 
@@ -1823,7 +1829,7 @@ Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
 a non-Codex recipient retains its established urgent ring contract. Unparked
 Codex urgency spends the sender's urgent allowance (the authority budget
-when the sender is the maintainer or a coordinator) and passes the same
+when the sender is the maintainer or a designated coordinator) and passes the same
 per-recipient, nightly and stagger caps, and records attention with
 `no_steer_path`. An armed queue listener may queue one fixed bell labelled
 `turn state unknown`; neither its acceptance nor board recency proves native

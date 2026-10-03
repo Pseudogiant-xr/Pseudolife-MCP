@@ -462,10 +462,10 @@ codex mcp add pseudolife-memory \
 installed, `<url>` an origin such as `http://100.64.0.2:8765` (no `/mcp`, no
 path).
 
-The shim waits about 20 seconds for a remote daemon that does not answer (a
-first probe, then a 15-second retry loop), which is longer than Codex's default MCP startup timeout. Set the Codex
-startup timeout as the [README's Codex setup](../../README.md#quickstart)
-describes.
+The shim waits up to 5 seconds for a remote daemon that does not answer,
+inside Codex's default 10-second MCP startup timeout, and then starts the
+session without it and gets memory back by itself once the daemon answers
+(see [When the daemon is unreachable](#when-the-daemon-is-unreachable)).
 
 The Claude Code plugin adds the session hooks:
 
