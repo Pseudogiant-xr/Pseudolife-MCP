@@ -145,30 +145,41 @@ fi
 # WSL (28 of its 39 GB) and 5 on the second machine had exhausted its
 # memory and swap. On that machine each also held its run's systemd scope
 # open. The test reaps its daemon itself; this catches what a killed run,
-# or a future test, leaves behind.
+# or a future test, leaves behind. A child started with a scrubbed
+# environment drops the marker and escapes the sweep: the Codex doorbell's
+# CLI and the tunnel's runtime do, on purpose (bearer hygiene). Linux only:
+# the sweep reads /proc.
 PSEUDOLIFE_SUITE_RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
     || printf '%s-%s-%s' "$$" "$RANDOM" "$(date +%s%N)")"
 export PSEUDOLIFE_SUITE_RUN_ID
 
-# Stops every other process carrying this run's marker. Reads /proc without
-# forking, so no helper of its own carries the marker while it scans; does
-# nothing where there is no /proc (macOS). It runs as the EXIT trap, so
-# neither a failed command nor a closed stderr (the run's reader gone) nor a
-# second signal may cut it short: the leftovers are signalled before
-# anything is printed.
+# Whether process $1 carries this run's marker. Reads /proc without
+# forking, so no helper of the sweep's own carries the marker while it scans.
+carries_marker() {
+    local entry marker="PSEUDOLIFE_SUITE_RUN_ID=$PSEUDOLIFE_SUITE_RUN_ID"
+    while IFS= read -r -d '' entry; do
+        [[ "$entry" == "$marker" ]] && return 0
+    done 2>/dev/null < "/proc/$1/environ"
+    return 1
+}
+
+# Stops every other process carrying this run's marker; does nothing where
+# there is no /proc (macOS). It runs as the EXIT trap, so neither a failed
+# command nor a closed stderr (the run's reader gone) nor a second signal
+# may cut it short: the leftovers are signalled before anything is printed.
+# A pid is checked for the marker again before SIGKILL, in case it exited
+# and the pid was reused (zombies, whose environment reads empty, drop out
+# the same way).
 stop_leftovers() {
     set +e
     trap '' HUP INT TERM PIPE
     [[ -r /proc/self/environ ]] || return 0
-    local marker="PSEUDOLIFE_SUITE_RUN_ID=$PSEUDOLIFE_SUITE_RUN_ID"
-    local dir pid entry
+    local dir pid
     local -a left=() alive=()
     for dir in /proc/[0-9]*; do
         pid="${dir#/proc/}"
         [[ "$pid" != "$$" && -r "$dir/environ" ]] || continue
-        while IFS= read -r -d '' entry; do
-            if [[ "$entry" == "$marker" ]]; then left+=("$pid"); break; fi
-        done 2>/dev/null < "$dir/environ"
+        carries_marker "$pid" && left+=("$pid")
     done
     (( ${#left[@]} )) || return 0
     kill -TERM "${left[@]}" 2>/dev/null
@@ -179,7 +190,7 @@ stop_leftovers() {
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         alive=()
         for pid in "${left[@]}"; do
-            [[ -d "/proc/$pid" ]] && alive+=("$pid")
+            carries_marker "$pid" && alive+=("$pid")
         done
         (( ${#alive[@]} )) || return 0
         sleep 1
@@ -190,12 +201,21 @@ stop_leftovers() {
 # pytest runs as a background child, not through exec, so the sweep runs
 # after it exits, and so a signal to this shell acts at once (bash runs a
 # trap only between commands, and `wait` returns when one arrives) and is
-# passed on. A background job starts with SIGINT ignored and Python keeps an
-# ignored SIGINT, so the subshell resets it: an interrupt still reaches
-# pytest as KeyboardInterrupt and its teardown runs. The test copy's lock
+# passed on: an interrupt, a hangup or TERM exits 130, 129 or 143 once
+# pytest has stopped; otherwise the exit code is pytest's. pytest gets a
+# session of its own, so the terminal's Ctrl+C (sent to its whole
+# foreground group) reaches it only through this shell, once: a second
+# interrupt aborted its session-finish cleanup (private banks undropped,
+# the suite lease unreleased; review of #541, 2026-10-03). The subshell is
+# not a group leader, so setsid execs pytest in place and $! stays its pid.
+# A background job starts with SIGINT ignored and Python keeps an ignored
+# SIGINT, so the subshell resets it: the interrupt still reaches pytest as
+# KeyboardInterrupt and its teardown runs. The test copy's lock
 # (descriptor 9) is held until the sweep is done.
+session=()
+command -v setsid >/dev/null 2>&1 && session=(setsid)
 trap stop_leftovers EXIT
-( trap - INT; exec "$venv/bin/python" -m pytest "$@" ) &
+( trap - INT; exec ${session[@]+"${session[@]}"} "$venv/bin/python" -m pytest "$@" ) &
 pytest_pid=$!
 pass_on() {
     kill "-$1" "$pytest_pid" 2>/dev/null
