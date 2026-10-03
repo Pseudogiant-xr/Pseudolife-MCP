@@ -1,0 +1,1227 @@
+{
+  "bank_size": 0,
+  "control": {
+    "available": true,
+    "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+    "method": "max minus min of medians of identical-input repeated control blocks",
+    "noise_floor_abs": 12.39374999931897,
+    "repeat_medians": [
+      654.0404999977909,
+      649.0268499983358,
+      641.6467499984719
+    ]
+  },
+  "limitations": [
+    "Fresh process startup through real CLI/discovery/auth/proxy to stdio initialize; warm OS filesystem cache.",
+    "Upstream is an empty loopback fixture; no daemon spawn, PG, embedding or default coordination attachment.",
+    "Coordination is explicitly disabled; this configuration must match any Rust comparison.",
+    "A quiet resource lease is required; external desktop activity is not controlled."
+  ],
+  "provenance": {
+    "host": {
+      "architecture": "AMD64",
+      "label": "local-cpu-01",
+      "logical_cpus": 16,
+      "os": "Windows",
+      "os_release": "10",
+      "physical_cpus": 8,
+      "ram_bytes": 66190344192
+    },
+    "instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+      "evals/rust_baseline/ci.py": "68339d51622ba8d680ef81c836615a63b1e51dd2859a13089d329f7ae6b25661",
+      "evals/rust_baseline/common.py": "48317e48fe0c47b434e178757dc3a5c6d77e30d6f7610111fdd37a7b212a66e2",
+      "evals/rust_baseline/daemon.py": "4db05d2f8517f99e39014536b85750d245d74e6ac09636190a7883e90209ea02",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/shim.py": "8d8d6fcbe1bee16c066bf741a4c26ad3d85021854ce9d17606949ec6c26530f2",
+      "evals/rust_baseline/test_baseline.py": "522805c3406feafb60f8dfe6af22b0a1b14929d5a062ed338986291fa4aa6b50",
+      "evals/rust_baseline/test_review_fixes.py": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826"
+    },
+    "measured_at_utc": "2026-10-02T23:28:11Z",
+    "parent_runtime": {
+      "dependencies": {
+        "httpx": "0.28.1",
+        "mcp": "2.1.0",
+        "psutil": "7.2.2",
+        "psycopg": "3.3.4",
+        "sentence-transformers": "5.5.1",
+        "torch": "2.12.0"
+      },
+      "python": "3.11.9"
+    },
+    "process_helper_sha256": {
+      "codex_doorbell.py": "00cb503e46456bfe92f127336fba19bbf46a0c5bc553b42d4fbeb814fd0b9388",
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "b5c9cb1daa6ab46353b87caa9758b0fc3e792ab2742f1d0a170348027c866f81"
+    },
+    "source_dirty": false,
+    "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+    "source_schema": 52
+  },
+  "resource_check": {
+    "checked_at_utc": "2026-10-02T23:27:38Z",
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "offline_resource_checked_at_utc": "2026-10-02T23:27:35Z",
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+    "offline_resource_clearance_used": true
+  },
+  "rss_root": "shim launcher and recursive descendants, including redirected runtime",
+  "runs": [
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84160512
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 0,
+      "startup_ms": 662.7394000024651
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84320256
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 1,
+      "startup_ms": 654.9814999962109
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84418560
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 2,
+      "startup_ms": 640.386999999464
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84324352
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 3,
+      "startup_ms": 660.6226999938372
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84529152
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 4,
+      "startup_ms": 674.4617000003927
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84348928
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 5,
+      "startup_ms": 636.804800000391
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84234240
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 6,
+      "startup_ms": 642.8981999997632
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84385792
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 7,
+      "startup_ms": 653.0994999993709
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84447232
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 8,
+      "startup_ms": 643.0226000011317
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84377600
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 9,
+      "startup_ms": 658.3876000004238
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84516864
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 0,
+      "startup_ms": 650.0136999966344
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84434944
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 1,
+      "startup_ms": 640.3995000000577
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84381696
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 2,
+      "startup_ms": 639.573599997675
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84770816
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 3,
+      "startup_ms": 648.0400000000373
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84406272
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 4,
+      "startup_ms": 669.5303000014974
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84328448
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 5,
+      "startup_ms": 679.2483999961405
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84525056
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 6,
+      "startup_ms": 661.8066000010003
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84619264
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 7,
+      "startup_ms": 639.5014000008814
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84267008
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 8,
+      "startup_ms": 642.2460999965551
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84959232
+      },
+      "protocol": "2025-11-25",
+      "repeat": 1,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 9,
+      "startup_ms": 680.3227999989758
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84758528
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 0,
+      "startup_ms": 641.3188000005903
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 83894272
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 1,
+      "startup_ms": 639.890699996613
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84414464
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 2,
+      "startup_ms": 648.0518999960623
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84201472
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 3,
+      "startup_ms": 636.3848999972106
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84520960
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 4,
+      "startup_ms": 644.6869999999763
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84721664
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 5,
+      "startup_ms": 641.9746999963536
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84340736
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 6,
+      "startup_ms": 654.4362999993609
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84344832
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 7,
+      "startup_ms": 652.8393000044161
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84496384
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 8,
+      "startup_ms": 638.8213999962318
+    },
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "cleanup_confirmed": true,
+        "exit_code": 0,
+        "forced": false,
+        "process_stopped": true,
+        "stderr_present": false,
+        "subtree_stopped": true
+      },
+      "fixture_auth_match": true,
+      "idle_process_tree": {
+        "processes": 3,
+        "rss_bytes": 84418560
+      },
+      "protocol": "2025-11-25",
+      "repeat": 2,
+      "runtime_observation": "separate untimed child with identical interpreter, environment and source root",
+      "sample": 9,
+      "startup_ms": 639.0070999987074
+    }
+  ],
+  "schema": 1,
+  "startup_ms": {
+    "max": 680.3227999989758,
+    "median": 646.3635000000068,
+    "min": 636.3848999972106,
+    "n": 30,
+    "p50": 644.6869999999763,
+    "p95": 679.2483999961405
+  },
+  "status": "quiet-fixture-baseline"
+}
