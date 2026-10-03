@@ -236,7 +236,7 @@ fn shared_host_claim_is_refused_before_any_upstream_call() {
     let response = shim.receive();
     assert_eq!(
         response["error"]["data"],
-        json!({"classification":"coordination_unavailable","phase":"call","operation_outcome":"not_dispatched"})
+        json!({"classification":"coordination_unavailable","phase":"initialize","operation_outcome":"not_dispatched"})
     );
     assert!(
         response["error"]["message"]

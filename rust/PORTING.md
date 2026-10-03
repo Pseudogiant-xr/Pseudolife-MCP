@@ -95,13 +95,16 @@ thread resumption. Successful native handles transfer into `OwnedHandle`; a
 separate process-handle clone pins the leader identity through cleanup, and
 thread ownership is checked before resumption. Job creation or assignment
 refusal preserves a runnable CLI and selects the native `taskkill /T /F /PID`
-fallback. Failed suspended adoption terminates and reaps the child before
-reporting definite preexecution failure; timeout and cancellation use bounded
-cleanup, while successful launcher completion leaves its worker running.
+fallback. Failed suspended adoption terminates and reaps the child. It reports
+definite preexecution failure only when no thread has resumed; after any
+successful resume, a later failure retains the delivery reservation because
+user code may have executed. Timeout and cancellation use bounded cleanup,
+while successful launcher completion leaves its worker running.
 Closing a job does not kill successful workers. The fallback retains the Python
-limitation for workers already orphaned without a job. Injected threads and
-failure after partial multi-thread resumption remain outside the current
-fixture coverage.
+limitation for workers already orphaned without a job. The partial-resume
+fixture injects a failure after a successful native resume and checks
+reservation retention and cleanup. Injected threads and an actual operating
+system failure on a later thread resume remain outside fixture coverage.
 
 `shim/src/board/doorbell_posix.rs` is a local exception for an execve-only
 Doorbell command wrapper, registered after `ProcessSession` installs its

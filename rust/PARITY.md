@@ -4,7 +4,7 @@ Phase 1 oracle: Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, sch
 Historical phase 0b receipts retain Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`.
 Recount at this pin: 38 MCP tools, 62 ConsoleRoutes registrations plus the
 separate POST /api/pair route, eight hook endpoints, 15 coordination actions
-and 25 CLI modes. The current Console is v3 at /ui/; /ui/next/ is absent.
+and 26 CLI modes. The current Console is v3 at /ui/; /ui/next/ is absent.
 No production Rust surface has been accepted. `ported` requires the brief's
 wire, differential and measurement gates; `deferred` is unfinished;
 `retired-by-decision` requires a recorded maintainer decision. No retirement
@@ -303,7 +303,7 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases, retaining their individual scope and pending equivalents. These mappings establish no passing Rust coverage or implemented parity. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases. All 125 scoped internal cases name Rust equivalents with targeted Windows and Linux evidence; 56 internal cases remain outside this phase's scope. Completed mappings do not establish frozen whole-candidate parity, whose acceptance gates remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 ## Health, HTTP bodies and logical transfer
 

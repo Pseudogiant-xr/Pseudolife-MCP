@@ -25,7 +25,15 @@ def run(root):
                 actual = capture([sys.executable, "-m", "evals.rust_port.broken_stdio", control],
                     cwd=root, home=Path(private) / control, url=fixture.url, exercise=exercise)
                 differences = judge(expected, actual, policy)
-                passed = not differences if control == "identity" else bool(differences)
+                if control == "identity":
+                    passed = not differences
+                elif control == "wrong-protocol":
+                    passed = any(difference["path"] == "/json/0/result/protocolVersion"
+                                 and difference["reason"] == "value"
+                                 for difference in differences)
+                else:
+                    passed = any(difference["reason"] == "duplicate_json_key"
+                                 for difference in differences)
                 if not passed:
                     raise RuntimeError("forwarding candidate control failed: " + control)
                 results[control] = {"passed": passed, "policy": policy.name,

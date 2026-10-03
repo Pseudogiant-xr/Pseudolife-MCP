@@ -345,21 +345,9 @@ impl Doorbell {
         {
             return;
         }
-        let reason = reason
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(60)
-            .filter(|c| c.is_alphanumeric() || " _-".contains(*c))
-            .collect::<String>();
         let ring = (
             decision.to_owned(),
-            if reason.is_empty() {
-                "unknown".into()
-            } else {
-                reason
-            },
+            super::liveness::reason(reason),
             ring_at,
         );
         if now() < ring_at || bell.last_ring.as_ref() == Some(&ring) {

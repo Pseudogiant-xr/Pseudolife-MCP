@@ -32,6 +32,24 @@ pub struct SpawnFailure {
     pid: Option<u32>,
 }
 
+#[derive(Clone, Copy)]
+enum Execution {
+    Unstarted,
+    MayHaveExecuted,
+}
+struct AdoptionFailure {
+    error: io::Error,
+    execution: Execution,
+}
+impl From<io::Error> for AdoptionFailure {
+    fn from(error: io::Error) -> Self {
+        Self {
+            error,
+            execution: Execution::Unstarted,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
     Create,
@@ -40,6 +58,10 @@ enum Phase {
     Snapshot,
     ThreadOpen,
     Resume,
+    #[cfg(test)]
+    ResumeAfterFirst,
+    #[cfg(test)]
+    AssignAndResumeAfterFirst,
     Terminate,
 }
 
@@ -53,6 +75,8 @@ impl Phases {
         #[cfg(test)]
         {
             self.refuse == Some(_phase)
+                || (self.refuse == Some(Phase::AssignAndResumeAfterFirst)
+                    && matches!(_phase, Phase::Assign | Phase::ResumeAfterFirst))
         }
         #[cfg(not(test))]
         {
@@ -67,8 +91,11 @@ pub struct QueueProcess {
     job: Option<OwnedHandle>,
     // A separate handle pins the PID even after Tokio observes leader exit.
     process_pin: Option<OwnedHandle>,
-    suspended: bool,
+    // Failed or cancelled adoption still owns cleanup, even after partial resume.
+    needs_cleanup: bool,
     phases: Phases,
+    #[cfg(test)]
+    fixture_root: Option<PathBuf>,
 }
 impl QueueProcess {
     pub async fn spawn(command: &mut Command) -> Result<Self, SpawnFailure> {
@@ -76,6 +103,12 @@ impl QueueProcess {
     }
 
     async fn spawn_phases(command: &mut Command, phases: Phases) -> Result<Self, SpawnFailure> {
+        #[cfg(test)]
+        let fixture_root = command.as_std().get_envs().find_map(|(key, value)| {
+            (key == "DOORBELL_WIN32_ROOT")
+                .then(|| value.map(PathBuf::from))
+                .flatten()
+        });
         let job = if phases.refuses(Phase::Create) {
             None
         } else {
@@ -90,10 +123,12 @@ impl QueueProcess {
         })?;
         let mut process = Self {
             child,
-            suspended: job.is_some(),
+            needs_cleanup: job.is_some(),
             job,
             process_pin: None,
             phases,
+            #[cfg(test)]
+            fixture_root,
         };
         // Tokio owns this live process handle. Clone it while the child borrow
         // is live; never take ownership of the borrowed raw handle itself.
@@ -120,19 +155,19 @@ impl QueueProcess {
         if process.job.is_some() {
             let adopted = process.adopt();
             match adopted {
-                Ok(true) => process.suspended = false,
+                Ok(true) => process.needs_cleanup = false,
                 // Assignment refusal resumes the CLI and closes the unused job.
                 Ok(false) => {
-                    process.suspended = false;
+                    process.needs_cleanup = false;
                     process.job = None;
                 }
-                Err(error) => {
+                Err(failure) => {
                     #[cfg(test)]
                     let pid = process.child.id();
                     process.kill().await;
                     return Err(SpawnFailure {
-                        error,
-                        unstarted: true,
+                        error: failure.error,
+                        unstarted: matches!(failure.execution, Execution::Unstarted),
                         #[cfg(test)]
                         pid,
                     });
@@ -142,9 +177,9 @@ impl QueueProcess {
         Ok(process)
     }
 
-    fn adopt(&self) -> io::Result<bool> {
+    fn adopt(&mut self) -> Result<bool, AdoptionFailure> {
         if self.phases.refuses(Phase::Handle) {
-            return Err(io::Error::other("no process handle"));
+            return Err(io::Error::other("no process handle").into());
         }
         let job = self
             .job
@@ -159,14 +194,21 @@ impl QueueProcess {
         let assigned = !self.phases.refuses(Phase::Assign)
             && unsafe { AssignProcessToJobObject(job.as_raw_handle(), process.as_raw_handle()) }
                 != 0;
+        // An empty refused job cannot contain descendants created by partial
+        // resume. Close it now so any ensuing failure uses taskkill fallback.
+        if !assigned {
+            self.job = None;
+        }
         if self.phases.refuses(Phase::Resume) {
-            return Err(io::Error::other("resume failed"));
+            return Err(io::Error::other("resume failed").into());
         }
         resume_threads(
             self.child
                 .id()
                 .ok_or_else(|| io::Error::other("no process id"))?,
             &self.phases,
+            #[cfg(test)]
+            self.fixture_root.as_deref(),
         )?;
         Ok(assigned)
     }
@@ -207,8 +249,9 @@ impl QueueProcess {
 impl Drop for QueueProcess {
     fn drop(&mut self) {
         // A cancelled spawn future may be awaiting failed-adoption cleanup.
-        // Never abandon the not-yet-resumed child; successful workers survive.
-        if self.suspended {
+        // Partial resume can create descendants before failed-adoption cleanup.
+        // The job stays owned until cleanup; successful workers survive drop.
+        if self.needs_cleanup {
             if let Some(job) = &self.job {
                 let _ = unsafe { TerminateJobObject(job.as_raw_handle(), 1) };
             }
@@ -224,14 +267,18 @@ fn create_job() -> Option<OwnedHandle> {
     (!handle.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
-fn resume_threads(pid: u32, phases: &Phases) -> io::Result<()> {
+fn resume_threads(
+    pid: u32,
+    phases: &Phases,
+    #[cfg(test)] fixture_root: Option<&std::path::Path>,
+) -> Result<(), AdoptionFailure> {
     if phases.refuses(Phase::Snapshot) {
-        return Err(io::Error::other("thread snapshot failed"));
+        return Err(io::Error::other("thread snapshot failed").into());
     }
     // Snapshot is non-inheritable; INVALID_HANDLE_VALUE must not be owned.
     let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if raw == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
     let snapshot = unsafe { OwnedHandle::from_raw_handle(raw) };
     let mut entry = THREADENTRY32 {
@@ -241,16 +288,16 @@ fn resume_threads(pid: u32, phases: &Phases) -> io::Result<()> {
     // The writable initialized entry remains alive through enumeration. Open
     // every matching thread before resuming any, while the child is suspended.
     if unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } == 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
     let mut threads = Vec::new();
     loop {
         if entry.dwSize < std::mem::size_of::<THREADENTRY32>() as u32 {
-            return Err(io::Error::other("short thread snapshot entry"));
+            return Err(io::Error::other("short thread snapshot entry").into());
         }
         if entry.th32OwnerProcessID == pid {
             if phases.refuses(Phase::ThreadOpen) {
-                return Err(io::Error::other("open thread failed"));
+                return Err(io::Error::other("open thread failed").into());
             }
             let raw = unsafe {
                 OpenThread(
@@ -260,17 +307,17 @@ fn resume_threads(pid: u32, phases: &Phases) -> io::Result<()> {
                 )
             };
             if raw.is_null() {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
             let thread = unsafe { OwnedHandle::from_raw_handle(raw) };
             // A snapshot's TID can be recycled before OpenThread. The owned
             // handle pins its thread; verify its process before resuming it.
             let owner = unsafe { GetProcessIdOfThread(thread.as_raw_handle()) };
             if owner == 0 {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
             if owner != pid {
-                return Err(io::Error::other("thread owner changed"));
+                return Err(io::Error::other("thread owner changed").into());
             }
             threads.push(thread);
         }
@@ -278,19 +325,40 @@ fn resume_threads(pid: u32, phases: &Phases) -> io::Result<()> {
         if unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } == 0 {
             let error = io::Error::last_os_error();
             if error.raw_os_error() != Some(ERROR_NO_MORE_FILES as i32) {
-                return Err(error);
+                return Err(error.into());
             }
             break;
         }
     }
     if threads.is_empty() {
-        return Err(io::Error::other("no suspended process threads"));
+        return Err(io::Error::other("no suspended process threads").into());
     }
+    let mut execution = Execution::Unstarted;
     for thread in threads {
         // Only owned thread handles from this child are passed. DWORD_MAX is
         // failure; a successful ResumeThread decrements the initial suspension.
-        if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
-            return Err(io::Error::last_os_error());
+        let previous = unsafe { ResumeThread(thread.as_raw_handle()) };
+        if previous == u32::MAX {
+            return Err(AdoptionFailure {
+                error: io::Error::last_os_error(),
+                execution,
+            });
+        }
+        // Resume is sequential, not atomic. Any successful call loses the
+        // definitely-unstarted guarantee, regardless of its previous count.
+        execution = Execution::MayHaveExecuted;
+        #[cfg(test)]
+        if phases.refuses(Phase::ResumeAfterFirst) {
+            let root = fixture_root.expect("partial-resume fixture root");
+            std::fs::write(root.join("native-resume"), previous.to_string()).unwrap();
+            let until = std::time::Instant::now() + Duration::from_secs(5);
+            while !root.join("ticks").exists() && std::time::Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            return Err(AdoptionFailure {
+                error: io::Error::other("injected failure after native resume"),
+                execution,
+            });
         }
     }
     Ok(())
@@ -305,6 +373,138 @@ mod tests {
 
     const THREAD: &str = "12345678-1234-1234-1234-123456789abc";
     const FIXTURE: &str = "board::doorbell::windows_process::tests::fixture_child";
+
+    #[test]
+    fn partial_resume_fixture_child() {
+        let Some(root) = std::env::var_os("DOORBELL_WIN32_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let role = std::env::var("DOORBELL_WIN32_ROLE").unwrap();
+        std::fs::write(
+            root.join(format!("{role}.pid")),
+            std::process::id().to_string(),
+        )
+        .unwrap();
+        if role == "worker" {
+            let until = std::time::Instant::now() + Duration::from_secs(10);
+            while !root.join("stop").exists() && std::time::Instant::now() < until {
+                std::fs::write(root.join("ticks"), "alive").unwrap();
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        } else {
+            if role == "leader" {
+                std::fs::write(root.join("executed"), "executed").unwrap();
+            }
+            let mut child = partial_command(
+                &root,
+                if role == "leader" {
+                    "intermediate"
+                } else {
+                    "worker"
+                },
+            )
+            .as_std_mut()
+            .spawn()
+            .unwrap();
+            let _ = child.wait();
+        }
+    }
+
+    fn partial_command(root: &std::path::Path, role: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "board::doorbell::windows_process::tests::partial_resume_fixture_child",
+                "--nocapture",
+            ])
+            .env("DOORBELL_WIN32_ROOT", root)
+            .env("DOORBELL_WIN32_ROLE", role)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        for (key, _) in std::env::vars_os() {
+            if key
+                .to_string_lossy()
+                .to_uppercase()
+                .starts_with("PSEUDOLIFE_")
+            {
+                command.env_remove(key);
+            }
+        }
+        command
+    }
+
+    #[tokio::test]
+    async fn partial_native_resume_kills_tree_and_preserves_reservation() {
+        for phase in [Phase::ResumeAfterFirst, Phase::AssignAndResumeAfterFirst] {
+            partial_resume(phase).await;
+        }
+    }
+
+    async fn partial_resume(phase: Phase) {
+        let home = Home::new();
+        let pending = PendingNotice::new(&home.0.join("notices"), THREAD).unwrap();
+        let notice = pending
+            .reserve(
+                1,
+                Some(super::super::now() + 3600.0),
+                super::super::now(),
+                false,
+            )
+            .unwrap();
+        let before = state::read(&pending.path, 8192).unwrap();
+        let failure = match QueueProcess::spawn_phases(
+            &mut partial_command(&home.0, "leader"),
+            Phases {
+                refuse: Some(phase),
+            },
+        )
+        .await
+        {
+            Ok(_) => panic!("injected partial resume accepted"),
+            Err(failure) => failure,
+        };
+        let leader = failure.pid.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home.0.join("native-resume")).unwrap(),
+            "1"
+        );
+        assert!(
+            home.0.join("executed").exists(),
+            "resumed leader did not execute"
+        );
+        assert!(
+            home.0.join("ticks").exists(),
+            "resumed leader did not launch grandchild"
+        );
+        let worker: u32 = std::fs::read_to_string(home.0.join("worker.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        let intermediate: u32 = std::fs::read_to_string(home.0.join("intermediate.pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(terminated(leader), "partially resumed leader survived");
+        assert!(
+            terminated(intermediate),
+            "partially resumed intermediate survived"
+        );
+        assert!(terminated(worker), "partially resumed grandchild survived");
+        // Same classification gate used by Doorbell::_ring's spawn-failure path.
+        let rolled_back =
+            failure.unstarted && pending.rollback_unstarted(&notice, super::super::now());
+        assert!(!rolled_back, "executed child was falsely rolled back");
+        assert!(!failure.unstarted);
+        assert_eq!(state::read(&pending.path, 8192).unwrap(), before);
+        assert!(!pending.path.with_extension("bell-accepted").exists());
+        evidence(
+            json!({"scenario":"injected_partial_resume","platform":"windows","leader_pid":leader,"intermediate_pid":intermediate,"worker_pid":worker,"real_resume_previous_count":1,"leader_executed":true,"grandchild_ticked":true,"leader_terminated":true,"intermediate_terminated":true,"worker_terminated":true,"reservation_preserved":true,"assignment_refused":phase == Phase::AssignAndResumeAfterFirst,"fault_injected":true}),
+        );
+    }
 
     #[test]
     fn windows_spawn_error_matrix_matches_pinned_python_errno_decisions() {

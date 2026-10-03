@@ -22,6 +22,39 @@ fn now() -> f64 {
 }
 
 #[tokio::test]
+async fn native_doorbell_ledger_uses_pinned_python_unicode_reason() {
+    let fixture = Fixture::new(0);
+    let home = Home::new();
+    let adapter = Adapter::enter(adapter_config(&fixture, &home))
+        .await
+        .unwrap();
+    let directory = home.0.join("notices");
+    let pending = PendingNotice::new(&directory, BANK).unwrap();
+    let bell = Doorbell::with_timing(
+        wrapper(&home, "success"),
+        directory.clone(),
+        Duration::ZERO,
+        Duration::from_secs(3),
+    );
+    bell.watch_checked(BANK, adapter.clone(), true)
+        .await
+        .unwrap();
+    let mut offered = view(&[1, 2], 2, 2, 1.0);
+    offered.wake.as_mut().unwrap()["reason"] = json!("alpha\u{001c}beta\u{0345} <>!");
+    bell.observe(BANK, &offered).await;
+    wait_for(|| pending.path.with_extension("bell-accepted").exists()).await;
+    bell.close().await;
+    let ledger = std::fs::read_to_string(directory.join("ledger.log")).unwrap();
+    let rows = ledger.lines().collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].split('\t').nth(5),
+        Some("rung alpha beta  queue_accepted pending recipient_state_unknown")
+    );
+    adapter.close().await;
+}
+
+#[tokio::test]
 async fn checked_watch_rejects_invalid_thread_before_subscribing_or_queueing() {
     let fixture = Fixture::new(0);
     let home = Home::new();

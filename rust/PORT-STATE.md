@@ -21,7 +21,7 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | — | Preliminary Rust judges pass on both platforms; internal equivalents, native fallback and final phase gates are in progress; no Rust acceptance claimed |
+| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | — | Preliminary Rust judges and scoped internal equivalents have targeted evidence on both platforms; frozen validation, review corrections and final phase gates remain open; no Rust acceptance claimed |
 | 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -75,9 +75,9 @@ No production Rust surface has been accepted.
   Both remain unchanged here. Phase 3 requires maintainer docs resolution and a
   named same-graph/tokenizer comparison with measured error before a tolerance
   or embedding-equivalence claim is accepted.
-- All internal test equivalents marked pending are future implementation work,
-  not accepted wire parity. Inventory coverage alone does not close production
-  behavior rows.
+- All 125 scoped internal cases have targeted Rust equivalents; 56 other
+  internal cases remain outside Phase 1's scope. Inventory and component
+  coverage alone do not close production behavior rows.
 - The legacy MCP negotiation evidence from #540 is about its original pin;
   current and earlier protocol revisions require separate current-pin evidence.
 
