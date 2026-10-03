@@ -142,6 +142,10 @@ DEFAULT_TTL = 120
 MIN_TTL, MAX_TTL = 30, 86400
 MIN_EXPECT, MAX_EXPECT = 1, 604800
 LIST_LIMIT = 50
+# Old action names that still parse, each mapped to the action replacing
+# it: a deprecated one prints one line naming its replacement, then runs it.
+# ``delegate`` was ``designate`` in 0.16.0 (renamed 2026-10-04).
+DEPRECATED_ACTIONS = {"designate": "delegate"}
 
 # Cadences from the lease contract (2026-09-26), not measured tuning: board
 # polls every ~5 s while queued, OS-lock retries every ~2 s, a waiting notice
@@ -1610,11 +1614,14 @@ def _break(args) -> int:
     return _operator("break", lambda store: store.break_lease(args.name))
 
 
-def _designate(args) -> int:
-    """Designate a project's coordinator through the bank itself (operator
-    only), as ``break`` does. Prints the store's answer as JSON; 1 when no
-    bank is found or the designation was refused."""
-    return _operator("designate", lambda store: store.designate_coordinator(
+def _delegate(args) -> int:
+    """Make a session the maintainer's delegate for a project through the
+    bank itself (operator only), as ``break`` does. Prints the store's
+    answer as JSON; 1 when no bank is found or the grant was refused."""
+    if args.action in DEPRECATED_ACTIONS:
+        print(f"pseudolife-mcp lease {args.action} is deprecated: use "
+              f"pseudolife-mcp lease {DEPRECATED_ACTIONS[args.action]}", file=sys.stderr)
+    return _operator("delegate", lambda store: store.grant_delegate(
         args.project, args.agent, hold=args.hold))
 
 
@@ -1732,7 +1739,7 @@ def _parsers():
                     "maintenance window) around a command. The lease is an OS file lock; "
                     "the agent board, where the daemon has one, mirrors it so other "
                     "agents see the holder, queue in order and see the expected end.")
-    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break,designate}")
+    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break,delegate}")
     run = actions.add_parser(
         "run", help="run a command while holding a lease",
         usage="pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] "
@@ -1814,24 +1821,25 @@ def _parsers():
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
-    designating = actions.add_parser(
-        "designate", help="(operator) make one session a project's coordinator",
+    delegating = actions.add_parser(
+        "delegate", aliases=list(DEPRECATED_ACTIONS),
+        help="(operator) make one session the maintainer's delegate for a project",
         description="Operator only: make the session AGENT (its id, or a unique prefix) the "
-                    "coordinator of PROJECT for DURATION, replacing any current one. Its "
-                    "urgent mail then reopens done parks in that project; holding the open "
-                    "coordinator:<project> lease grants nothing. The designation is the "
-                    "board lease designated:coordinator:<project>, which no session can "
-                    "take: it opens the bank directly, like break, and the audit log "
-                    "records it with the operator as its actor. Revoke it with: "
-                    "lease break designated:coordinator:<project>.")
-    designating.add_argument("project", type=_lease_name, metavar="PROJECT",
-                             help="the project, as sessions set it on the board")
-    designating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
-    designating.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
-                             metavar="DURATION",
-                             help="how long the designation lasts (default 1d, at most 7d)")
+                    "maintainer's delegate for PROJECT for DURATION, replacing any current "
+                    "one. Its urgent mail then reopens done parks in that project; holding "
+                    "the open coordinator:<project> lease grants nothing. The grant is the "
+                    "board lease delegate:<project>, which no session can take: it opens "
+                    "the bank directly, like break, and the audit log records it with the "
+                    "operator as its actor. Revoke it with: lease break delegate:<project>.")
+    delegating.add_argument("project", type=_lease_name, metavar="PROJECT",
+                            help="the project, as sessions set it on the board")
+    delegating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
+    delegating.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
+                            metavar="DURATION",
+                            help="how long the grant lasts (default 1d, at most 7d)")
     return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking,
-                         "designate": designating}
+                         "delegate": delegating,
+                         **{alias: delegating for alias in DEPRECATED_ACTIONS}}
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -1849,7 +1857,7 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         if args.action is None:
             parser.print_usage(sys.stderr)
             parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list, "
-                                    "break or designate (--help explains each)\n")
+                                    "break or delegate (--help explains each)\n")
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
@@ -1865,6 +1873,6 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _list(args, transport)
     if args.action == "break":
         return _break(args)
-    if args.action == "designate":
-        return _designate(args)
+    if args.action == "delegate" or args.action in DEPRECATED_ACTIONS:
+        return _delegate(args)
     return _run(args, command, transport)

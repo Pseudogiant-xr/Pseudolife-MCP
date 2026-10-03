@@ -1023,14 +1023,18 @@ def test_help_exits_0(lease_env, argv, capsys):
 
 def test_the_usage_line_names_every_action(lease_env, capsys):
     """The usage braces come from a hand-written metavar, so a new action
-    (``designate`` shipped without one) must be added there too."""
+    (``designate`` shipped without one) must be added there too. A
+    deprecated alias still parses but is not advertised."""
     parser, _, _ = lease_cli._parsers()
     actions = next(a for a in parser._actions if a.dest == "action").choices
+    assert set(lease_cli.DEPRECATED_ACTIONS) <= set(actions)
     assert _run(["--help"], FakeDaemon()) == 0
     usage = capsys.readouterr().out.split("\n\n", 1)[0]
     braces = re.search(r"\{([a-z,]+)\}", usage)
     assert braces is not None, usage
-    assert braces.group(1).split(",") == list(actions)
+    assert braces.group(1).split(",") == [
+        a for a in actions if a not in lease_cli.DEPRECATED_ACTIONS]
+    assert "delegate" in braces.group(1).split(",")
 
 
 # --- lease list -----------------------------------------------------------------
@@ -1129,7 +1133,8 @@ def test_the_console_usage_lists_lease():
 def test_the_console_usage_names_the_operator_commands():
     usage = " ".join(console._USAGE.split())
     assert "`lease break NAME`" in usage
-    assert "`lease designate PROJECT AGENT`" in usage
+    assert "`lease delegate PROJECT AGENT`" in usage
+    assert "designate" not in usage
 
 
 def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):
