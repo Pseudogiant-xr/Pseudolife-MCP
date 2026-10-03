@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
+
 ### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
 - The served `memory_message` description said a done session reopens
   only for urgent mail from the "maintainer/coordinator/clearer". Since
