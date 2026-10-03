@@ -237,6 +237,7 @@
    "d": [
     "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
     "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
+    "A daemon it must not spawn (non-loopback URL, or PSEUDOLIFE_MCP_NO_SPAWN) that misses a 5 s wait starts the session degraded: initialize + tools/list from the per-URL handshake cache (~/.pseudolife-mcp/handshake-cache), calls retried, a /health watcher emits tools/list_changed on recovery",
     "X-PL-Session = Claude Code's session id when the writer is Claude Code (joins the hook's root), else one uid per process; opens no episode (the daemon lazy-opens on the first write); closes only its own key at exit",
     "Re-emits tools/list_changed downstream after memory_toolset tier changes",
     "Optional channel mode isolates the earlier handshake and serializes labeled events beside tool replies; real-host delivery requires explicit opt-in and verification",

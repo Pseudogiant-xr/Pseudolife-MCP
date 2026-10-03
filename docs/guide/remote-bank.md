@@ -23,13 +23,41 @@ The agent board (`memory_agents`, `memory_message`, leases) lives in the
 daemon too, so once a remote principal is admitted, sessions on different
 machines see each other and exchange mail with no further setup.
 
-What this is not: there is no offline mode and no replica. When the daemon is
-unreachable the remote shim exits and the plugin hooks degrade to
+What this is not: there is no offline mode and no replica. While the daemon is
+unreachable no memory call runs, and the plugin hooks degrade to
 "coordination unavailable"; there is one bank and one writer of record. A link
 that answers the shim's health check but stalls its board registration leaves
 memory working and the registration retrying in the background (see
 [configuration](configuration.md)).
 Replicating the bank across machines is not part of this feature.
+
+### When the daemon is unreachable
+
+A shim whose daemon is on another machine (or, with `PSEUDOLIFE_MCP_NO_SPAWN=1`,
+an external local one) waits up to 5 s for it at startup and then starts the
+session anyway, so the client's MCP handshake does not time out. Claude Code
+and Claude Desktop never retry a stdio server whose startup failed: before
+this, a session started during a few minutes' tailnet outage ran without
+memory tools for its whole life unless `/mcp` reconnected it.
+
+- **Handshake.** The shim answers `initialize` and `tools/list` from the last
+  handshake it saw from that daemon URL, kept in
+  `~/.pseudolife-mcp/handshake-cache/` (one file per URL, the 16 most
+  recently written kept). With no cache it serves no tools until the daemon
+  answers. The served instructions open with a line saying the daemon did not
+  answer at startup.
+- **Calls.** Each tool call tries the daemon. One that cannot connect returns
+  an MCP error saying the daemon is unreachable and being retried; nothing ran.
+  A connection attempt gives up after 5 s.
+- **Recovery.** The shim probes `/health` in the background at growing
+  intervals (1, 2, 5, 10 and 30 s apart, then every 60 s). When the daemon answers, or a call gets
+  through, it sends `notifications/tools/list_changed`, and the client's next
+  `tools/list` returns the live tools. The instructions stay as served: MCP
+  has no notification for changed instructions. A daemon that stops answering
+  mid-session gets the same treatment.
+
+A loopback daemon the shim starts itself is unchanged: if it never comes up,
+the shim still exits with the recovery commands.
 
 ## What the daemon allows
 

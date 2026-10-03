@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a session started while its daemon is unreachable gets memory back by itself)
+- A shim whose daemon is on another machine waited 15 s for it at startup and
+  then exited, before the MCP handshake. Claude Code and Claude Desktop mark
+  such a stdio server failed ("connection timed out after 30000ms") and never
+  retry it, so a session started during an outage ran without memory tools
+  or the agent board until someone ran `/mcp` → Reconnect. That morning the
+  box's tailscaled was down for minutes and every session started then lost
+  memory for its whole life. The same applied to an external local daemon
+  under `PSEUDOLIFE_MCP_NO_SPAWN`, whose 180 s wait already outlasted both
+  hosts' handshake budgets.
+- Now both wait up to 5 s (inside Codex's 10 s default startup budget) and
+  then start the session without the daemon. The shim answers `initialize`
+  and `tools/list` from the last handshake it saw from that daemon URL,
+  cached in `~/.pseudolife-mcp/handshake-cache/`, or with no tools when it
+  has none. Each tool call retries the daemon, and one that cannot connect
+  says the daemon is unreachable and being retried. A background `/health`
+  probe (or the first call that gets through) sends
+  `notifications/tools/list_changed` when the daemon answers, and the
+  client re-lists the live tools. A daemon that stops answering mid-session
+  is handled the same way. A loopback daemon the shim spawns itself still
+  exits the shim when it never comes up.
+- Deploying this needs the client step: the shim is a separate install
+  that a daemon deploy never touches.
+
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before
   it queued for the suite lock, and passed over a server that refused the
