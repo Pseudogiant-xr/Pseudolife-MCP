@@ -17,6 +17,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -100,8 +101,49 @@ def _alive(pid: int) -> bool:
         return False
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"),
-                    reason="the sweep reads /proc; setsid is util-linux")
+def _start_launcher(tmp_path: Path, stub_tail: str) -> tuple[subprocess.Popen, Path]:
+    """Start ops/wsl-suite.sh with pytest's stand-in: a stub that detaches a
+    child as the shim detaches its daemon, records the child's pid, then
+    runs ``stub_tail``. Returns the launcher and the pid file."""
+    venv_bin = tmp_path / "venv" / "bin"
+    stubs = tmp_path / "stubs"
+    venv_bin.mkdir(parents=True)
+    stubs.mkdir()
+    left = tmp_path / "left.pid"
+    (venv_bin / "python").write_text(
+        "#!/bin/bash\n"
+        "setsid sleep 300 </dev/null >/dev/null 2>&1 &\n"
+        f"echo $! > '{left}'\n"
+        f"{stub_tail}\n", encoding="utf-8")
+    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    for stub in (venv_bin / "python", stubs / "uv"):
+        stub.chmod(0o755)
+    launcher = subprocess.Popen(
+        [BASH, str(SCRIPT)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True,
+        env=hermetic_env(HOME=str(tmp_path / "home"),
+                         PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
+                         PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"),
+                         PSEUDOLIFE_SUITE_COMMIT=None,
+                         PSEUDOLIFE_SUITE_DISPATCHED=None))
+    return launcher, left
+
+
+def _left_pid(left: Path) -> int:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        text = left.read_text(encoding="ascii").strip() if left.exists() else ""
+        if text:
+            return int(text)
+        time.sleep(0.1)
+    raise AssertionError("pytest's stand-in never started")
+
+
+_LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                 reason="the sweep reads /proc; setsid is util-linux")
+
+
+@_LINUX_ONLY
 def test_the_launcher_stops_what_the_run_left_behind(tmp_path):
     """A detached process the run started dies when the launcher returns.
 
@@ -109,40 +151,51 @@ def test_the_launcher_stops_what_the_run_left_behind(tmp_path):
     so neither pytest's exit nor a signal to its process group reaches it.
     Off Windows one outlived every full run for months (2026-10-03: 14 in
     WSL, 5 on the second machine, ~2.8 GB each, which exhausted its memory).
-    A process the run did not start, here this test's own, is never touched.
+    A process the run did not start, here this test's own, is never touched,
+    and the launcher still exits with pytest's own code.
     """
-    venv_bin = tmp_path / "venv" / "bin"
-    stubs = tmp_path / "stubs"
-    venv_bin.mkdir(parents=True)
-    stubs.mkdir()
-    left = tmp_path / "left.pid"
-    # pytest's stand-in: detach a child as the shim does, then fail, so the
-    # launcher must still pass pytest's own exit code through.
-    (venv_bin / "python").write_text(
-        "#!/bin/bash\n"
-        "setsid sleep 300 </dev/null >/dev/null 2>&1 &\n"
-        f"echo $! > '{left}'\n"
-        "exit 3\n", encoding="utf-8")
-    (stubs / "uv").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    for stub in (venv_bin / "python", stubs / "uv"):
-        stub.chmod(0o755)
     outsider = subprocess.Popen(["sleep", "300"])
     leftover = None
     try:
-        proc = subprocess.run(
-            [BASH, str(SCRIPT)], capture_output=True, text=True, timeout=120,
-            env=hermetic_env(HOME=str(tmp_path / "home"),
-                             PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}",
-                             PSEUDOLIFE_SUITE_VENV=str(tmp_path / "venv"),
-                             PSEUDOLIFE_SUITE_COMMIT=None,
-                             PSEUDOLIFE_SUITE_DISPATCHED=None))
-        assert proc.returncode == 3, proc.stderr
-        leftover = int(left.read_text(encoding="ascii"))
+        launcher, left = _start_launcher(tmp_path, "exit 3")
+        _, stderr = launcher.communicate(timeout=120)
+        assert launcher.returncode == 3, stderr
+        leftover = _left_pid(left)
         assert not _alive(leftover), (
             f"the run's detached child {leftover} outlived the launcher")
+        assert "left 1 process(es) behind" in stderr, stderr
         assert outsider.poll() is None, "stopped a process outside the run"
     finally:
         outsider.kill()
         outsider.wait(timeout=10)
+        if leftover is not None and _alive(leftover):
+            os.kill(leftover, signal.SIGKILL)
+
+
+@_LINUX_ONLY
+def test_a_signal_to_the_launcher_stops_the_run_and_its_leftovers(tmp_path):
+    """A hangup or TERM sent to the launcher alone acts at once.
+
+    Before the sweep the launcher exec'd pytest, so such a signal reached
+    pytest directly. Now pytest is a child, and bash defers a trap until a
+    foreground child exits: the signal would wait out the whole run. The
+    launcher waits on pytest in the background instead and passes the
+    signal on, then sweeps.
+    """
+    launcher = leftover = None
+    try:
+        launcher, left = _start_launcher(tmp_path, "exec sleep 300")
+        leftover = _left_pid(left)
+        started = time.monotonic()
+        launcher.send_signal(signal.SIGTERM)
+        _, stderr = launcher.communicate(timeout=60)
+        assert time.monotonic() - started < 30, "the signal waited for the run"
+        assert launcher.returncode == 143, stderr
+        assert not _alive(leftover), (
+            f"the run's detached child {leftover} outlived the launcher")
+    finally:
+        if launcher is not None and launcher.poll() is None:
+            launcher.kill()
+            launcher.communicate(timeout=10)
         if leftover is not None and _alive(leftover):
             os.kill(leftover, signal.SIGKILL)
