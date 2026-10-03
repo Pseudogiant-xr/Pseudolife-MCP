@@ -87,6 +87,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that done stays reachable. `plugin/hooks/hooks.json` is unchanged, so
   Codex users approve nothing again; the new prompt text reaches a client
   with its next plugin update. No schema change.
+
 ### Fixed (2026-10-03 — a tunnel child launched mid-exec stays recognised)
 - The tunnel supervisor records each child's identity (pid, start time,
   executable, arguments) right after starting it. On Linux, `Popen`
@@ -100,8 +101,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the live tunnel. The identity is now read once the arguments appear.
   If they have not appeared within 5 seconds and the child is still
   alive, the launch fails and the child is reaped, rather than recording
-  an identity that can never match. A child that has already exited is
-  recorded as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  an identity that can never match. A child that has already exited
+  fails the launch as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
   launches hit the empty window. Over 1,250 cancellation-test runs under
   the same load, the unfixed code failed 8 and the fixed code failed none.
   This was the intermittent `all_reaped` failure (and the 30-second
