@@ -69,6 +69,31 @@ observations retain their own source identity; the Linux daemon oracle remains
 `3691f5cb75487d3fda54a6bde6fab35dcf32c681`. The repeat receipt measures noise for
 that fixed CI reference, not the wall time of another revision or its daemon.
 
+The [same-head receipt](../results/rust-phase0b-ci-same-head.json) contains three
+successful attempts (1, 3 and 4) of
+[Actions run 37090575829](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37090575829).
+Each includes the same five jobs. Attempt 2 failed a wait-mail timing test and
+is excluded from this successful-control sample; the cancelled master repeat
+is also excluded. These exclusions do not erase either failed observation.
+
+| Job | Public runner label | Attempts | Median seconds | Range seconds | Noise floor seconds |
+|---|---|---:|---:|---|---:|
+| frontend | ubuntu-latest | 3 | 25 | 18–28 | 10 |
+| test | ubuntu-latest | 3 | 1651 | 1638–1724 | 86 |
+| test-lite-linux | ubuntu-latest | 3 | 1154 | 1146–1191 | 45 |
+| test-lite-macos | macos-latest | 3 | 746 | 732–770 | 38 |
+| test-lite-windows | windows-latest | 3 | 785 | 775–895 | 120 |
+
+Each job's noise floor is the maximum minus minimum of its three observed job
+durations, derived from the receipt's `summary.lanes_s`. Overall `job_span_s`
+has median 1,651 seconds and range 1,638–1,724 (86 seconds).
+`attempt_started_to_last_job_s` has median 1,655 seconds and range 1,642–1,745
+(103 seconds). The `hosted_wall_s` summary uses original run creation time and
+includes time before reruns; it is excluded from execution-latency comparisons.
+Hosted hardware/load remain unknown and these descriptive ranges are not
+confidence intervals or evidence of speedup. Green CI for the phase 0b PR's
+final head is a separate acceptance gate from this PR #540 measurement.
+
 The historical phase-0 evidence is the r5 capture with verified runtime ownership
 and child runtime provenance:
 [daemon](../results/rust-rewrite-baseline-daemon-20261003-r5.json),
