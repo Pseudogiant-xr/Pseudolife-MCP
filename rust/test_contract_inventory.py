@@ -15,6 +15,28 @@ def test_every_pinned_test_file_has_one_bucket_and_candidate_nodes_exist():
     assert result["missing_surfaces"] == []
 
 
+def test_snapshot_ignores_newer_checkout_sources(monkeypatch):
+    original = inventory.source
+    expected = json.loads(original("rust/contract-inventory.json"))
+    def current_source(path):
+        assert not path.startswith(("pseudolife_memory/", "ops/", "plugin/")), "read newer checkout source"
+        return original(path)
+    monkeypatch.setattr(inventory, "source", current_source)
+    assert inventory.snapshot() == expected
+
+
+def test_audit_ignores_newer_checkout_test_files(monkeypatch):
+    expected = json.loads(inventory.source("rust/contract-inventory.json"))
+    monkeypatch.setattr(inventory, "snapshot", lambda: expected)
+    original = Path.glob
+    def with_new_test(path, pattern):
+        yield from original(path, pattern)
+        if path == inventory.ROOT / "tests" and pattern == "test_*.py":
+            yield path / "test_newer_master_surface.py"
+    monkeypatch.setattr(Path, "glob", with_new_test)
+    assert inventory.validate()["test_files"] == 406
+
+
 def test_missing_candidate_node_is_not_resolved(tmp_path, monkeypatch):
     monkeypatch.setattr(inventory, "ROOT", tmp_path)
     path = tmp_path / "tests/test_example.py"
@@ -43,8 +65,15 @@ def test_audit_rejects_detached_cli_rows(monkeypatch, mode, status):
         inventory.validate()
 
 
-@pytest.mark.parametrize("fault", ["missing-file", "duplicate-file", "missing-node", "unsupported-node", "missing-surface", "invalid-status"])
-def test_audit_rejects_incomplete_or_invalid_inventory(monkeypatch, fault):
+@pytest.mark.parametrize("fault,error", [
+    ("missing-file", "^missing or extra test-file bucket$"),
+    ("duplicate-file", "^duplicate test-file bucket$"),
+    ("missing-node", "^candidate node does not exist:"),
+    ("unsupported-node", "^external plugin cannot route:"),
+    ("missing-surface", "^missing required surface row: MCP-MOUNT$"),
+    ("invalid-status", "^invalid parity status:"),
+])
+def test_audit_rejects_incomplete_or_invalid_inventory(monkeypatch, fault, error):
     original = inventory.source
     manifest = json.loads(original("rust/test-buckets.json"))
     register = original("rust/PARITY.md")
@@ -68,5 +97,5 @@ def test_audit_rejects_incomplete_or_invalid_inventory(monkeypatch, fault):
             return register
         return original(path)
     monkeypatch.setattr(inventory, "source", changed)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=error):
         inventory.validate()

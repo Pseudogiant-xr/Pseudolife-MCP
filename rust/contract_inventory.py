@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter, defaultdict
+from functools import cache
 import json
 from pathlib import Path
 import re
@@ -16,8 +17,15 @@ def source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8-sig")
 
 
+@cache
+def pinned_source(path: str) -> str:
+    """Read immutable oracle blobs; register and manifest reads stay live."""
+    return subprocess.check_output(["git", "show", f"{ORACLE}:{path}"],
+                                   cwd=ROOT, text=True, encoding="utf-8-sig")
+
+
 def snapshot() -> dict:
-    config = ast.parse(source("pseudolife_memory/utils/config.py"))
+    config = ast.parse(pinned_source("pseudolife_memory/utils/config.py"))
     sections = {
         node.name: [field.target.id for field in node.body
                     if isinstance(field, ast.AnnAssign) and isinstance(field.target, ast.Name)]
@@ -29,14 +37,14 @@ def snapshot() -> dict:
     # as well as direct reads, so dynamically selected env keys are not omitted.
     # Documentation and generated Console assets are not executable readers.
     extensions = {".py", ".sh", ".ps1", ".json", ".yml", ".yaml", ".toml", ".bat", ".cmd"}
-    tracked = subprocess.check_output(["git", "ls-files", "pseudolife_memory", "ops", "plugin"],
+    tracked = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", ORACLE, "pseudolife_memory", "ops", "plugin"],
                                       cwd=ROOT, text=True).splitlines()
     python_trees = {}
     env_symbols = {}
     for path in tracked:
         if Path(path).suffix not in extensions and not Path(path).name.startswith("Dockerfile"):
             continue
-        text = source(path)
+        text = pinned_source(path)
         for name in set(re.findall(r"(?<![A-Z0-9])_?PSEUDOLIFE_[A-Z][A-Z0-9_]*\b", text)):
             if name.endswith("_"):
                 continue  # A prefix/family is not a concrete variable.
@@ -69,7 +77,7 @@ def snapshot() -> dict:
         for key in kind["keys"]:
             variables[kind["prefix"] + key.upper()].add("ops/shim_autostart.py")
     tools = []
-    for node in ast.parse(source("pseudolife_memory/mcp_server.py")).body:
+    for node in ast.parse(pinned_source("pseudolife_memory/mcp_server.py")).body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for dec in node.decorator_list:
@@ -77,24 +85,24 @@ def snapshot() -> dict:
                 tier = next((ast.literal_eval(k.value) for k in dec.keywords if k.arg == "tier"), "full")
                 tools.append({"name": node.name, "tier": tier})
     # Async tier switching is registered manually so it can emit listChanged.
-    mcp_source = source("pseudolife_memory/mcp_server.py")
+    mcp_source = pinned_source("pseudolife_memory/mcp_server.py")
     for name, tier in re.findall(r'_TOOL_TIERS\["([^"]+)"\] = "([^"]+)"', mcp_source):
         if re.search(r'\)\(' + re.escape(name) + r'\)', mcp_source):
             tools.append({"name": name, "tier": tier})
     routes = [{"method": "GET" if m == "g" else "POST", "path": path}
-              for m, path in re.findall(r'\b([gp])\("(/api/[^"\n]+)"', source("pseudolife_memory/web/routes.py"))]
-    cli = ast.parse(source("pseudolife_memory/cli.py"))
+              for m, path in re.findall(r'\b([gp])\("(/api/[^"\n]+)"', pinned_source("pseudolife_memory/web/routes.py"))]
+    cli = ast.parse(pinned_source("pseudolife_memory/cli.py"))
     modes = set()
     for node in ast.walk(cli):
         if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) and node.left.id == "mode":
             for value in ast.walk(node.comparators[0]):
                 if isinstance(value, ast.Constant) and isinstance(value.value, str) and not value.value.startswith("-"):
                     modes.add(value.value)
-    api = source("pseudolife_memory/web/api.py")
+    api = pinned_source("pseudolife_memory/web/api.py")
     hooks = [{"path": path, "method": method} for path, method in re.findall(
         r'if path == "(/api/hook/[^"]+)":.*?if method != "([A-Z]+)"', api, re.S)]
     actions = next([key.value for key in node.value.keys]
-                   for node in ast.parse(source("pseudolife_memory/coordination.py")).body
+                   for node in ast.parse(pinned_source("pseudolife_memory/coordination.py")).body
                    if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
                    and node.targets[0].id == "_PARAMETERS")
     return {"schema": 1, "oracle_commit": ORACLE, "database_schema": 53,
@@ -110,14 +118,14 @@ def test_files_at_pin() -> list[str]:
     return sorted(path for path in paths if re.fullmatch(r"tests/test_[^/]+\.py", path))
 
 
-def literal_node_ids(path: str) -> set[str]:
+def literal_node_ids(path: str, *, pinned: bool = False) -> set[str]:
     """Resolve concrete IDs for the adapter's literal, single-axis CLI cases.
 
     Fail closed for any unsupported parameterization, rather than pretending
     a function name proves a concrete pytest node exists.
     """
     result = set()
-    for node in ast.parse(source(path)).body:
+    for node in ast.parse(pinned_source(path) if pinned else source(path)).body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
             continue
         params = [dec for dec in node.decorator_list if isinstance(dec, ast.Call)
@@ -139,8 +147,8 @@ def validate() -> dict:
     files = manifest["files"]
     paths = [item["path"] for item in files]
     assert len(paths) == len(set(paths)), "duplicate test-file bucket"
-    assert sorted(paths) == test_files_at_pin(), "missing or extra test-file bucket"
-    assert sorted(paths) == sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "tests").glob("test_*.py"))
+    pinned_files = test_files_at_pin()
+    assert sorted(paths) == pinned_files, "missing or extra test-file bucket"
     mapped = json.loads(source("evals/rust_port/oracle_tests.json"))["mapped"]
     selected = []
     for item in files:
@@ -149,8 +157,10 @@ def validate() -> dict:
             assert item["candidate_nodes"]
             assert item["remaining_nodes"] == "oracle"
             existing = literal_node_ids(item["path"])
+            pinned_nodes = literal_node_ids(item["path"], pinned=True)
             for node in item["candidate_nodes"]:
                 assert node in existing, f"candidate node does not exist: {node}"
+                assert node in pinned_nodes, f"candidate node does not exist at oracle pin: {node}"
                 assert node in mapped, f"external plugin cannot route: {node}"
                 selected.append(node)
         elif item["bucket"] == "internal":
@@ -205,7 +215,7 @@ def validate() -> dict:
     for mode in inventory["cli_modes"]:
         assert mode in checked_cli_modes, f"CLI mode outside status table: {mode}"
     for name in set(re.findall(r'`(?:tests/)?(test_[A-Za-z0-9_]+\.py)`', register)):
-        assert (ROOT / "tests" / name).is_file(), f"obsolete test reference: {name}"
+        assert f"tests/{name}" in pinned_files, f"obsolete test reference: {name}"
     return {"test_files": len(files), "buckets": counts, "candidate_nodes": len(selected),
             "config_sections": len(inventory["config_sections"]),
             "environment_variables": len(inventory["environment_variables"]),
