@@ -30,6 +30,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failures release only their own unaccepted reservation, while ambiguous results
   retain it. Versioned exact notice formats survive wording updates, and prompt
   receipt recording retries brief real lock contention.
+- New reservations are fully written and flushed in a private temporary file
+  before publication under the per-thread lock. Interrupted or failed writes
+  cannot leave a partial pending record that blocks later notices.
 - Ambiguous bridge failure never queues an alternate for that snapshot and restores
   a guarded listener for later eligible arrivals. Current desktop queued-notice
   hook emission remains unverified; missing receipts use the recorded expiry

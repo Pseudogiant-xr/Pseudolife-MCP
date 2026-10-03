@@ -3,6 +3,9 @@ import asyncio
 from contextlib import contextmanager, suppress
 import json
 import os
+from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 
@@ -683,3 +686,137 @@ def test_busy_known_attention_receipt_replaces_unknown_receipt_without_queue(tmp
     ledger = (tmp_path / "ledger.log").read_text()
     assert "recipient_state_unknown" in ledger and "recipient_state_busy" in ledger
     assert "recipient turn state busy" in adapter.unread_hint
+
+
+@pytest.mark.parametrize("failure", ["partial_write", "fsync", "interrupted_write"])
+def test_failed_reservation_write_never_publishes_partial_state(tmp_path, monkeypatch, failure):
+    import pseudolife_memory.codex_doorbell_state as module
+
+    pending = PendingNotice(tmp_path, THREAD)
+    fdopen = os.fdopen
+    class FailedWriter:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+
+        def write(self, text):
+            self.handle.write(text[:1])
+            self.handle.flush()
+            if failure == "interrupted_write":
+                raise SystemExit("fixture interrupted reservation")
+            raise OSError("fixture partial reservation write")
+
+    def fail_write(fd, mode, **kwargs):
+        handle = fdopen(fd, mode, **kwargs)
+        return FailedWriter(handle) if mode == "w" else handle
+
+    def fail_fsync(fd):
+        raise OSError("fixture reservation fsync failure")
+
+    with monkeypatch.context() as patch:
+        if failure == "fsync":
+            patch.setattr(module.os, "fsync", fail_fsync)
+        else:
+            patch.setattr(module.os, "fdopen", fail_write)
+        if failure == "interrupted_write":
+            with pytest.raises(SystemExit, match="fixture interrupted reservation"):
+                pending.reserve(1)
+        else:
+            assert pending.reserve(1) is None
+    assert not pending.path.exists()
+    assert not list(tmp_path.glob(".bell-*"))
+    recovered = PendingNotice(tmp_path, THREAD).reserve(2)
+    assert recovered and json.loads(pending.path.read_text()) == recovered
+
+
+def test_unresolved_reservation_is_byte_identical_after_another_producer(tmp_path):
+    pending = PendingNotice(tmp_path, THREAD)
+    first = pending.reserve(1)
+    assert first
+    contents = pending.path.read_bytes()
+    assert PendingNotice(tmp_path, THREAD).reserve(2) is None
+    assert pending.path.read_bytes() == contents
+
+
+def test_abrupt_exit_during_reservation_write_leaves_only_staging_state(tmp_path):
+    code = """
+import os
+from pathlib import Path
+import sys
+from pseudolife_memory.codex_doorbell_state import PendingNotice
+
+fdopen = os.fdopen
+class InterruptedWriter:
+    def __init__(self, handle):
+        self.handle = handle
+    def __enter__(self):
+        return self
+    def __exit__(self, *exc):
+        self.handle.close()
+    def write(self, text):
+        self.handle.write(text[:1])
+        self.handle.flush()
+        os._exit(17)
+
+def interrupted(fd, mode, **kwargs):
+    handle = fdopen(fd, mode, **kwargs)
+    return InterruptedWriter(handle) if mode == "w" else handle
+
+os.fdopen = interrupted
+PendingNotice(Path(sys.argv[1]), sys.argv[2]).reserve(1)
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), THREAD],
+                            cwd=Path(__file__).resolve().parents[1],
+                            capture_output=True, timeout=10)
+    assert result.returncode == 17
+    pending = PendingNotice(tmp_path, THREAD)
+    assert not pending.path.exists()
+    staging = list(tmp_path.glob(".bell-*"))
+    assert len(staging) == 1 and staging[0].read_text() == "{"
+    recovered = pending.reserve(2)
+    assert recovered and json.loads(pending.path.read_text()) == recovered
+    assert pending.path.stat().st_nlink == 1
+    assert staging[0].read_text() == "{"
+
+
+def test_reservation_publication_failure_is_retryable(tmp_path, monkeypatch):
+    pending = PendingNotice(tmp_path, THREAD)
+    def refuse(source, target):
+        raise OSError("fixture atomic publication unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", refuse)
+        assert pending.reserve(1) is None
+    assert not pending.path.exists()
+    assert not list(tmp_path.glob(".bell-*"))
+    assert pending.reserve(2)
+
+
+def test_reservation_rechecks_existing_target_after_staging(tmp_path, monkeypatch):
+    import pseudolife_memory.codex_doorbell_state as module
+
+    pending = PendingNotice(tmp_path, THREAD)
+    first = pending.reserve(1)
+    assert first
+    contents = pending.path.read_bytes()
+    pending.path.unlink()
+    fsync = os.fsync
+    def insert_existing(fd):
+        fsync(fd)
+        other_fd = module.open_private(pending.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        with os.fdopen(other_fd, "wb") as handle:
+            handle.write(contents)
+            handle.flush()
+            fsync(handle.fileno())
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", insert_existing)
+        assert pending.reserve(2) is None
+    assert pending.path.read_bytes() == contents
+    assert not list(tmp_path.glob(".bell-*"))
+    assert pending.reserve(3) is None

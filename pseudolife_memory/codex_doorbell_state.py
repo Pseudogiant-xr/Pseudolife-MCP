@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, suppress
+import errno
 import json
 import math
 import os
@@ -35,6 +36,20 @@ def notice_text(count, nonce=None, *, version=1, recipient_state=None):
 
 def _timestamp(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def _sync_directory(directory):
+    if os.name == "nt":
+        return  # Windows does not support opening directories through os.open.
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            if exc.errno not in (errno.EINVAL, errno.ENOTSUP):
+                raise
+    finally:
+        os.close(fd)
 
 
 class PendingNotice:
@@ -130,8 +145,10 @@ class PendingNotice:
         except FileNotFoundError:
             return False
 
-    def _write_atomic(self, path, text):
+    def _write_atomic(self, path, text, *, exclusive=False):
         if os.path.lexists(path):
+            if exclusive:
+                raise FileExistsError(path)
             self._read(path)  # Never tighten or replace a foreign/private-invalid marker.
         fd, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".bell-")
         try:
@@ -144,7 +161,12 @@ class PendingNotice:
                 handle.write(text + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
+            # All pending-record producers hold the same per-thread lock.
+            # Recheck after staging so an existing reservation stays intact.
+            if exclusive and os.path.lexists(path):
+                raise FileExistsError(path)
             os.replace(temporary, path)
+            _sync_directory(path.parent)
         finally:
             with suppress(OSError):
                 os.unlink(temporary)
@@ -183,11 +205,8 @@ class PendingNotice:
                                               recipient_state=recipient_state)}
                 if expires_at is None:
                     record["legacy_first_seen"] = now
-                fd = open_private(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                    json.dump(record, handle, separators=(",", ":"))
-                    handle.flush()
-                    os.fsync(handle.fileno())
+                self._write_atomic(self.path, json.dumps(record, separators=(",", ":")),
+                                   exclusive=True)
                 return record
         except (OSError, ValueError, PrivateStateError):
             return None
