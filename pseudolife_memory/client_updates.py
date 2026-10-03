@@ -39,13 +39,16 @@ again, because the read-back is the proof. Nothing is ever uninstalled.
 Codex: Codex approves a hook by its definition in hooks.json, not by the
 script it runs (measured on Codex 0.158.0, 2026-09-30). Manual copies run
 through a launcher whose commands never change, so this refreshes them to
-the checkout's scripts with no approval; a plugin copy is reported as
-behind, and only a changed hooks.json names the approval steps
-(``ops/setup-codex-hooks.py``).
+the checkout's scripts with no approval. A plugin copy whose scripts are
+behind while its hooks.json is current is refreshed through Codex's own
+``codex plugin marketplace upgrade`` (its approvals carry over); only a
+changed hooks.json names the approval steps (``ops/setup-codex-hooks.py``).
 
 Every CLI call goes through :func:`run_cli`, every lookup through
-:func:`which` and :func:`home`, so the tests drive the real logic with
-fakes and never touch this machine's registrations. Nothing here prints
+:func:`which` and :func:`home` (the Codex CLI through the doorbell's
+resolver, which never takes the working directory, in
+:func:`codex_executable`), so the tests drive the real logic with fakes and
+never touch this machine's registrations. Nothing here prints
 tokens: registration files are parsed for the command line only.
 ``ops/update_clients.py`` runs this from the checkout by putting it first
 on ``sys.path``, so an older installed release never answers for the
@@ -817,8 +820,9 @@ def codex_reapproval_text(codex: dict | None) -> str:
     return "\n".join([
         f"Codex: its hook copy needs re-approval ({which}). Codex trusts hooks by hash and runs only "
         f"approved handlers, {off}",
-        "  1. Update the plugin in Codex's plugin manager, so its marketplace clone holds the new scripts "
-        "(python ops/setup-codex-hooks.py --source plugin approves what the clone holds; it does not pull one)",
+        "  1. Update the plugin in Codex's plugin manager (or: codex plugin marketplace upgrade "
+        f"{MARKETPLACE}), so its copy holds the new scripts "
+        "(python ops/setup-codex-hooks.py --source plugin approves what Codex lists; it does not pull one)",
         "  2. Approve the handlers: in a Codex session run /hooks and approve every pseudolife-memory "
         "handler; unattended: python ops/setup-codex-hooks.py --source plugin --trust yes, or the "
         "installer's --codex-hook-trust yes (-CodexHookTrust yes on Windows)",
@@ -839,6 +843,184 @@ def _daemon_scripts_dir(daemon_digest: str | None) -> Path | None:
     return hooks if hooks.is_dir() and hooks_digest(hooks) == daemon_digest else None
 
 
+def codex_plugin_hooks(codex_home: Path) -> Path:
+    """The plugin hook directory Codex runs: its installed copy when there
+    is one, else the marketplace clone it installs from.
+
+    Codex runs a plugin's hooks from the installed copy, one folder named
+    ``local`` whatever the commit (``hooks/list`` sourcePath, Codex 0.160.0,
+    2026-10-03); the clone under ``.tmp/marketplaces`` is only its source."""
+    installed = codex_home / "plugins" / "cache" / MARKETPLACE / PLUGIN_ID.split("@")[0] / "local" / "hooks"
+    return installed if installed.is_dir() else codex_home / ".tmp" / "marketplaces" / MARKETPLACE / "plugin" / "hooks"
+
+
+def codex_executable(codex_home: Path) -> str | None:
+    """The Codex CLI to run the marketplace upgrade with, as an absolute
+    path, or ``None``: ``PSEUDOLIFE_CODEX_BIN``, ``codex`` on an absolute
+    PATH entry, or the Windows desktop app's build folder (the doorbell's
+    resolver, which never takes the working directory), then the standalone
+    package the desktop app installs under the Codex home (Windows, Codex
+    0.160.0, 2026-10-03: ``packages/standalone/current/bin/codex.exe``,
+    a per-platform release behind the ``current`` link)."""
+    from pseudolife_memory import codex_doorbell
+    found = codex_doorbell.resolve_codex_command()
+    if found:
+        return found[0]
+    standalone = codex_home / "packages" / "standalone" / "current" / "bin" / (
+        "codex.exe" if os.name == "nt" else "codex")
+    return str(standalone.resolve()) if standalone.is_file() else None
+
+
+# A git fetch of the marketplace repository plus Codex's reinstall of its
+# copy: about 5 s on the maintainer's Windows host (2026-10-03, throwaway
+# CODEX_HOME); the margin is for a slow network.
+_CODEX_UPGRADE_TIMEOUT_S = 300
+
+
+def _json_object(text: str) -> dict | None:
+    """The first JSON object in ``text`` (Codex prints its report on stdout
+    and may warn on stderr, which ``run_cli`` appends)."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _marketplace_source(codex_home: Path) -> tuple[str | None, str | None]:
+    """``(git source, ref)`` of the marketplace Codex upgrades from: its
+    ``[marketplaces.<name>]`` table in config.toml, else the clone's
+    ``.codex-marketplace-install.json`` (written by Codex's upgrade)."""
+    table: dict = {}
+    try:
+        import tomllib
+        table = ((tomllib.loads((codex_home / "config.toml").read_text(encoding="utf-8"))
+                  .get("marketplaces") or {}).get(MARKETPLACE) or {})
+    except (ModuleNotFoundError, OSError, ValueError, AttributeError):
+        pass
+    if not isinstance(table, dict) or not table.get("source"):
+        table = _read_json(codex_home / ".tmp" / "marketplaces" / MARKETPLACE / ".codex-marketplace-install.json")
+    if table.get("source_type", "git") != "git" or not table.get("source"):
+        return None, None
+    ref = table.get("ref") or table.get("ref_name")
+    return str(table["source"]), (str(ref) if ref else None)
+
+
+# A blob-less depth-1 clone reads one file of the marketplace's branch:
+# 1.5 s and 159 KB from GitHub on the maintainer's host (2026-10-03).
+_MARKETPLACE_READ_TIMEOUT_S = 120
+
+
+def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
+    """The hooks.json the marketplace's branch would install (CRLF read as
+    LF), or ``(None, why not)``. Read from a private blob-less clone in a
+    temporary directory, never from Codex's own clone, which stays Codex's
+    to write."""
+    git = which("git")
+    if not git:
+        return None, "git is not on PATH to read the marketplace's hooks.json first"
+    source, ref = _marketplace_source(codex_home)
+    if not source:
+        return None, f"no git source for the {MARKETPLACE} marketplace in the Codex home's config.toml"
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    with tempfile.TemporaryDirectory(prefix="pseudolife-codex-marketplace-", ignore_cleanup_errors=True) as tmp:
+        clone = str(Path(tmp) / "m")
+        branch = ["--branch", ref] if ref else []
+        code, out = run_cli([git, "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--no-checkout",
+                             *branch, source, clone], timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+        if code == 0:
+            code, out = run_cli([git, "-C", clone, "show", "HEAD:plugin/hooks/hooks.json"],
+                                timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+    try:
+        valid = code == 0 and isinstance(json.loads(out).get("hooks"), dict)
+    except (ValueError, AttributeError):
+        valid = False
+    if not valid:
+        lines = out.strip().splitlines()
+        return None, f"could not read the marketplace's hooks.json ({lines[-1] if lines else f'exit {code}'})"
+    # Bytes, as every other hooks.json comparison here (changed_hook_files).
+    return out.replace("\r\n", "\n").encode("utf-8"), ""
+
+
+def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: str | None,
+                          changed: list[str]) -> dict:
+    """Refresh a plugin copy whose scripts are behind while its hooks.json is
+    current, through Codex's own ``codex plugin marketplace upgrade``.
+
+    Measured on Codex 0.160.0 (2026-10-03, throwaway CODEX_HOME): the
+    upgrade fetches the git marketplace and replaces both its clone and the
+    installed copy hooks run from; config.toml stays byte-identical and
+    ``hooks/list`` reports the same keys and hashes, so approvals carry
+    over; with nothing newer it changes nothing. Codex keeps one installed
+    copy and replaces it in place, as its plugin manager's update does;
+    there is no copy beside it to keep for running sessions. The upgrade
+    takes the marketplace's branch, not the checkout or the release, so it
+    runs only when that branch's hooks.json matches the installed one (read
+    first from a private clone); the copy is read back afterwards, because
+    the read-back is the proof."""
+    behind = f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)})"
+    manual = (f"run codex plugin marketplace upgrade {MARKETPLACE}, or update the plugin in Codex's plugin "
+              "manager; its approvals carry over (Codex approves hook definitions, which did not change, "
+              "not the scripts)")
+
+    def stays(reason: str, files: list[str] = changed) -> dict:
+        return {"state": "behind", "source": "plugin", "changed_files": files,
+                "detail": f"{behind}; {reason}"}
+
+    codex = codex_executable(codex_home)
+    if not codex:
+        return stays("no Codex CLI was found (PATH, PSEUDOLIFE_CODEX_BIN, or the desktop app's own copy), so "
+                     f"it was not refreshed here: {manual}")
+    # The marketplace serves its branch, which can carry a hooks.json the
+    # checkout or the deployed release does not; Codex would then ask for
+    # an approval nobody gave. Upgrade only when the branch's matches.
+    offered, why = _marketplace_hooks_json(codex_home)
+    if offered is None:
+        return stays(f"{why}, so it was not refreshed here: {manual}")
+    try:
+        installed = _normalised(codex_plugin_hooks(codex_home) / "hooks.json")
+    except OSError:
+        installed = None
+    if offered != installed:
+        return stays("the marketplace's branch also changes hooks.json, which Codex would ask to approve, so it "
+                     "was not refreshed automatically. When you are ready to approve: update the plugin in "
+                     f"Codex's plugin manager (or codex plugin marketplace upgrade {MARKETPLACE}), then approve "
+                     "every pseudolife-memory handler with /hooks in a Codex session or "
+                     "python ops/setup-codex-hooks.py --source plugin --trust ask")
+    code, out = run_cli([codex, "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"],
+                        timeout=_CODEX_UPGRADE_TIMEOUT_S, env=dict(os.environ, CODEX_HOME=str(codex_home)))
+    report = _json_object(out) if code == 0 else None
+    errors = [str(e.get("message", e)) if isinstance(e, dict) else str(e)
+              for e in ((report or {}).get("errors") or [])]
+    if code != 0 or report is None or errors:
+        lines = [line for line in out.strip().splitlines() if not line.startswith("WARNING")]
+        said = "; ".join(errors) or (lines[-1] if lines else f"exit {code}")
+        return stays(f"codex plugin marketplace upgrade {MARKETPLACE} did not refresh it ({said}): {manual}")
+    after = check_codex_hooks(repo, daemon_digest)
+    if after["state"] == "current":
+        return {"state": "refreshed", "source": "plugin", "changed_files": changed,
+                "detail": f"Codex's plugin copy refreshed through codex plugin marketplace upgrade {MARKETPLACE} "
+                          f"(changed: {', '.join(changed)}); its approvals carry over: Codex approves hook "
+                          "definitions, which did not change, not the scripts"}
+    if after["state"] == "behind":
+        # The marketplace serves its branch (master), which can be behind a
+        # checkout under test or past the release just deployed.
+        files = after.get("changed_files") or changed
+        whose = "the checkout's" if repo else "the daemon's"
+        if not report.get("upgradedRoots"):
+            return stays(f"the marketplace has nothing newer than Codex's copy, which holds the marketplace's "
+                         f"branch and differs from {whose} scripts", files)
+        return stays(f"Codex upgraded its copy to the marketplace's branch, which still differs from {whose} "
+                     f"scripts (changed: {', '.join(files)})", files)
+    # What Codex installed needs an approval after all (the branch moved
+    # between the read and Codex's fetch, or a handler position is new):
+    # approving it is the user's.
+    return dict(after, detail=f"after codex plugin marketplace upgrade {MARKETPLACE}: {after['detail']}")
+
+
 def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None,
                       refresh: bool = False) -> dict:
     """Codex hooks come either as manual copies under ``<codex
@@ -848,7 +1030,9 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     2026-09-30), so only a changed ``hooks.json`` asks for approval again.
     Manual copies run through a launcher whose commands never change; with
     ``refresh`` (the update step) they are moved to the checkout's scripts
-    here, with no consent needed. Everything else is reported. The current
+    here, with no consent needed, and a plugin copy whose scripts alone are
+    behind is refreshed through ``codex plugin marketplace upgrade``.
+    Everything else is reported. The current
     scripts are the checkout's when ``repo`` is given, else the daemon's
     (``daemon_digest``, its ``/health`` ``hooks_digest``)."""
     repo = Path(repo) if repo else None
@@ -897,10 +1081,10 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
         config_text = ""
     if f'"{PLUGIN_ID}"' not in config_text:
         return {"state": "not-configured", "detail": "no Codex hook copies or plugin under the Codex home"}
-    clone_hooks = codex_home / ".tmp" / "marketplaces" / MARKETPLACE / "plugin" / "hooks"
+    clone_hooks = codex_plugin_hooks(codex_home)
     current = hooks_digest(repo / "plugin" / "hooks") if repo else daemon_digest
     if current is None:
-        return {"state": "unknown", "detail": "Codex runs the plugin's hooks; nothing to compare its clone with "
+        return {"state": "unknown", "detail": "Codex runs the plugin's hooks; nothing to compare its copy with "
                                               "(no checkout, and the daemon reported no hooks_digest)"}
     # Name the files that differ when the current scripts can be read here:
     # the checkout's, or the daemon's through the plugin cache. The scripts'
@@ -914,13 +1098,16 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
                               "approve them: python ops/setup-codex-hooks.py --source plugin --trust ask "
                               "(or /hooks in the Codex terminal app)"}
-        return {"state": "current", "detail": "Codex runs the plugin's hooks; its marketplace clone matches "
+        return {"state": "current", "detail": "Codex runs the plugin's hooks; its copy matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
     if changed and "hooks.json" not in changed:
         # Codex approves hook definitions (hooks.json), not the scripts
         # they run: only the plugin copy is behind, no approval is due.
+        if refresh:
+            return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
         return {"state": "behind", "source": "plugin", "changed_files": changed,
                 "detail": f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)}); "
+                          "the update refreshes it (codex plugin marketplace upgrade " + MARKETPLACE + "), or "
                           "update the plugin in Codex's plugin manager. Its approvals carry over: Codex "
                           "approves hook definitions, which did not change, not the scripts"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
