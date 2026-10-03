@@ -65,6 +65,17 @@ def test_audit_rejects_detached_cli_rows(monkeypatch, mode, status):
         inventory.validate()
 
 
+@pytest.mark.parametrize("status", ["deferred", "complete"])
+def test_audit_rejects_detached_required_surface_rows(monkeypatch, status):
+    original = inventory.source
+    register = original("rust/PARITY.md").replace("\n\n| CONFIG-LOAD |", "\n| CONFIG-LOAD |")
+    row = next(line for line in register.splitlines() if line.startswith("| MCP-MOUNT |"))
+    register = register.replace(row, "\n" + row.replace("| deferred |", f"| {status} |"))
+    monkeypatch.setattr(inventory, "source", lambda path: register if path == "rust/PARITY.md" else original(path))
+    with pytest.raises(AssertionError, match="surface row outside status table"):
+        inventory.validate()
+
+
 @pytest.mark.parametrize("fault,error", [
     ("missing-file", "^missing or extra test-file bucket$"),
     ("duplicate-file", "^duplicate test-file bucket$"),

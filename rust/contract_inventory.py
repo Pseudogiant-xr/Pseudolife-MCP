@@ -196,11 +196,12 @@ def validate() -> dict:
                      "ONNX-PREREQUISITE"}
     for row in required_rows:
         assert f"| {row} |" in register, f"missing required surface row: {row}"
-    status_index = mode_index = None
+    status_index = mode_index = surface_index = None
     checked_cli_modes = set()
+    checked_surface_rows = set()
     for line in register.splitlines():
         if not line.startswith("|"):
-            status_index = mode_index = None
+            status_index = mode_index = surface_index = None
             continue
         if line.startswith("|---"):
             continue
@@ -208,10 +209,15 @@ def validate() -> dict:
         if "Status" in cells:
             status_index = cells.index("Status")
             mode_index = cells.index("Mode") if "Mode" in cells else None
+            surface_index = cells.index("Row") if "Row" in cells else None
         elif status_index is not None:
             assert cells[status_index] in {"ported", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
             if mode_index is not None:
                 checked_cli_modes.add(cells[mode_index])
+            if surface_index is not None:
+                checked_surface_rows.add(cells[surface_index])
+    for row in required_rows:
+        assert row in checked_surface_rows, f"surface row outside status table: {row}"
     for mode in inventory["cli_modes"]:
         assert mode in checked_cli_modes, f"CLI mode outside status table: {mode}"
     for name in set(re.findall(r'`(?:tests/)?(test_[A-Za-z0-9_]+\.py)`', register)):
