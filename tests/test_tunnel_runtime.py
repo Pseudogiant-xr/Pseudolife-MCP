@@ -254,6 +254,36 @@ def test_launch_identity_waits_out_the_exec_window(tmp_path, monkeypatch):
                     child.wait(timeout=10)
 
 
+def test_launch_fails_when_arguments_never_appear(tmp_path, monkeypatch):
+    # An identity without arguments never matches its child again, so the
+    # launch fails and reaps the child instead of recording a stranger.
+    import subprocess
+    store, profile = _ready_profile(tmp_path)
+    children = []
+    real_popen = subprocess.Popen
+    def launch_fixture(args, **kwargs):
+        child = real_popen([CHILD_PYTHON, '-c', 'import time; time.sleep(60)'], **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(runtime.subprocess, 'Popen', launch_fixture)
+    class NoArguments(runtime.psutil.Process):
+        def cmdline(self):
+            return []
+    monkeypatch.setattr(runtime.psutil, 'Process', NoArguments)
+    monkeypatch.setattr(runtime, 'EXEC_WINDOW_SECONDS', 0.05)
+    ledger = []
+    with runtime.runtime_profile(profile, store, ['synthetic-shim']) as config:
+        try:
+            with pytest.raises(TunnelError, match='arguments'):
+                runtime._launch_child(profile, Path(CHILD_PYTHON), config, store, owned_children=ledger)
+            assert ledger == [] and len(children) == 1 and children[0].poll() is not None
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.terminate()
+                    child.wait(timeout=10)
+
+
 def archive(name='tunnel-client.exe', data=b'synthetic-binary'):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w') as zipped:

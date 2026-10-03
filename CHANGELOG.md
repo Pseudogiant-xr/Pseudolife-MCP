@@ -13,10 +13,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the identity could be recorded with an empty argument list. Every later
   ownership check then refused the supervisor's own child: a refresh
   answered "owned tunnel changed before refresh" and left the old child
-  running, cancellation cleanup skipped the child and leaked it, and
-  `tunnel status` reported it as not running. The identity is now read
-  once the arguments appear (bounded at 5 seconds, and not for a child
-  that has already exited). Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  running, cancellation cleanup skipped the child and leaked it,
+  `tunnel stop` reported `stopped` without stopping it, `tunnel status`
+  reported it as not running, and the bridge and `tunnel update` refused
+  the live tunnel. The identity is now read once the arguments appear.
+  If they have not appeared within 5 seconds and the child is still
+  alive, the launch fails and the child is reaped, rather than recording
+  an identity that can never match. A child that has already exited is
+  recorded as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
   launches hit the empty window. Over 1,250 cancellation-test runs under
   the same load, the unfixed code failed 8 and the fixed code failed none.
   This was the intermittent `all_reaped` failure (and the 30-second

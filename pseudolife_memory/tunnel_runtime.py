@@ -153,17 +153,25 @@ def ensure_runtime(store: ProfileStore, version: str = VERSION, *, readiness=Non
             stage.rmdir()
 
 
+# Popen returns at execve's point of no return, before Linux publishes the new
+# image's arguments, so a just-launched child can briefly read an empty command
+# line. An identity recorded then never matches the child again. Measured
+# 2026-10-03 in WSL2: 10 of 1,732 test launches read an empty command line.
+# The bound is a ceiling for a stalled exec, not a measured window length.
+EXEC_WINDOW_SECONDS = 5
+
+
 def _process_identity(pid: int) -> dict:
     process = psutil.Process(pid)
-    # Popen returns at execve's point of no return, before Linux publishes the
-    # new image's arguments, so a just-launched child can briefly read an empty
-    # command line. An identity recorded then never matches the child again.
-    # Measured 2026-10-03 in WSL2: 10 of 1,732 test launches (0.6%).
     argv = process.cmdline()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + EXEC_WINDOW_SECONDS
+    # A zombie has no arguments to wait for (psutil 7 on Linux raises
+    # ZombieProcess first; the status check covers versions that return []).
     while not argv and time.monotonic() < deadline and process.status() != psutil.STATUS_ZOMBIE:
         time.sleep(0.005)
         argv = process.cmdline()
+    if not argv and process.status() != psutil.STATUS_ZOMBIE:
+        raise TunnelError('tunnel process arguments never appeared; it cannot be identified safely')
     return {'pid': pid, 'created': process.create_time(), 'exe': process.exe(), 'argv': argv}
 
 
