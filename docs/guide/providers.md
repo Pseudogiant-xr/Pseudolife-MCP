@@ -263,6 +263,31 @@ running `python ops/setup-codex-hooks.py` once more is the last approval it
 needs. Bundles from before the launcher stay, since a Codex session started
 earlier may still run them.
 
+When Codex runs the plugin's hooks instead, the same update refreshes them
+too, as long as only the scripts changed. It runs Codex's own
+`codex plugin marketplace upgrade pseudolife-mcp`, which fetches the
+marketplace and replaces both its clone and the installed copy Codex runs
+hooks from (`~/.codex/plugins/cache/pseudolife-mcp/pseudolife-memory/local`).
+It then reads that copy back and reports `refreshed`. Measured on Codex
+0.160.0, the upgrade leaves `config.toml` unchanged and every hook keeps its
+approval hash, so nothing needs approving. Codex keeps one installed copy and
+replaces it in place, as an update from its plugin manager does, so there is
+no older copy kept beside it. The CLI and the desktop app share the Codex home, so
+both pick up the new scripts. The update finds the Codex CLI on PATH, through
+`PSEUDOLIFE_CODEX_BIN`, in the Windows desktop app's build folder, or in the
+standalone package the desktop app installs under the Codex home
+(`packages/standalone/current/bin`). The marketplace serves its branch
+(master), which can carry a `hooks.json` change that the checkout or the
+release just deployed does not. So the update first reads that branch's
+`hooks.json` from a private, blob-less clone in a temporary directory (never
+Codex's own clone), and upgrades only when it matches the installed one. If it
+finds no Codex CLI or git, the read or the upgrade fails, the branch changes
+`hooks.json`, or the branch has nothing newer, the step stays `behind` and says
+why. Running `codex plugin marketplace upgrade pseudolife-mcp` yourself,
+or updating the plugin in Codex's plugin manager, does the same. A changed
+`hooks.json` is never upgraded automatically: the update prints the approval
+steps instead.
+
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
 fourth PseudoLife hook (earlier releases skip async hooks there). In Codex
@@ -436,8 +461,9 @@ upgrade that exact environment as described below. Update the Pseudolife
 plugin through the client's plugin manager, or with `pseudolife-mcp update` or
 `-All` / `--all`, which install Claude Code's new copy beside the one running
 sessions use ([where the plugin lives](configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)).
-Codex keeps its hook approvals when only the scripts change; the update says
-when a changed `hooks.json` needs one. Editing a plugin cache directly does not
+Codex keeps its hook approvals when only the scripts change, and the update
+refreshes its plugin copy through `codex plugin marketplace upgrade`. The
+update says when a changed `hooks.json` needs an approval. Editing a plugin cache directly does not
 survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a

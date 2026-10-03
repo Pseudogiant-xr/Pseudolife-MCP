@@ -3208,10 +3208,11 @@ daemon that comes back healthy at a version other than the one pulled
 fails the update with that rollback and moves no client. Release mode
 builds nothing, so it prunes no build cache. `PSEUDOLIFE_DOCKER` names
 the docker command (the tests use it); `PSEUDOLIFE_MCP_DAEMON_URL` or
-`--daemon-url` names the daemon. Release mode moves no Codex hook copy (a
-checkout's client step refreshes manual copies; Codex's plugin manager
-moves its plugin copy); it prints approval steps only when Codex would ask
-again, and the check compares Codex's clone with the daemon just deployed,
+`--daemon-url` names the daemon. Release mode moves no manual Codex hook
+copy (a checkout's client step refreshes those). It does refresh Codex's
+plugin copy through `codex plugin marketplace upgrade` when only its scripts
+are behind. It prints approval steps only when Codex would ask again, and
+the check compares Codex's installed copy with the daemon just deployed,
 never with a checkout at some other commit.
 
 ### Being told, and the unattended client half (`updates`)
@@ -3412,8 +3413,15 @@ its definition in `hooks.json` (the command, timeout, `async` and
 editing the command asked again. So an update whose scripts changed but
 whose `hooks.json` did not needs no approval:
 
-- A plugin copy with older scripts is reported as `behind`: update the
-  plugin in Codex's plugin manager and its approvals carry over.
+- A plugin copy with older scripts is refreshed by the update itself,
+  through Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
+  (state `refreshed`), and its approvals carry over. It first checks that
+  the marketplace's branch would not also change `hooks.json`. When that
+  cannot run (no Codex CLI or git found, a failed fetch, a branch that
+  changes `hooks.json`, nothing newer on the branch) the copy is reported as
+  `behind` with the reason; updating the
+  plugin in Codex's plugin manager does the same
+  ([the plugin copy](providers.md)).
 - Manual copies (`setup-codex-hooks.py --source manual`) run through a
   launcher whose commands never change, and the update refreshes them
   itself ([the launcher](providers.md)).
@@ -3427,11 +3435,13 @@ scripts differ is treated as needing approval too, to be safe. Then, and
 only then, every update path (`pseudolife-mcp
 update`, `ops/update.ps1` / `update.sh`, `ops/update_clients.py`, the
 unattended run's board notice) prints the complete steps: which files
-changed (read from Codex's marketplace clone against the checkout, or
-against the Claude plugin cache when that holds the daemon's scripts), the
-refresh (update the plugin in Codex's plugin manager so its clone holds the
-new scripts; `ops/setup-codex-hooks.py --source plugin` approves what the
-clone holds and does not pull one), the approval (`/hooks` in a Codex
+changed (read from Codex's installed plugin copy, or its marketplace clone
+when there is none, against the checkout, or against the Claude plugin
+cache when that holds the daemon's scripts), the refresh (update the plugin
+in Codex's plugin manager, or `codex plugin marketplace upgrade
+pseudolife-mcp`, so its copy holds the new scripts;
+`ops/setup-codex-hooks.py --source plugin` approves what Codex lists and
+does not pull one), the approval (`/hooks` in a Codex
 session, or `python ops/setup-codex-hooks.py --source plugin --trust yes` /
 `--codex-hook-trust yes` for an unattended install), what is off until
 then (the handlers Codex has not approved), and the check:

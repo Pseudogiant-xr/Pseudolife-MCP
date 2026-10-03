@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
+- When Codex runs the plugin's hooks and only the scripts changed (its
+  `hooks.json` is current), the client step (`pseudolife-mcp update`,
+  `ops/update.ps1 -All`, `ops/update.sh --all`, `ops/update_clients.py`)
+  now runs Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
+  and reports `refreshed`, where it used to report `behind` and ask for a
+  click in Codex's plugin manager. Measured on Codex 0.160.0 in a
+  throwaway Codex home: the upgrade fetches the marketplace and replaces
+  its clone and the installed copy, leaves `config.toml` byte-identical,
+  and `hooks/list` reports the same keys and hashes, so approvals carry
+  over. A changed `hooks.json` is never upgraded automatically and still
+  names the approval steps. The marketplace serves its branch, which can
+  carry a `hooks.json` the checkout or the deployed release does not, so
+  the update first reads that branch's `hooks.json` from a private,
+  blob-less clone in a temporary directory (never Codex's own clone) and
+  upgrades only when it matches the installed one. When the upgrade cannot
+  run (no Codex CLI or git found, a failed fetch, the branch changes
+  `hooks.json`, nothing newer on the branch) the step stays `behind` and
+  says why. Manual hook copies are refreshed as before.
+- The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
+  Windows desktop app's build folder, or in the standalone package the
+  desktop app keeps under the Codex home
+  (`packages/standalone/current/bin`).
+- The Codex hooks check now compares the installed copy Codex runs hooks
+  from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
+  back to the marketplace clone when there is no installed copy. Codex
+  replaces that single copy in place, as its plugin manager does, so there
+  is no older copy kept beside it.
+
 ### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
 - Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved
   native queue notice. Private per-thread reservations survive restart; exact
