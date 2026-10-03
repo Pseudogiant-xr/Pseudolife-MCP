@@ -44,11 +44,12 @@ behind while its hooks.json is current is refreshed through Codex's own
 ``codex plugin marketplace upgrade`` (its approvals carry over); only a
 changed hooks.json names the approval steps (``ops/setup-codex-hooks.py``).
 
-Every CLI call goes through :func:`run_cli`, every lookup through
-:func:`which` and :func:`home` (the Codex CLI through the doorbell's
-resolver, which never takes the working directory, in
-:func:`codex_executable`), so the tests drive the real logic with fakes and
-never touch this machine's registrations. Nothing here prints
+Every CLI call goes through :func:`run_cli`, client homes through
+:func:`home`, and ordinary CLI lookups through :func:`which`. Codex and
+the git used to inspect its marketplace resolve only from absolute paths,
+never implicitly from the working directory, through
+:func:`codex_executable` and :func:`_git_executable`, so tests drive the
+logic with fakes and never touch this machine's registrations. Nothing here prints
 tokens: registration files are parsed for the command line only.
 ``ops/update_clients.py`` runs this from the checkout by putting it first
 on ``sys.path``, so an older installed release never answers for the
@@ -95,7 +96,8 @@ def home() -> Path:
 TIMED_OUT = 124
 
 
-def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
+def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | None = None,
+            encoding: str | None = None) -> tuple[int, str]:
     """Run a CLI and return ``(returncode, combined output)``; a missing
     executable reads as code 1 and a hung one as ``TIMED_OUT``, with the
     reason as output."""
@@ -103,9 +105,12 @@ def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | Non
         # No stdin: a CLI that decides to prompt fails fast instead of holding
         # a captured-output deploy for the whole timeout with nothing shown.
         proc = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
-                              timeout=timeout, check=False, errors="replace",
+                              timeout=timeout, check=False, encoding=encoding, errors="replace",
                               stdin=subprocess.DEVNULL, cwd=cwd, env=env)
     except subprocess.TimeoutExpired as exc:
+        # subprocess.run stops the direct process only. An npm codex.cmd
+        # wrapper on Windows can leave its Codex child running after a
+        # timeout; this helper does not own or terminate the process tree.
         return TIMED_OUT, f"{type(exc).__name__}: {exc}"
     except OSError as exc:
         return 1, f"{type(exc).__name__}: {exc}"
@@ -866,6 +871,10 @@ def codex_executable(codex_home: Path) -> str | None:
     found = codex_doorbell.resolve_codex_command()
     if found:
         return found[0]
+    # An invalid configured path is a setup error, as in the doorbell;
+    # another installed binary must not silently replace it.
+    if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip():
+        return None
     standalone = codex_home / "packages" / "standalone" / "current" / "bin" / (
         "codex.exe" if os.name == "nt" else "codex")
     return str(standalone.resolve()) if standalone.is_file() else None
@@ -924,12 +933,33 @@ def _marketplace_source(codex_home: Path) -> tuple[str | None, str | None]:
 _MARKETPLACE_READ_TIMEOUT_S = 120
 
 
+def _git_executable() -> str | None:
+    """Git from an absolute PATH directory, without shutil.which's implicit
+    Windows working-directory search (the Codex doorbell's resolver rule)."""
+    if os.name == "nt":
+        pathext = os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
+        names = [f"git{ext}" for ext in pathext.split(os.pathsep)
+                 if ext.lower() in (".com", ".exe", ".bat", ".cmd")]
+    else:
+        names = ["git"]
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        directory = directory.strip().strip('"')
+        # Path.is_absolute also rejects drive-relative Windows paths.
+        if not directory or not Path(directory).is_absolute():
+            continue
+        for name in names:
+            candidate = Path(directory) / name
+            if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                return str(candidate)
+    return None
+
+
 def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
     """The hooks.json the marketplace's branch would install (CRLF read as
     LF), or ``(None, why not)``. Read from a private blob-less clone in a
     temporary directory, never from Codex's own clone, which stays Codex's
     to write."""
-    git = which("git")
+    git = _git_executable()
     if not git:
         return None, "git is not on PATH to read the marketplace's hooks.json first"
     source, ref = _marketplace_source(codex_home)
@@ -943,10 +973,10 @@ def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
         clone = str(Path(tmp) / "m")
         branch = ["--branch", ref] if ref else []
         code, out = run_cli([git, "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--no-checkout",
-                             *branch, source, clone], timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+                             *branch, "--", source, clone], timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
         if code == 0:
             code, out = run_cli([git, "-C", clone, "show", "HEAD:plugin/hooks/hooks.json"],
-                                timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+                                timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env, encoding="utf-8")
     try:
         valid = code == 0 and isinstance(json.loads(out).get("hooks"), dict)
     except (ValueError, AttributeError):
@@ -976,8 +1006,8 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
     the read-back is the proof."""
     behind = f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)})"
     manual = (f"run codex plugin marketplace upgrade {MARKETPLACE}, or update the plugin in Codex's plugin "
-              "manager; its approvals carry over (Codex approves hook definitions, which did not change, "
-              "not the scripts)")
+              "manager; that upgrade may change hooks.json and need approval because the marketplace's "
+              "branch has not been checked")
 
     def stays(reason: str, files: list[str] = changed) -> dict:
         return {"state": "behind", "source": "plugin", "changed_files": files,
@@ -985,6 +1015,9 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
 
     codex = codex_executable(codex_home)
     if not codex:
+        if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip():
+            return stays("PSEUDOLIFE_CODEX_BIN is not an absolute path to an existing file (setup error), "
+                         f"so it was not refreshed here: {manual}")
         return stays("no Codex CLI was found (PATH, PSEUDOLIFE_CODEX_BIN, or the desktop app's own copy), so "
                      f"it was not refreshed here: {manual}")
     # The marketplace serves its branch, which can carry a hooks.json the
@@ -1003,6 +1036,9 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
                      f"Codex's plugin manager (or codex plugin marketplace upgrade {MARKETPLACE}), then approve "
                      "every pseudolife-memory handler with /hooks in a Codex session or "
                      "python ops/setup-codex-hooks.py --source plugin --trust ask")
+    manual = (f"run codex plugin marketplace upgrade {MARKETPLACE}, or update the plugin in Codex's plugin "
+              "manager; its approvals carry over if hooks.json stays as inspected (the branch matched "
+              "the installed definition; Codex approves definitions, not scripts)")
     code, out = run_cli([codex, "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"],
                         timeout=_CODEX_UPGRADE_TIMEOUT_S, env=dict(os.environ, CODEX_HOME=str(codex_home)))
     report = _json_object(out) if code == 0 else None
@@ -1114,15 +1150,15 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its copy matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
     if changed and "hooks.json" not in changed:
-        # Codex approves hook definitions (hooks.json), not the scripts
-        # they run: only the plugin copy is behind, no approval is due.
+        # The installed definitions match the reference, but a plain check
+        # does not inspect what the marketplace's branch would bring.
         if refresh:
             return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
         return {"state": "behind", "source": "plugin", "changed_files": changed,
                 "detail": f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)}); "
                           "the update refreshes it (codex plugin marketplace upgrade " + MARKETPLACE + "), or "
-                          "update the plugin in Codex's plugin manager. Its approvals carry over: Codex "
-                          "approves hook definitions, which did not change, not the scripts"}
+                          "update the plugin in Codex's plugin manager; that upgrade may change hooks.json "
+                          "and need approval because the marketplace's branch has not been checked"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
             "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "

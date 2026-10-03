@@ -7727,7 +7727,11 @@ whose `hooks.json` did not needs no approval:
   changes `hooks.json`, nothing newer on the branch) the copy is reported as
   `behind` with the reason; updating the
   plugin in Codex's plugin manager does the same
-  ([the plugin copy](providers.md)).
+  ([the plugin copy](providers.md)). A changed `hooks.json` is not knowingly
+  upgraded automatically; if the branch moves between inspection and
+  Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with approval steps. A manual upgrade may change `hooks.json`
+  and need approval when the branch has not been inspected.
 - Manual copies (`setup-codex-hooks.py --source manual`) run through a
   launcher whose commands never change, and the update refreshes them
   itself ([the launcher](providers.md)).
@@ -8312,7 +8316,11 @@ no older copy kept beside it. The CLI and the desktop app share the Codex home, 
 both pick up the new scripts. The update finds the Codex CLI on PATH, through
 `PSEUDOLIFE_CODEX_BIN`, in the Windows desktop app's build folder, or in the
 standalone package the desktop app installs under the Codex home
-(`packages/standalone/current/bin`). The marketplace serves its branch
+(`packages/standalone/current/bin`). A missing or relative configured
+`PSEUDOLIFE_CODEX_BIN` is a setup error; the update does not fall back to
+another binary. The git used for the branch check comes only from absolute
+PATH entries, excluding implicit working-directory lookup, and reads
+`hooks.json` as UTF-8. The marketplace serves its branch
 (master), which can carry a `hooks.json` change that the checkout or the
 release just deployed does not. So the update first reads that branch's
 `hooks.json` from a private, blob-less clone in a temporary directory (never
@@ -8321,8 +8329,11 @@ finds no Codex CLI or git, the read or the upgrade fails, the branch changes
 `hooks.json`, or the branch has nothing newer, the step stays `behind` and says
 why. Running `codex plugin marketplace upgrade pseudolife-mcp` yourself,
 or updating the plugin in Codex's plugin manager, does the same. A changed
-`hooks.json` is never upgraded automatically: the update prints the approval
-steps instead.
+`hooks.json` is not knowingly upgraded automatically: the update prints the
+approval steps instead. If the branch moves between inspection and Codex's
+fetch and a changed definition lands, the read-back reports `stale` with
+the approval steps. A manual upgrade can also change `hooks.json` and need
+approval when the branch has not been inspected.
 
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a

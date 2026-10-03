@@ -340,7 +340,26 @@ def test_real_codex_keeps_trusting_the_manual_hooks_across_a_refresh(tmp_path, m
 # existing handler's script instead (Codex does not hash scripts). When a
 # change here is unavoidable, update this pin and say in the CHANGELOG that
 # Codex users approve the hooks once more.
-CODEX_APPROVED_HOOKS = "f819d5977d299ebcdf94715d4d7b6eb3233066ea60f5b961aed7c6b87e0bc439"
+CODEX_APPROVED_HOOKS = "639c4367cc121ce9d7fb755b0a514559949ab41b5803c4ba0f5b7bc10332b265"
+
+
+@pytest.mark.parametrize("event, cap", [
+    ("UserPromptSubmit", None), ("SessionStart", None), ("SessionEnd", 3),
+    ("Stop", None), ("SubagentStart", None), ("SubagentStop", None), ("PreToolUse", None),
+])
+def test_plugin_handlers_fit_codex_event_timeout_caps(event, cap):
+    """Codex clamps only SessionEnd/Interrupt, not the other events.
+
+    Confirmed 2026-10-03 in openai/codex b741e480, hooks/src/engine/
+    discovery.rs normalize_command_hook: other events use the configured
+    value (600 seconds by default), with no upper cap.
+    """
+    manifest = json.loads((ROOT / "plugin/hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+    for group in manifest[event]:
+        for handler in group["hooks"]:
+            assert handler["timeout"] >= 1
+            if cap is not None:
+                assert handler["timeout"] <= cap
 
 
 def _codex_approved_fields() -> list:

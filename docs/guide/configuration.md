@@ -3421,7 +3421,11 @@ whose `hooks.json` did not needs no approval:
   changes `hooks.json`, nothing newer on the branch) the copy is reported as
   `behind` with the reason; updating the
   plugin in Codex's plugin manager does the same
-  ([the plugin copy](providers.md)).
+  ([the plugin copy](providers.md)). A changed `hooks.json` is not knowingly
+  upgraded automatically; if the branch moves between inspection and
+  Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with approval steps. A manual upgrade may change `hooks.json`
+  and need approval when the branch has not been inspected.
 - Manual copies (`setup-codex-hooks.py --source manual`) run through a
   launcher whose commands never change, and the update refreshes them
   itself ([the launcher](providers.md)).

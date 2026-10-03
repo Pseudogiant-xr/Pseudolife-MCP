@@ -94,14 +94,15 @@ def test_a_changed_hooks_json_needs_approval_and_is_named(cli):
 
 
 def test_changed_scripts_alone_are_behind_and_keep_their_approval(cli):
-    """Codex does not hash the scripts: a plugin copy whose scripts changed
-    and whose hooks.json did not needs a plugin update, never an approval."""
+    """The installed definitions keep approval, but the unchecked marketplace
+    branch may bring a definition change when the plugin is upgraded."""
     _clone(cli, change="session-end.sh")
     result = uc.check_codex_hooks(ROOT)
     assert result["state"] == "behind" and result["changed_files"] == ["session-end.sh"]
     assert uc.codex_reapproval_text(result) == ""
     assert uc._marker(result["state"]) != "[!]"
-    assert "approvals carry over" in result["detail"]
+    assert "approvals carry over" not in result["detail"]
+    assert "may change hooks.json" in result["detail"]
 
 
 def test_check_names_the_files_through_the_plugin_cache_without_a_checkout(cli):

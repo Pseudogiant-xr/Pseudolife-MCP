@@ -20,8 +20,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 # A hang guard for every hook and installer process this file runs, not a
-# timing contract: the hooks' real caps (Codex 15/5/3s, Claude 15/5/10s)
-# are asserted separately, at the fixture daemon, in
+# timing contract: the shared SessionEnd network budget is asserted
+# separately, at the fixture daemon, in
 # test_codex_session_end_fits_the_three_second_cap and statically in
 # tests/test_plugin_packaging.py. On a loaded windows-latest runner
 # process creation under Git Bash costs seconds per spawn: run 35603265565
@@ -558,10 +558,10 @@ def test_posix_hooks_use_managed_rotatable_credential(tmp_path, event):
         worker.join(timeout=2)
 
 
-def test_codex_session_end_fits_the_three_second_cap(tmp_path):
-    """Codex caps SessionEnd at three seconds (ops/setup-codex-hooks.py),
-    while Claude's hooks.json allows ten. The bash script's Codex branch
-    must finish inside the cap: one attempt, no retry, like lifecycle.ps1.
+@pytest.mark.parametrize("context", ["codex", "claude"])
+def test_codex_session_end_fits_the_three_second_cap(tmp_path, context):
+    """The shared SessionEnd script fits Codex's three-second cap in both
+    host contexts: one bounded attempt, with no retry after a stall.
 
     The live half is measured at the fixture daemon, not around the
     subprocess: each attempt is held without a reply and timed until curl
@@ -572,18 +572,12 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     honoured its two-second budget — and a wrapper ``curl`` on PATH cannot
     stand in, because Git's ``bin/bash.exe`` launcher prepends
     ``/mingw64/bin:/usr/bin`` to PATH ahead of anything the test sets."""
-    script = (ROOT / "plugin/hooks/session-end.sh").read_text(encoding="utf-8")
-    codex = re.search(r'CODEX_HOOK_CONTEXT"\s*\];?\s*then\s*(?:#[^\n]*\n\s*)*CURL_BUDGET=\(([^)]*)\)', script)
-    assert codex, "session-end.sh needs a Codex-context curl budget"
-    assert "--retry" not in codex.group(1)
-    max_time = int(re.search(r"--max-time\s+(\d+)", codex.group(1)).group(1))
     import importlib.util
     spec = importlib.util.spec_from_file_location("codex_hook_setup_cap", ROOT / "ops/setup-codex-hooks.py")
     setup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(setup)
     cap = setup.launcher_definitions(tmp_path)["SessionEnd"]["timeout"]
     assert cap == setup.manual_definitions(tmp_path)["SessionEnd"]["timeout"]
-    assert max_time + 1 <= cap
     # Live: a daemon that never answers must not hold the hook past the cap.
     attempts = []  # seconds each attempt's connection stayed open
 
@@ -601,7 +595,8 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path):
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
     env = isolated_env(tmp_path / "codex-home")
-    env["PSEUDOLIFE_CODEX_HOOK"] = "1"
+    if context == "codex":
+        env["PSEUDOLIFE_CODEX_HOOK"] = "1"
     env["PSEUDOLIFE_MCP_DAEMON_URL"] = f"http://127.0.0.1:{server.server_port}"
     try:
         bash_run(ROOT / "plugin/hooks/session-end.sh", input='{"session_id":"fixture"}', env=env)

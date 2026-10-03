@@ -16,24 +16,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throwaway Codex home: the upgrade fetches the marketplace and replaces
   its clone and the installed copy, leaves `config.toml` byte-identical,
   and `hooks/list` reports the same keys and hashes, so approvals carry
-  over. A changed `hooks.json` is never upgraded automatically and still
-  names the approval steps. The marketplace serves its branch, which can
-  carry a `hooks.json` the checkout or the deployed release does not, so
-  the update first reads that branch's `hooks.json` from a private,
+  over. A changed `hooks.json` is not knowingly upgraded automatically and
+  still names the approval steps. If the branch moves between inspection
+  and Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with those approval steps. The marketplace serves its branch,
+  which can carry a `hooks.json` the checkout or the deployed release does
+  not, so the update first reads that branch's `hooks.json` from a private,
   blob-less clone in a temporary directory (never Codex's own clone) and
   upgrades only when it matches the installed one. When the upgrade cannot
   run (no Codex CLI or git found, a failed fetch, the branch changes
   `hooks.json`, nothing newer on the branch) the step stays `behind` and
-  says why. Manual hook copies are refreshed as before.
+  says why. Advice to upgrade manually promises approval carryover only
+  when the branch's `hooks.json` was checked and matched; otherwise it says
+  that the upgrade may change the definition and need approval. Manual hook
+  copies are refreshed as before.
 - The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
   Windows desktop app's build folder, or in the standalone package the
   desktop app keeps under the Codex home
-  (`packages/standalone/current/bin`).
+  (`packages/standalone/current/bin`). A missing or relative configured
+  `PSEUDOLIFE_CODEX_BIN` is reported as a setup error, without falling back
+  to another binary. The git used to inspect the marketplace is resolved
+  only from absolute PATH entries, excluding implicit working-directory
+  lookup, and its `hooks.json` is decoded as UTF-8 on every platform.
 - The Codex hooks check now compares the installed copy Codex runs hooks
   from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
   back to the marketplace clone when there is no installed copy. Codex
   replaces that single copy in place, as its plugin manager does, so there
   is no older copy kept beside it.
+- The shared plugin's SessionEnd timeout now matches Codex's enforced
+  3-second cap, removing the startup clamp warning. Its bash hook makes
+  one request with a 1-second total and connection timeout, without
+  retries; idle reaping remains the backstop. This changes the approved
+  `hooks.json` definition: Codex users must approve the hooks once more.
 
 ### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
 - Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved

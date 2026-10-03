@@ -12,7 +12,9 @@ throwaway CODEX_HOME) fetches the git marketplace and replaces both its
 clone and the installed copy Codex runs hooks from
 (``plugins/cache/pseudolife-mcp/pseudolife-memory/local``), leaving
 config.toml and every hook's approval hash as they were. A changed
-hooks.json is never upgraded here: its approval stays a consented step.
+hooks.json is not knowingly upgraded here: its approval stays a consented step.
+If the branch moves between inspection and the fetch, read-back reports
+the changed definition as stale with approval steps.
 The marketplace serves its branch, which can differ from the checkout and
 from the release just deployed, so before upgrading the update reads the
 branch's hooks.json from a private blob-less clone in a temporary
@@ -40,6 +42,15 @@ from tests.test_update_clients import _codex_plugin_config, _plugin_handler_keys
 EXE = ".exe" if os.name == "nt" else ""
 UPGRADE = ["plugin", "marketplace", "upgrade", "pseudolife-mcp", "--json"]
 SOURCE = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+RUN_CLI = uc.run_cli
+GIT_EXECUTABLE = uc._git_executable
+SYSTEM_GIT = shutil.which("git")
+
+
+@pytest.fixture(autouse=True)
+def _no_configured_codex(monkeypatch):
+    # A maintainer's configured executable is not part of a fake client home.
+    monkeypatch.delenv("PSEUDOLIFE_CODEX_BIN", raising=False)
 
 
 def _clone(codex_home: Path) -> Path:
@@ -95,6 +106,7 @@ class FakeCodex:
         self.remote_hooks: str | None = None     # the branch's hooks.json, when not the served tree's
         self.exe = cli.tools["codex"]
         cli.tools["git"] = str(Path(cli.tools["codex"]).with_name(f"git{EXE}"))
+        monkeypatch.setattr(uc, "_git_executable", lambda: cli.tools.get("git"))
         monkeypatch.setattr(codex_doorbell, "resolve_codex_command",
                             lambda environ=None: [self.exe] if self.exe else None)
         monkeypatch.setattr(uc, "run_cli", self)
@@ -111,7 +123,10 @@ class FakeCodex:
             return self.answer
         if argv[1:] != UPGRADE:
             return 91, f"unexpected call {argv}"
-        codex_home = Path((kw.get("env") or {})["CODEX_HOME"])
+        selected_home = (kw.get("env") or {}).get("CODEX_HOME")
+        if not selected_home:
+            return 92, "the fake upgrade requires an explicit CODEX_HOME"
+        codex_home = Path(selected_home)
         clone = _clone(codex_home)
         upgraded = []
         if self.offers is not None and uc.tree_differs(self.offers, clone):
@@ -231,6 +246,8 @@ def test_a_failed_upgrade_stays_behind_with_codexs_words(cli, monkeypatch, answe
     result = uc.check_codex_hooks(ROOT, refresh=True)
     assert result["state"] == "behind" and said in result["detail"]
     assert "plugin manager" in result["detail"]
+    assert "approvals carry over" in result["detail"]
+    assert "inspected" in result["detail"]
     assert uc._marker(result["state"]) == "[-]"
 
 
@@ -284,6 +301,7 @@ def test_a_branch_that_changes_hooks_json_is_not_upgraded(cli, monkeypatch, tmp_
     result = uc.check_codex_hooks(ROOT, refresh=True)
     assert result["state"] == "behind" and codex.calls == []
     assert "hooks.json" in result["detail"] and "approv" in result["detail"]
+    assert "approvals carry over" not in result["detail"]
     assert "/hooks" in result["detail"] and "plugin manager" in result["detail"]
     assert (_cache(codex_home) / "hooks" / "session-end.sh").read_bytes() == before
 
@@ -386,6 +404,7 @@ def test_a_hooks_json_that_lands_anyway_asks_for_the_approval(cli, monkeypatch, 
     result = uc.check_codex_hooks(ROOT, refresh=True)
     assert result["state"] == "stale" and "hooks.json" in result["changed_files"]
     assert "hooks.json" in uc.codex_reapproval_text(result)
+    assert "approvals carry over" not in result["detail"]
 
 
 # ── the copy Codex runs ─────────────────────────────────────────────────────
@@ -409,3 +428,121 @@ def test_the_ladder_shows_the_refresh(cli, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[x] Codex hooks    refreshed" in out
     assert "re-approval" not in out
+
+
+@pytest.mark.parametrize("unavailable", ["inspection", "codex", "git", "source", "branch"])
+def test_uninspected_marketplace_never_promises_approval_carryover(cli, monkeypatch, unavailable):
+    codex_home = _installed(cli)
+    codex = FakeCodex(cli, monkeypatch)
+    if unavailable == "codex":
+        codex.exe = None
+    elif unavailable == "git":
+        cli.tools["git"] = None
+    elif unavailable == "source":
+        config = codex_home / "config.toml"
+        config.write_text(config.read_text(encoding="utf-8").split("\n[marketplaces.")[0], encoding="utf-8")
+    elif unavailable == "branch":
+        codex.remote_hooks = "fatal: repository not found"
+    result = uc.check_codex_hooks(ROOT, refresh=unavailable != "inspection")
+    assert result["state"] == "behind" and codex.calls == []
+    assert "approvals carry over" not in result["detail"]
+    assert "may change hooks.json" in result["detail"] and "approval" in result["detail"]
+
+
+def test_missing_configured_codex_never_uses_the_standalone_copy(cli, monkeypatch):
+    codex_home = _installed(cli)
+    codex = FakeCodex(cli, monkeypatch)
+    codex.exe = None
+    standalone = codex_home / "packages" / "standalone" / "current" / "bin" / f"codex{EXE}"
+    standalone.parent.mkdir(parents=True)
+    standalone.write_bytes(b"fake codex")
+    monkeypatch.setenv("PSEUDOLIFE_CODEX_BIN", str(cli.home / "missing-codex"))
+    result = uc.check_codex_hooks(ROOT, refresh=True)
+    assert result["state"] == "behind" and codex.calls == []
+    assert "PSEUDOLIFE_CODEX_BIN" in result["detail"] and "setup error" in result["detail"]
+
+
+def test_git_clone_separates_a_source_from_options(cli, monkeypatch):
+    _installed(cli)
+    codex = FakeCodex(cli, monkeypatch)
+    uc.check_codex_hooks(ROOT, refresh=True)
+    assert codex.git_calls[0][-3:] == ["--", SOURCE, codex.git_calls[0][-1]]
+
+
+@pytest.mark.parametrize("entry", ["", ".", "relative-bin"])
+def test_git_never_runs_from_cwd_or_a_relative_path(cli, monkeypatch, tmp_path, entry):
+    _installed(cli)
+    codex = FakeCodex(cli, monkeypatch)
+    planted = tmp_path / entry / f"git{EXE}"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_bytes(b"fake git")
+    planted.chmod(0o755)
+    cli.tools["git"] = str(planted.resolve())
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", entry)
+    # Exercise real resolution instead of the fake CLI's lookup seam.
+    monkeypatch.setattr(uc, "_git_executable", GIT_EXECUTABLE)
+    result = uc.check_codex_hooks(ROOT, refresh=True)
+    assert result["state"] == "behind" and codex.git_calls == [] and codex.calls == []
+
+
+def test_branch_manifest_is_decoded_as_utf8_under_a_legacy_locale(cli, monkeypatch):
+    codex_home = _installed(cli)
+    real_run_cli = RUN_CLI
+    real_subprocess_run = uc.subprocess.run
+    codex = FakeCodex(cli, monkeypatch)
+    manifest = json.dumps({"hooks": {}, "description": "caf\u00e9"}, ensure_ascii=False).encode("utf-8")
+
+    def legacy_locale(argv, **kw):
+        if not kw.get("encoding"):
+            kw["encoding"] = "cp1252"
+        return real_subprocess_run(argv, **kw)
+
+    def run(argv, **kw):
+        if "show" in argv:
+            return real_run_cli([sys.executable, "-c", f"import sys; sys.stdout.buffer.write({manifest!r})"], **kw)
+        return codex(argv, **kw)
+
+    monkeypatch.setattr(uc.subprocess, "run", legacy_locale)
+    monkeypatch.setattr(uc, "run_cli", run)
+    offered, why = uc._marketplace_hooks_json(codex_home)
+    assert offered == manifest and why == ""
+
+
+def test_upgrade_uses_the_inspected_home_when_codex_home_is_unset(cli, monkeypatch):
+    configured = _installed(cli)
+    inspected = cli.home / ".codex"
+    configured.rename(inspected)
+    monkeypatch.delenv("CODEX_HOME")
+    codex = FakeCodex(cli, monkeypatch)
+    result = uc.check_codex_hooks(ROOT, refresh=True)
+    # Inspect only the home field, so a failed assertion cannot print the
+    # subprocess's whole inherited environment.
+    received_home = codex.calls[0][1]["env"].get("CODEX_HOME")
+    assert received_home == str(inspected.resolve())
+    assert result["state"] == "refreshed"
+    assert len(codex.calls) == 1
+
+
+@pytest.mark.parametrize("git_kind", ["fake", "system"])
+def test_git_is_found_in_an_absolute_path_directory(cli, monkeypatch, tmp_path, git_kind):
+    codex_home = _installed(cli)
+    codex = FakeCodex(cli, monkeypatch)
+    if git_kind == "system":
+        if SYSTEM_GIT is None:
+            pytest.skip("no system git installed; fake absolute PATH remains covered")
+        executable = Path(SYSTEM_GIT).resolve()
+    else:
+        executable = tmp_path / "absolute-bin" / f"git{EXE}"
+        executable.parent.mkdir()
+        executable.write_bytes(b"fake git")
+        executable.chmod(0o755)
+    cwd = tmp_path / "working-directory"
+    cwd.mkdir()
+    (cwd / f"git{EXE}").write_bytes(b"planted git")
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("PATH", str(executable.parent))
+    monkeypatch.setattr(uc, "_git_executable", GIT_EXECUTABLE)
+    offered, why = uc._marketplace_hooks_json(codex_home)
+    assert offered == uc._normalised(ROOT / "plugin" / "hooks" / "hooks.json") and why == ""
+    assert Path(codex.git_calls[0][0]).resolve() == executable
