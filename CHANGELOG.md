@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
+- Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved
+  native queue notice. Private per-thread reservations survive restart; exact
+  generated notice/nonce arrival at the owning prompt hook is separate evidence
+  from queue acceptance, reading mail or completing work.
+- An unresolved reservation may clear at its originating message's durably
+  recorded expiry, with an explicit `unresolved_expired` availability receipt.
+  Expiry receipts precede release on both polling and replacement paths; a failed
+  receipt write retains the old reservation, and replacement logs the expiry once.
+  Native cancellation remains unknown and the queued item may remain visible.
+  Valid older records without exact expiry get one durable first-seen plus
+  24-hour upper bound; malformed or foreign state stays fail-closed.
+- Capped urgent unparked Codex mail may queue one fixed bell labelled
+  `turn state unknown`. Receipts distinguish pending queue permission from
+  known-busy attention hints; no native desktop steer route is proved.
+  Active and unknown-state notices resume the original authorized task.
+- Current eligible Codex grants remain explicit through the quiet interval and
+  fan-out stagger. Historical grants require retained audit ordering after the
+  unchanged current park; cleared, expired or refined parks withdraw old offers,
+  delayed writes and marker retries without rewriting historical grants or caps.
+- Empty reservation contention remains retryable; definite pre-execution CLI
+  failures release only their own unaccepted reservation, while ambiguous results
+  retain it. Versioned exact notice formats survive wording updates, and prompt
+  receipt recording retries brief real lock contention.
+- New reservations are fully written and flushed in a private temporary file
+  before publication under the per-thread lock. Interrupted or failed writes
+  cannot leave a partial pending record that blocks later notices. A directory
+  sync failure after publication releases only the exact new, unaccepted record
+  under the same lock, allowing ordinary delivery to retry.
+- Ambiguous bridge failure never queues an alternate for that snapshot and restores
+  a guarded listener for later eligible arrivals. Current desktop queued-notice
+  hook emission remains unverified; missing receipts use the recorded expiry
+  fallback. Client hooks must be updated to use the correlation path.
+
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before
   it queued for the suite lock, and passed over a server that refused the

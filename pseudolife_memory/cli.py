@@ -149,6 +149,9 @@ def main() -> None:
     elif mode == "prompt-hook":
         from pseudolife_memory.briefing_cli import run_prompt_hook
         run_prompt_hook()
+    elif mode == "doorbell-prompt-seen":
+        from pseudolife_memory.codex_doorbell_state import prompt_seen_hook
+        prompt_seen_hook()
     elif mode == "doctor":
         from pseudolife_memory.doctor_cli import run_doctor
         run_doctor()

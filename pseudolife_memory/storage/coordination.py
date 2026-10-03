@@ -2041,34 +2041,81 @@ class CoordinationStore:
     def _serve_wake(self, agent_id, now):
         """Offer the newest pending ring; the adapter deduplicates its identity.
         Queued mail retains a stable offer until acknowledgment or expiry,
-        covering lost handoffs and replacement attachments. Other rings
-        repeat only for one heartbeat interval. Only ``rung`` rows are
-        offered: a ``nudged`` row decided before 2026-10-02 (regular mail
-        never wakes) is history, never served."""
+        covering lost handoffs and replacement attachments. Codex ring offers
+        require retained audit proof of the unchanged current live park. Other rings
+        repeat only for one heartbeat interval. New capped unparked ``attention``
+        rows may explicitly authorize an unknown-state queue bell; historical
+        attention without that permission stays hint-only. A
+        ``nudged`` row decided before 2026-10-02 (regular mail never wakes) is history, never served."""
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
-        if self._listener_path(row, now) is not None:
+        codex = "codex" in (row.get("capabilities") or {})
+        park = self._live_park(row, now) if codex else None
+        if park and park["park_reason"] == "done":
+            return None
+        park_since = park["park_set_at"] if park else None
+        # Audit sequence, not wall time, binds a grant to the unchanged
+        # current park. A missing or mismatched audit snapshot proves nothing.
+        park_event = self._one(
+            "SELECT seq,payload::jsonb->'fields'->'park_set_at' AS park_set_at "
+            "FROM coordination_events WHERE agent_id=%s AND event='update' "
+            "AND payload::jsonb->'fields' ? 'park_set_at' ORDER BY seq DESC LIMIT 1",
+            (agent_id,)) if park else None
+        park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
+        ring_allowed = park_seq is not None and self._listener_path(row, now) is None
+        serve_guard = (" AND (decision='attention' OR (%s AND EXISTS (SELECT 1 "
+                       "FROM coordination_events s WHERE s.event='send' "
+                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))") if codex else ""
+        serve_values = (ring_allowed, park_seq or 0) if codex else ()
+        if not codex and self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
             "UPDATE coordination_wakes SET served_at=%s WHERE recipient_agent_id=%s "
-            "AND decision='rung' "
+            "AND decision IN ('rung','attention') "
             "AND served_at IS NULL AND EXISTS (SELECT 1 FROM coordination_messages m "
             "WHERE m.message_id=coordination_wakes.message_id AND m.recipient_agent_id=%s "
-            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)", (now, agent_id, agent_id, now))
+            "AND m.acknowledged_at IS NULL AND m.expires_at>%s)" + serve_guard,
+            (now, agent_id, agent_id, now, *serve_values))
         rows = self._all(
-            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,"
-            "coalesce(m.wake->>'queued'='true',false) AS queued FROM coordination_wakes w "
+            "SELECT w.decision,w.reason,w.ring_at,w.created_at,w.wake_id,w.served_at,m.expires_at,"
+            "coalesce(m.wake->>'queue_allowed'='true',false) AS queue_allowed,"
+            "coalesce(m.wake->>'queued'='true',false) AS queued,"
+            "EXISTS (SELECT 1 FROM coordination_events s WHERE s.event='send' "
+            "AND s.message_id=w.message_id AND s.seq>%s) AS park_authorized FROM coordination_wakes w "
             "JOIN coordination_messages m ON m.message_id=w.message_id "
             "AND m.recipient_agent_id=w.recipient_agent_id WHERE w.recipient_agent_id=%s "
-            "AND w.decision='rung' "
-            "AND w.served_at IS NOT NULL AND m.acknowledged_at IS NULL AND m.expires_at>%s",
-            (agent_id, now))
+            "AND w.decision IN ('rung','attention') "
+            "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
+            (park_seq or 0, agent_id, codex, now))
         if not rows:
             return None
+        if codex:
+            eligible = [item for item in rows if item["decision"] == "attention"
+                        or (ring_allowed and item["park_authorized"])]
+            if not eligible:
+                # Historical ring authorization without its unchanged park is
+                # pending context, never a new queue or a recorded ring handoff.
+                return {"decision": "attention", "reason": "no_steer_path",
+                        "ring_at": max(item["ring_at"] for item in rows)}
+            rows = eligible
+        # Attention is context for pull/hints, never an idle ring. An armed
+        # queue listener does not establish an active-turn steer path.
+        if self._listener_path(row, now) is not None:
+            rows = [item for item in rows if item["decision"] == "attention"]
+            if not rows:
+                return None
         newest = max(rows, key=lambda r: (r["created_at"], r["wake_id"]))
-        if not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
+        if not codex and not any(row["queued"] for row in rows) and newest["served_at"] <= now - WAKE_SERVE_REPEAT:
             return None
-        return {"decision": newest["decision"], "reason": newest["reason"],
-                "ring_at": max(r["ring_at"] for r in rows)}
+        offer = {"decision": newest["decision"], "reason": newest["reason"],
+                 "ring_at": max(r["ring_at"] for r in rows)}
+        if codex:
+            # Exact immutable message expiry, not a new lifetime on each heartbeat.
+            offer["message_expires_at"] = newest["expires_at"]
+            if newest["decision"] == "attention":
+                offer.update(queue_allowed=(newest["queue_allowed"] and park is None
+                                            and self._listener_path(row, now) is None),
+                             recipient_state="unknown")
+        return offer
 
     def _live_park(self, row, now):
         """The row's park record while it stands: a reason set, and no
@@ -2111,9 +2158,10 @@ class CoordinationStore:
         given up, ``_lease_clearer``), ``park_clear_by`` is ``anyone``,
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
-        the need so the sender knows what would wake it; idle with no park
-        (or a lapsed one), ``rung`` for ``urgent`` (within the same urgent
-        cap), else ``not_needed`` with reason ``no_park``: the session is
+        the need so the sender knows what would wake it. Unparked Codex
+        urgency is capped attention with explicit one-bell queue permission,
+        unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
+        else ``not_needed`` with reason ``no_park``: the session is
         waiting on nobody, so the mail waits for its next turn. Regular
         mail never wakes (maintainer decision 2026-10-02, retiring the
         hourly ``nudged`` ring; rows decided ``nudged`` before then are
@@ -2127,7 +2175,9 @@ class CoordinationStore:
         # A parked session has stopped: its last board action (the park
         # itself) is no sign a tool result will carry the mail, so only an
         # unparked session counts as active (review, 2026-09-28).
-        if park is None and recipient["last_activity"] > now - policy.active_seconds:
+        attention = park is None and urgent and "codex" in (recipient.get("capabilities") or {})
+        if (not attention and park is None
+                and recipient["last_activity"] > now - policy.active_seconds):
             return {"decision": "hinted", "reason": "active"}
         if park and park["park_reason"] == "done":
             return {"decision": "not_needed", "reason": "parked_done"}
@@ -2151,7 +2201,8 @@ class CoordinationStore:
                 return {"decision": "withheld", "reason": "need_not_cleared", **need}
         elif urgent:
             # Waiting on nobody, but the sender says it cannot wait
-            # (maintainer decision 2026-10-02): a ring like any other.
+            # (maintainer decision 2026-10-02): apply the existing caps;
+            # unparked Codex becomes pending attention below.
             how = "urgent"
         else:
             # Waiting on nobody: plain mail, or clears with no need to
@@ -2164,7 +2215,7 @@ class CoordinationStore:
                              (sender["agent_id"], hour))["n"]
             if sent >= policy.urgent_per_sender_per_hour:
                 return {"decision": "capped", "reason": "urgent_sender_hour", **need}
-        decision, reason = "rung", how
+        decision, reason = ("attention" if attention else "rung"), how
         counts = self._one(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
             "count(*) FILTER (WHERE created_at>%s) AS night,"
@@ -2184,6 +2235,14 @@ class CoordinationStore:
             "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
              reason == "urgent", ring_at, now))
+        if attention:
+            # Codex's desktop owner uses private stdio; a queue capability
+            # proves neither actual idle state nor a supported steer route.
+            return {"decision": "no_path", "reason": "no_steer_path",
+                    "attention": True, "delivery": "queue_pending", "recipient_state": "unknown",
+                    "queue_allowed": True,
+                    "ring_at": ring_at,
+                    "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering."}
         missing = self._listener_path(recipient, now)
         if missing is not None:
             return {"decision": "no_path", "reason": missing, "queued": True,
