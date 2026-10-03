@@ -371,7 +371,7 @@
     "Bearer token; tokenless = loopback Origin/Host guard (CSRF / DNS-rebind)",
     "POST must be exactly application/json (forces CORS preflight)",
     "Sync service calls always via run_in_executor — never blocks the loop",
-    "POST /api/pair is the one unauthenticated write (pairing-code redemption): any Origin 403, uniform 400 pairing_refused, a failure budget then 429; stored (invited) principals are refused the operator POST paths"
+    "POST /api/pair is the one unauthenticated write (pairing-code redemption): any Origin 403, one uniform 400 pairing_refused for every refused code, a failure budget then 429; stored (invited) principals are refused the operator POST paths"
    ]
   },
   {
@@ -1432,7 +1432,7 @@
    "d": [
     "invite <name> on the daemon host writes a principals row holding only the code's SHA-256 and prints the code once (15 min default, 24 h cap; --tier, --no-board, --list, --revoke, --replace); refuses unless the local daemon reports auth on and its /health bank fingerprint matches the database",
     "pair on the joining machine mints its own token into a new owner-only file and sends POST /api/pair {code, token_sha256}: the token never crosses the wire; the answer names principal, tier and bank, and the file becomes ~/.pseudolife-mcp/<principal>.token",
-    "/api/pair sits before the bearer gate: any Origin is 403, JSON only, every refusal the same 400 pairing_refused, a global budget of 20 failed redemptions a minute before 429"
+    "/api/pair sits before the bearer gate: any Origin is 403, JSON only, every refused redemption the same 400 pairing_refused (no oracle for which codes exist), a global budget of 20 failed redemptions a minute before 429"
    ]
   },
   {
