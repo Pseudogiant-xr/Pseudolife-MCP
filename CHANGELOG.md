@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
+- The served `memory_message` description said a done session reopens
+  only for urgent mail from the "maintainer/coordinator/clearer". Since
+  the change below, the coordinator that counts is the one the operator
+  designated (the live `designated:coordinator:<project>` lease); holding
+  the open `coordinator:<project>` lease, which the `memory_agents`
+  description tells sessions to claim, grants nothing. Read side by side,
+  the two descriptions suggested that claiming the lease let a session's
+  urgent mail reopen done parks. The sentence now says "designated
+  coordinator", pinned by a test. The docstring was reflowed one line
+  shorter to pay for the word; tier description budgets are unchanged.
+
 ### Changed (2026-10-03 — only an operator-designated coordinator reopens a done session)
 - The first version below made the holder of the `coordinator:<project>`
   lease the coordinator, and any session can claim a free one, possibly
