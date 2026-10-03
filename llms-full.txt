@@ -436,7 +436,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the project's designated coordinator (`pseudolife-mcp lease designate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -651,8 +651,11 @@ daily task or timer that applies a new release only while
 agent board, with the same backup and rollback tag, and posts a board
 notice either way. Codex keeps its hook approvals across updates (it
 approves the hook definitions, not the scripts), and an update from a
-checkout refreshes manual Codex hook copies itself; only a changed
-`hooks.json` makes every update path print the approval steps.
+checkout refreshes manual Codex hook copies itself. Where Codex runs the
+plugin's hooks, the client step refreshes Codex's installed plugin copy
+through `codex plugin marketplace upgrade` while the approved hook
+definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-specifics));
+only a changed `hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:
@@ -4403,7 +4406,7 @@ bank; `fan_out_stagger_seconds` (30) spaces the rings from one sender's burst;
 `active_seconds` (60) is the window in which a recipient's own last board
 action makes ordinary mail `hinted` rather than rung;
 `authority_per_sender_per_hour` (12) bounds the urgent rings one sender causes
-as the maintainer or a project's coordinator, which spend it instead of
+as the maintainer or a project's designated coordinator, which spend it instead of
 `urgent_per_sender_per_hour` (see [Reopening a done park](#reopening-a-done-park)).
 Unparked Codex urgency
 takes capped attention first, with unknown host turn state. The values are whole
@@ -4496,10 +4499,16 @@ The installed shim starts its adapter (for Codex, its per-thread registry) by
 default when it holds a bearer token (`PSEUDOLIFE_MCP_TOKEN` or
 `PSEUDOLIFE_MCP_TOKEN_FILE`) and the daemon serves that bearer the board; it
 asks at startup and otherwise stays quiet. A question the daemon does not
-answer (no connection, a timeout, a 5xx, 408 or 429) is not a no: a Claude Code session's
-shim asks again in the background on the registration retry schedule below,
-registers once the answer is yes, and stays quiet if it is no. A Codex shim
-still reads no answer as no for that process. `PSEUDOLIFE_AGENT_COORDINATION=0`
+answer (no connection, a timeout, a 5xx, 408 or 429) is not a no: the shim
+asks again in the background on the registration retry schedule below. A
+Claude Code session's shim registers once the answer is yes, and stays quiet
+if it is no. A Codex shim builds its per-thread registry once the answer is
+yes, and each thread's first result after that carries a one-time note that
+the board works, since the instructions carried no check-in; until then a
+board write is refused with the retry message and memory calls go out as
+usual. A later no keeps the quiet default (no registry, no warning, no
+note), except that an explicit `PSEUDOLIFE_CODEX_DOORBELL=1` then says once
+on stderr that the doorbell is off. `PSEUDOLIFE_AGENT_COORDINATION=0`
 (any value but `1`, `true`, `yes` or `on`) turns it off for that client, and
 `=1` skips the question and reports any refusal on stderr.
 
@@ -6116,7 +6125,7 @@ characters) and `urgent`, and returns `wake` beside the receipt:
 | `hinted` | ordinary mail to a recipient that is not parked and acted on the board within `active_seconds` (unparked Codex urgency takes the capped attention branch first); its next tool result carries the mail (a parked session has stopped, so it is decided on its park however recently it parked) | |
 | `not_needed` | the recipient is parked `done` and the mail does not reopen it (`reason: parked_done`; see [Reopening a done park](#reopening-a-done-park)), or has not parked at all or its park has lapsed (`reason: no_park`) and the mail is not `urgent`: it is waiting on nobody, so the mail waits for its next turn (a `clears` changes nothing; there is no need to clear) | `reopen_by` for `parked_done`: who could reopen it |
 | `no_path` | unparked Codex urgency has no proved steer path (`reason: no_steer_path`, `delivery: queue_pending`, `recipient_state: unknown`, `queue_allowed: true` for a capped unknown-state bell), or the mail would ring the recipient, but it has neither a live channel nor a currently armed ring listener; an installed or declared ring capability alone is insufficient | the parked need, if any; `reason: listener_unknown` or `listener_expired` for an unarmed or expired ring path; `fallback` (text) and `fallback_paths`, the other ways to reach that client: `codex_doorbell` and `maintainer_types` for a Codex thread, `claude_desktop_send_message` and `maintainer_types` for a Claude Code session; `reopened` for a reopened done park |
-| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the recipient project's coordinator is `reason: maintainer` or `coordinator` and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
+| `rung` | a live path is armed and the recipient is parked with a need the mail plausibly clears: the sender is `park_clear_by` (or, when that names a lease, released it or let it expire within the last 60 seconds, by the daemon's audit log; never for `maintainer`, an agent id or an id prefix), `park_clear_by` is `anyone`, `clears` names the need (the same words, or one's words as a run of whole words inside the other's, holding a word of four letters or more), or `urgent` within the sender's cap; or a non-Codex recipient has old board activity and is not parked (or its park lapsed) and the mail is `urgent`, within the same sender cap (`reason: urgent`); urgent mail from the maintainer or the recipient project's designated coordinator is `reason: maintainer` or `coordinator` and spends the authority budget instead; a done park rings only for the urgent reopen described under [Reopening a done park](#reopening-a-done-park) | `ring_at`; `reopened: true` for a done park |
 | `withheld` | parked with a need the mail does not clear | `park_needs`, `park_clear_by`, `retry` (what would ring it: `urgent`, or `clears` naming the need) |
 | `capped` | over a cap: `reason` names it (`recipient_hour`, `nightly`, `urgent_sender_hour`, `authority_sender_hour`) | the parked need, if any |
 
@@ -6129,7 +6138,7 @@ Chatter never rings, and regular mail never wakes (maintainer decision
 2026-10-02): a parked recipient rings for mail that clears its need, and
 a non-Codex recipient retains its established urgent ring contract. Unparked
 Codex urgency spends the sender's urgent allowance (the authority budget
-when the sender is the maintainer or a coordinator) and passes the same
+when the sender is the maintainer or a designated coordinator) and passes the same
 per-recipient, nightly and stagger caps, and records attention with
 `no_steer_path`. An armed queue listener may queue one fixed bell labelled
 `turn state unknown`; neither its acceptance nor board recency proves native
@@ -10427,10 +10436,10 @@ codex mcp add pseudolife-memory \
 installed, `<url>` an origin such as `http://100.64.0.2:8765` (no `/mcp`, no
 path).
 
-The shim waits about 20 seconds for a remote daemon that does not answer (a
-first probe, then a 15-second retry loop), which is longer than Codex's default MCP startup timeout. Set the Codex
-startup timeout as the [README's Codex setup](../../README.md#quickstart)
-describes.
+The shim waits up to 5 seconds for a remote daemon that does not answer,
+inside Codex's default 10-second MCP startup timeout, and then starts the
+session without it and gets memory back by itself once the daemon answers
+(see [When the daemon is unreachable](#when-the-daemon-is-unreachable)).
 
 The Claude Code plugin adds the session hooks:
 

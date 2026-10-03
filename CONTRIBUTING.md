@@ -135,7 +135,14 @@ HEAD's suite in WSL, and `pwsh ops/remote-suite.ps1` runs it on the first
 free machine (local WSL, or a second Linux machine configured outside the
 repository); both refuse a checkout with uncommitted changes (the WSL
 launcher's `PSEUDOLIFE_WSL_SUITE_SOURCE=worktree` tests the working tree
-instead).
+instead). Both run `ops/wsl-suite.sh`, which tags the run with
+`PSEUDOLIFE_SUITE_RUN_ID` and, once pytest exits (also on Ctrl+C or a
+hangup), stops every process still carrying that marker and names each on
+stderr; it exits 130, 129 or 143 for an interrupt, hangup or TERM, else
+with pytest's code. A run dispatched to the second machine refuses a test
+server that holds a production bank, and checks again once it holds the
+suite lock, since a server that refused the first connection may be up by
+then.
 
 All tests must pass. Every PR requires fresh CI for its current head
 integrated with current master, including the full PostgreSQL, lite Linux,
