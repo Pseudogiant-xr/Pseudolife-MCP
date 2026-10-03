@@ -29,7 +29,9 @@ def boundary(monkeypatch, *, use_service=True):
 
     def run_daemon(**kwargs):
         calls.append(("daemon", kwargs))
-        selected = service.MemoryService() if use_service else object()
+        # This slot is the synthetic callback patched by oracle.run_fixture.
+        fixture_factory = service.MemoryService
+        selected = fixture_factory() if use_service else object()
         if use_service:
             assert selected.config.memory.dream.enabled is False
             assert selected.config.memory.retrieval_log.enabled is False
