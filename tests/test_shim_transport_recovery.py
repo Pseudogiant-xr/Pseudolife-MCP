@@ -812,6 +812,10 @@ def test_lost_write_response_is_unknown_and_never_replayed(tmp_path, upstream):
             data = _error_data(caught.value)
             assert data["phase"] == "call"
             assert data["operation_outcome"] == "unknown"
+            # A write that committed before its connection dropped is not one
+            # that "never reached the daemon": the unreachable-daemon message
+            # must not tell the client it did not run.
+            assert "did not run" not in str(caught.value)
             assert upstream.writes == 1
             recovered = await client.call_tool("read", {})
             assert json.loads(recovered.content[0].text)["writes"] == 1

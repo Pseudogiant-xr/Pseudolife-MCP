@@ -1696,3 +1696,84 @@ def test_a_daemon_whose_health_answers_but_mcp_drops_does_not_flap_the_tool_list
         http.server_close()
         worker.join(timeout=2)
     assert 1 <= notices <= 4, notices
+
+
+def test_a_call_that_gets_through_announces_the_recovery_itself(tmp_path, monkeypatch):
+    """The /health watcher is not the only way back: a tool call that reaches
+    the daemon proves it answers, and the shim must say so (list_changed)
+    rather than leave the client on the cached list until the next probe. The
+    fixture's /health never answers, so only the call can flip the link."""
+    import asyncio
+    from http.server import ThreadingHTTPServer
+    from threading import Thread
+
+    import mcp.types as types
+
+    base = _fixture_daemon("live_tool", "Live daemon instructions.")
+
+    class Handler(base):
+        def do_GET(self):  # /health is broken; /mcp works
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=http.serve_forever, daemon=True)
+    worker.start()
+
+    async def drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        changed = asyncio.Event()
+
+        async def on_message(message) -> None:
+            if isinstance(getattr(message, "root", message),
+                          types.ToolListChangedNotification):
+                changed.set()
+
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "pseudolife_memory.cli"],
+            env=_degraded_shim_env(http.server_port, tmp_path))
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w, message_handler=on_message) as client:
+                init = await asyncio.wait_for(client.initialize(), timeout=20)
+                assert "did not answer" in init.instructions
+                assert (await client.list_tools()).tools == []
+                res = await client.call_tool("live_tool", {})
+                assert "live answer" in res.content[0].text
+                await asyncio.wait_for(changed.wait(), timeout=5)
+                assert [t.name for t in (await client.list_tools()).tools] == ["live_tool"]
+
+    try:
+        asyncio.run(asyncio.wait_for(drive(), timeout=60))
+    finally:
+        http.shutdown()
+        http.server_close()
+        worker.join(timeout=2)
+
+
+def test_degraded_start_still_names_an_unusable_token_file(monkeypatch, tmp_path, capsys):
+    """With no /health there is no ``auth`` verdict, so the startup credential
+    check cannot decide to exit; but a configured token file that is missing
+    or unsafe fails every call later behind an opaque error, so the one line a
+    human can read still names it. The session starts regardless."""
+    from pseudolife_memory import shim
+
+    missing = tmp_path / "missing.token"
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKEN", raising=False)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN_FILE", str(missing))
+    monkeypatch.setattr(shim, "_require_mcp_sdk_v2", lambda: None)
+    monkeypatch.setattr(shim, "ensure_daemon", lambda url: None)
+    monkeypatch.setattr(shim, "_post_episode", lambda *a, **k: None)
+    started = []
+
+    async def proxy(url, token, session_uid, **kwargs):
+        started.append(kwargs.get("daemon_unreachable"))
+
+    monkeypatch.setattr(shim, "_run_session_proxy", proxy)
+    shim.run_shim()
+    assert started == [True]
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert "PSEUDOLIFE_MCP_TOKEN_FILE" in err

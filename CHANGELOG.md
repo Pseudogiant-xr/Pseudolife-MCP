@@ -26,7 +26,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `notifications/tools/list_changed` when the daemon answers, and the
   client re-lists the live tools. A daemon that stops answering mid-session
   is handled the same way. A loopback daemon the shim spawns itself still
-  exits the shim when it never comes up.
+  exits the shim when it never comes up. A degraded start cannot know
+  whether the daemon requires a bearer, so it does not exit on a missing
+  credential, but it still names a configured token file it cannot use on
+  stderr.
+- Known regression, follow-up in progress: a Codex session started while
+  the daemon is unreachable for more than 5 s never joins the agent board,
+  even after the daemon returns. Its board probe goes unanswered, and the
+  Codex path, unlike Claude Code's, has no late registration. Before, the
+  180 s no-spawn wait fit inside the `startup_timeout_sec = 240` the README
+  recommends for Codex, so a Codex session started while Docker booted
+  could still join. Memory tools themselves recover as above.
 - Deploying this needs the client step: the shim is a separate install
   that a daemon deploy never touches.
 

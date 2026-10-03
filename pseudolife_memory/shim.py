@@ -2161,6 +2161,28 @@ def _require_credential_for_auth(url: str, health: dict, provider) -> None:
     sys.exit(1)
 
 
+def _warn_if_credential_file_unusable(provider) -> None:
+    """The degraded-start half of :func:`_require_credential_for_auth`. With
+    no /health there is no ``auth`` verdict to exit on, and the session must
+    start anyway; but a configured token file that cannot be used fails every
+    call later behind an opaque error, so name it once here."""
+    from pseudolife_memory.credentials import CredentialError
+
+    if provider.path is None:
+        return
+    try:
+        provider.snapshot()
+    except CredentialError as exc:
+        print(
+            f"[shim] the configured credential file cannot be used: {exc}\n"
+            f"  PSEUDOLIFE_MCP_TOKEN_FILE={provider.path}\n"
+            f"  If the daemon requires bearer authentication, every call will "
+            f"be refused until the file exists, is owner-only, and holds only "
+            f"the token.",
+            file=sys.stderr,
+        )
+
+
 def run_shim(*, channel: bool = False) -> None:
     import asyncio
     from pseudolife_memory.credentials import CredentialProvider
@@ -2171,6 +2193,8 @@ def run_shim(*, channel: bool = False) -> None:
     provider = CredentialProvider.from_environment()
     if health is not None:
         _require_credential_for_auth(url, health, provider)
+    else:
+        _warn_if_credential_file_unusable(provider)
     # One client session, one root episode. ``session_uid`` rides every call
     # as X-PL-Session, and the daemon stamps a write that passes no
     # ``episode=`` handle (and names the session for memory_session_title)
