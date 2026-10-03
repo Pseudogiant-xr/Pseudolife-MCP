@@ -17,6 +17,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   urgent mail reopen done parks. The sentence now says "designated
   coordinator", pinned by a test. The docstring was reflowed one line
   shorter to pay for the word; tier description budgets are unchanged.
+
 ### Fixed (2026-10-04 — the Stop gate and lease help name the designated coordinator)
 - The Stop hook's park gate told a stopping session that urgent mail from
   "the project coordinator" still rings a done park. Since the change
