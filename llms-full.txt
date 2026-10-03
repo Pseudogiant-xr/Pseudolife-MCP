@@ -6077,8 +6077,8 @@ The **park record** lives on the agent row and is set through
 | `park_expires` | An epoch after which the park no longer stands; a park set without one expires after 12 hours, and none may be more than 7 days ahead (`invalid_park`) |
 
 Use `done` only when no follow-up is expected; urgent mail from the
-maintainer, the project coordinator or your named clearer still rings it.
-Waiting on a merge click or a review that may still bring fixes? Park
+maintainer, the project's designated coordinator or your named clearer still
+rings it. Waiting on a merge click or a review that may still bring fixes? Park
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
 `maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
 a live listener. Check the sender's wake receipt; `no_path` means mail is
@@ -6438,10 +6438,10 @@ also capped (below, and by the daemon's `wake` caps under
   ending: update your board status with why you stopped and what you need
   (memory_agents update park_reason=... park_needs=... park_clear_by=...
   park_resume=...). Use done only when no follow-up is expected; urgent mail
-  from the maintainer, the project coordinator or your named clearer still
-  rings it. Waiting on a merge click or a review that may still bring fixes?
-  Park needs_approval with park_clear_by set to the reviewer's agent id or
-  maintainer, or waiting_peer. A park records intent; automatic wake requires
+  from the maintainer, the project's designated coordinator or your named
+  clearer still rings it. Waiting on a merge click or a review that may still
+  bring fixes? Park needs_approval with park_clear_by set to the reviewer's
+  agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires
   a live listener. Check the sender's wake receipt; no_path means mail is
   queued for receive on a later turn. For waits over 59 minutes, especially
   needs_approval waiting on maintainer, arm wait-mail in the background or

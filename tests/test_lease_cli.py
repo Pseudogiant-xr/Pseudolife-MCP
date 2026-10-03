@@ -1021,6 +1021,18 @@ def test_help_exits_0(lease_env, argv, capsys):
     assert "pseudolife-mcp lease" in capsys.readouterr().out
 
 
+def test_the_usage_line_names_every_action(lease_env, capsys):
+    """The usage braces come from a hand-written metavar, so a new action
+    (``designate`` shipped without one) must be added there too."""
+    parser, _, _ = lease_cli._parsers()
+    actions = next(a for a in parser._actions if a.dest == "action").choices
+    assert _run(["--help"], FakeDaemon()) == 0
+    usage = capsys.readouterr().out.split("\n\n", 1)[0]
+    braces = re.search(r"\{([a-z,]+)\}", usage)
+    assert braces is not None, usage
+    assert braces.group(1).split(",") == list(actions)
+
+
 # --- lease list -----------------------------------------------------------------
 
 def test_list_without_a_board_reports_local_locks(lease_env, monkeypatch, capsys):
@@ -1112,6 +1124,12 @@ def test_list_falls_back_to_local_state_when_the_board_refuses(lease_env, capsys
 
 def test_the_console_usage_lists_lease():
     assert re.search(r"^  lease\s", console._USAGE, re.M)
+
+
+def test_the_console_usage_names_the_operator_commands():
+    usage = " ".join(console._USAGE.split())
+    assert "`lease break NAME`" in usage
+    assert "`lease designate PROJECT AGENT`" in usage
 
 
 def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):
