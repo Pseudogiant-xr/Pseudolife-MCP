@@ -1766,3 +1766,86 @@ def test_turn_and_marker_files_leave_with_the_digest(tmp_path):
         assert not (tmp_path / "digest.turn").exists()
 
     asyncio.run(drive())
+
+
+def test_codex_attention_offer_reports_pending_without_a_ring_marker(tmp_path):
+    daemon = FakeDaemon()
+    answers = iter([(0, [], None), (1, _preview("m1"),
+                    {"decision": "attention", "reason": "urgent", "ring_at": 0.0})])
+
+    def hook(action, body):
+        if action not in {"attach", "heartbeat"}:
+            return None
+        count, preview, wake = next(answers)
+        return httpx.Response(200, json={"generation": 3, "lease_until": "later",
+                                        "pending_count": count, "pending_preview": preview,
+                                        "wake": wake})
+    daemon.hook = hook
+
+    async def drive():
+        client, coordination = adapter(daemon, digest_path=tmp_path / "digest.txt",
+                                      delivery_transport="codex")
+        async with client, coordination:
+            await coordination._heartbeat()
+            assert coordination.ring_due() is None
+            assert "no_steer_path" in coordination.unread_hint
+            assert "pending" in coordination.unread_hint
+            assert not (tmp_path / "digest.ring").exists()
+            assert "no_steer_path" in (tmp_path / "ledger.log").read_text(encoding="utf-8")
+
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("withdrawn", [None, {}, "malformed",
+    {"decision": "not_needed", "reason": "parked_done"},
+    {"decision": "attention", "reason": "no_steer_path", "ring_at": 1.0},
+    {"decision": "rung", "reason": "urgent", "ring_at": True},
+    {"decision": "rung", "reason": [], "ring_at": 1.0}])
+@pytest.mark.parametrize("marker", ["written", "delayed", "refused"])
+def test_codex_authoritative_withdrawal_clears_offer_and_marker_paths(tmp_path, withdrawn, marker):
+    ring = {"decision": "rung", "reason": "urgent",
+            "ring_at": time.time() + 0.2 if marker == "delayed" else 0.0}
+    daemon = _mailbox_daemon([(0, [], None), (1, _preview("m1"), ring),
+                              (2, _preview("m1", "m2"), withdrawn)])
+
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                if marker == "refused":
+                    failed = _fail_first_ring_write(coordination)
+                await coordination._heartbeat()
+                await asyncio.sleep(0.01)
+                if marker == "refused":
+                    assert failed and coordination._ring_unwritten is not None
+                elif marker == "written":
+                    assert (tmp_path / "digest.ring").exists()
+                else:
+                    assert coordination._ring_timer is not None
+                original_ring = coordination._last_ring
+                await coordination._heartbeat()
+                assert coordination.ring_due() is None
+                assert coordination._ring_timer is None
+                assert coordination._ring_unwritten is None
+                assert coordination._last_ring == original_ring
+                await asyncio.sleep(0.25)
+                assert not (tmp_path / "digest.ring").exists()
+    asyncio.run(drive())
+
+
+def test_codex_repeated_valid_rung_keeps_offer_and_deduplicates_consumption(tmp_path):
+    ring = {"decision": "rung", "reason": "urgent", "ring_at": 0.0}
+    daemon = _mailbox_daemon([(0, [], None)] + [(1, _preview("m1"), ring)] * 3)
+
+    async def drive():
+        client, coordination = adapter(daemon, delivery_transport="codex",
+                                       digest_path=tmp_path / "digest.txt")
+        async with client:
+            async with coordination:
+                await coordination._heartbeat()
+                await coordination._heartbeat()
+                assert coordination.ring_due() == ("rung", "urgent")
+                await coordination._heartbeat()
+                assert coordination.ring_due() is None
+    asyncio.run(drive())

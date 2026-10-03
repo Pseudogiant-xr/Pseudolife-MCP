@@ -84,8 +84,8 @@ def own_bank():
 
     A bank has one writer (the writer lease): on the run's database this
     daemon would contend with in-process tests' services (see
-    ``tests.helpers.serve_on_private_bank``), and off Windows
-    ``_reap_daemon`` cannot kill it, so it would outlive its test holding
+    ``tests.helpers.serve_on_private_bank``), and a daemon that outlives
+    its test (an interrupted run skips ``_reap_daemon``) would keep holding
     that database. Dropping the private bank cuts it off instead.
     """
     url = resolve_test_db_url()
@@ -331,7 +331,10 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path, own_bank):
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
-        _reap_daemon(port, tmp_path)
+        survivors = _reap_daemon(tmp_path)
+    # The spawned daemon is detached on purpose, so nothing but the reap ends
+    # it: off Windows it once outlived every run, one ~2.8 GB daemon each.
+    assert survivors == [], f"the autostarted daemon outlived its test: {survivors}"
 
 
 def test_shim_forwards_stringified_list_param(shared_daemon):
@@ -667,54 +670,85 @@ def test_shipped_package_never_spawns_with_detached_process():
         f"CREATE_NO_WINDOW so no console window is ever allocated")
 
 
-def _reap_daemon(port: int, data_dir) -> None:
-    """Best-effort cleanup of the detached daemon the shim auto-spawned.
+def _spawned_procs(data_dir) -> list:
+    """Live processes whose environment names ``data_dir``.
 
-    Only a listener on ``port`` whose environment names this test's
-    ``data_dir`` (the shim hands its own environment to the daemon it
-    spawns) is killed. If the spawn failed, the port may be another
-    session's by now, and killing by port alone would take that down.
+    The shim hands its own environment to the daemon it spawns, and
+    ``data_dir`` is the test's own ``tmp_path``, so this matches the test's
+    shim and daemon and nothing else: never another session's daemon or the
+    live one. Matching by environment, not by port, also finds a daemon that
+    never bound its port, and needs no system-wide socket table (which macOS
+    only lists for root).
     """
-    import urllib.request
-
     import psutil
-    try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
-    except Exception:  # noqa: BLE001
-        pass
-    if sys.platform != "win32":
-        return
-    for conn in psutil.net_connections(kind="tcp"):
-        if (conn.status != psutil.CONN_LISTEN or not conn.laddr
-                or conn.laddr.port != port or not conn.pid):
-            continue
+
+    found = []
+    for proc in psutil.process_iter():
         try:
-            proc = psutil.Process(conn.pid)
-            if proc.environ().get("PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir):
-                proc.kill()
+            if (proc.pid != os.getpid() and proc.environ().get(
+                    "PSEUDOLIFE_MCP_DATA_DIR") == str(data_dir)):
+                found.append(proc)
+        except psutil.Error:
+            continue
+    return found
+
+
+def _spawned_by(data_dir) -> list[str]:
+    """:func:`_spawned_procs` as ``pid argv`` lines, for assertions."""
+    import psutil
+
+    lines = []
+    for proc in _spawned_procs(data_dir):
+        try:
+            lines.append(f"{proc.pid} {' '.join(proc.cmdline())}")
+        except psutil.Error:
+            continue
+    return lines
+
+
+def _reap_daemon(data_dir) -> list[str]:
+    """Kill what the shim auto-spawned for this test; return what survived.
+
+    The shim detaches its daemon on purpose (its own session off Windows,
+    its own process group on Windows) so that it outlives the shim, and so
+    it outlives the test too unless killed here. This reaper used to act on
+    Windows only: off Windows every run left one ~2.8 GB daemon behind
+    (2026-10-03: 14 in WSL, and 5 on the second machine, which exhausted
+    its memory and swap). Dropping the test's private bank cuts the daemon
+    off from Postgres but does not end the process.
+    """
+    import psutil
+
+    procs = _spawned_procs(data_dir)
+    for proc in procs:
+        try:
+            proc.kill()
         except psutil.Error:
             pass
+    psutil.wait_procs(procs, timeout=10)
+    return _spawned_by(data_dir)
 
 
 def test_reap_daemon_kills_only_the_daemon_this_test_started(tmp_path):
-    if sys.platform != "win32":
-        pytest.skip("the reaper only acts on Windows")
     listen = ("import socket, time; s = socket.socket(); "
               "s.bind(('127.0.0.1', 0)); s.listen(); "
               "print(s.getsockname()[1], flush=True); time.sleep(60)")
 
     def listener(data_dir):
+        # Detached as shim.spawn_daemon detaches the daemon: its own session
+        # off Windows, so no signal to this test's group reaches it.
+        detach = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+                  if sys.platform == "win32" else {"start_new_session": True})
         proc = subprocess.Popen(
             [sys.executable, "-c", listen], stdout=subprocess.PIPE, text=True,
             env={**os.environ, "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir)},
-            creationflags=subprocess.CREATE_NO_WINDOW)
+            **detach)
         return proc, int(proc.stdout.readline())
 
-    theirs, their_port = listener(tmp_path / "another-session")
-    ours, our_port = listener(tmp_path)
+    theirs, _ = listener(tmp_path / "another-session")
+    ours, _ = listener(tmp_path)
     try:
-        _reap_daemon(their_port, tmp_path)
-        _reap_daemon(our_port, tmp_path)
+        assert _reap_daemon(tmp_path) == []
         ours.wait(timeout=10)
         assert theirs.poll() is None, "killed another session's listener"
     finally:

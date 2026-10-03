@@ -6,6 +6,64 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
+- Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved
+  native queue notice. Private per-thread reservations survive restart; exact
+  generated notice/nonce arrival at the owning prompt hook is separate evidence
+  from queue acceptance, reading mail or completing work.
+- An unresolved reservation may clear at its originating message's durably
+  recorded expiry, with an explicit `unresolved_expired` availability receipt.
+  Expiry receipts precede release on both polling and replacement paths; a failed
+  receipt write retains the old reservation, and replacement logs the expiry once.
+  Native cancellation remains unknown and the queued item may remain visible.
+  Valid older records without exact expiry get one durable first-seen plus
+  24-hour upper bound; malformed or foreign state stays fail-closed.
+- Capped urgent unparked Codex mail may queue one fixed bell labelled
+  `turn state unknown`. Receipts distinguish pending queue permission from
+  known-busy attention hints; no native desktop steer route is proved.
+  Active and unknown-state notices resume the original authorized task.
+- Current eligible Codex grants remain explicit through the quiet interval and
+  fan-out stagger. Historical grants require retained audit ordering after the
+  unchanged current park; cleared, expired or refined parks withdraw old offers,
+  delayed writes and marker retries without rewriting historical grants or caps.
+- Empty reservation contention remains retryable; definite pre-execution CLI
+  failures release only their own unaccepted reservation, while ambiguous results
+  retain it. Versioned exact notice formats survive wording updates, and prompt
+  receipt recording retries brief real lock contention.
+- New reservations are fully written and flushed in a private temporary file
+  before publication under the per-thread lock. Interrupted or failed writes
+  cannot leave a partial pending record that blocks later notices. A directory
+  sync failure after publication releases only the exact new, unaccepted record
+  under the same lock, allowing ordinary delivery to retry.
+- Ambiguous bridge failure never queues an alternate for that snapshot and restores
+  a guarded listener for later eligible arrivals. Current desktop queued-notice
+  hook emission remains unverified; missing receipts use the recorded expiry
+  fallback. Client hooks must be updated to use the correlation path.
+
+### Fixed (2026-10-03 — a Linux test run no longer leaves a 2.8 GB daemon behind)
+- Every full test run on Linux, WSL or macOS left one test daemon
+  (`python -m pseudolife_memory.cli serve`, about 2.8 GB) running after
+  pytest exited. The shim's autostart test makes the shim start a daemon,
+  which the shim detaches on purpose, and the test's cleanup only acted on
+  Windows. On 2026-10-03 14 had piled up in WSL (28 of its 39 GB), and 5 on
+  the second test machine, each holding its run's systemd scope open, had
+  exhausted its memory and swap, taking the live memory bank and the agent
+  board down for hours. The test now stops what its shim started on every
+  platform, found by the test's own data directory in the process
+  environment, and fails if anything survives.
+- `ops/wsl-suite.sh` (both `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`
+  run it) now runs pytest as a child, tags the run with
+  `PSEUDOLIFE_SUITE_RUN_ID`, and after pytest exits, also on Ctrl+C or a
+  hangup, stops every process still carrying that marker, naming each on
+  stderr (Linux only: it reads `/proc`). Processes the run did not start,
+  such as the live daemon or another run, are never touched; a child
+  started with a scrubbed environment (the Codex doorbell's CLI, the
+  tunnel's runtime) drops the marker and is not swept. pytest runs in a
+  session of its own: an interrupt, hangup or TERM sent to the launcher is
+  passed on to it at once and exactly once (a terminal's Ctrl+C no longer
+  reaches it twice, which aborted its session-finish cleanup), and the
+  launcher then exits 130, 129 or 143; otherwise the exit code is pytest's.
+
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before
   it queued for the suite lock, and passed over a server that refused the
