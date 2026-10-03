@@ -97,7 +97,8 @@ _ADAPTER_RETRY_ATTEMPT_SECONDS = 30.0
 # tuning constant. A healthy daemon answers it without storage I/O in a
 # loopback round trip; a stalled one must not stretch the startup budget
 # above. An unanswered probe adds no adapter or check-in at startup; the
-# per-session shim asks again in the background (_LateBoardAdapter).
+# per-session shim asks again in the background (_LateBoardAdapter, or
+# _LateCodexRegistry for Codex).
 _BOARD_PROBE_SECONDS = 1.5
 # The provider guide's 2026-08-31 cold-start check budgets 180 s for a first
 # model-loading tool call. This replaces the MCP SDK's 300 s SSE default while
@@ -1231,6 +1232,103 @@ class _LateBoardAdapter:
                 yield event
 
 
+class _LateCodexRegistry:
+    """Codex's per-thread registry for a default-mode board check that went
+    unanswered at startup, built once the daemon says it serves the board.
+
+    Codex binds no identity at startup (each thread attaches on its first
+    call), so what is retried here is only the question. Until the daemon
+    answers, :func:`_proxy` refuses board writes with the retry message and
+    sends memory calls out as if there were no registry; ``False`` stops the
+    asking and leaves today's quiet default (no registry, no note); ``True``
+    builds the real registry, which every call then reaches through
+    :meth:`get`, :meth:`unread_hint` and :meth:`note_call`. The instructions
+    carried no check-in, so each thread's first attached result says once
+    that the board works."""
+
+    def __init__(self, build, ask_board, *, refused_note=None):
+        self._build = build
+        self._ask_board = ask_board
+        # Printed on a no: a setting that needs the board says it is off.
+        self._refused_note = refused_note
+        self._registry = None
+        self._stopped = False
+        self._closing = False
+        self._noted: set[str] = set()
+        self._task = None
+
+    @property
+    def live(self) -> bool:
+        return self._registry is not None
+
+    @property
+    def pending(self) -> bool:
+        return self._registry is None and not self._stopped
+
+    def start(self) -> None:
+        import asyncio
+        self._task = asyncio.create_task(self._retry())
+
+    async def _retry(self) -> None:
+        import asyncio
+        attempt = 0
+        # The closing flag ends the loop, as in _LateBoardAdapter: the
+        # check's wait_for can lose the cancellation.
+        while not self._closing:
+            await asyncio.sleep(
+                _ADAPTER_RETRY_DELAYS[min(attempt, len(_ADAPTER_RETRY_DELAYS) - 1)])
+            attempt += 1
+            served = await self._ask_board()
+            if self._closing:
+                return
+            if served is None:
+                continue
+            if not served:
+                self._stopped = True
+                if self._refused_note:
+                    print(self._refused_note, file=sys.stderr)
+                return
+            try:
+                self._registry = self._build()
+            except Exception:  # noqa: BLE001 - memory must survive optional coordination
+                self._stopped = True
+                _report_coordination_unavailable(None)
+                return
+            print("pseudolife-mcp: the daemon serves the board after a startup delay; "
+                  "Codex threads register on their next call.", file=sys.stderr)
+            return
+
+    async def aclose(self) -> None:
+        import asyncio
+        import anyio
+        self._closing = True
+        with anyio.CancelScope(shield=True):
+            if self._task is not None:
+                self._task.cancel()
+                await asyncio.wait({self._task})
+            if self._registry is not None:
+                await self._registry.aclose()
+
+    async def get(self, thread_id, **kwargs):
+        if self._registry is None:
+            return None
+        return await self._registry.get(thread_id, **kwargs)
+
+    def unread_hint(self, thread_id, adapter) -> str | None:
+        if self._registry is None:
+            return None
+        hint = self._registry.unread_hint(thread_id, adapter)
+        if adapter is not None and thread_id not in self._noted:
+            # Bounded by the registry's thread cap: only attached threads.
+            self._noted.add(thread_id)
+            hint = "\n".join(filter(None, (_BOARD_REGISTERED_NOTE, hint)))
+        return hint
+
+    def note_call(self, thread_id, name, arguments, *, succeeded: bool = False) -> None:
+        if self._registry is not None:
+            self._registry.note_call(thread_id, name, arguments, succeeded=succeeded)
+
+
 async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None,
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
@@ -1421,7 +1519,17 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                     thread_id = thread_id_from_meta(params.meta)
                     if thread_id is not None:
                         call_headers["X-PL-Session"] = thread_id
-                        if coordination_registry is not None:
+                        registry = coordination_registry
+                        if (isinstance(registry, _LateCodexRegistry)
+                                and not registry.live):
+                            # The startup board check is still unanswered,
+                            # or the daemon said no: no registry yet, or ever.
+                            if registry.pending and _requires_coordination_identity(
+                                    params.name, params.arguments):
+                                raise _CoordinationUnavailableError(
+                                    message=_BOARD_PENDING_REFUSAL)
+                            registry = None
+                        if registry is not None:
                             # A native subagent's parent (v50), registered
                             # with the thread's address on its first call.
                             parent = parent_thread_from_meta(params.meta, thread_id)
@@ -1657,6 +1765,57 @@ def _session_state_path(url: str):
     return path
 
 
+def _codex_registry(url: str, token: str | None, provider):
+    """Codex's per-thread registry with its optional live delivery and
+    doorbell, as the environment configures them."""
+    from pseudolife_memory.codex_coordination import (
+        CodexCoordinationRegistry)
+    registry_options = {
+        "startup_seconds": _ADAPTER_STARTUP_SECONDS}
+    wake = os.environ.get(
+        "PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
+            "1", "true", "yes", "on"}
+    if wake:
+        delivery_url = os.environ.get(
+            "PSEUDOLIFE_CODEX_SERVER_URL")
+        delivery_token = os.environ.get(
+            "PSEUDOLIFE_CODEX_SERVER_TOKEN")
+        try:
+            bank_token = provider.snapshot().token
+        except Exception:  # credential failure disables optional wake only
+            bank_token = None
+        if (delivery_url and delivery_token and bank_token is not None
+                and delivery_token != bank_token):
+            registry_options.update({
+                "delivery_url": delivery_url,
+                "delivery_token": delivery_token,
+            })
+        else:
+            print("pseudolife-mcp: Codex live delivery requires an "
+                  "authenticated bridge with a separate host credential; "
+                  "using pull coordination.",
+                  file=sys.stderr)
+    # The doorbell is on by default (2026-09-28) when a
+    # codex CLI is found; unset stays quiet when none is
+    # (doctor names it), an explicit yes says why on stderr.
+    doorbell, doorbell_explicit = _doorbell_setting()
+    if doorbell:
+        from pseudolife_memory.codex_doorbell import (
+            CodexDoorbell, resolve_codex_command)
+        command = resolve_codex_command()
+        if command is not None:
+            registry_options["doorbell"] = CodexDoorbell(command)
+        elif doorbell_explicit:
+            reason = ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
+                      "existing file"
+                      if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
+                      else "no codex CLI found on PATH")
+            print(f"pseudolife-mcp: Codex board doorbell off ({reason}); "
+                  "using pull coordination.", file=sys.stderr)
+    return CodexCoordinationRegistry(
+        url, token, provider=provider, **registry_options)
+
+
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                              channel: bool = False, provider=None,
                              instructions_note: str = "") -> None:
@@ -1677,7 +1836,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     # Codex registry, whose refusals would otherwise ride every tool result.
     # An explicit opt-in skips the question and keeps the adapter's own
     # diagnostics. A question the daemon did not answer is not a no: the
-    # per-session shim keeps asking in the background (_LateBoardAdapter).
+    # per-session shim keeps asking in the background (_LateBoardAdapter,
+    # and _LateCodexRegistry for Codex's per-thread registry).
     setting = os.environ.get("PSEUDOLIFE_AGENT_COORDINATION", "").strip().lower()
     explicit = setting in {"1", "true", "yes", "on"}
     enabled = explicit
@@ -1704,60 +1864,40 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             # not bind an identity during process startup: launcher env is not
             # thread-scoped and future hosts may share one MCP process.
             kwargs["codex_metadata"] = True
-            if enabled:
+            if enabled or unanswered:
                 if os.environ.get("PSEUDOLIFE_AGENT_STATE"):
                     print("pseudolife-mcp: Codex automatic coordination is disabled by "
                           "the fixed PSEUDOLIFE_AGENT_STATE setting because threads must "
                           "not share credentials; remove it and use "
                           "PSEUDOLIFE_AGENT_STATE_DIR instead.",
                           file=sys.stderr)
-                else:
-                    from pseudolife_memory.codex_coordination import (
-                        CodexCoordinationRegistry)
-                    registry_options = {
-                        "startup_seconds": _ADAPTER_STARTUP_SECONDS}
-                    wake = os.environ.get(
-                        "PSEUDOLIFE_AGENT_WAKE", "").strip().lower() in {
-                            "1", "true", "yes", "on"}
-                    if wake:
-                        delivery_url = os.environ.get(
-                            "PSEUDOLIFE_CODEX_SERVER_URL")
-                        delivery_token = os.environ.get(
-                            "PSEUDOLIFE_CODEX_SERVER_TOKEN")
+                elif unanswered:
+                    # Whether the daemon serves this bearer the board is
+                    # still open: the stand-in asks again in the background
+                    # and builds the registry on a yes; a no then leaves
+                    # today's quiet default. No check-in until then.
+                    async def ask_board():
                         try:
-                            bank_token = provider.snapshot().token
-                        except Exception:  # credential failure disables optional wake only
-                            bank_token = None
-                        if (delivery_url and delivery_token and bank_token is not None
-                                and delivery_token != bank_token):
-                            registry_options.update({
-                                "delivery_url": delivery_url,
-                                "delivery_token": delivery_token,
-                            })
-                        else:
-                            print("pseudolife-mcp: Codex live delivery requires an "
-                                  "authenticated bridge with a separate host credential; "
-                                  "using pull coordination.",
-                                  file=sys.stderr)
-                    # The doorbell is on by default (2026-09-28) when a
-                    # codex CLI is found; unset stays quiet when none is
-                    # (doctor names it), an explicit yes says why on stderr.
-                    doorbell, doorbell_explicit = _doorbell_setting()
-                    if doorbell:
-                        from pseudolife_memory.codex_doorbell import (
-                            CodexDoorbell, resolve_codex_command)
-                        command = resolve_codex_command()
-                        if command is not None:
-                            registry_options["doorbell"] = CodexDoorbell(command)
-                        elif doorbell_explicit:
-                            reason = ("PSEUDOLIFE_CODEX_BIN is not an absolute path to an "
-                                      "existing file"
-                                      if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip()
-                                      else "no codex CLI found on PATH")
-                            print(f"pseudolife-mcp: Codex board doorbell off ({reason}); "
-                                  "using pull coordination.", file=sys.stderr)
-                    registry = CodexCoordinationRegistry(
-                        url, token, provider=provider, **registry_options)
+                            return await asyncio.wait_for(
+                                asyncio.to_thread(_board_available, url, provider),
+                                timeout=_ADAPTER_RETRY_ATTEMPT_SECONDS)
+                        except (TimeoutError, asyncio.TimeoutError):
+                            return None
+
+                    late_registry = _LateCodexRegistry(
+                        lambda: _codex_registry(url, token, provider), ask_board,
+                        refused_note=(
+                            "pseudolife-mcp: PSEUDOLIFE_CODEX_DOORBELL needs agent "
+                            "coordination, which the daemon does not serve this "
+                            "bearer; doorbell off." if _doorbell_setting()[1] else None))
+                    stack.push_async_callback(late_registry.aclose)
+                    late_registry.start()
+                    kwargs["coordination_registry"] = late_registry
+                    print("pseudolife-mcp: the daemon did not answer the board check at "
+                          "startup; memory proxy remains active and the check is "
+                          "retried in the background.", file=sys.stderr)
+                else:
+                    registry = _codex_registry(url, token, provider)
                     stack.push_async_callback(registry.aclose)
                     kwargs["coordination_registry"] = registry
                     if explicit:

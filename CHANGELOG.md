@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-03 — a Codex shim that starts while the daemon is slow joins the board later)
+- With `PSEUDOLIFE_AGENT_COORDINATION` unset, a Codex shim
+  (`PSEUDOLIFE_WRITER_ID=codex`) whose startup board check
+  (`GET /api/hook/coordination-start`) got no answer read it as "no board"
+  for the life of the process, so its threads never registered even after
+  the daemon came back. The Claude Code path has asked again since
+  2026-09-30; the Codex path now does too. The shim keeps asking in the
+  background on the registration retry schedule and builds its per-thread
+  registry once the daemon says it serves the board; each thread's first
+  result after that carries a one-time note that the board works, since
+  the instructions carried no check-in. While the check is unanswered, a
+  board write is refused locally with the retry message and memory calls
+  go out as before; a later no keeps the quiet default (no registry, no
+  warning, no note), except that an explicit `PSEUDOLIFE_CODEX_DOORBELL`
+  then says once that it is off. A fixed `PSEUDOLIFE_AGENT_STATE` now
+  draws its warning on an unanswered check too. The explicit opt-in is
+  unchanged. A shim change: it reaches clients through the client step of
+  a deploy.
+
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before
   it queued for the suite lock, and passed over a server that refused the
