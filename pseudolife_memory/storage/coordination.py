@@ -193,9 +193,11 @@ FALLBACK_CODEX = (
     "session's window.")
 FALLBACK_CLAUDE = (
     "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
-    "wait or wait-mail re-arms. A Claude Desktop Code-tab session can be reached now "
-    "through its host's session send_message; otherwise the maintainer types into the "
-    "session's window.")
+    "wait or wait-mail re-arms. Only if it is a Claude Desktop Code-tab session (the "
+    "board cannot tell) does its host's session send_message reach it now; a Claude Code "
+    "CLI session is reached by the maintainer typing into its window.")
+# ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
+# the board cannot tell one from a CLI session, so the text says so.
 FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
 FALLBACK_PATHS_CLAUDE = ("claude_desktop_send_message", "maintainer_types")
 DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.IGNORECASE)

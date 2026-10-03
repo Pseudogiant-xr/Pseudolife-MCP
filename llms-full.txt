@@ -6186,7 +6186,7 @@ and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI or Desktop Code tab) | the Stop hook's 59-minute wait, or a background `wait-mail` | `claude_desktop_send_message` (a Desktop Code-tab session: the host's session `send_message` starts a turn without the board), `maintainer_types` |
+| Claude Code (CLI or Desktop Code tab) | the Stop hook's 59-minute wait, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional

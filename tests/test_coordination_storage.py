@@ -2379,3 +2379,17 @@ def test_a_coordinators_project_burst_reopens_only_its_own_project(store):
     reasons = {r["recipient_agent_id"]: r["wake"]["reason"] for r in burst["receipts"]}
     assert reasons[ours["agent_id"]] == "coordinator"
     assert reasons[theirs["agent_id"]] == "parked_done"
+
+
+def test_releasing_the_lease_a_done_park_names_reopens_it_within_the_urgent_cap(store):
+    """A done park whose ``park_clear_by`` names a lease is reopened by the
+    agent that just released it (``_lease_clearer``), with ``urgent`` only."""
+    holder = store.register("alice")
+    store.acquire_lease(*creds(holder), name="gpu", ttl=3600)
+    b = _done(store, clear_by="gpu")
+    store.release_lease(*creds(holder), name="gpu")
+    assert _wake(store, holder, b)["reason"] == "parked_done"
+    assert _wake(store, holder, b, urgent=True) == {
+        "decision": "rung", "reason": "clearer", "ring_at": 1000.0, "reopened": True}
+    # Another agent's urgency names no lease it gave up.
+    assert _wake(store, store.register("alice"), b, urgent=True)["reason"] == "parked_done"

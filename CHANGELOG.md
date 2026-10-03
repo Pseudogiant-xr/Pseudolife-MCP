@@ -31,6 +31,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session, with matching `fallback` text. A `withheld` receipt carries
   `retry` (resend with `urgent`, or `clears` naming the need), and a
   `parked_done` one `reopen_by`.
+- A Codex thread parked `done` could not be rung even with an armed
+  doorbell: the daemon served it nothing. It is now served only a reopen
+  sent after its current park, with the audit-sequence proof other Codex
+  grants carry; a grant or attention decided before the park stays
+  unserved and unstamped.
+- `coordination_wakes.urgent` (read by `board-audit stats`, which does not
+  use it, and by anything querying the table) now means "counted against the plain urgent allowance": a maintainer or
+  coordinator ring is stored `urgent = false` with reason `maintainer` /
+  `coordinator`, though its send set `urgent`; a named clearer's reopen
+  is stored `urgent = true`.
 - The Codex doorbell serves CLI threads as well as desktop ones;
   `capabilities.codex` is the optional live-delivery bridge, not the
   doorbell. The guide now says so, with what a reopen needs from each
