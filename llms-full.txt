@@ -7165,8 +7165,8 @@ ops/shim_runtime.py install --source <checkout or requirement>` — builds a
 new runtime beside the old ones and never touches a file a running session
 has open: sessions keep the runtime they started with, the next session
 start takes the new one, and an old runtime is removed (by the same step,
-or `shim_runtime.py prune`) only once no process runs from it and no
-registration names it. A registration that still names a runtime, pipx or
+or `shim_runtime.py prune`) only once no process runs from it (the
+update doing the removing included) and no registration names it. A registration that still names a runtime, pipx or
 virtualenv path directly is moved to the launcher in place, the file
 backed up first and its permission bits kept (`shim_runtime.py migrate`); a
 mode argument such as `channel` stays. A registration that would spawn its
@@ -7630,7 +7630,7 @@ installer and the session notices print.
 | `pseudolife-mcp update --tag 0.15.1` | the same for a pinned release |
 | `pseudolife-mcp update --check` | report only: exit 0 when a newer release exists, 3 when current, 2 when PyPI or the daemon did not answer |
 | `--clients-only` / `--daemon-only` | one half: the shim runtime + plugin cache + Codex step, or the daemon. On a client-only machine (run from a shim runtime, no daemon container here) plain `update` and `--clients-only` both move the clients to the daemon's release (the newest release when it does not answer), and `--daemon-only` is refused naming the daemon's host |
-| `--reinstall` | recreate the daemon at the version it already runs; with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
+| `--reinstall` | recreate the daemon at the version it already runs, and install the shim runtime again when the current one is already that release (without it the shim step reports `current`); with `--clients-only`, install the release even over a checkout-built shim runtime of the same version |
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |

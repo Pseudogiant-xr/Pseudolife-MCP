@@ -423,12 +423,24 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
-def update_shim(source, repo: Path | None = None) -> dict:
+def _installed_release(rt, layout, source: str):
+    """The current runtime when it was installed from ``source`` itself, a
+    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version;
+    ``None`` for a checkout source, whose code changes under one version."""
+    pinned = re.fullmatch(r"pseudolife-mcp==([0-9A-Za-z.+-]+)", source)
+    current = rt.current_runtime(layout)
+    if pinned is None or current is None or rt.from_checkout(current):
+        return None
+    return current if current.source == source and current.version == pinned.group(1) else None
+
+
+def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> dict:
     """Install ``source`` (a checkout path, or a requirement such as
     ``pseudolife-mcp==0.15.1``) as a new shim runtime and move the
     registrations to the launcher. ``repo`` is the checkout whose ``.venv``
     counts as an editable install; it defaults to ``source`` when that is a
-    directory."""
+    directory. A release the current runtime was installed from is not
+    installed again unless ``reinstall``."""
     source = str(source)
     if repo is None and Path(source).is_dir():
         repo = Path(source)
@@ -513,8 +525,13 @@ def update_shim(source, repo: Path | None = None) -> dict:
         results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
+    installed = None if reinstall else _installed_release(rt, layout, source)
     try:
-        runtime = rt.install(source, layout, run=run_cli, log=lines.append)
+        if installed is not None:
+            # What the install would have done in passing: a launcher that
+            # was removed or is out of date is put back.
+            rt.ensure_launcher(layout, installed, run=run_cli, log=lines.append)
+        runtime = installed or rt.install(source, layout, run=run_cli, log=lines.append)
     except rt.RuntimeInstallError as exc:
         retry = (f"python \"{repo / 'ops' / 'update_clients.py'}\" --only shim --repo \"{repo}\"" if repo
                  else "pseudolife-mcp update --clients-only")
@@ -522,9 +539,13 @@ def update_shim(source, repo: Path | None = None) -> dict:
                   f"registrations were not touched and the runtime that was current stays current. "
                   f"Retry: {retry}")
         return {"state": "failed", "detail": "; ".join([detail] + [r["detail"] for r in results])}
-    detail = [f"runtime {runtime.name} ({runtime.version}"
-              + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
-              + f") installed from {source} behind {layout.launcher}"]
+    if installed is not None:
+        detail = [f"runtime {runtime.name} ({runtime.version}) is already installed from {source} behind "
+                  f"{layout.launcher}; nothing to install (--reinstall to install it again)"]
+    else:
+        detail = [f"runtime {runtime.name} ({runtime.version}"
+                  + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
+                  + f") installed from {source} behind {layout.launcher}"]
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
@@ -568,8 +589,9 @@ def update_shim(source, repo: Path | None = None) -> dict:
         if not any(rt.registered_runtime(r, layout) == legacy for r in rt.find_registrations(env)):
             detail.append(f"{legacy} is a hand-made runtime no registration names any more; remove it once no "
                           f"session runs from it")
-    detail.append("sessions already running keep their runtime; new sessions start on the new one")
-    state = "failed" if failed else f"installed:{runtime.version}"
+    if installed is None:
+        detail.append("sessions already running keep their runtime; new sessions start on the new one")
+    state = "failed" if failed else f"{'current' if installed else 'installed'}:{runtime.version}"
     return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results])}
 
 
@@ -1429,13 +1451,14 @@ def update_tunnels(shim: dict | None) -> dict | None:
                       "again to see why, then `pseudolife-mcp tunnel doctor`"}
 
 
-def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None) -> dict:
+def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None,
+              reinstall: bool = False) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
     (those in ``steps``), ``autostart`` when a checkout is known, and
-    ``ok``."""
+    ``ok``. ``reinstall`` installs a release the shim already runs."""
     report: dict = {}
     if "shim" in steps:
-        report["shim"] = update_shim(source, repo)
+        report["shim"] = update_shim(source, repo, reinstall)
     if "plugin" in steps:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:
