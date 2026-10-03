@@ -340,6 +340,30 @@ def test_a_launcher_registration_gets_a_new_runtime_beside_the_current_one(cli):
     assert not list(cli.home.glob("*.bak-*"))
 
 
+def test_a_release_the_current_runtime_already_is_is_not_installed_again(cli):
+    """`update --clients-only` after a release update installed one more
+    runtime of the same release on every run (2026-10-04). The current
+    runtime installed from that same pinned release is reported current;
+    another release, or --reinstall, installs."""
+    layout = _layout(cli)
+    _register_claude(cli, str(layout.launcher))
+    cli.version = "0.16.0"
+    first = uc.update_shim("pseudolife-mcp==0.16.0")
+    assert first["state"] == "installed:0.16.0", first
+    installs = len(_install_calls(cli))
+    layout.launcher.unlink()   # what a reinstall used to repair in passing
+    again = uc.update_shim("pseudolife-mcp==0.16.0")
+    assert again["state"] == "current:0.16.0", again
+    assert layout.launcher.is_file()
+    assert len(_install_calls(cli)) == installs and _runtime_dirs(cli) == ["000001"]
+    assert "runtime 000001 (0.16.0) is already installed from pseudolife-mcp==0.16.0" in again["detail"]
+    forced = uc.update_shim("pseudolife-mcp==0.16.0", reinstall=True)
+    assert forced["state"] == "installed:0.16.0" and _runtime_dirs(cli) == ["000002"]
+    cli.version = "0.16.1"
+    assert uc.update_shim("pseudolife-mcp==0.16.1")["state"] == "installed:0.16.1"
+    assert _runtime_dirs(cli) == ["000003"]
+
+
 def test_registrations_naming_a_runtime_path_are_moved_to_the_launcher_with_backups(cli):
     """Claude Code registers the hand-made runtime's launcher, Codex its
     python -m form with a cwd: both move to the launcher, the runtime is

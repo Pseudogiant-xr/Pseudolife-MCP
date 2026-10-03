@@ -84,7 +84,7 @@ PUBLIC_ERROR_CODES = frozenset({
     "coordination_unavailable", "invalid_request",
     "invalid_lease", "invalid_ttl", "invalid_expect", "invalid_purpose",
     "lease_not_held", "lease_queue_full",
-    # An agent's acquire of an operator-only (``designated:``) lease.
+    # An agent's acquire of an operator-only (``delegate:``) lease.
     "reserved_lease",
     "invalid_repository", "invalid_repository_id", "invalid_claim_path",
     "file_claim_requires_local_client",
@@ -195,8 +195,8 @@ PARK_CHECKIN_SENTENCE = (
     "needs_approval|needs_info|needs_resource|waiting_peer>, park_needs=<what>, "
     "park_clear_by=<agent id|maintainer|anyone>, park_resume=<what to do once "
     "cleared>), so mail wakes you only when it clears that need. Use done only "
-    "when no follow-up is expected; urgent mail from the maintainer, the project's "
-    "designated coordinator or your named clearer still rings it. Waiting on a merge "
+    "when no follow-up is expected; urgent mail from the maintainer, the maintainer's "
+    "delegate for the project or your named clearer still rings it. Waiting on a merge "
     "click or a review that may still bring fixes? Park needs_approval with "
     "park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer.")
 # The compact form for MCP initialization, which the shim appends only when
@@ -228,7 +228,7 @@ PARK_GATE_MESSAGE = (
     "Before ending: update your board status with why you stopped and what you need "
     "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
     "park_resume=...). Use done only when no follow-up is expected; urgent mail "
-    "from the maintainer, the project's designated coordinator or your named "
+    "from the maintainer, the maintainer's delegate for the project or your named "
     "clearer still rings it. Waiting on a merge click or a review that may "
     "still bring fixes? Park needs_approval with park_clear_by set to the "
     "reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires "

@@ -1031,6 +1031,23 @@ def test_the_usage_line_names_every_action(lease_env, capsys):
     braces = re.search(r"\{([a-z,]+)\}", usage)
     assert braces is not None, usage
     assert braces.group(1).split(",") == list(actions)
+    assert "delegate" in braces.group(1).split(",")
+
+
+def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, capsys):
+    """``designate`` (0.16.0's name for ``delegate``) still runs, but no help
+    text offers it, and every use of it, even ``--help`` or a bad argument,
+    says once which command replaces it."""
+    assert lease_cli.DEPRECATED_ACTIONS == {"designate": "delegate"}
+    assert _run(["--help"], FakeDaemon()) == 0
+    assert "designate" not in capsys.readouterr().out
+    for argv, code in ((["designate", "--help"], 0), (["designate"], lease_cli.EXIT_USAGE)):
+        assert _run(argv, FakeDaemon()) == code
+        captured = capsys.readouterr()
+        notice = [line for line in captured.err.splitlines() if "deprecated" in line]
+        assert notice == ["pseudolife-mcp lease designate is deprecated: use "
+                          "pseudolife-mcp lease delegate"]
+        assert "lease delegate" in captured.out + captured.err
 
 
 # --- lease list -----------------------------------------------------------------
@@ -1129,7 +1146,8 @@ def test_the_console_usage_lists_lease():
 def test_the_console_usage_names_the_operator_commands():
     usage = " ".join(console._USAGE.split())
     assert "`lease break NAME`" in usage
-    assert "`lease designate PROJECT AGENT`" in usage
+    assert "`lease delegate PROJECT AGENT`" in usage
+    assert "designate" not in usage
 
 
 def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):

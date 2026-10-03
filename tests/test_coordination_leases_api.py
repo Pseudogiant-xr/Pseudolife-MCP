@@ -102,7 +102,7 @@ def test_rest_lease_errors_map_to_stable_codes(pg_conn, pg_url):
             stranger = await _post(client, a, "release", {"name": "gpu"})
             assert (stranger.status_code, stranger.json()) == (400, {"error": "lease_not_held"})
             reserved = await _post(client, a, "lease",
-                                   {"name": "designated:coordinator:p", "ttl": 3600})
+                                   {"name": "delegate:p", "ttl": 3600})
             assert (reserved.status_code, reserved.json()) == (400, {"error": "reserved_lease"})
             anonymous = await _post(client, BEARER, "lease", {"name": "gpu", "ttl": 120})
             assert anonymous.status_code == 401

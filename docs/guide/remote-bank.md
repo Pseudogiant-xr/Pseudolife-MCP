@@ -597,7 +597,7 @@ after a move that ended that way, read it and run its `manual_rollback`
 lines in order.
 
 **Don't run commands that write the database directly during a move**
-(`lease break`, `lease designate`, `board-audit redact`, `coordination-recovery`, a `psql`
+(`lease break`, `lease delegate`, `board-audit redact`, `coordination-recovery`, a `psql`
 session). The move cuts such connections off before the final dump and
 fences the database right after it, but the dump has to connect first, so
 a write landing in those seconds would miss the dump.

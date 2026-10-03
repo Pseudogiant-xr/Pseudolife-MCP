@@ -10,6 +10,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Add an experimental Rust stdio shim candidate and Windows/Linux parity CI lane; no installation path installs the candidate.
 
+### Changed (2026-10-04 — the authority to reopen a done session is the maintainer's delegate, not a coordinator)
+- Two things were both called "coordinator": the open `coordinator:<project>`
+  lease, which any session may claim and which grants nothing, and the
+  operator's grant whose holder's urgent mail reopens done parks. The first
+  version of #549 confused them, and the 0.16.0 wording still invited it.
+  The grant is now the **maintainer's delegate for the project**;
+  "coordinator" means only the open role, which is unchanged.
+- The grant's lease is `delegate:<project>` (was
+  `designated:coordinator:<project>`), granted with
+  `pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` and logged as
+  `lease_delegate` (was `lease_designate`). A session's acquire of any
+  `delegate:` lease is refused `reserved_lease`, and `designated:` stays
+  reserved. `lease designate` still works as a deprecated alias that prints
+  one line naming `lease delegate`; the usage line and `pseudolife-mcp help`
+  name `delegate`. No schema change.
+- The wake receipt and audit reason for the delegate's rings is `delegate`
+  (was `coordinator`) from now on. Wake rows recorded as `coordinator`
+  before the upgrade stay as history: they still count against the sender's
+  `authority_per_sender_per_hour` and a queued reopen is still served.
+- The wording "the project's designated coordinator" is now "the
+  maintainer's delegate for the project" in the done-park receipt's
+  `reopen_by`, the Stop hook's park gate (served text and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks; `hooks.json` is unchanged, so
+  Codex users approve nothing again), the check-in park sentence, the
+  served `memory_message` description, the README and the guides.
+- **Operator step after upgrading:** a grant made under 0.16.0 is not
+  honoured (it lasted at most 7 days), so re-grant any live one with
+  `pseudolife-mcp lease delegate PROJECT AGENT --for 7d` (in the Docker tier,
+  inside the daemon container). Clear a leftover
+  `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
+  or let it expire. Before deploying, run `pseudolife-mcp lease list` and
+  `lease break` any `delegate:` lease: 0.16.0 let any session hold one under
+  that name. Such a hold grants nothing after the upgrade either, since a
+  delegate counts only with the operator's `lease_delegate` audit record for
+  the lease's current fence (coordinator review of #559). The hook fallback
+  wording under `plugin/hooks/` needs the update's client step.
+
+### Fixed (2026-10-04 — `pseudolife-mcp update` no longer deletes the shim runtime it runs from)
+- On Linux and macOS, `pseudolife-mcp update` could never finish its
+  client side. The launcher runs the update from the current shim
+  runtime; the shim step installs the new release as a newer runtime and
+  then removes unused ones, and the update's own process was never
+  counted as using its runtime. That runtime was deleted under the
+  running update, whose next lazy import failed
+  (`ModuleNotFoundError: No module named
+  'pseudolife_memory.tunnel_profiles'`) after the plugin and Codex steps,
+  so their outcome was never reported and the run ended with a traceback
+  and exit 1. Windows was spared only
+  because it refuses to rename a directory a process runs from. The
+  runtime this interpreter runs from is now always kept and reported like
+  a runtime a session still runs; a later update removes it once idle.
+- A rerun of the client side (`pseudolife-mcp update --clients-only`,
+  the retry the update names) installed yet another runtime of the same
+  release every time. When the current runtime was installed from that
+  same pinned release, the shim step now reports `current:<version>` and
+  installs nothing (`--reinstall` installs it again). Checkout sources
+  still install every time, since their code changes under one version.
+- **Workaround for 0.16.0 on Linux/macOS**: the 0.16.0 updater still has
+  the bug, so after `pseudolife-mcp update` on 0.16.0, finish the client
+  side from a checkout at v0.16.0 with `python ops/update_clients.py
+  --repo <checkout> --only plugin,codex`. Updating from 0.16.0 to the
+  fixed release runs 0.16.0's updater once more and hits the same crash
+  after installing the new runtime; run `pseudolife-mcp update
+  --clients-only` once afterwards and the fixed code completes the
+  client side.
+
 ## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
 
 ### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
