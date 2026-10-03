@@ -1515,7 +1515,11 @@ def test_shim_starts_without_its_daemon_and_recovers_when_it_answers(
                     res = await client.call_tool("live_tool", {})
                     assert not res.is_error
                     assert "live answer" in res.content[0].text
-        errors = (tmp_path / "shim-stderr.txt").read_text(encoding="utf-8")
+        # The shim writes stderr in its console encoding (cp1252 on Windows
+        # without UTF-8 mode, where its em dashes are not UTF-8), and only
+        # the absence of a traceback is checked here.
+        errors = (tmp_path / "shim-stderr.txt").read_text(
+            encoding="utf-8", errors="replace")
         assert "Traceback" not in errors
 
     try:
