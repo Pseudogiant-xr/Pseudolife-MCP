@@ -39,6 +39,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a guarded listener for later eligible arrivals. Current desktop queued-notice
   hook emission remains unverified; missing receipts use the recorded expiry
   fallback. Client hooks must be updated to use the correlation path.
+### Fixed (2026-10-03 — a Linux test run no longer leaves a 2.8 GB daemon behind)
+- Every full test run on Linux, WSL or macOS left one test daemon
+  (`python -m pseudolife_memory.cli serve`, about 2.8 GB) running after
+  pytest exited. The shim's autostart test makes the shim start a daemon,
+  which the shim detaches on purpose, and the test's cleanup only acted on
+  Windows. On 2026-10-03 14 had piled up in WSL (28 of its 39 GB), and 5 on
+  the second test machine, each holding its run's systemd scope open, had
+  exhausted its memory and swap, taking the live memory bank and the agent
+  board down for hours. The test now stops what its shim started on every
+  platform, found by the test's own data directory in the process
+  environment, and fails if anything survives.
+- `ops/wsl-suite.sh` (both `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`
+  run it) now runs pytest as a child, tags the run with
+  `PSEUDOLIFE_SUITE_RUN_ID`, and after pytest exits, also on Ctrl+C or a
+  hangup, stops every process still carrying that marker, naming each on
+  stderr (Linux only: it reads `/proc`). Processes the run did not start,
+  such as the live daemon or another run, are never touched; a child
+  started with a scrubbed environment (the Codex doorbell's CLI, the
+  tunnel's runtime) drops the marker and is not swept. pytest runs in a
+  session of its own: an interrupt, hangup or TERM sent to the launcher is
+  passed on to it at once and exactly once (a terminal's Ctrl+C no longer
+  reaches it twice, which aborted its session-finish cleanup), and the
+  launcher then exits 130, 129 or 143; otherwise the exit code is pytest's.
 
 ### Fixed (2026-10-03 — a dispatched suite checks for the live bank again after it queues)
 - A dispatched full suite checked for the live bank's server once, before

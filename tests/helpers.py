@@ -118,7 +118,7 @@ def private_bank(url: str, label: str):
 
     A bank has exactly one writer (the writer lease), so a daemon that runs
     beside another one, or that may outlive its test (a shim-autostarted
-    daemon is only reaped on Windows), needs a bank of its own, as it would
+    daemon on a hard-killed run), needs a bank of its own, as it would
     in any real deployment. Yields the bank's URL. On exit the database is
     dropped ``WITH (FORCE)``, which also cuts off a daemon that outlived its
     test. Locally the name keeps the run's pid as its last ``_`` part, so a
