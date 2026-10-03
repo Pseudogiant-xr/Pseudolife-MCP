@@ -30,7 +30,8 @@ from pseudolife_memory.utils.config import (
 
 PATHEXT = ".COM;.EXE;.BAT;.CMD"
 CAPS = {"per_recipient_per_hour": 20, "urgent_per_sender_per_hour": 6,
-        "nightly_total": 200, "fan_out_stagger_seconds": 30}
+        "nightly_total": 200, "fan_out_stagger_seconds": 30,
+        "authority_per_sender_per_hour": 12}
 PLUGIN = "pseudolife-memory@pseudolife-mcp"
 
 
@@ -75,10 +76,12 @@ def test_a_zero_cap_rings_nobody_and_the_windows_need_a_second():
     "never urgent"); the two windows must be at least 1 s. Whole numbers
     only, never negative, and a boolean is not a number here."""
     wake = WakeConfig(per_recipient_per_hour=0, urgent_per_sender_per_hour=0,
-                      nightly_total=0, fan_out_stagger_seconds=0)
+                      nightly_total=0, fan_out_stagger_seconds=0,
+                      authority_per_sender_per_hour=0)
     assert {k: getattr(wake, k) for k in CAPS} == dict.fromkeys(CAPS, 0)
     for name, value in (("active_seconds", 0), ("fan_out_stagger_seconds", 2.5),
-                        ("nightly_total", -1), ("per_recipient_per_hour", True)):
+                        ("nightly_total", -1), ("per_recipient_per_hour", True),
+                        ("authority_per_sender_per_hour", -1)):
         with pytest.raises(ValueError, match=f"coordination.wake.{name}"):
             WakeConfig(**{name: value})
 

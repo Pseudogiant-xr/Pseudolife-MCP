@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-03 — the maintainer and the coordinator can reopen a done session)
+- A session parked `done` was unreachable: on 2026-10-03 a coordinator's
+  urgent review of PR #548, with two required changes, came back
+  `wake: {decision: not_needed, reason: parked_done}`, and the maintainer
+  had to type into the window. `done` now means "I expect no follow-up":
+  `urgent` mail reopens it when the sender is the maintainer (a bearer
+  principal listed in the new `coordination.maintainer_principals`, empty
+  by default; `default` and `daemon` are refused), the holder of the live
+  `coordinator:<project>` lease for the recipient's own project, or the
+  park's named clearer. The ring's reason is `maintainer`, `coordinator`
+  or `clearer`, and the receipt carries `reopened: true`. Plain mail still
+  never rings a done park, and neither does a peer's urgency (`anyone`
+  included); authority is read from the bearer, the lease table and the
+  park, never from message text. Waking grants nothing.
+- Maintainer and coordinator urgency, to any session, spends a new
+  `coordination.wake.authority_per_sender_per_hour` (12) instead of the
+  6-an-hour urgent allowance, so incident relays are not capped halfway;
+  the per-recipient, nightly and stagger caps still apply. `/health` and
+  `pseudolife-mcp doctor` report the new cap.
+- A `no_path` receipt names the client's other ways in: `fallback_paths`
+  is `codex_doorbell` + `maintainer_types` for a Codex thread and
+  `claude_desktop_send_message` + `maintainer_types` for a Claude Code
+  session, with matching `fallback` text. A `withheld` receipt carries
+  `retry` (resend with `urgent`, or `clears` naming the need), and a
+  `parked_done` one `reopen_by`.
+- The Codex doorbell serves CLI threads as well as desktop ones;
+  `capabilities.codex` is the optional live-delivery bridge, not the
+  doorbell. The guide now says so, with what a reopen needs from each
+  client and what to do when the board itself is down.
+- The Stop hook's park prompt (served `PARK_GATE_MESSAGE`, and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks), the park check-in sentence,
+  `memory_message`'s description and `examples/hook-instructions.md` say
+  that done stays reachable. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again; the new prompt text reaches a client
+  with its next plugin update. No schema change.
+
 ### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
 - When Codex runs the plugin's hooks and only the scripts changed (its
   `hooks.json` is current), the client step (`pseudolife-mcp update`,

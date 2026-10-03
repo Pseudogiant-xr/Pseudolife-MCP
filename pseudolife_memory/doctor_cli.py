@@ -311,7 +311,8 @@ def _wake_report(health: dict | None) -> dict:
     else:
         caps = {key: value for key, value in coordination["wake"].items()
                 if key in {"per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
-                           "fan_out_stagger_seconds", "active_seconds"}
+                           "fan_out_stagger_seconds", "active_seconds",
+                           "authority_per_sender_per_hour"}
                 and type(value) is int and value >= 0}
     report = {}
     for name, probe in (("claude_code", _claude_code_wake), ("codex", _codex_wake)):

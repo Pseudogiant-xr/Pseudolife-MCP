@@ -162,6 +162,42 @@ _PARK_CLEARED = {"park_reason": None, "park_needs": "", "park_clear_by": "", "pa
                  "park_expires": None, "park_set_at": None}
 # A status that says the session's work is over reads as parked done to the
 # Stop-hook park gate, so a session that ended with one is not asked to park.
+# A done park says "I expect no follow-up", not "unreachable" (maintainer,
+# 2026-10-03: a coordinator's review of a finished PR could not reach the
+# session that opened it). Urgent mail reopens it when the sender is the
+# maintainer (a principal in ``coordination.maintainer_principals``), the
+# holder of the recipient project's ``coordinator:<project>`` lease, or the
+# agent the park names in ``park_clear_by``. Each comes from the sender's
+# authenticated bearer, the lease table or the recipient's own park, never
+# from anything a message says. The first two are AUTHORITY_REASONS, which
+# spend their own hourly budget instead of the plain urgent allowance.
+AUTHORITY_REASONS = ("maintainer", "coordinator")
+REOPEN_REASONS = (*AUTHORITY_REASONS, "clearer")
+COORDINATOR_LEASE_PREFIX = "coordinator:"
+# What a send to a done park is told would reopen it.
+DONE_REOPEN_BY = ("urgent mail from the maintainer, the holder of the coordinator:<project> "
+                  "lease, or the park's named clearer")
+# What a withheld send is told would ring the park.
+WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
+# The ways to reach a session the board cannot ring right now, by client.
+# Codex: the doorbell (``codex queue``) serves CLI and desktop threads alike
+# but watches a thread only from the thread's first Pseudolife call after the
+# MCP server starts, and turns itself off after a failed queue. Claude Code:
+# the Stop hook's 59-minute wait or a background wait-mail; a Claude Desktop
+# Code-tab session also takes its host's session send_message, which needs
+# neither the board nor a listener.
+FALLBACK_CODEX = (
+    "Mail is queued for receive on the thread's next turn and rings once its Codex "
+    "doorbell re-arms (the shim watches a thread from its first Pseudolife call after "
+    "the MCP server starts). For an immediate response, the maintainer types into the "
+    "session's window.")
+FALLBACK_CLAUDE = (
+    "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
+    "wait or wait-mail re-arms. A Claude Desktop Code-tab session can be reached now "
+    "through its host's session send_message; otherwise the maintainer types into the "
+    "session's window.")
+FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
+FALLBACK_PATHS_CLAUDE = ("claude_desktop_send_message", "maintainer_types")
 DONE_STATUS = re.compile(r"^\W*(done|complete|completed|finished|merged)\b", re.IGNORECASE)
 # Rings decided at send (v49) are kept this long: the nightly total counts a
 # day of them, and a week matches the request-key window.
@@ -325,6 +361,7 @@ class WakePolicy:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
+    authority_per_sender_per_hour: int = 12
 
     @classmethod
     def from_config(cls, config) -> "WakePolicy":
@@ -951,11 +988,14 @@ def audit_events(conn, *, project=None, task=None, agent_id=None, since=None, un
 
 
 class CoordinationStore:
-    def __init__(self, storage, *, clock=time.time, wake=None):
+    def __init__(self, storage, *, clock=time.time, wake=None, maintainer_principals=()):
         self.storage = storage
         self.clock = clock
         # The wake caps (v49); the daemon hands over its configured ones.
         self.wake = WakePolicy() if wake is None else wake
+        # Bearer principals whose mail speaks for the maintainer
+        # (``coordination.maintainer_principals``; empty by default).
+        self.maintainer_principals = frozenset(maintainer_principals)
 
     def _one(self, sql, params=()):
         with self.storage.conn.cursor(row_factory=dict_row) as cur:
@@ -2050,8 +2090,9 @@ class CoordinationStore:
         row = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
         codex = "codex" in (row.get("capabilities") or {})
         park = self._live_park(row, now) if codex else None
-        if park and park["park_reason"] == "done":
-            return None
+        # A done park is served only a reopen (REOPEN_REASONS) sent after it
+        # (2026-10-03); older grants and attention stay withdrawn.
+        reopen_only = park is not None and park["park_reason"] == "done"
         park_since = park["park_set_at"] if park else None
         # Audit sequence, not wall time, binds a grant to the unchanged
         # current park. A missing or mismatched audit snapshot proves nothing.
@@ -2066,6 +2107,9 @@ class CoordinationStore:
                        "FROM coordination_events s WHERE s.event='send' "
                        "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))") if codex else ""
         serve_values = (ring_allowed, park_seq or 0) if codex else ()
+        if reopen_only:
+            serve_guard += " AND decision='rung' AND reason=ANY(%s)"
+            serve_values += (list(REOPEN_REASONS),)
         if not codex and self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
@@ -2086,6 +2130,9 @@ class CoordinationStore:
             "AND w.decision IN ('rung','attention') "
             "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
             (park_seq or 0, agent_id, codex, now))
+        if reopen_only:
+            rows = [item for item in rows if park_seq is not None and item["decision"] == "rung"
+                    and item["reason"] in REOPEN_REASONS and item["park_authorized"]]
         if not rows:
             return None
         if codex:
@@ -2146,6 +2193,23 @@ class CoordinationStore:
             "THEN payload::jsonb->>'name'=%s ELSE false END LIMIT 1",
             (now - LEASE_CLEAR_GRACE, agent_id, name)) is not None
 
+    def _authority(self, sender, recipient, now):
+        """``maintainer`` when the sender's bearer principal is one the
+        operator listed, ``coordinator`` when the sender holds the live
+        ``coordinator:<project>`` lease for the recipient's (non-empty)
+        project, else None. Read from the authenticated sender row and the
+        lease table only: nothing a message says can claim either. An
+        expired hold counts for nothing even before a settle vacates it."""
+        if sender["principal"] in self.maintainer_principals:
+            return "maintainer"
+        project = recipient.get("project") or ""
+        if project and self._one(
+                "SELECT 1 AS hit FROM coordination_leases WHERE name=%s "
+                "AND holder_agent_id=%s AND expires_at>%s",
+                (COORDINATOR_LEASE_PREFIX + project, sender["agent_id"], now)) is not None:
+            return "coordinator"
+        return None
+
     def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id):
         """Decide at send whether the recipient's shim should ring (v49).
 
@@ -2158,7 +2222,15 @@ class CoordinationStore:
         given up, ``_lease_clearer``), ``park_clear_by`` is ``anyone``,
         ``clears`` names the need, or the
         sender set ``urgent`` (each within its cap), else ``withheld`` with
-        the need so the sender knows what would wake it. Unparked Codex
+        the need and ``retry`` so the sender knows what would wake it.
+        A done park rings only for ``urgent`` mail from the maintainer, the
+        project's coordinator or the park's named clearer (``reopened``;
+        2026-10-03), else ``not_needed`` with ``reopen_by``. Urgent mail
+        from the maintainer or the coordinator is decided ``maintainer`` or
+        ``coordinator`` wherever plain urgency would ring, and spends the
+        sender's ``authority_per_sender_per_hour`` instead of its urgent
+        allowance; the per-recipient, nightly and stagger caps bind every
+        ring alike. Unparked Codex
         urgency is capped attention with explicit one-bell queue permission,
         unknown native state and no steer path. Other unparked clients retain their urgent ring contract,
         else ``not_needed`` with reason ``no_park``: the session is
@@ -2170,8 +2242,9 @@ class CoordinationStore:
         are staggered by ``fan_out_stagger_seconds``. Chatter never rings."""
         policy = self.wake
         park = self._live_park(recipient, now)
+        done = park is not None and park["park_reason"] == "done"
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
-                if park and park["park_reason"] != "done" else {})
+                if park and not done else {})
         # A parked session has stopped: its last board action (the park
         # itself) is no sign a tool result will carry the mail, so only an
         # unparked session counts as active (review, 2026-09-28).
@@ -2179,10 +2252,21 @@ class CoordinationStore:
         if (not attention and park is None
                 and recipient["last_activity"] > now - policy.active_seconds):
             return {"decision": "hinted", "reason": "active"}
-        if park and park["park_reason"] == "done":
-            return {"decision": "not_needed", "reason": "parked_done"}
+        authority = self._authority(sender, recipient, now) if urgent else None
         hour, day = now - 3600, now - 86400
-        if park:
+        if done:
+            how = authority
+            if how is None and urgent and park["park_clear_by"] and (
+                    park["park_clear_by"] == sender["agent_id"]
+                    or self._lease_clearer(sender["agent_id"], park["park_clear_by"], now)):
+                how = "clearer"
+            if how is None:
+                # Plain mail, or a peer's urgency (``anyone`` included): the
+                # session expects no follow-up, and the mail waits for its
+                # next turn.
+                return {"decision": "not_needed", "reason": "parked_done",
+                        "reopen_by": DONE_REOPEN_BY}
+        elif park:
             how = None
             if park["park_clear_by"] == sender["agent_id"]:
                 how = "clearer"
@@ -2196,25 +2280,35 @@ class CoordinationStore:
             elif clears is not None and _need_matches(clears, park["park_needs"]):
                 how = "clears"
             elif urgent:
-                how = "urgent"
+                how = authority or "urgent"
             if how is None:
-                return {"decision": "withheld", "reason": "need_not_cleared", **need}
+                return {"decision": "withheld", "reason": "need_not_cleared", **need,
+                        "retry": WITHHELD_RETRY}
         elif urgent:
             # Waiting on nobody, but the sender says it cannot wait
             # (maintainer decision 2026-10-02): apply the existing caps;
             # unparked Codex becomes pending attention below.
-            how = "urgent"
+            how = authority or "urgent"
         else:
             # Waiting on nobody: plain mail, or clears with no need to
             # clear, never rings; it waits for the session's next turn
             # (maintainer decision 2026-10-02).
             return {"decision": "not_needed", "reason": "no_park"}
-        if how == "urgent":
+        # A named clearer reopening a done park spends the plain urgent
+        # allowance: it is the park's own designation, not an authority.
+        counts_urgent = how == "urgent" or (done and how == "clearer")
+        if counts_urgent:
             sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
                              "sender_agent_id=%s AND urgent AND created_at>%s",
                              (sender["agent_id"], hour))["n"]
             if sent >= policy.urgent_per_sender_per_hour:
                 return {"decision": "capped", "reason": "urgent_sender_hour", **need}
+        elif how in AUTHORITY_REASONS:
+            sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                             "sender_agent_id=%s AND reason=ANY(%s) AND created_at>%s",
+                             (sender["agent_id"], list(AUTHORITY_REASONS), hour))["n"]
+            if sent >= policy.authority_per_sender_per_hour:
+                return {"decision": "capped", "reason": "authority_sender_hour", **need}
         decision, reason = ("attention" if attention else "rung"), how
         counts = self._one(
             "SELECT count(*) FILTER (WHERE recipient_agent_id=%s AND created_at>%s) AS recipient,"
@@ -2234,7 +2328,8 @@ class CoordinationStore:
             "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
             "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (recipient["agent_id"], sender["agent_id"], message_id, decision, reason,
-             reason == "urgent", ring_at, now))
+             counts_urgent, ring_at, now))
+        reopened = {"reopened": True} if done else {}
         if attention:
             # Codex's desktop owner uses private stdio; a queue capability
             # proves neither actual idle state nor a supported steer route.
@@ -2245,11 +2340,14 @@ class CoordinationStore:
                     "fallback": "One capped bell may queue with turn state unknown; acceptance is not dispatch, reading, or native steering."}
         missing = self._listener_path(recipient, now)
         if missing is not None:
+            codex = "codex" in (recipient.get("capabilities") or {})
             return {"decision": "no_path", "reason": missing, "queued": True,
                     "last_activity": recipient["last_activity"],
-                    "fallback": "Mail is queued. Use receive on the next turn or contact the maintainer for an immediate response.",
-                    **need}
-        return {"decision": decision, "reason": reason, "ring_at": ring_at}
+                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
+                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
+                                           else FALLBACK_PATHS_CLAUDE),
+                    **need, **reopened}
+        return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened}
 
     def park_gate(self, agent_id, principal, *, since=None):
         """What the Stop hook asks when a turn ends (v49): ``block`` when the

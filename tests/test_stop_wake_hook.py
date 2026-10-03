@@ -750,8 +750,9 @@ def test_a_malformed_ring_never_wakes(tmp_path, ring):
 
 GATE_MESSAGE = ("Before ending: update your board status with why you stopped and what you need "
                 "(memory_agents update park_reason=... park_needs=... park_clear_by=... "
-                "park_resume=...). Use done only when no follow-up is expected: nothing will ring "
-                "you. Waiting on a merge click or a review that may still bring fixes? Park "
+                "park_resume=...). Use done only when no follow-up is expected; urgent mail from "
+                "the maintainer, the project coordinator or your named clearer still rings it. "
+                "Waiting on a merge click or a review that may still bring fixes? Park "
                 "needs_approval with park_clear_by set to the reviewer's agent id or maintainer, "
                 "or waiting_peer. A park records intent; automatic wake requires a live listener. "
                 "Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. "
