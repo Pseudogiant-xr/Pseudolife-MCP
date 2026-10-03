@@ -239,7 +239,7 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert any(n.startswith("pseudolife_state-") for n in backups)
     assert not any(n.endswith(".part") for n in backups)
     assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
-                        "daemon_digest": "e" * 64}]
+                        "daemon_digest": "e" * 64, "reinstall": False}]
     out = capsys.readouterr().out
     assert "healthy. version=0.15.1" in out
     # the overlay selects the image through PSEUDOLIFE_IMAGE_TAG: that is the rollback
@@ -386,7 +386,7 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
     _project(world, tmp_path)
     assert _run(["--clients-only"]) == 0
     assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
-                        "daemon_digest": "d" * 64}]
+                        "daemon_digest": "d" * 64, "reinstall": False}]
     assert not any(c.startswith(("pull", "compose")) for c in world.docker_calls())
     clients.clear()
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
@@ -641,7 +641,8 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
 def test_all_moves_the_clients_from_the_checkout(world, clients, tmp_path):
     root, _ = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--all"]) == 0
-    assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": root, "source": str(root), "daemon_digest": None}]
+    assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": root, "source": str(root), "daemon_digest": None,
+                       "reinstall": False}]
 
 
 def test_a_dirty_tree_is_refused_before_anything_runs(world, clients, tmp_path, capsys):
@@ -972,7 +973,7 @@ def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world,
         clients.clear()
         assert _run(argv + ["--daemon-url", "http://10.0.0.7:8765"]) == 0, argv
         assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None,
-                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64}]
+                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64, "reinstall": False}]
         captured = capsys.readouterr()
         assert "docker" not in (captured.out + captured.err).lower()
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
