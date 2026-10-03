@@ -39,6 +39,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a guarded listener for later eligible arrivals. Current desktop queued-notice
   hook emission remains unverified; missing receipts use the recorded expiry
   fallback. Client hooks must be updated to use the correlation path.
+
 ### Fixed (2026-10-03 — a Linux test run no longer leaves a 2.8 GB daemon behind)
 - Every full test run on Linux, WSL or macOS left one test daemon
   (`python -m pseudolife_memory.cli serve`, about 2.8 GB) running after
