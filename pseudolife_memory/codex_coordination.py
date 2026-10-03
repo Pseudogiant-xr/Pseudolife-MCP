@@ -231,12 +231,12 @@ class CodexCoordinationRegistry:
                     await adapter.downgrade_to_pull()
                 except Exception:  # noqa: BLE001 - local pull mode is already set
                     pass
+                # The ambiguous snapshot is covered: never queue an alternate
+                # for it. Later independently eligible arrivals retain a listener.
                 if self._doorbell is not None and not self._closing:
-                    # Pull now: the doorbell covers the thread the bridge
-                    # dropped, and nothing pending was shown while it held it.
                     try:
-                        self._doorbell.watch(thread_id, adapter, shown=False)
-                    except Exception:  # noqa: BLE001 - memory must survive optional coordination
+                        self._doorbell.watch(thread_id, adapter, shown=True)
+                    except Exception:  # noqa: BLE001 - pull coordination remains available
                         pass
             try:
                 await delivery.__aexit__(None, None, None)

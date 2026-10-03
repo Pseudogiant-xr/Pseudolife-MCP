@@ -330,6 +330,26 @@ if ($Event -eq 'UserPromptSubmit' -and $sessionId -cnotmatch '^[A-Za-z0-9._-]{1,
 
 if ($Event -eq 'CoordinationPrompt') {
     try {
+        if ($sessionId -cmatch '^[a-f0-9-]{36}\z') {
+            $pendingPath = Join-Path (Get-DigestDir) ((Get-DigestKey $sessionId) + '.bell-pending')
+            if ((Test-Path -LiteralPath $pendingPath -PathType Leaf) -and
+                    -not ((Get-Item -LiteralPath $pendingPath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $launcher = Get-ShimLauncherOffPath
+                if (-not $launcher) {
+                    $found = Get-Command pseudolife-mcp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($found) { $launcher = $found.Source }
+                }
+                if ($launcher) {
+                    $previousEncoding = $OutputEncoding
+                    try {
+                        $OutputEncoding = [Text.UTF8Encoding]::new($false)
+                        $rawInput | & $launcher doorbell-prompt-seen 2>$null | Out-Null
+                    } finally { $OutputEncoding = $previousEncoding }
+                }
+            }
+        }
+    } catch {}
+    try {
         $digest = Read-TurnDigest $sessionId
         if ($digest) { Write-Context $digest }
     } catch {}

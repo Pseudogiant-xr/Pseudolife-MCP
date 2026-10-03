@@ -68,15 +68,18 @@ class Daemon:
 
 
 def _board_session(monkeypatch, daemon, *, driver, channel=False, wake=False,
-                   state_path=None, coordination="1", probe=None):
+                   state_path=None, coordination="1", probe=None, codex_registry=None):
     """Run ``_run_session_proxy`` with the adapter on ``daemon`` and the
     upstream MCP faked; ``driver(handler, calls, inbox)`` plays the client.
-    Returns the upstream calls, after checking no task outlived the session."""
+    ``codex_registry`` makes it a Codex shim whose per-thread registry is
+    that class. Returns the upstream calls, after checking no task outlived
+    the session."""
     from mcp import types
     from mcp.client import session, streamable_http
     from mcp.server import Server, stdio
 
-    from pseudolife_memory import channel as channel_module, coordination_adapter
+    from pseudolife_memory import (
+        channel as channel_module, codex_coordination, coordination_adapter)
 
     calls = []
     real_client = httpx.AsyncClient
@@ -137,6 +140,11 @@ def _board_session(monkeypatch, daemon, *, driver, channel=False, wake=False,
         monkeypatch.setenv("PSEUDOLIFE_AGENT_WAKE", "1")
     if state_path is not None:
         monkeypatch.setenv("PSEUDOLIFE_AGENT_STATE", str(state_path))
+    if codex_registry is not None:
+        monkeypatch.setenv("PSEUDOLIFE_WRITER_ID", "codex")
+        monkeypatch.setenv("PSEUDOLIFE_CODEX_DOORBELL", "0")
+        monkeypatch.setattr(codex_coordination, "CodexCoordinationRegistry",
+                            codex_registry)
     leftover = asyncio.run(asyncio.wait_for(session_run(), 10))
     assert leftover == []
     return calls
@@ -456,6 +464,192 @@ def test_a_board_check_answered_as_the_close_begins_registers_nothing(monkeypatc
             return True
 
         late = shim._LateBoardAdapter(lambda: built.append(1), ask_board=ask_board)
+        late.start()
+        await asyncio.wait({late._task}, timeout=2)
+        return late._task.done()
+
+    monkeypatch.setattr(shim, "_ADAPTER_RETRY_DELAYS", (0.001,))
+    assert asyncio.run(run()) is True
+    assert built == []
+
+
+# A Codex thread id, as Codex sends it in each tools/call's metadata.
+CODEX_THREAD = "01a0ec35-a4b3-7651-a945-81ed1f6cb638"
+OTHER_THREAD = "01a0ec35-a19d-7043-9336-ac6b9863afd7"
+
+
+def _codex_registry():
+    """A per-thread registry class that records its instances and attaches
+    every thread at once."""
+    class Adapter:
+        instance_headers = {"X-PL-Agent": "codex-late", "X-PL-Agent-Key": "codex-key"}
+        def deliver_hint(self): return None
+        def note_turn(self): pass
+
+    class Registry:
+        built = []
+
+        def __init__(self, url, token, **kwargs):
+            self.closed = False
+            Registry.built.append(self)
+
+        async def get(self, thread_id, *, snapshot=None, parent_thread=None):
+            return Adapter()
+
+        def unread_hint(self, thread_id, adapter):
+            return adapter.deliver_hint() if adapter is not None else "fixture: no identity"
+
+        def note_call(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            self.closed = True
+
+    return Registry
+
+
+def _codex_call(name, arguments, thread=CODEX_THREAD):
+    from mcp import types
+    return types.CallToolRequestParams(
+        name=name, arguments=arguments, _meta={"threadId": thread})
+
+
+def _codex_update(thread=CODEX_THREAD):
+    return _codex_call("memory_agents", {"action": "update", "status": "working"}, thread)
+
+
+def _codex_search(thread=CODEX_THREAD):
+    return _codex_call("memory_search", {"query": "x"}, thread)
+
+
+def test_codex_unanswered_board_check_is_retried_then_builds_its_registry(
+        monkeypatch, capsys):
+    """A Codex shim whose startup board check got no answer (the daemon slow
+    or unreachable at start) keeps asking, and builds its per-thread registry
+    once the daemon says it serves the board, instead of staying off the
+    board for the life of the process."""
+    Registry = _codex_registry()
+    probe = _scripted_probe(None, None, True)
+    seen = {}
+
+    async def driver(handler, calls, inbox):
+        # While the check is unanswered: a board write is refused with the
+        # retry message and never forwarded; memory calls go out as before,
+        # with no identity and no hint.
+        with pytest.raises(Exception) as caught:
+            await handler(None, _codex_update())
+        seen["refusal"] = caught.value.message
+        assert caught.value.data["classification"] == "coordination_unavailable"
+        assert not any(call.get("tool") == "memory_agents" for call in calls)
+        seen["pending_search"] = _texts(await handler(None, _codex_search()))
+        assert "X-PL-Agent" not in calls[-1]["headers"]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while loop.time() < deadline:
+            try:
+                seen["first"] = _texts(await handler(None, _codex_update()))
+            except Exception:  # noqa: BLE001 - still asking
+                await asyncio.sleep(0.02)
+                continue
+            break
+        seen["headers"] = calls[-1]["headers"]
+        seen["later"] = _texts(await handler(None, _codex_search()))
+        # Another thread hears once too: the instructions carried no check-in.
+        seen["other"] = [_texts(await handler(None, _codex_search(OTHER_THREAD)))
+                         for _ in range(2)]
+
+    _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
+                   probe=probe, codex_registry=Registry)
+    assert "retried" in seen["refusal"]
+    assert seen["pending_search"] == []
+    assert seen["headers"]["X-PL-Agent"] == "codex-late"
+    assert seen["headers"]["X-PL-Session"] == CODEX_THREAD
+    assert any("board registration completed" in text for text in seen["first"])
+    assert seen["later"] == []
+    assert any("board registration completed" in text for text in seen["other"][0])
+    assert seen["other"][1] == []
+    assert len(probe.asked) == 3
+    assert len(Registry.built) == 1 and Registry.built[0].closed
+    err = capsys.readouterr().err
+    assert "did not answer the board check" in err
+    assert "serves the board after a startup delay" in err
+
+
+def test_codex_unanswered_board_check_then_a_refusal_stops_quietly(monkeypatch, capsys):
+    """Once the daemon answers no, the Codex shim is in today's quiet
+    default: no registry, no warning, no note; a board write goes to the
+    daemon, whose refusal says why."""
+    Registry = _codex_registry()
+    probe = _scripted_probe(None, False)
+
+    async def driver(handler, calls, inbox):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while loop.time() < deadline:
+            try:  # refused with the retry message until the no lands
+                texts = _texts(await handler(None, _codex_update()))
+            except Exception:  # noqa: BLE001 - still asking
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert calls[-1]["tool"] == "memory_agents"
+        assert "X-PL-Agent" not in calls[-1]["headers"]
+        assert texts == []
+
+    _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
+                   probe=probe, codex_registry=Registry)
+    assert len(probe.asked) == 2
+    assert Registry.built == []
+    err = capsys.readouterr().err
+    assert "coordination unavailable" not in err and "registered" not in err
+
+
+def test_codex_session_end_stops_an_unanswered_board_check(monkeypatch):
+    """A daemon that never answers: the session still ends cleanly
+    (``_board_session`` checks no task outlives it) and builds no registry."""
+    Registry = _codex_registry()
+    probe = _scripted_probe(None)
+
+    async def driver(handler, calls, inbox):
+        await asyncio.sleep(0.2)
+
+    _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
+                   probe=probe, codex_registry=Registry)
+    assert len(probe.asked) >= 2
+    assert Registry.built == []
+
+
+def test_codex_doorbell_hears_when_a_late_board_check_says_no(monkeypatch, capsys):
+    """An explicit doorbell needs the board; the no that arrives after an
+    unanswered startup check says it is off, as a startup no does."""
+    probe = _scripted_probe(None, False)
+
+    async def driver(handler, calls, inbox):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5
+        while len(probe.asked) < 2 and loop.time() < deadline:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(shim, "_doorbell_setting", lambda environ=None: (True, True))
+    _board_session(monkeypatch, Daemon(), driver=driver, coordination=None,
+                   probe=probe, codex_registry=_codex_registry())
+    assert "PSEUDOLIFE_CODEX_DOORBELL needs agent coordination" in capsys.readouterr().err
+
+
+def test_a_codex_board_check_answered_as_the_close_begins_builds_nothing(monkeypatch):
+    """A yes that arrives after the close began must not build a registry
+    that nothing would close."""
+    built = []
+
+    async def run():
+        late = None
+
+        async def ask_board():
+            late._closing = True  # the close began while the check was out
+            return True
+
+        late = shim._LateCodexRegistry(lambda: built.append(1), ask_board)
         late.start()
         await asyncio.wait({late._task}, timeout=2)
         return late._task.done()
