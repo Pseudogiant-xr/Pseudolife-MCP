@@ -839,7 +839,8 @@ class Update:
         from pseudolife_memory import client_updates
         self.step("updating the client side (shim, plugin cache, Codex hooks)...")
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
-                                          daemon_digest=(health or {}).get("hooks_digest"))
+                                          daemon_digest=(health or {}).get("hooks_digest"),
+                                          reinstall=self.o.reinstall)
         self.report.clients = report
         if not self.o.as_json:
             client_updates.print_ladder(report)
@@ -1223,7 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all", action="store_true", help="checkout mode: also move the client side (shim, plugin, Codex)")
     parser.add_argument("--clients-only", action="store_true", help="only the client side; the daemon is left as it is")
     parser.add_argument("--daemon-only", action="store_true", help="only the daemon; the client side is left as it is")
-    parser.add_argument("--reinstall", action="store_true", help="release mode: recreate the daemon even at the same version")
+    parser.add_argument("--reinstall", action="store_true", help="release mode: recreate the daemon, and install the shim runtime again, even at the same version")
     parser.add_argument("--allow-downgrade", action="store_true",
                         help="release mode: allow a --tag older than the version the daemon runs")
     parser.add_argument("--env-file", default=None,

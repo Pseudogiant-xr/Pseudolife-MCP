@@ -173,8 +173,9 @@ def clients(monkeypatch):
     """The client side, recorded not run."""
     seen: list[dict] = []
 
-    def run_steps(steps, *, repo, source, daemon_digest=None):
-        seen.append({"steps": tuple(steps), "repo": repo, "source": source, "daemon_digest": daemon_digest})
+    def run_steps(steps, *, repo, source, daemon_digest=None, reinstall=False):
+        seen.append({"steps": tuple(steps), "repo": repo, "source": source, "daemon_digest": daemon_digest,
+                     "reinstall": reinstall})
         return {"shim": {"state": "installed:0.15.1", "detail": "ok"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
                 "codex": {"state": "current", "detail": "ok"}, "ok": True}
 
@@ -254,6 +255,8 @@ def test_the_same_version_is_not_redeployed_without_reinstall(world, clients, tm
     assert clients == []
     assert _run(["--reinstall", "--health-delay-ms", "1"]) == 0
     assert any(c.startswith("compose") for c in world.docker_calls())
+    # the shim step installs the release again too, not only the daemon
+    assert clients[-1]["reinstall"] is True
 
 
 def test_a_pinned_tag_wins_over_pypi_and_a_failed_pull_changes_nothing(world, clients, tmp_path, capsys):
@@ -1016,7 +1019,7 @@ def test_a_checkout_runtime_is_not_replaced_by_the_same_release(world, clients, 
     assert "checkout" in err and "ops/update.sh --all" in err and "--reinstall" in err
     assert clients == []
     assert _run(["--clients-only", "--tag", "0.15.0", "--reinstall"]) == 0
-    assert clients[0]["source"] == "pseudolife-mcp==0.15.0"
+    assert clients[0]["source"] == "pseudolife-mcp==0.15.0" and clients[0]["reinstall"] is True
 
 
 def test_a_release_runtime_or_a_newer_release_is_not_refused(world, clients, tmp_path):
