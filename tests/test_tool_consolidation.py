@@ -429,8 +429,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # full-tier tool after tightening its docstring: minimal 5,232, core
     # 11,706, full 18,154. Full moves deliberately, 18,000 -> 18,250.
     # 2026-10-04: memory_message's done-park sentence names the designated
-    # coordinator (+11), paid for by reflowing the same docstring one line
-    # shorter, caps unchanged: minimal 5,232, core 11,729, full 18,248.
+    # coordinator (+11 for the word, +7 net), paid for by reflowing the
+    # same docstring one line shorter, caps unchanged: minimal 5,232, core
+    # 11,729, full 18,248 (2 to spare).
     budgets = {"minimal": 5250, "core": 11750, "full": 18250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
