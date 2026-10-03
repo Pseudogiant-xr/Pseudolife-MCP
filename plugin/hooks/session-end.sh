@@ -256,11 +256,14 @@ fi
 
 if [ -n "$SID" ] && [ -z "$CONNECTION_ERROR" ]; then
     # Codex caps SessionEnd at 3s (openai/codex b741e480,
-    # normalize_command_hook, confirmed 2026-10-03). Both hosts share this
-    # definition: one 1s request, including connection setup, leaves 2s for
-    # local work (native ACL checks measured 0.344-0.375s each, 2026-09-28).
-    # No retry or delay; the idle reaper backstops a busy or offline daemon.
-    CURL_BUDGET=(--max-time 1 --connect-timeout 1)
+    # normalize_command_hook, confirmed 2026-10-03). Preserve Codex's 2s
+    # request opportunity (1.25s fixture regression, 2026-10-03), with
+    # connection setup inside that total and 1s left for POSIX local work.
+    # Git Bash alone pays native ACL checks; Windows Codex uses lifecycle.ps1.
+    # Claude's plugin deadline is separately 1.5s, regardless of this file's
+    # timeout (measured 2026-09-27). No retry or delay; a miss waits for the
+    # idle reaper (30min idle plus the next 5min sweep by default).
+    CURL_BUDGET=(--max-time 2 --connect-timeout 1)
     curl -L --max-redirs 0 -sf "${CURL_BUDGET[@]}" \
         "${AUTH[@]}" -X POST \
         -H "content-type: application/json" \

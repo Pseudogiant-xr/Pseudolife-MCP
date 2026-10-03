@@ -560,8 +560,10 @@ def test_posix_hooks_use_managed_rotatable_credential(tmp_path, event):
 
 @pytest.mark.parametrize("context", ["codex", "claude"])
 def test_codex_session_end_fits_the_three_second_cap(tmp_path, context):
-    """The shared SessionEnd script fits Codex's three-second cap in both
-    host contexts: one bounded attempt, with no retry after a stall.
+    """The shared curl request fits Codex's three-second cap in both script
+    contexts: one two-second attempt, with no retry after a stall. This
+    does not model Claude's separate 1.5-second plugin deadline, which can
+    stop the script sooner.
 
     The live half is measured at the fixture daemon, not around the
     subprocess: each attempt is held without a reply and timed until curl
@@ -606,6 +608,54 @@ def test_codex_session_end_fits_the_three_second_cap(tmp_path, context):
         worker.join(timeout=8)
     assert len(attempts) == 1, attempts
     assert attempts[0] < cap, attempts
+
+
+@pytest.mark.parametrize("context", ["codex", "claude"])
+def test_session_end_keeps_the_two_second_response_opportunity(tmp_path, context):
+    """A fixture reply after 1.25 seconds still reaches the curl client.
+
+    Exercise the real script and curl outside either host's hook harness;
+    Claude may stop a plugin hook at 1.5 seconds regardless of this budget.
+    Socket EOF distinguishes a client that gave up after one second from
+    one still waiting for the delayed response, even though the hook exits
+    successfully after a curl timeout.
+    """
+    replies = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            started = time.monotonic()
+            readable, _, _ = select.select([self.connection], [], [], 1.25)
+            if readable:  # curl closed before the fixture could reply
+                replies.append((False, time.monotonic() - started))
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+            self.wfile.flush()
+            replies.append((True, time.monotonic() - started))
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    env = isolated_env(tmp_path / "codex-home")
+    env["HOME"] = tmp_path.as_posix()
+    if context == "codex":
+        env["PSEUDOLIFE_CODEX_HOOK"] = "1"
+    env["PSEUDOLIFE_MCP_DAEMON_URL"] = f"http://127.0.0.1:{server.server_port}"
+    try:
+        bash_run(ROOT / "plugin/hooks/session-end.sh", input='{"session_id":"fixture"}', env=env)
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+    assert len(replies) == 1, replies
+    received, elapsed = replies[0]
+    assert received, "SessionEnd gave up before the fixture's 1.25-second reply"
+    assert elapsed >= 1.25
 
 
 def test_native_prompt_reminder_matches_claude_script():
