@@ -1,0 +1,551 @@
+{
+  "schema": 1,
+  "seed": 150052,
+  "fixture_entries": [
+    {
+      "text": "The apricot rover carries an amber navigation beacon calibrated to 485 hertz.",
+      "source": "synthetic-differential",
+      "origin": "agent"
+    },
+    {
+      "text": "The birch greenhouse irrigates its violet orchids with 683 millilitres each morning.",
+      "source": "synthetic-differential",
+      "origin": "agent"
+    },
+    {
+      "text": "The cobalt observatory stores telescope exposure number 961 in its north archive.",
+      "source": "synthetic-differential",
+      "origin": "agent"
+    }
+  ],
+  "cases": [
+    {
+      "id": "search-unauthorized",
+      "surface": "http",
+      "request": {
+        "path": "/api/search?q=apricot",
+        "method": "GET",
+        "auth": "absent"
+      },
+      "expect": {
+        "status": 401
+      },
+      "operation": "search-unauthorized"
+    },
+    {
+      "id": "search-wrong-bearer",
+      "surface": "http",
+      "request": {
+        "path": "/api/search?q=apricot",
+        "method": "GET",
+        "auth": "invalid"
+      },
+      "expect": {
+        "status": 401
+      },
+      "operation": "search-wrong-bearer"
+    },
+    {
+      "id": "initialize",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "id": 3,
+          "params": {
+            "protocolVersion": "2026-07-28",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "synthetic-differential",
+              "version": "1"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "initialize"
+    },
+    {
+      "id": "initialized",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        }
+      },
+      "expect": {
+        "status": 202
+      },
+      "operation": "initialized"
+    },
+    {
+      "id": "list-tools",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/list",
+          "id": 5
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "list-tools"
+    },
+    {
+      "id": "seed-store-0",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 6,
+          "params": {
+            "name": "memory_store",
+            "arguments": {
+              "text": "The apricot rover carries an amber navigation beacon calibrated to 485 hertz.",
+              "source": "synthetic-differential",
+              "origin": "agent"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "seed-store"
+    },
+    {
+      "id": "seed-store-1",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 7,
+          "params": {
+            "name": "memory_store",
+            "arguments": {
+              "text": "The birch greenhouse irrigates its violet orchids with 683 millilitres each morning.",
+              "source": "synthetic-differential",
+              "origin": "agent"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "seed-store"
+    },
+    {
+      "id": "seed-store-2",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 8,
+          "params": {
+            "name": "memory_store",
+            "arguments": {
+              "text": "The cobalt observatory stores telescope exposure number 961 in its north archive.",
+              "source": "synthetic-differential",
+              "origin": "agent"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "seed-store"
+    },
+    {
+      "id": "store-empty",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 9,
+          "params": {
+            "name": "memory_store",
+            "arguments": {
+              "text": "",
+              "source": "synthetic-differential"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "store-empty"
+    },
+    {
+      "id": "unknown-tool",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 10,
+          "params": {
+            "name": "synthetic_unknown_tool",
+            "arguments": {}
+          }
+        }
+      },
+      "expect": {
+        "status": 200,
+        "tool_error": true
+      },
+      "operation": "unknown-tool"
+    },
+    {
+      "id": "search-mcp",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 11,
+          "params": {
+            "name": "memory_search",
+            "arguments": {
+              "query": "apricot rover amber navigation beacon",
+              "top_k": 3,
+              "sources": [
+                "synthetic-differential"
+              ],
+              "disable_recency_boost": true,
+              "rerank": false,
+              "bm25": false,
+              "min_score": -1.0
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "search"
+    },
+    {
+      "id": "search-http",
+      "surface": "http",
+      "request": {
+        "path": "/api/search?q=apricot%20rover%20amber&top_k=3&source=synthetic-differential&min_score=-1&disable_recency_boost=true&rerank=false&bm25=false",
+        "method": "GET",
+        "auth": "valid"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "search"
+    },
+    {
+      "id": "fact-set",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 13,
+          "params": {
+            "name": "memory_fact_set",
+            "arguments": {
+              "entity": "synthetic-apricot-rover",
+              "attribute": "beacon_colour",
+              "value": "amber",
+              "origin": "user",
+              "confidence": 1.0,
+              "freshness_class": "evergreen"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "fact-set"
+    },
+    {
+      "id": "fact-update",
+      "surface": "http",
+      "request": {
+        "path": "/api/facts/set",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "entity": "synthetic-apricot-rover",
+          "attribute": "beacon_colour",
+          "value": "violet",
+          "origin": "user",
+          "confidence": 1.0,
+          "freshness_class": "evergreen"
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "fact-update"
+    },
+    {
+      "id": "fact-get",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 15,
+          "params": {
+            "name": "memory_fact_get",
+            "arguments": {
+              "entity": "synthetic-apricot-rover",
+              "attribute": "beacon_colour",
+              "verbose": true
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "fact-get"
+    },
+    {
+      "id": "fact-history",
+      "surface": "mcp",
+      "request": {
+        "path": "/mcp",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "id": 16,
+          "params": {
+            "name": "memory_history",
+            "arguments": {
+              "entity": "synthetic-apricot-rover",
+              "attribute": "beacon_colour"
+            }
+          }
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "fact-history"
+    },
+    {
+      "id": "register-sender",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/register",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "label": "synthetic-sender",
+          "project": "synthetic-differential",
+          "task": "wire-contract"
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "register-sender"
+    },
+    {
+      "id": "register-recipient",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/register",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "label": "synthetic-recipient",
+          "project": "synthetic-differential",
+          "task": "wire-contract"
+        }
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "register-recipient"
+    },
+    {
+      "id": "send-first",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/send",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "to": {
+            "$ref": "recipient.agent_id"
+          },
+          "text": "synthetic first",
+          "request_id": "synthetic-first"
+        },
+        "identity": "sender"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "send-first"
+    },
+    {
+      "id": "send-second",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/send",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "to": {
+            "$ref": "recipient.agent_id"
+          },
+          "text": "synthetic second",
+          "request_id": "synthetic-second"
+        },
+        "identity": "sender"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "send-second"
+    },
+    {
+      "id": "send-missing-text",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/send",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "to": {
+            "$ref": "recipient.agent_id"
+          },
+          "request_id": "synthetic-invalid"
+        },
+        "identity": "sender"
+      },
+      "expect": {
+        "status": 400
+      },
+      "operation": "send-missing-text"
+    },
+    {
+      "id": "receive-ordered",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/receive",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "limit": 8
+        },
+        "identity": "recipient"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "receive-ordered"
+    },
+    {
+      "id": "ack-first",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/ack",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "message_id": {
+            "$ref": "first.message_id"
+          }
+        },
+        "identity": "recipient"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "ack-first"
+    },
+    {
+      "id": "receive-after-ack",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/receive",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "limit": 8
+        },
+        "identity": "recipient"
+      },
+      "expect": {
+        "status": 200
+      },
+      "operation": "receive-after-ack"
+    },
+    {
+      "id": "receive-wrong-identity",
+      "surface": "http",
+      "request": {
+        "path": "/api/coordination/receive",
+        "method": "POST",
+        "auth": "valid",
+        "body": {
+          "limit": 8
+        },
+        "identity": "wrong-recipient"
+      },
+      "expect": {
+        "status": 403
+      },
+      "operation": "receive-wrong-identity"
+    }
+  ],
+  "scope": "real Python daemon, real CPU embedder, two newly minted PostgreSQL banks; no Rust daemon"
+}

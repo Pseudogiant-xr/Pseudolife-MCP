@@ -1,0 +1,144 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "cases": 25,
+  "differences": [],
+  "cleanup": [
+    {
+      "readiness_identity_verified": true,
+      "actual_child_runtime": {
+        "python": "3.11.9",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "environment_kind": "virtualenv",
+        "distribution_versions": {
+          "pseudolife-mcp": "0.15.0",
+          "mcp": "2.1.0",
+          "httpx": "0.28.1",
+          "torch": "2.12.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1"
+        },
+        "package_runtime_version": "0.15.0",
+        "source_origin_matches_selected_root": true,
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+      },
+      "daemon_stopped": true,
+      "children_stopped": true,
+      "shutdown": "owned-process termination; bank disposable, no durability claim",
+      "database_dropped": true
+    },
+    {
+      "readiness_identity_verified": true,
+      "actual_child_runtime": {
+        "python": "3.11.9",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "environment_kind": "virtualenv",
+        "distribution_versions": {
+          "pseudolife-mcp": "0.15.0",
+          "mcp": "2.1.0",
+          "httpx": "0.28.1",
+          "torch": "2.12.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1"
+        },
+        "package_runtime_version": "0.15.0",
+        "source_origin_matches_selected_root": true,
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+      },
+      "daemon_stopped": true,
+      "children_stopped": true,
+      "shutdown": "owned-process termination; bank disposable, no durability claim",
+      "database_dropped": true
+    }
+  ],
+  "resource_check": {
+    "checked_at_utc": "2026-10-02T23:29:44Z",
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "offline_resource_checked_at_utc": "2026-10-02T23:29:30Z",
+    "offline_resource_clearance_used": true,
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance"
+  },
+  "environment": {
+    "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+    "instrument_head": "d398068743e7276e884bd2693501484b83f981e9",
+    "instrument_sha256": {
+      "__init__.py": "b81bf969b568b1b1770afc917f5aa62c8f947eaa982b3a07e38be60c241de694",
+      "fixtures.py": "e5aa794cfe4abd49b50bcdb94c9769fd1990756d28bda4065fb563e5871fd8e8",
+      "full_bank.py": "e88365abd59e645a7c9076cb0f2c7255f55c53fcb7b5cceabf4b620d6d978caf",
+      "full_seed.json": "55ea8c2bfa6b242572f2a5de4d355ba95d370ba9ca4c228eb3e13e0de7e4a80a",
+      "harness.py": "a5b6c68d7677d8bf6e4ca0b56c98e8c80762ee52b0be64633652413f2ff4e3b4",
+      "oracle.py": "01eafddb6db4081c154b894c854875ea5b4bbf7a32bff8de34b4e2e0c8fc24fb",
+      "oracle_tests.json": "edbeb91ca912f5570644c21a435edf585628169dc7f0a5b49a3fbbfbba6cafaf",
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+      "provenance.py": "b5c9cb1daa6ab46353b87caa9758b0fc3e792ab2742f1d0a170348027c866f81",
+      "pytest_plugin.py": "6e2a8eb38fd31256b404afb14dddc8bdad243db074ef2f777d9457ce1485193a",
+      "seed.json": "bf1dfd16af73b2076dfebd224a6dd96c74b2fc2d35b617ba240bd65f8c8001c1",
+      "selfcheck.py": "87da6f2bdda3c12f221e02095eaf3364934afcd6a949267339c96bef8bb4a319",
+      "test_boundary_regressions.py": "7c33a3c4865b09b61ba3780336897291db7ee1631e9fed75768a83505dad4c8f",
+      "test_capture_provenance.py": "bd931c14cfc7d5e23dba3eff373de18938ebe714fa834d8afcef8d9a66f5d30f",
+      "test_full_bank.py": "38b9219383289a11a538086e344185f94e959b039d7d2024edc1c8af5a099700",
+      "test_harness.py": "67932a41edb968462c3d9d521f47028928a0cdfebaa287d0734e5407d5888915",
+      "test_instrument_routing.py": "537722fae96e2f26e341cbfa09a86fa86d894cd6a3a8ffea1363f1f4f8cbff25",
+      "test_processes.py": "566609009dd9d70bfea3630eb89b739a98071b2a5ebf2a7832d2d870f18e0e40",
+      "test_provenance.py": "079faf8d8a3766478b38c59248ed04a90df6b5b14f735d546fa4ff3816c74624",
+      "test_runtime_provenance.py": "5eb2ed0f959e8b3ae5e0eec5dffd6535977cae5be7b4f6244d0d8e567dc8cfde"
+    },
+    "process_helper_sha256": {
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5",
+      "codex_doorbell.py": "00cb503e46456bfe92f127336fba19bbf46a0c5bc553b42d4fbeb814fd0b9388"
+    },
+    "source_schema": 52,
+    "historical_oracle": {
+      "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+      "source_schema": 52
+    },
+    "production_source_matches_historical": true,
+    "source_comparison_paths": [
+      "pseudolife_memory",
+      "pyproject.toml",
+      "tests/pg_defaults.py",
+      "tests/test_cli_dispatch.py",
+      "tests/conftest.py"
+    ],
+    "parent_runtime": {
+      "python": "3.11.9",
+      "executable_basename": "python.exe",
+      "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+      "environment_kind": "virtualenv",
+      "distribution_versions": {
+        "pseudolife-mcp": "0.15.0",
+        "mcp": "2.1.0",
+        "httpx": "0.28.1",
+        "torch": "2.12.0",
+        "psycopg": "3.3.4",
+        "sentence-transformers": "5.5.1"
+      },
+      "package_runtime_version": "0.15.0",
+      "source_origin_matches_selected_root": true,
+      "source_file": "pseudolife_memory/__init__.py",
+      "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+    },
+    "baseline_instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+      "evals/rust_baseline/ci.py": "68339d51622ba8d680ef81c836615a63b1e51dd2859a13089d329f7ae6b25661",
+      "evals/rust_baseline/common.py": "48317e48fe0c47b434e178757dc3a5c6d77e30d6f7610111fdd37a7b212a66e2",
+      "evals/rust_baseline/daemon.py": "4db05d2f8517f99e39014536b85750d245d74e6ac09636190a7883e90209ea02",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/shim.py": "8d8d6fcbe1bee16c066bf741a4c26ad3d85021854ce9d17606949ec6c26530f2",
+      "evals/rust_baseline/test_baseline.py": "522805c3406feafb60f8dfe6af22b0a1b14929d5a062ed338986291fa4aa6b50",
+      "evals/rust_baseline/test_review_fixes.py": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826"
+    }
+  },
+  "seed": 150052,
+  "scope": "real Python daemon, real CPU embedder, two newly minted PostgreSQL banks; no Rust daemon",
+  "score_abs_tolerance": 1e-06,
+  "ranking_order": "strict; sequential integer memory IDs retained exactly"
+}

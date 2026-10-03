@@ -1,0 +1,326 @@
+{
+  "idle_rss_bytes": {
+    "max": 2925686784,
+    "median": 2925686784.0,
+    "min": 2925686784,
+    "n": 20,
+    "p50": 2925686784,
+    "p95": 2925686784
+  },
+  "limitations": [
+    "Warm query embedding cache; fixed eight-query loop, sequential requests.",
+    "Each repeat starts from a fresh bank with identical synthetic inputs; store/fact phases grow it.",
+    "Memory is sampled process-tree RSS; excludes PostgreSQL and shared-page double-count adjustment.",
+    "Dream and release network checks disabled; CPU only, one model thread.",
+    "Mail timing is durable HTTP send plus immediate receive; no host delivery or wake timing.",
+    "Owned daemon is terminated after timing; no graceful-shutdown or durability assertion.",
+    "Smoke is plumbing only; never a performance baseline."
+  ],
+  "method": {
+    "bank_size": 2,
+    "embedding_backend": "torch",
+    "embedding_cache_size": 1024,
+    "embedding_cpu_dtype": "fp32",
+    "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+    "load_rss_interval_s": 0.02,
+    "repeats": 1,
+    "rss_root": "identity-verified owned runtime; excludes interpreter redirector",
+    "samples_per_repeat": 1,
+    "search_query_cycle": [
+      "apricot",
+      "birch",
+      "cobalt",
+      "dahlia",
+      "elm",
+      "fern",
+      "granite",
+      "hazel"
+    ],
+    "threads": 1
+  },
+  "provenance": {
+    "host": {
+      "architecture": "AMD64",
+      "label": "local-cpu-01",
+      "logical_cpus": 16,
+      "os": "Windows",
+      "os_release": "10",
+      "physical_cpus": 8,
+      "ram_bytes": 66190344192
+    },
+    "instrument_sha256": {
+      "evals/rust_baseline/__init__.py": "c1722478e4cc576b1f5623673c4730bbbe128bdb1bd5f1ac172cdea7ac65e674",
+      "evals/rust_baseline/ci.py": "68339d51622ba8d680ef81c836615a63b1e51dd2859a13089d329f7ae6b25661",
+      "evals/rust_baseline/common.py": "48317e48fe0c47b434e178757dc3a5c6d77e30d6f7610111fdd37a7b212a66e2",
+      "evals/rust_baseline/daemon.py": "4db05d2f8517f99e39014536b85750d245d74e6ac09636190a7883e90209ea02",
+      "evals/rust_baseline/daemon_child.py": "9566ebd2147c60afe857d9542b05f3cf348fd4384544788590f49bda59d73e71",
+      "evals/rust_baseline/shim.py": "8d8d6fcbe1bee16c066bf741a4c26ad3d85021854ce9d17606949ec6c26530f2",
+      "evals/rust_baseline/test_baseline.py": "522805c3406feafb60f8dfe6af22b0a1b14929d5a062ed338986291fa4aa6b50",
+      "evals/rust_baseline/test_review_fixes.py": "2990a91b17906e241f2366e5604fcf175be43567acdcd2bcc3a72c3281445cb5",
+      "evals/rust_baseline/transport.py": "345a47a45ce510ee0a9e75b6282e2f46773ae8b32a979108c3483a1de8fec826"
+    },
+    "measured_at_utc": "2026-10-02T23:22:43Z",
+    "parent_runtime": {
+      "dependencies": {
+        "httpx": "0.28.1",
+        "mcp": "2.1.0",
+        "psutil": "7.2.2",
+        "psycopg": "3.3.4",
+        "sentence-transformers": "5.5.1",
+        "torch": "2.12.0"
+      },
+      "python": "3.11.9"
+    },
+    "process_helper_sha256": {
+      "codex_doorbell.py": "00cb503e46456bfe92f127336fba19bbf46a0c5bc553b42d4fbeb814fd0b9388",
+      "processes.py": "89c42c274b5ee1ec2f40ca35d2b223086011c2b67d287a86797f36786552fec5"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "b5c9cb1daa6ab46353b87caa9758b0fc3e792ab2742f1d0a170348027c866f81"
+    },
+    "source_dirty": false,
+    "source_head": "136a34ae95e981a691fcc31ba9fb4f35d83d4249",
+    "source_schema": 52
+  },
+  "resource_check": {
+    "checked_at_utc": "2026-10-02T23:22:27Z",
+    "cli_board_available": false,
+    "lead_board_checked_free_at_utc": null,
+    "local_lease_check_exit": 0,
+    "local_lock_free": true,
+    "offline_resource_checked_at_utc": "2026-10-02T23:22:25Z",
+    "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+    "offline_resource_clearance_used": true
+  },
+  "runs": [
+    {
+      "actual_child_runtime": {
+        "distribution_versions": {
+          "httpx": "0.28.1",
+          "mcp": "2.1.0",
+          "pseudolife-mcp": "0.15.0",
+          "psycopg": "3.3.4",
+          "sentence-transformers": "5.5.1",
+          "torch": "2.12.0"
+        },
+        "environment_kind": "virtualenv",
+        "executable_basename": "python.exe",
+        "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+        "package_runtime_version": "0.15.0",
+        "python": "3.11.9",
+        "source_file": "pseudolife_memory/__init__.py",
+        "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "source_origin_matches_selected_root": true
+      },
+      "cleanup": {
+        "actual_child_runtime": {
+          "distribution_versions": {
+            "httpx": "0.28.1",
+            "mcp": "2.1.0",
+            "pseudolife-mcp": "0.15.0",
+            "psycopg": "3.3.4",
+            "sentence-transformers": "5.5.1",
+            "torch": "2.12.0"
+          },
+          "environment_kind": "virtualenv",
+          "executable_basename": "python.exe",
+          "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+          "package_runtime_version": "0.15.0",
+          "python": "3.11.9",
+          "source_file": "pseudolife_memory/__init__.py",
+          "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+          "source_origin_matches_selected_root": true
+        },
+        "children_stopped": true,
+        "daemon_stopped": true,
+        "database_dropped": true,
+        "readiness_identity_verified": true,
+        "shutdown": "owned-process termination; bank disposable, no durability claim"
+      },
+      "embedder": {
+        "backend": "torch",
+        "device": "cpu",
+        "dtype": "fp32"
+      },
+      "final_seed_and_store_count": 3,
+      "host_cpu_percent_before": 3.3,
+      "idle_rss_bytes": [
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784,
+        2925686784
+      ],
+      "initial_bank_size": 2,
+      "latency_ms": {
+        "coordination_receive": [
+          7.372500003839377
+        ],
+        "coordination_send": [
+          12.684200002695434
+        ],
+        "mail_roundtrip": [
+          20.060499999090098
+        ],
+        "memory_fact_set": [
+          303.2530999989831
+        ],
+        "memory_search": [
+          5.674500003806315
+        ],
+        "memory_store": [
+          227.22289999364875
+        ]
+      },
+      "protocol": "2025-11-25",
+      "repeat": 0,
+      "schema": 52,
+      "search_load_rss_bytes": [
+        2925686784
+      ]
+    }
+  ],
+  "schema": 1,
+  "search_load_rss_bytes": {
+    "max": 2925686784,
+    "median": 2925686784,
+    "min": 2925686784,
+    "n": 1,
+    "p50": 2925686784,
+    "p95": 2925686784
+  },
+  "seed": 61003,
+  "status": "plumbing-smoke",
+  "summary": {
+    "coordination_receive": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          7.372500003839377
+        ]
+      },
+      "ms": {
+        "max": 7.372500003839377,
+        "median": 7.372500003839377,
+        "min": 7.372500003839377,
+        "n": 1,
+        "p50": 7.372500003839377,
+        "p95": 7.372500003839377
+      }
+    },
+    "coordination_send": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          12.684200002695434
+        ]
+      },
+      "ms": {
+        "max": 12.684200002695434,
+        "median": 12.684200002695434,
+        "min": 12.684200002695434,
+        "n": 1,
+        "p50": 12.684200002695434,
+        "p95": 12.684200002695434
+      }
+    },
+    "mail_roundtrip": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          20.060499999090098
+        ]
+      },
+      "ms": {
+        "max": 20.060499999090098,
+        "median": 20.060499999090098,
+        "min": 20.060499999090098,
+        "n": 1,
+        "p50": 20.060499999090098,
+        "p95": 20.060499999090098
+      }
+    },
+    "memory_fact_set": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          303.2530999989831
+        ]
+      },
+      "ms": {
+        "max": 303.2530999989831,
+        "median": 303.2530999989831,
+        "min": 303.2530999989831,
+        "n": 1,
+        "p50": 303.2530999989831,
+        "p95": 303.2530999989831
+      }
+    },
+    "memory_search": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          5.674500003806315
+        ]
+      },
+      "ms": {
+        "max": 5.674500003806315,
+        "median": 5.674500003806315,
+        "min": 5.674500003806315,
+        "n": 1,
+        "p50": 5.674500003806315,
+        "p95": 5.674500003806315
+      }
+    },
+    "memory_store": {
+      "control": {
+        "available": false,
+        "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval.",
+        "method": "max minus min of medians of identical-input repeated control blocks",
+        "noise_floor_abs": null,
+        "repeat_medians": [
+          227.22289999364875
+        ]
+      },
+      "ms": {
+        "max": 227.22289999364875,
+        "median": 227.22289999364875,
+        "min": 227.22289999364875,
+        "n": 1,
+        "p50": 227.22289999364875,
+        "p95": 227.22289999364875
+      }
+    }
+  },
+  "synthetic_corpus_sha256": "0a2bbce16b33763fb37c22a7063b0112f4595f7ac5bb9557b6547de9ac44be8f"
+}
