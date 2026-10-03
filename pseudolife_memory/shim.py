@@ -4,10 +4,14 @@ An MCP client launches this per session via the ``pseudolife-mcp`` script.
 It owns NO storage and loads NO models: one daemon process holds the
 bank, every session attaches through here (or directly over HTTP).
 
-Failure contract: if the daemon can't be reached or started within the
-startup budget, exit loudly with the exact recovery commands — never
-fall back to embedded storage (that would reintroduce multi-writer
-state, the v0.1 bug class).
+Failure contract: never fall back to embedded storage (that would
+reintroduce multi-writer state, the v0.1 bug class). A daemon this shim
+starts itself that never comes up ends the shim loudly with the exact
+recovery commands. A daemon it does not start (another machine's, or an
+external one under ``PSEUDOLIFE_MCP_NO_SPAWN``) that does not answer leaves
+the session up instead: the shim serves the last handshake it cached for
+that daemon, retries it, and tells the client to re-list tools when it
+answers.
 """
 
 from __future__ import annotations
@@ -57,21 +61,20 @@ _SPAWN_WAIT_S = 25.0
 # of the 25 s floor on FAST hardware. 180 s gives slower disks/AV room;
 # the child-liveness check above keeps genuine failures fast.
 _SPAWN_WAIT_ALIVE_S = 180.0
-# How long the no-spawn path waits for an EXTERNAL daemon to appear. Sized
-# for the 2026-08-29 incident's scenario — a Claude session starting at
-# logon while Docker Desktop is still booting after a reboot: Docker's
-# port proxy arrived within seconds of the shim's failed probe there, and
-# a cold Docker Desktop start is typically tens of seconds to a couple of
-# minutes, so the spawn ceiling above is a comfortable cap for this too.
-_NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
-# How long the shim waits for a daemon on ANOTHER machine (a non-loopback
-# daemon URL) before giving up. A remote daemon that does not answer the
-# first probe is down or unreachable, not booting beside this session, so
-# the wait is a design bound for a flapping link, not a measured boot time:
-# the 2026-09-28 remote-client dogfood measured a healthy tailnet /health
-# round trip at 7-10 ms, and a session should not stall three minutes on a
-# link that is simply not there.
-_REMOTE_WAIT_S = 15.0
+# How long the shim waits for a daemon it does not start itself (an EXTERNAL
+# one under PSEUDOLIFE_MCP_NO_SPAWN, or one on ANOTHER machine) before it
+# starts the session without it. The wait blocks the MCP handshake, which the
+# hosts time out (Codex at 10 s by default, Claude Code at 30 s) and never
+# retry: a stdio server that misses it stays failed for the session's life.
+# On 2026-10-03 the box's tailscaled was down for minutes and every session
+# started then ran without memory. Past the wait the shim serves the cached
+# handshake and recovers by itself, so waiting longer buys only a fresher
+# handshake. 5 s is a design bound inside Codex's budget, not a measurement;
+# it replaced 180 s (no-spawn, sized for Docker Desktop booting after the
+# 2026-08-29 reboot, whose port proxy came up within seconds) and 15 s
+# (remote; a healthy tailnet /health round trip measured 7-10 ms, 2026-09-28).
+_NO_SPAWN_WAIT_S = 5.0
+_REMOTE_WAIT_S = _NO_SPAWN_WAIT_S
 # Per-probe timeout for a remote daemon. The loopback default (0.25 s) is
 # sized for a local round trip; a relayed tailnet path (DERP) can cost tens
 # to a few hundred ms per request, so a remote probe gets 2 s: a design
@@ -409,6 +412,26 @@ def _transport_error(exc: BaseException, attempt: _UpstreamAttempt,
     return MCPError(code, message, data)
 
 
+def _never_reached_daemon(error) -> bool:
+    """True when a mapped upstream error (``_transport_error``) is a request
+    that never got through to the daemon: the connection itself failed, so
+    nothing ran. A refusal, a timeout or a lost response says the daemon
+    (or something in front of it) is there."""
+    data = getattr(error, "data", None)
+    return (isinstance(data, dict)
+            and data.get("classification") == "connection_failure"
+            and data.get("operation_outcome") == "not_dispatched")
+
+
+_DAEMON_UNREACHABLE_MESSAGE = (
+    "The memory daemon is unreachable, so this call did not run. The shim keeps "
+    "retrying it in the background and has the client re-list tools when it "
+    "answers; retry this call then.")
+_STARTED_WITHOUT_DAEMON_NOTE = (
+    "Pseudolife-MCP: the memory daemon did not answer when this session started. "
+    "{served} Each tool call retries it, and the tool list refreshes when it answers.")
+
+
 def probe_health(url: str, timeout: float = 0.25) -> dict | None:
     try:
         with urllib.request.urlopen(url + "/health", timeout=timeout) as r:
@@ -645,6 +668,67 @@ def _state_dir():
     return Path.home() / ".pseudolife-mcp"
 
 
+# The last handshake each daemon URL gave this machine: its instructions and
+# tool list, so a shim whose daemon is unreachable at start still answers
+# initialize and tools/list. One small file per URL; only the most recently
+# written are kept, since every test shim on a random port writes one.
+_HANDSHAKE_CACHE_KEEP = 16
+
+
+def _handshake_cache_path(url: str):
+    """Under ``PSEUDOLIFE_AGENT_STATE_DIR`` when set (the installers give each
+    client its own, so clients on different tool tiers keep their own lists),
+    else under :func:`_state_dir`."""
+    from pathlib import Path
+
+    configured = os.environ.get("PSEUDOLIFE_AGENT_STATE_DIR")
+    root = Path(configured).expanduser() if configured else _state_dir()
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return root / "handshake-cache" / f"{digest}.json"
+
+
+def _load_handshake_cache(url: str) -> dict:
+    """``{"instructions": str, "tools": [tool dicts]}``, each key only when
+    cached; ``{}`` for no cache or an unreadable one."""
+    try:
+        data = json.loads(_handshake_cache_path(url).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - an unreadable cache is no cache
+        return {}
+    if not isinstance(data, dict) or data.get("url") != url:
+        return {}
+    cached = {}
+    if isinstance(data.get("instructions"), str):
+        cached["instructions"] = data["instructions"]
+    if isinstance(data.get("tools"), list):
+        cached["tools"] = data["tools"]
+    return cached
+
+
+def _store_handshake_cache(url: str, **fields) -> None:
+    """Merge ``instructions=`` and/or ``tools=`` into ``url``'s cache.
+    Best-effort: a cache must never be what stops a session."""
+    scratch = None
+    try:
+        path = _handshake_cache_path(url)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cached = {**_load_handshake_cache(url), **fields}
+        scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        scratch.write_text(json.dumps({"url": url, **cached}), encoding="utf-8")
+        # On Windows this fails while another shim has the file open to read.
+        os.replace(scratch, path)
+        scratch = None
+        files = sorted(path.parent.glob("*.json"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        for stale in files[_HANDSHAKE_CACHE_KEEP:]:
+            stale.unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        if scratch is not None:
+            try:
+                scratch.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _spawn_detached(argv: list[str], log) -> int:
     """Start ``argv`` so it outlives this shim, appending its output to
     ``log``; returns the pid. The seam the tests replace."""
@@ -759,37 +843,53 @@ def _version_key(value: str) -> tuple[int, ...] | None:
     return tuple(int(part) for part in match.group(1).split(".")) if match else None
 
 
+_LOCAL_REMEDY = (
+    "  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n"
+    "  Pip tiers:    pseudolife-mcp serve   (run it in a terminal — "
+    "the daemon logs to its own stderr, so this shows why it died)")
+_STARTING_WITHOUT_DAEMON = (
+    "  This session starts without it: the shim serves the last tool list it\n"
+    "  saw from that daemon, retries the daemon on every call and in the\n"
+    "  background, and has the client re-list tools once it answers.")
+
+
 def _exit_unreachable(url: str) -> NoReturn:
-    no_spawn_note = (
-        "  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was "
-        "spawned.)\n" if _spawn_disabled() else "")
-    print(
-        f"[shim] FAILED to reach the memory daemon at {url}.\n"
-        f"{no_spawn_note}"
-        f"  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n"
-        f"  Pip tiers:    pseudolife-mcp serve   (run it in a terminal — "
-        f"the daemon logs to its own stderr, so this shows why it died)",
-        file=sys.stderr,
-    )
+    print(f"[shim] FAILED to reach the memory daemon at {url}.\n{_LOCAL_REMEDY}",
+          file=sys.stderr)
     sys.exit(1)
 
 
-def _exit_unreachable_remote(url: str) -> NoReturn:
+def _report_unreachable_external(url: str) -> None:
     print(
-        f"[shim] FAILED to reach the memory daemon at {url}.\n"
+        f"[shim] no answer from the memory daemon at {url}.\n"
+        f"  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n"
+        f"{_LOCAL_REMEDY}\n{_STARTING_WITHOUT_DAEMON}",
+        file=sys.stderr,
+    )
+
+
+def _report_unreachable_remote(url: str) -> None:
+    print(
+        f"[shim] no answer from the memory daemon at {url}.\n"
         f"  That address is another machine, so no local daemon was started:\n"
         f"  a daemon spawned here could never be that one.\n"
         f"  Check the link to the daemon host (tailnet up? LAN route?), that\n"
         f"  the host exposes the port to this machine (e.g. `tailscale serve "
-        f"status` there), and that the daemon is running there (GET /health).",
+        f"status` there), and that the daemon is running there (GET /health).\n"
+        f"{_STARTING_WITHOUT_DAEMON}",
         file=sys.stderr,
     )
-    sys.exit(1)
 
 
-def ensure_daemon(url: str) -> dict:
+def ensure_daemon(url: str) -> dict | None:
+    """The daemon's /health payload once it answers, or ``None`` when a
+    daemon this shim must not start (another machine's, or an external one
+    under ``PSEUDOLIFE_MCP_NO_SPAWN``) did not answer within its wait: the
+    session then starts without it (see ``_proxy``). A daemon this shim
+    spawns that never comes up still exits."""
     url = _validated_daemon_url(url)
     remote = not _is_loopback_url(url)
+    started = time.time()
     health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S) if remote else probe_health(url)
     if health is not None:
         return _accept_health(url, health)
@@ -804,13 +904,18 @@ def ensure_daemon(url: str) -> dict:
             f"local daemon for a remote URL...",
             file=sys.stderr,
         )
-        start = time.time()
-        while time.time() - start < _REMOTE_WAIT_S:
+        # The whole wait, first probe included, ends by the deadline: a link
+        # that drops packets costs every probe its full timeout, so a late
+        # probe gets only the time left (counted from after the first probe it
+        # could reach ~9.5 s of Codex's 10 s handshake budget: review, 2026-10-03).
+        deadline = started + _REMOTE_WAIT_S
+        while (left := deadline - time.time() - 0.5) >= 0.25:
             time.sleep(0.5)
-            health = probe_health(url, timeout=_REMOTE_PROBE_TIMEOUT_S)
+            health = probe_health(url, timeout=min(_REMOTE_PROBE_TIMEOUT_S, left))
             if health is not None:
                 return _accept_health(url, health)
-        _exit_unreachable_remote(url)
+        _report_unreachable_remote(url)
+        return None
     if _spawn_disabled():
         # Docker-tier install: the daemon is external (compose), so wait
         # for it instead of racing its port bind with a fallback spawn.
@@ -826,7 +931,8 @@ def ensure_daemon(url: str) -> dict:
             health = probe_health(url, timeout=0.5)
             if health is not None:
                 return _accept_health(url, health)
-        _exit_unreachable(url)
+        _report_unreachable_external(url)
+        return None
     lock = _open_spawn_lock(url)
     held = False
     try:
@@ -1235,13 +1341,15 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
                  channel_inbox=None, agent_headers=None, coordination_hint=None,
                  coordination_adapter=None, codex_metadata: bool = False,
                  coordination_registry=None, instructions_note: str = "",
-                 board_checkin=False, coordination_refusal: str = "") -> None:
+                 board_checkin=False, coordination_refusal: str = "",
+                 daemon_unreachable: bool = False) -> None:
     import asyncio
     import contextlib
     import anyio
 
     url = _validated_daemon_url(url)
 
+    import mcp.types as types
     from mcp.client import streamable_http
     from mcp.client.session import ClientSession
     _widen_sse_event_limit(streamable_http)
@@ -1250,6 +1358,7 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     from mcp.server.stdio import stdio_server
     from mcp.server.subscriptions import (
         InMemorySubscriptionBus, ListenHandler, ToolsListChanged)
+    from mcp.shared.exceptions import MCPError
 
     from pseudolife_memory.credentials import CredentialProvider
 
@@ -1363,14 +1472,114 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
     # validate_input=False plus content/structured juggling to preserve
     # that; v2's pass-through result types make it the default).
 
+    # Whether the daemon answered the last time the shim asked. While it does
+    # not (down at start, or a request that never reached it), tools/list is
+    # served from the cached handshake and a background probe watches
+    # /health; the first sign of life flips it back and has the client
+    # re-list. ``session`` is the downstream session, kept for that notice.
+    # ``backoff`` indexes the probe schedule and survives the watcher: a
+    # /health that answers while every /mcp connection still fails would
+    # otherwise restart it at 1 s and have the client re-list every second or
+    # two (review, 2026-10-03). Only a request that got through resets it.
+    link = {"up": not daemon_unreachable, "watcher": None, "session": None,
+            "backoff": 0}
+
+    def _cached_tools():
+        tools = []
+        for raw in _load_handshake_cache(url).get("tools", []):
+            try:
+                tools.append(types.Tool.model_validate(raw))
+            except Exception:  # noqa: BLE001 - skip a tool this SDK cannot read
+                continue
+        return types.ListToolsResult(tools=tools)
+
+    async def _notify_tools_changed(session=None):
+        # Both eras: the subscription bus for 2026-07-28 clients (whose
+        # outbound path drops plain session notifications) and the session
+        # send for handshake-era clients. Best-effort.
+        try:
+            await bus.publish(ToolsListChanged())
+        except Exception:  # noqa: BLE001
+            pass
+        session = session or link["session"]
+        if session is not None:
+            try:
+                await session.send_tool_list_changed()
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _watch_daemon():
+        # The adapter's re-attach schedule, reused rather than tuned.
+        timeout = 0.5 if _is_loopback_url(url) else _REMOTE_PROBE_TIMEOUT_S
+        while not link["up"]:
+            await asyncio.sleep(_ADAPTER_RETRY_DELAYS[
+                min(link["backoff"], len(_ADAPTER_RETRY_DELAYS) - 1)])
+            link["backoff"] += 1
+            if await asyncio.to_thread(probe_health, url, timeout) is not None:
+                await _daemon_answered()
+
+    def _daemon_lost():
+        if link["up"]:
+            link["up"] = False
+            print("pseudolife-mcp: the memory daemon stopped answering; serving the "
+                  "cached tool list and retrying it in the background.", file=sys.stderr)
+        if link["watcher"] is None or link["watcher"].done():
+            link["watcher"] = asyncio.get_running_loop().create_task(_watch_daemon())
+
+    async def _daemon_answered():
+        if link["up"]:
+            return
+        link["up"] = True
+        watcher = link["watcher"]
+        if watcher is not None and watcher is not asyncio.current_task():
+            watcher.cancel()
+        print("pseudolife-mcp: the memory daemon answers again; the client was asked "
+              "to re-list tools.", file=sys.stderr)
+        await _notify_tools_changed()
+
+    def _remember_session(ctx):
+        session = getattr(ctx, "session", None)
+        if session is not None:
+            link["session"] = session
+
     async def _list_tools(ctx, params):
+        _remember_session(ctx)
+        if not link["up"]:
+            _daemon_lost()  # keeps the watcher running
+            return _cached_tools()
+
         # Forward pagination params verbatim — swallowing a client cursor
         # would replay page 1 forever if the daemon ever paginates.
         async def forward(remote, _initialization, _snapshot):
             return await remote.list_tools(params=params)
-        return await _perform("list", forward)
+        try:
+            result = await _perform("list", forward)
+        except MCPError as error:
+            if not _never_reached_daemon(error):
+                raise
+            _daemon_lost()
+            return _cached_tools()
+        link["backoff"] = 0
+        if params is None or not getattr(params, "cursor", None):
+            _store_handshake_cache(url, tools=[
+                tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for tool in result.tools])
+        return result
 
     async def _call_tool(ctx, params):
+        _remember_session(ctx)
+        try:
+            return await _forward_call(ctx, params)
+        except MCPError as error:
+            # Every call retries the daemon; one that could not reach it says
+            # so instead of the generic connection advice, and starts the
+            # background watch that re-lists tools when it answers.
+            if not _never_reached_daemon(error):
+                raise
+            _daemon_lost()
+            raise MCPError(error.code, _DAEMON_UNREACHABLE_MESSAGE, error.data) from None
+
+    async def _forward_call(ctx, params):
         call_headers = {}
         call_hint = coordination_hint
         noted_thread = None
@@ -1464,26 +1673,19 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
             raise
         except Exception as exc:
             raise _transport_error(exc, attempt, "call") from None
+        link["backoff"] = 0
+        await _daemon_answered()  # a no-op unless the daemon was unreachable
         if noted_thread is not None and not result.is_error:
             # Only a receive that succeeded has read the mailbox.
             coordination_registry.note_call(
                 noted_thread, params.name, params.arguments, succeeded=True)
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
-        # to the real client — re-emit it downstream on BOTH eras: the
-        # subscription bus for 2026-07-28 clients (whose outbound path drops
-        # plain session notifications) and the session send for handshake-era
-        # clients. A failed call cannot have changed the tier.
+        # to the real client — re-emit it downstream on both eras. A failed
+        # call cannot have changed the tier.
         if (not result.is_error and params.name == "memory_toolset"
                 and _toolset_changed(result)):
-            try:
-                await bus.publish(ToolsListChanged())
-            except Exception:  # noqa: BLE001 — notify is best-effort
-                pass
-            try:
-                await ctx.session.send_tool_list_changed()
-            except Exception:  # noqa: BLE001 — notify is best-effort
-                pass
+            await _notify_tools_changed(ctx.session)
         if call_hint is not None:
             hint = call_hint()
             if hint:
@@ -1513,7 +1715,9 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         try:
             # Reserve time within Codex's default 10s startup budget for the
             # downstream handshake; the upstream HTTP read default is 300s.
-            return await asyncio.wait_for(_fetch_instructions(), timeout=5)
+            instructions = await asyncio.wait_for(_fetch_instructions(), timeout=5)
+            _store_handshake_cache(url, instructions=instructions)
+            return instructions
         except Exception as exc:
             # This optional enhancement must not turn a transient MCP refusal
             # into a dead stdio process. Fresh per-call connections can recover.
@@ -1533,9 +1737,25 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         except Exception:  # noqa: BLE001 - an unanswered probe adds no check-in
             return False
 
-    instructions, board_ready = await asyncio.gather(
-        _startup_instructions(), _board_ready())
-    instructions = _with_board_checkin(instructions, board_ready)
+    if daemon_unreachable:
+        # Nothing to ask: the daemon just failed its startup wait, and asking
+        # again would spend the host's handshake budget. Serve the instructions
+        # it last gave this machine, and start watching for it.
+        cached = _load_handshake_cache(url)
+        instructions = _with_board_checkin(
+            cached.get("instructions"),
+            bool(board_checkin) and not callable(board_checkin))
+        instructions_note = "\n\n".join(filter(None, (
+            _STARTED_WITHOUT_DAEMON_NOTE.format(
+                served=("These instructions and the tool list are the last ones it "
+                        "gave this machine." if cached.get("tools") else
+                        "Its tools are listed once it answers.")),
+            instructions_note)))
+        _daemon_lost()
+    else:
+        instructions, board_ready = await asyncio.gather(
+            _startup_instructions(), _board_ready())
+        instructions = _with_board_checkin(instructions, board_ready)
     if instructions_note:
         # The version mismatch goes first: it explains any other oddity.
         instructions = instructions_note + "\n\n" + (instructions or "")
@@ -1554,16 +1774,20 @@ async def _proxy(url: str, token: str | None, session_uid: str, *, provider=None
         on_subscriptions_listen=ListenHandler(bus),
     )
 
-    async with stdio_server() as (r, w):
-        if channel_inbox is not None:
-            from pseudolife_memory.channel import serve_channel
-            await serve_channel(server, r, w, channel_inbox,
-                                notification_options=NotificationOptions(tools_changed=True))
-        else:
-            await server.run(
-                r, w, server.create_initialization_options(
-                    NotificationOptions(tools_changed=True)),
-            )
+    try:
+        async with stdio_server() as (r, w):
+            if channel_inbox is not None:
+                from pseudolife_memory.channel import serve_channel
+                await serve_channel(server, r, w, channel_inbox,
+                                    notification_options=NotificationOptions(tools_changed=True))
+            else:
+                await server.run(
+                    r, w, server.create_initialization_options(
+                        NotificationOptions(tools_changed=True)),
+                )
+    finally:
+        if link["watcher"] is not None:
+            link["watcher"].cancel()
 
 
 # The capability :func:`_proxy` actually needs, probed as a module so the
@@ -1659,7 +1883,8 @@ def _session_state_path(url: str):
 
 async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                              channel: bool = False, provider=None,
-                             instructions_note: str = "") -> None:
+                             instructions_note: str = "",
+                             daemon_unreachable: bool = False) -> None:
     import asyncio
     from contextlib import AsyncExitStack
     from pseudolife_memory.channel import idle_inbox
@@ -1686,12 +1911,17 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
     # A process serving many conversations binds no board identity whatever
     # the daemon says, so it does not wait on the question.
     if not setting and _holds_bearer(provider) and not shared_host:
-        try:
-            answer = await asyncio.wait_for(
-                asyncio.to_thread(_board_available, url, provider),
-                timeout=_BOARD_PROBE_SECONDS)
-        except (TimeoutError, asyncio.TimeoutError):  # 3.10 raises the latter
+        if daemon_unreachable:
+            # It just failed its startup wait: asking again would only spend
+            # the handshake budget, so the question stays open (unanswered).
             answer = None
+        else:
+            try:
+                answer = await asyncio.wait_for(
+                    asyncio.to_thread(_board_available, url, provider),
+                    timeout=_BOARD_PROBE_SECONDS)
+            except (TimeoutError, asyncio.TimeoutError):  # 3.10 raises the latter
+                answer = None
         enabled = answer is True
         unanswered = answer is None
     codex_pull = (not shared_host and not channel
@@ -1699,6 +1929,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
                   == "codex")
     async with AsyncExitStack() as stack:
         kwargs = {"instructions_note": instructions_note} if instructions_note else {}
+        if daemon_unreachable:
+            kwargs["daemon_unreachable"] = True
         if codex_pull:
             # Codex supplies the thread only on each tools/call request.  Do
             # not bind an identity during process startup: launcher env is not
@@ -1929,6 +2161,28 @@ def _require_credential_for_auth(url: str, health: dict, provider) -> None:
     sys.exit(1)
 
 
+def _warn_if_credential_file_unusable(provider) -> None:
+    """The degraded-start half of :func:`_require_credential_for_auth`. With
+    no /health there is no ``auth`` verdict to exit on, and the session must
+    start anyway; but a configured token file that cannot be used fails every
+    call later behind an opaque error, so name it once here."""
+    from pseudolife_memory.credentials import CredentialError
+
+    if provider.path is None:
+        return
+    try:
+        provider.snapshot()
+    except CredentialError as exc:
+        print(
+            f"[shim] the configured credential file cannot be used: {exc}\n"
+            f"  PSEUDOLIFE_MCP_TOKEN_FILE={provider.path}\n"
+            f"  If the daemon requires bearer authentication, every call will "
+            f"be refused until the file exists, is owner-only, and holds only "
+            f"the token.",
+            file=sys.stderr,
+        )
+
+
 def run_shim(*, channel: bool = False) -> None:
     import asyncio
     from pseudolife_memory.credentials import CredentialProvider
@@ -1937,7 +2191,10 @@ def run_shim(*, channel: bool = False) -> None:
     url = _daemon_url()
     health = ensure_daemon(url)
     provider = CredentialProvider.from_environment()
-    _require_credential_for_auth(url, health, provider)
+    if health is not None:
+        _require_credential_for_auth(url, health, provider)
+    else:
+        _warn_if_credential_file_unusable(provider)
     # One client session, one root episode. ``session_uid`` rides every call
     # as X-PL-Session, and the daemon stamps a write that passes no
     # ``episode=`` handle (and names the session for memory_session_title)
@@ -1965,7 +2222,8 @@ def run_shim(*, channel: bool = False) -> None:
     try:
         asyncio.run(_run_session_proxy(
             url, None, session_uid, channel=channel, provider=provider,
-            instructions_note=_version_note(url, health)))
+            instructions_note=_version_note(url, health) if health is not None else "",
+            daemon_unreachable=health is None))
     except KeyboardInterrupt:  # session closed
         pass
     finally:
