@@ -91,7 +91,7 @@ def _when(value):
 
 
 def _enrol_code(store, args, out):
-    from pseudolife_memory.storage.maintainer import BOOTSTRAP_TTL
+    from pseudolife_memory.storage.maintainer import BOOTSTRAP_TTL, key_prefix
     code = store.bootstrap_code()
     print(f"One-time enrolment code: {code}", file=out)
     print(f"Valid for {BOOTSTRAP_TTL // 60} minutes. Enter it in the Console with a label, "
@@ -103,7 +103,7 @@ def _enrol_code(store, args, out):
     while time.monotonic() < deadline:
         redeemed = store.bootstrap_redeemed(code)
         if redeemed:
-            prefix = redeemed["credential_id"][:12]
+            prefix = key_prefix(redeemed["credential_id"])
             print(f"Enrolled (pending): {prefix}  label: {redeemed['label']}", file=out)
             print("Check that the Console shows the same prefix and label, then run:\n"
                   f"  pseudolife-mcp maintainer confirm {prefix}\n"
@@ -155,7 +155,7 @@ def main(argv=None, out=None) -> int:
             and argv[1].startswith("-") and argv[1] not in ("-h", "--help", "--")):
         argv.insert(1, "--")
     args = parser.parse_args(argv)
-    from pseudolife_memory.storage.maintainer import MaintainerError
+    from pseudolife_memory.storage.maintainer import MaintainerError, key_prefix
     try:
         with _bank() as storage:
             store = _store(storage)
@@ -163,10 +163,12 @@ def main(argv=None, out=None) -> int:
                 return _enrol_code(store, args, out)
             if args.action == "confirm":
                 row = store.confirm(args.prefix)
-                print(f"Active: {row['credential_id'][:12]}  label: {row['label']}", file=out)
+                print(f"Active: {key_prefix(row['credential_id'])}  label: {row['label']}",
+                      file=out)
             elif args.action == "revoke":
                 row = store.revoke(args.prefix)
-                print(f"Revoked: {row['credential_id'][:12]}  label: {row['label']}", file=out)
+                print(f"Revoked: {key_prefix(row['credential_id'])}  label: {row['label']}",
+                      file=out)
             elif args.action == "reset":
                 if not args.yes:
                     print("reset revokes every passkey and rotates the secret; pass --yes",
@@ -180,8 +182,8 @@ def main(argv=None, out=None) -> int:
                 if not keys:
                     print("No passkeys.", file=out)
                 for key in keys:
-                    print(f"{key['credential_id'][:12]}  {key['state']:8} {key['label']!r}  "
-                          f"enrolled_by={key['enrolled_by'][:12]}  "
+                    print(f"{key_prefix(key['credential_id'])}  {key['state']:8} {key['label']!r}  "
+                          f"enrolled_by={key_prefix(key['enrolled_by'])}  "
                           f"active_from={_when(key['active_from'])}  "
                           f"last_used={_when(key['last_used_at'])}"
                           + ("  FLAGGED (sign count went backwards)" if key["flagged_at"]

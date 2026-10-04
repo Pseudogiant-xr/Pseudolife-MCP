@@ -38,7 +38,7 @@ from pseudolife_memory.storage.coordination import (
 )
 from pseudolife_memory.storage.maintainer import (
     CHALLENGE_PURPOSES, CHALLENGE_TTL, ROLE_PURPOSES, MaintainerError, MaintainerStore,
-    challenge_bytes, check_label,
+    challenge_bytes, check_label, key_prefix,
 )
 
 logger = logging.getLogger("pseudolife-mcp.maintainer")
@@ -420,12 +420,12 @@ def _enrol(service, board, store, body):
     if "code" in body:
         out = store.enrol_bootstrap(body.get("payload"), body.get("mac"),
                                     body.get("attestation"), body.get("code"))
-        notice = (f"key {out['credential_id'][:12]} was enrolled with a one-time code from "
+        notice = (f"key {key_prefix(out['credential_id'])} was enrolled with a one-time code from "
                   "the daemon host and waits for the host confirm")
     else:
         out = store.enrol_approved(body.get("payload"), body.get("mac"),
                                    body.get("attestation"))
-        notice = (f"key {out['credential_id'][:12]} was added; it cannot sign for 24 hours "
+        notice = (f"key {key_prefix(out['credential_id'])} was added; it cannot sign for 24 hours "
                   "and an older key can cancel it meanwhile")
     return {"credential_id": out["credential_id"], "label": out["label"], "state": out["state"],
             "_notice": notice}
@@ -434,13 +434,13 @@ def _enrol(service, board, store, body):
 def _cancel(service, board, store, body):
     out = store.cancel(body.get("payload"), body.get("mac"), body.get("assertion"))
     return {"state": out["state"],
-            "_notice": f"key {out['credential_id'][:12]} was cancelled by an older key"}
+            "_notice": f"key {key_prefix(out['credential_id'])} was cancelled by an older key"}
 
 
 def _revoke(service, board, store, body):
     out = store.revoke_self(body.get("payload"), body.get("mac"), body.get("assertion"))
     return {"state": out["state"],
-            "_notice": f"key {out['credential_id'][:12]} revoked itself"}
+            "_notice": f"key {key_prefix(out['credential_id'])} revoked itself"}
 
 
 class MaintainerOps:
