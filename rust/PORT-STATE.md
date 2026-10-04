@@ -11,7 +11,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 [PR #546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546).
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
-Overall Phase 1 acceptance remains pending; named retirements and scoped substitutions are recorded in PARITY.md.
+Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
@@ -23,7 +23,7 @@ Overall Phase 1 acceptance remains pending; named retirements and scoped substit
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | Close-out a-f evidenced at 690bb8ac; final acceptance g pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Four current schema-2 judges/self-replays, separate Python dispatcher scope, both 3x10 paired measurements and executing green Rust/Parity CI below. Named SDK retirement and three substitutions are explicit; committed candidate-routed full suites, integrated final-head CI and fresh whole-change review remain pending |
+| 1: Stdio shim | ready-for-review | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current PR-head suites, integrated CI and final review must pass before #560 is marked ready. |
 | 2: Client CLI leaves | Implementation started; acceptance deferred | — | All 28 current modes classified in PARITY.md; 19 requested leaves plus carried help/version/channel accounted for. Windows watched red controls, 82 focused Python checks, 3 Rust process tests, all-target clippy/release build and private 15-case exact-byte debug proof passed for UTF-8 stdout/stderr and valid Unicode scalar argv, preserving Windows CRLF; other output encodings remain deferred. No committed final receipts, Linux/CI proof or measurements yet. Final Phase 1 a-f evidence integrated; next: freeze source, capture both-OS pinned self-replay/candidate receipts and schedule help paired measurement |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -277,7 +277,7 @@ The brief's 2.1 close-out status is:
 | d: Actual outcomes, source/binary bindings, self-replay and pruning | Complete at 690bb8ac | Four schema-2 combined receipts; eight actual nodes each, 32 bound cells each, all sections and cleanup checked; one current replay kind/platform; two named historical strict-judge receipts retained |
 | e: Post-retirement paired measurement | Complete at 690bb8ac | Both platform receipts below, three repeats of ten samples per arm; all normal and separate RSS launches clean; canonical historical LF artifact binding |
 | f: Small review items | Implemented and validated at 690bb8ac | Close-race built-empty assertion; doctor oracle subprocess classification; local unsafe allowances; lazy launcher scan; Python-first observed concurrent-order contract; seven exact startup stderr cells and executing CI |
-| g: Final acceptance | Pending | Candidate-routed committed full suites on WSL and box, local final-closeout judges as required, final-head CI after evidence integration, and fresh independent whole changed-since-2e review; PR #560 stays draft |
+| g: Final acceptance | Implementation evidence complete at 8b7a6c95; current documentation PR-head gates pending | Both candidate-routed committed full suites, executing green integrated CI and the reviewed production-equivalent source chain are recorded in the separate close-out ledger below; current PR-head suites, CI and final independent review remain required before #560 is marked ready |
 
 ## Current post-retirement paired measurements
 
@@ -322,3 +322,37 @@ crossover isolates the cause. The canonical LF r5 Git blob
 The historical artifact is unchanged; checkout CRLF bytes do not replace this
 canonical reference. No general performance claim or completed Phase 1
 acceptance follows from these tables.
+
+## Phase 1 implementation acceptance at `8b7a6c95`
+
+The [separate acceptance ledger](../evals/results/rust-phase1-closeout-8b7a6c95.json)
+records the tested implementation tree, source chain, artifact digests, actual
+suite routing/outcomes, cleanup and current ready-status gates. The
+`phase1-test-buckets.json` acceptance fields remain the frozen pre-acceptance
+inventory mapping; this ledger records final implementation acceptance.
+MCP-TIER acceptance covers the client boundary only; daemon tier enforcement
+remains Phase 3 deferred. The four exact channel remainder nodes stay deferred
+to Phase 2 in the ledger; the named SDK retirement and three substitutions remain.
+
+| Suite host label | Tested checkout | Passed / skipped | Pytest seconds | Mapped nodes passed once |
+| --- | --- | --- | --- | --- |
+| linux-wsl | 8b7a6c95 | 17,950 / 81 | 1,681.36 | 8 Rust stdio; 5 Python dispatcher |
+| linux-box | 8b7a6c95 | 17,955 / 76 | 1,689.51 | 8 Rust stdio; 5 Python dispatcher |
+
+Both suites execute the native ELF built at `690bb8ac`, with its original hash
+and build-source identity. `d3022bcc` only promotes documentation/data;
+`8b7a6c95` changes one independently reviewed Windows `cfg(test)` assertion.
+No production or executable instrument bytes changed in that source chain.
+Both exact owned process/database censuses are empty; staged copies are removed
+and native locks are free. Lease board verification was unavailable.
+
+[Integrated Rust workflow 37238403052](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37238403052)
+passed all four executing jobs at `8b7a6c95`: Rust Ubuntu 2m12s, Rust Windows
+4m41s, Parity Ubuntu 4m05s and Parity Windows 9m56s. All fourteen PR checks
+passed at that implementation head. The whole-closeout draft review approved
+`d3022bcc`; the sole subsequent fixture assertion has independent bounded
+approval. Final review of this acceptance record and evidence followup remains
+required. Current documentation PR-head suites and integrated CI must pass
+before #560 is marked ready; these earlier results do not claim the dirty
+documentation head has been tested. Measurements and all four local judges
+retain their executed `690bb8ac` identities.

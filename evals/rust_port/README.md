@@ -242,9 +242,10 @@ The pending row now records targeted Windows/Linux evidence at frozen tree
 `a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
 and successful reruns, and Linux passed all four checks (66 integration and
 5 wire cases). The 55 other internal functions remain outside this phase.
-The inventory mapping's pending row remains subject to full acceptance g.
-Current runtime evidence and the register's scoped substitutions are recorded
-in PORT-STATE.md; final integrated-head CI, full suites and review remain pending.
+The inventory mapping is frozen before acceptance; its pending labels remain
+unchanged. Final bounded implementation acceptance is recorded separately in
+`evals/results/rust-phase1-closeout-8b7a6c95.json` and PORT-STATE.md; current
+documentation PR-head CI, full suites and final review remain required before ready.
 
 The final judge always executes the seven startup scenarios and six concurrent
 call cells in addition to the original nineteen candidate cells. Both scenario
@@ -316,7 +317,10 @@ of ten samples per arm with clean normal and separate RSS launches. PORT-STATE.m
 records their numeric quantiles and per-arm repeat floors. Historical r5 remains
 unchanged and noncomparable; its canonical LF Git blob SHA256 is
 `3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
-Final full-suite, integrated-head CI and independent review gates remain pending.
+Implementation-head suites and integrated CI passed at `8b7a6c95`; the separate
+close-out ledger preserves their source chain and actual routing. Current
+documentation PR-head suites, CI and final independent review remain required
+before #560 is marked ready.
 
 Phase 2 adds `cli_corpus.py` and `cli_dispatch.py` without changing the historical
 Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown valid
