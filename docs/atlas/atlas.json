@@ -1,7 +1,7 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "schema": 53,
   "verified": "2026-10-04"
  },
@@ -1584,7 +1584,7 @@
    "s": "moves shim, plugin cache and Codex hooks together",
    "p": "pseudolife_memory/client_updates.py",
    "d": [
-    "Shim: installs a numbered side-by-side runtime (venv, pip --no-deps, version probe, runtime.json written last) behind one stable launcher, migrates registrations to the launcher (each file backed up) and removes runtimes nothing names or runs",
+    "Shim: installs a numbered side-by-side runtime (venv, pip --no-deps, version probe, runtime.json written last) behind one stable launcher, migrates registrations to the launcher (each file backed up) and removes runtimes nothing names or runs (never the one the update itself runs from); a release the current runtime was installed from reports current instead of installing again (--reinstall forces it)",
     "Plugin: claude plugin marketplace update, a byte compare of marketplace clone and cache, claude plugin update only on a difference, then the compare again as proof; never uninstalls",
     "Codex: refreshes manual hook copies, upgrades a plugin copy via codex plugin marketplace upgrade, prints re-approval steps only when an approved hook definition changed; saved tunnels are updated too"
    ]
