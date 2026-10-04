@@ -33,8 +33,14 @@ fn board_state_inode_fence_preserves_a_replacement() {
     let home = Home::new();
     let path = home.0.join("agent.json");
     let (_, mut reservation) = Reservation::load_or_reserve(&path, "http://fixture").unwrap();
-    std::fs::remove_file(&path).unwrap();
+    let original = home.0.join("reserved-agent.json");
+    // Keep the old inode allocated so this exercises a distinct replacement.
+    std::fs::rename(&path, &original).unwrap();
     state::atomic_write(&path, b"replacement", None).unwrap();
+    assert_ne!(
+        state::open(&path).unwrap().identity,
+        state::open(&original).unwrap().identity
+    );
     assert!(
         reservation
             .as_mut()
