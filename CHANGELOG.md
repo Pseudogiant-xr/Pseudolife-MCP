@@ -16,6 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
   7d` (0.16.1, and the configuration guide): on those versions use
   `--for 168h`.
+
 ### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
 - A shim runtime installed by `pseudolife-mcp update` run from inside a
   checkout could record the wrong version in its `runtime.json`. The
@@ -35,6 +36,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without this fix still mislabels the runtime it installs, the fixed
   release's included. Run `pseudolife-mcp update` from outside a
   checkout to avoid that.
+
 ### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
 - `connect`'s MCP handshake ran its child Python, and the shim that child
   starts, in the current directory. `python -c` and `-m` put that directory
@@ -46,6 +48,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before the child gets it, as the checks before the handshake already
   resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
   which `-I` would ignore.
+
 ### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
 - The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
   plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
