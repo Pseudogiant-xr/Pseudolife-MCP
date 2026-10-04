@@ -6,9 +6,603 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
+- Turning on maintainer passkeys took four manual steps on the daemon host:
+  a `tailscale serve` command, a hand edit of the daemon's config file, a
+  restart, and two `pseudolife-mcp maintainer` commands (inside the daemon
+  container on the Docker tier). `pseudolife-mcp maintainer setup` now does
+  all of it, guided. It picks the Console's name: this host's tailnet HTTPS
+  name when Tailscale runs with HTTPS certificates on (and serves it with
+  `tailscale serve --bg --https=8443`), else `http://localhost:<port>`. It
+  writes `coordination.maintainer` into the daemon's config with a backup,
+  restarts the daemon container (`docker restart`), and runs the enrolment.
+  It asks once before any host change (`--yes` for scripts). Only the
+  passkey tap and one y/N question remain for the maintainer: does the
+  Console show the printed prefix and label? N revokes the key. A re-run on
+  a configured host changes nothing, and a valid name is never replaced.
+  Tailscale stopped or without HTTPS certificates is refused rather than
+  guessed. The command reads the daemon's config and the bank in the
+  daemon's own environment, so it needs no bearer.
+- A daemon-host install with a token offers the setup at the end, one
+  question, default no, that names the tailnet exposure (devices on the
+  tailnet can reach the daemon at `https://<this machine>:8443`); an install
+  without a terminal prints one line naming the command,
+  and a re-run where passkeys are in place asks nothing (`maintainer setup
+  --check`: exit 0 set up, 1 not, 2 unreadable).
+- A Docker-tier `pseudolife-mcp update` (release or checkout mode) ends with
+  one line naming `pseudolife-mcp maintainer setup` until passkeys are set
+  up on a bearer-gated daemon. At a terminal it offers to run it (default
+  no). `pseudolife-mcp doctor`'s passkey line and fix name the command too.
+- A checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's
+  host) creates the test suite's own Postgres login (`test-login create`,
+  never `--rotate`) when the account has no `~/.pseudolife-mcp/test-pg.env`
+  and the bundled Postgres container runs on the host, and only when the
+  account's test suite connects to that container: its test server
+  (`PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
+  `~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`) must be the
+  container's published port. A host whose suites use another server, such
+  as a box whose bundled Postgres holds the live bank, is skipped with one
+  line. A match on the suite's default alone (no variable, no env file, as
+  for a deploy run as root) is not taken as the suite's word: a deploy at a
+  terminal asks once, default no, and one without a terminal skips with one
+  line naming `pseudolife-mcp test-login create`. A refusal warns with the
+  fix and leaves the deploy standing;
+  `-NoTestLogin` / `--no-test-login` skips it. A release update never
+  creates it.
+
+### Fixed (2026-10-05 — board roles and maintainer messages: follow-ups to the #569 review)
+- A session that held both a project's delegate and coordinator leases from
+  before v54 could no longer renew its coordinator lease (`already_delegate`),
+  so the lease lapsed under it. The live holder now renews it; a delegate
+  still cannot newly claim or queue for `coordinator:<project>`, so once that
+  old hold lapses or is released the session keeps one role. The upgrade
+  leaves such a pair in place until then; the maintainer can revoke either
+  role from the Console.
+- `memory_message history` returned the full text of a message the
+  maintainer withdrew, without `repudiated_at`, where `receive` shows the
+  withdrawal sentence. History now shows it the same way. A withdrawal also
+  appends a `maintainer_repudiate` event to the board's audit log, so history
+  keeps withholding the text after the live message row is pruned (history
+  keeps bodies for the audit retention, longer than the live row).
+- A grant or assignment signed while the recipient held neither role still
+  broke the other role if the recipient took it before the tap, although the
+  signed preview said `also_breaks: null`. The other role's holder is now
+  signed too (`other_holder`), so such a change answers `409 role_changed`.
+- `coordination.maintainer.origin` with an explicit default port
+  (`https://host:443`, `http://localhost:80`) passed validation, but browsers
+  serialise the origin without it, so every assertion failed while doctor
+  reported passkeys on. That origin is now refused with
+  `409 maintainer_https_required`, naming the default port.
+- Docs: the v54 schema comment and version-history row said spent nonces
+  are kept until their payload expires; they are kept 7 days past it. The
+  row also names `maintainer_bootstrap.failed_attempts`.
+
+### Fixed (2026-10-05 — `test-login create` no longer locks out a daemon it cannot see, and restores close their scratch copy)
+- An independent review of `pseudolife-mcp test-login create` found that its
+  daemon-lockout check ran only when `PSEUDOLIFE_MCP_DATABASE_URL` was in
+  the operator's shell. With `--admin-url` against a server whose daemon
+  reaches the bank only through PUBLIC, the revoke locked that daemon out at
+  its next connection. It now also refuses, before any change and naming
+  the `GRANT CONNECT` to run, when any role connected to a bank now
+  (`pg_stat_activity`) would lose CONNECT, and says "daemon user not
+  checked" when that variable is absent or names no user. A daemon that
+  is down and reaches
+  the bank only through PUBLIC is still not seen: the guides now say so
+  instead of claiming the check unconditionally.
+- `--role` naming the daemon's own database user (from that variable) is
+  refused outright (the check skipped exactly that case).
+- The role changes run as one transaction: a statement failing part way
+  (a bank dropped meanwhile) left the role with a new password no file held,
+  since the staged file was removed.
+- A login file that cannot be written safely (`PrivateStateError`, or an
+  OS error) ends with one `test-login:` line and exit 1, not a traceback.
+  When the file cannot be moved into place after the role change, the
+  message says the role already has the new password and names the staged
+  file that holds it.
+- `ops/restore.*` rehearsals close their scratch copy
+  (`pseudolife_restore_rehearsal`, the whole bank) to PUBLIC before the
+  replay, and stop if they cannot; the test login could read it meanwhile.
+  The REVOKE a real restore runs on the bank (2026-10-04) is unconditional:
+  it runs whether or not a test login exists, so a custom role that reached
+  the bank only through PUBLIC's CONNECT loses it after a restore and needs
+  its own `GRANT CONNECT`.
+- Test infrastructure: the suite's refusal of a per-run database another
+  role owns no longer applies under `PSEUDOLIFE_TEST_DATABASE_URL`, whose
+  contract leaves the database to its caller; the bulk session reaps in
+  `tests/` and `evals/` also require `usename = current_user`, since a
+  non-superuser login cannot terminate another role's session; two
+  `tests/test_pg_defaults.py` tests hide a provisioned machine's login file
+  so they keep exercising `ops/.env`; and the server half of
+  `tests/test_test_login_cli.py` fails, rather than skips, in CI's
+  PostgreSQL job when `PSEUDOLIFE_TEST_LOGIN_ADMIN_URL` is missing.
+
+### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
+- The maintainer could not reach a board session at all, and changing who
+  holds a project's delegate or coordinator role took a shell on the daemon
+  host. Both now work from the Console, each action proven by a passkey tap
+  (WebAuthn, user verification required); a bearer token alone can do
+  neither. Specs: `docs/superpowers/specs/2026-10-02-maintainer-wake-design.md`
+  and its addendum `2026-10-04-board-roles-passkey.md`.
+- Schema v54: `maintainer_passkeys`, `maintainer_bootstrap` and
+  `maintainer_nonces` tables (in the bench reset roster, out of logical
+  exports with the `maintainer_secret_v1` meta key), and
+  `coordination_messages.origin`, `.maintainer_proof` and `.repudiated_at`.
+- Routes `GET /api/maintainer`, `POST /api/maintainer/challenge|enrol|send|role|cancel|revoke|repudiate`,
+  `GET /api/maintainer/sent|inbox`, each calling one `MemoryService.maintainer_*`
+  method. Challenges are stateless (an HMAC'd payload carrying every input
+  that decides the outcome); assertions and registrations are verified
+  strictly (`cryptography` plus a minimal CBOR/COSE decoder: ES256, EdDSA,
+  RS256; exact origin and RP ID; UP and UV; no crossOrigin or topOrigin;
+  sign-count compare-and-set). Every failure answers `assertion_invalid`.
+- `coordination.maintainer.rp_id`, `.origin` (HTTPS, or `http://localhost`
+  for local use) and `.maintainer_per_recipient_per_hour` (30) are
+  config-file only: `POST /api/config` refuses them (`config_protected`).
+- `pseudolife-mcp maintainer enrol-code|confirm|revoke|reset|list` on the
+  daemon host manages the passkeys.
+- Maintainer mail carries `origin: "maintainer"` and `verified` in a
+  `receive` result (with `maintainer_note`), rings any session with a live
+  listener whatever its park, and can be repudiated. Agents reply with
+  `memory_message send reply_to=<id>` and no `to`. `maintainer` is reserved:
+  never a bearer principal, a target, or a label (nor `daemon`, `passkey`,
+  `verified`, in any spelling that normalizes to one).
+- Role changes: grant/revoke the delegate and assign/revoke the coordinator
+  per project, one role per session; the delegate's reopen authority now
+  accepts a grant recorded by the operator or the maintainer. The holder a
+  change replaces or evicts is part of the signed payload: if another
+  session took the role during the tap, the change answers `409
+  role_changed` and does nothing.
+- The Console's Board gains a pinned Roles band per project: the delegate
+  (time left, Message, Extend, Revoke) and the coordinator (Message, Revoke),
+  with Make/Revoke buttons for both roles on every session. Each slot has a
+  composer and the thread with that session. Every change and message shows
+  what will be signed, then asks for the passkey. Settings gains Your passkeys
+  (bootstrap with the host's one-time code, add a key, cancel a quarantined
+  one, revoke). Without HTTPS or an enrolled key, the band still shows who
+  holds each role and says how to set it up.
+- Every `/ui/` response carries a strict Content-Security-Policy,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and
+  `X-Content-Type-Options: nosniff` (JSON API answers carry `nosniff` too);
+  the Console's theme bootstrap moved out of an inline script into
+  `/ui/theme.js`.
+- `pseudolife-mcp lease delegate` now also frees the grantee's
+  `coordinator:<project>` lease (one role per session; the answer names it in
+  `also_broken`). The rule also holds outside the signed routes: the
+  delegate's own claim of its project's coordinator lease is refused
+  `already_delegate`, and a session queued for that lease leaves the queue
+  when it is made the delegate (security review, 2026-10-04).
+- `memory_message` documents replying with `reply_to` and no `to` (how a
+  session answers the maintainer); a receive result that holds maintainer
+  mail carries `maintainer_note`, saying that mail was signed by the maintainer.
+- Every change to the maintainer's passkeys (bootstrap enrolment, host
+  confirm, an added key, cancel, revoke from the Console or the host, reset)
+  is recorded in the board's hash-chained audit log with the path it came by
+  and the key that signed it, and `GET /api/maintainer` lists the newest 30
+  (`key_changes`). Settings shows them; a change from the last 7 days that
+  this browser did not make is a banner there and a notice on the Roles band.
+  Console key changes also post a board notice. The passkey cannot stop
+  someone with the host shell or the database password from replacing the
+  keys, so it makes that loud.
+- A one-time enrolment code burns after 5 wrong attempts
+  (`maintainer_bootstrap.failed_attempts`, v54).
+- `pseudolife-mcp doctor` reports maintainer passkeys: off (information),
+  invalid configuration (a failure, with the fix), or the RP ID, origin and
+  number of active keys. The 409 `maintainer_https_required` answer names the
+  rule the configuration breaks (`config_problem`).
+- Board labels that only look like a reserved name are refused
+  (`invalid_label`): look-alike letters (Cyrillic, Greek, fullwidth, 0 and 1),
+  `maintainer` anywhere in a label or one edit away, `daemon` one edit away,
+  and `passkey` or `verified` exactly. Labels set earlier keep working and
+  the digest shows them as an unnamed peer. A label such as
+  `maintainer-helper`, accepted before, is now refused.
+- One session's replies can no longer fill the maintainer's inbox: the
+  pending-mail cap on the maintainer row counts each sender's own replies.
+- `pseudolife-mcp maintainer confirm|revoke` accept an id prefix that starts
+  with `-`.
+
+### Added (2026-10-04 — the test suite gets its own Postgres login, so agent sessions stop holding the bank owner's password)
+- The bundled Postgres serves the production bank and the test suite's
+  per-run databases under one role, `pseudolife`, the server's superuser,
+  and the suite logged in as it with `ops/.env`'s `POSTGRES_PASSWORD`. The
+  full-run refusal told every session to copy `ops/.env` into its worktree,
+  so any agent that ran tests held the bank owner's password, beside the
+  operator bearer tokens in the same file. New `pseudolife-mcp test-login
+  create`, run once on the daemon host, provisions idempotently a role
+  `pseudolife_test` (LOGIN CREATEDB; no superuser, CREATEROLE, REPLICATION
+  or BYPASSRLS; every role membership revoked), revokes CONNECT on the
+  production database and on `template1` from PUBLIC (the owner keeps it;
+  a session in `template1` would fail every `CREATE DATABASE` that copies
+  it, which needs no CONNECT there), hands leftover per-run test databases
+  an owner run left (the names the suite's prune drops) to the role,
+  installs `vector` in `template1` (pgvector's extension is not trusted, so
+  the login could not create it; `CREATE DATABASE` copies it), and writes
+  the login to an owner-only `~/.pseudolife-mcp/test-pg.env`. It runs
+  `psql` in the Postgres container as that container's superuser (or uses
+  `--admin-url`, which needs no password in it: libpq reads `PGPASSWORD`
+  or `~/.pgpass`, and an error never prints one), sends the server only the
+  password's SCRAM verifier, refuses without a superuser connection or when
+  the daemon's database user (`PSEUDOLIFE_MCP_DATABASE_URL`) would lose
+  CONNECT, prints what it changed and checks the result. A re-run
+  re-applies the file's password; `--rotate` draws a new one, and is
+  required when the role exists but no file here holds its password.
+- The suite logs in with `PSEUDOLIFE_TEST_PG_PASSWORD` (as
+  `PSEUDOLIFE_TEST_PG_USER`, else the owner), then the test login file
+  (`PSEUDOLIFE_TEST_PG_LOGIN_FILE`, else `~/.pseudolife-mcp/test-pg.env`),
+  then `ops/.env`, then the compose default. A run that still logs in as
+  the owner, whatever the source, works and prints one line naming the
+  source and the fix; the fresh-worktree refusal names `test-login create`
+  instead of copying `ops/.env`, and a run whose per-run database another
+  role owns is refused in one line naming the `DROP DATABASE` to run.
+  `ops/wsl-suite.ps1` forwards the login file and stops copying `ops/.env`
+  into WSL when it exists. The installers run the command only on request
+  (`-TestLogin` / `--test-login`, for contributors who run the suite against
+  the bundled server; a failure only warns); `pseudolife-mcp update` never
+  does. `ops/restore.*` revoke CONNECT from PUBLIC again after recreating
+  the bank, since a plain dump carries no database grants.
+- Running the suite as such a login found one more privileged act: the
+  per-test reset reaped autovacuum workers too, which PostgreSQL 18 allows
+  only superusers. The bulk reaps in `tests/` and `evals/` now end client
+  backends only.
+- CI's PostgreSQL job provisions the login (as its own role,
+  `pseudolife_test_ci`) on its service container
+  (`PSEUDOLIFE_TEST_LOGIN_ADMIN_URL`) and runs a slice of the PG-backed
+  suite under it, checking it cannot connect to the production-named
+  database or `template1`. New guide: [running agent sessions under a separate
+  account](docs/guide/agent-isolation.md).
+
+### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
+- `memory_agents` and `memory_message` served 26 parameters with no
+  description and docstrings in compressed shorthand ("Bearer required;
+  list before shared work/resume."). Two reviews of the served surface, one
+  reading it from Claude Code's transcripts and one from inside Codex,
+  converged on the same findings: a model cannot see a cap Codex strips
+  from the schema (`maxLength`, `minimum`, `maximum`), so 63 of Codex's 110
+  model-caused errors in five weeks were `string_too_long` on these fields;
+  a send without `request_id` fails with a bare `missing_parameter` that
+  models retried three or four times; and the wording `""/plain status
+  clears` sent models after the empty-string route (89 malformed calls in
+  17 Claude sessions) when a status update with no park fields already
+  clears a park. Every parameter of both tools now carries a description
+  that names its action, whether it is required there, and its cap; the
+  docstrings lead with purpose, say that a wake receipt describes
+  notification rather than delivery (a `withheld` send is queued, not
+  failed, and must not be resent with `clears` or `urgent` just to ring),
+  and that reusing a `request_id` with changed inputs is a
+  `request_conflict`.
+- `memory_search` opens with what it searches (including ingested
+  documents) and which sibling to call instead (`memory_fact_get`,
+  `memory_recall`, `memory_lesson_search`, `memory_world_search`,
+  `document_search`, with their tier), and says what its filters reach:
+  `sources` / `bands` / `episodes` / `tags` narrow direct neural hits only,
+  not cortex facts, reference documents or contiguity neighbours, and `[]`
+  means no filter. `top_k` says "use top_k, not limit" — both model
+  families sent `limit`, which the server ignored silently (140 calls).
+  The "~4 in 10" figure on `verified: false` moves out of the served text
+  (a ratio without its population or date is not a runtime contract; the
+  measurement stays in the 2026-09-23 review's test comment).
+- `memory_toolset` says what expanding does and does not do: one tier per
+  call, `list_changed_sent` means the notification was sent, not that the
+  client refreshed its tool list (observed from Codex: `status` said
+  `full` while the callable catalog stayed at 24), so rediscover tools
+  after expanding and report a mismatch rather than expanding again. Its
+  `status` ladder now lists the board tools under core and
+  `memory_episode_summary` / `memory_graph_unrelate` under full.
+- The MCP initialization text is 502 characters composed (was 508): the
+  base says "pass episode where accepted" (only the tools with an
+  `episode` parameter can record one; the others ignored it silently),
+  and the shim's check-in suffix says "Subagents never send; all may
+  receive; update/ack need an own board ID" instead of "only read the
+  board", which was wrong for a Codex subagent (its own address does
+  update, receive and ack) and overstated for a Claude Code one (it may
+  receive). Codex prefixes this text to every tool declaration it shows
+  the model, so it is paid 24 times per session. The bench-pinned
+  `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again.
+- The parameter-description budgets move to the measured totals plus a
+  tenth of headroom (3,000 / 8,750 / 12,500); the description budgets and
+  the per-tool client limits (1,600 characters, 4,000 schema bytes) are
+  unchanged and every tool stays under them (largest schema
+  `memory_agents`, 3,459 bytes).
+
+### Fixed (2026-10-04 — `lease delegate --for 7d` works as documented)
+- The `pseudolife-mcp lease` duration arguments (`delegate --for`,
+  `run`/`hold --expect`, `--ttl` and `--timeout`) now accept a `d` suffix
+  for days, so `--for 7d` is 604800 seconds, alongside the bare seconds,
+  `s`, `m` and `h` forms that keep working; each argument's own bounds
+  still apply (`--for` at most a week). 0.16.0 and 0.16.1 refused `7d` with
+  "not a duration" although their CHANGELOG entries show `lease designate
+  PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
+  7d` (0.16.1, and the configuration guide): on those versions use
+  `--for 168h`.
+
+### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
+- A shim runtime installed by `pseudolife-mcp update` run from inside a
+  checkout could record the wrong version in its `runtime.json`. The
+  install asks the new runtime's Python which `pseudolife-mcp` it holds,
+  and `python -c` puts the working directory first on `sys.path`, so a
+  stale `pseudolife_mcp.egg-info` left in the checkout by an earlier
+  in-tree build answered instead (seen on Linux: 0.16.1 installed,
+  0.15.0 recorded). The wrong label made the same-release check miss, so
+  every rerun installed yet another runtime. The probe now runs isolated
+  (`python -I`), reading only the runtime's own packages.
+- A runtime already labelled wrongly is harmless: the launcher picks a
+  runtime by its sequence number, not its label, so it runs the right
+  code. The first update run by a release with this fix installs one
+  correctly labelled runtime, and a later update removes the mislabelled
+  one once nothing runs from it.
+- The probe runs inside the updater doing the install, so an updater
+  without this fix still mislabels the runtime it installs, the fixed
+  release's included. Run `pseudolife-mcp update` from outside a
+  checkout to avoid that.
+
+### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
+- `connect`'s MCP handshake ran its child Python, and the shim that child
+  starts, in the current directory. `python -c` and `-m` put that directory
+  first on `sys.path`, so `connect` run from inside a source checkout
+  validated the checkout's `pseudolife_memory` instead of the installed one.
+  The handshake child now runs from the system temporary directory, and the
+  shim it starts inherits that directory, and a relative token-file path
+  in a registration is resolved against the directory `connect` ran from
+  before the child gets it, as the checks before the handshake already
+  resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
+  which `-I` would ignore.
+
+### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
+- The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
+  plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
+  that shorthand as a `github` source and refreshes it over SSH, so on a host
+  with no GitHub SSH key or known_hosts entry every later
+  `claude plugin marketplace update` failed ("SSH host key is not in your
+  known_hosts file") and the plugin silently stopped updating (seen on a
+  Linux host, 2026-10-04). They now add it by
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`, as do the manual
+  `/plugin marketplace add` commands in the README, the plugin README, the
+  remote-bank guide, the translated READMEs, and the client step's advice
+  when the marketplace clone is missing. `tests/test_plugin_packaging.py`
+  fails while any of them names the shorthand.
+- **Existing installs** keep the `github` source until it is moved; the
+  README's Updating section gives the steps. If `~/.claude/settings.json`
+  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
+  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  (the CLI refuses an add that differs from a declared source), then run
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
+  Do not remove the marketplace first: that uninstalls its plugins.
+
+### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
+- The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
+  `ops/update_clients.py`) runs `claude plugin marketplace update
+  pseudolife-mcp` and then compares the marketplace clone with the installed
+  cache. It ignored a failed marketplace update, so a cache matching a clone
+  that could not be refreshed read `current`. On 2026-10-04 the homelab box
+  had no github.com host key for root: Claude Code's SSH clone failed, the
+  clone stayed at 0.16.0's commit, and the box kept 0.16.0's plugin hooks
+  after a 0.16.1 deploy that reported the plugin green.
+- A failed marketplace update (a non-zero exit, or the CLI's `Failed to
+  update marketplace` / `Failed to refresh marketplace` line even with exit
+  0) now makes the step `failed`, which fails the run with the client-step
+  exit code. The detail quotes the CLI's line and the remedy: for a missing
+  host key, add github.com's key to `known_hosts` after checking its
+  fingerprint, or point the marketplace at HTTPS with `claude plugin
+  marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which re-points the existing entry in place (measured on Claude Code
+  2.1.287). Claude Code refuses that add while `settings.json` declares the
+  marketplace under `extraKnownMarketplaces` with another source, as the
+  box's did, so where such a declaration exists the detail names the file
+  and says to change the entry's source to the HTTPS git URL first; it
+  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  still installs a clone that differs from the cache,
+  since that is progress, but it reports `failed` and says the clone may be
+  behind, not `refreshed`. A successful marketplace update behaves as
+  before.
+
+## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
+
+### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
+- The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
+  urllib3 from 2.7.0 to 2.8.0 (#557), which fixes two high-severity issues
+  (an HTTPS proxy's TLS configuration could be ignored or overridden,
+  GHSA-8988-9cw3-xx77; a chunk-size line could be buffered without bound,
+  GHSA-vxq7-64xx-v4gw) and one medium (chunked Deflate streaming could loop
+  forever, GHSA-gh4c-6fx4-qh6g). A deployment that sends the daemon's
+  outbound HTTPS through a forwarding proxy with its own TLS settings
+  should read urllib3 2.8.0's release note on proxy TLS configuration.
+
+### Changed (2026-10-04 — the authority to reopen a done session is the maintainer's delegate, not a coordinator)
+- Two things were both called "coordinator": the open `coordinator:<project>`
+  lease, which any session may claim and which grants nothing, and the
+  operator's grant whose holder's urgent mail reopens done parks. The first
+  version of #549 confused them, and the 0.16.0 wording still invited it.
+  The grant is now the **maintainer's delegate for the project**;
+  "coordinator" means only the open role, which is unchanged.
+- The grant's lease is `delegate:<project>` (was
+  `designated:coordinator:<project>`), granted with
+  `pseudolife-mcp lease delegate PROJECT AGENT [--for DURATION]` and logged as
+  `lease_delegate` (was `lease_designate`). A session's acquire of any
+  `delegate:` lease is refused `reserved_lease`, and `designated:` stays
+  reserved. `lease designate` still works as a deprecated alias that prints
+  one line naming `lease delegate`; the usage line and `pseudolife-mcp help`
+  name `delegate`. No schema change.
+- The wake receipt and audit reason for the delegate's rings is `delegate`
+  (was `coordinator`) from now on. Wake rows recorded as `coordinator`
+  before the upgrade stay as history: they still count against the sender's
+  `authority_per_sender_per_hour` and a queued reopen is still served.
+- The wording "the project's designated coordinator" is now "the
+  maintainer's delegate for the project" in the done-park receipt's
+  `reopen_by`, the Stop hook's park gate (served text and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks; `hooks.json` is unchanged, so
+  Codex users approve nothing again), the check-in park sentence, the
+  served `memory_message` description, the README and the guides.
+- **Operator step after upgrading:** a grant made under 0.16.0 is not
+  honoured (it lasted at most 7 days), so re-grant any live one with
+  `pseudolife-mcp lease delegate PROJECT AGENT --for 7d` (in the Docker tier,
+  inside the daemon container). Clear a leftover
+  `designated:coordinator:<project>` hold with `pseudolife-mcp lease break`,
+  or let it expire. Before deploying, run `pseudolife-mcp lease list` and
+  `lease break` any `delegate:` lease: 0.16.0 let any session hold one under
+  that name. Such a hold grants nothing after the upgrade either, since a
+  delegate counts only with the operator's `lease_delegate` audit record for
+  the lease's current fence (coordinator review of #559). The hook fallback
+  wording under `plugin/hooks/` needs the update's client step.
+
+### Fixed (2026-10-04 — `pseudolife-mcp update` no longer deletes the shim runtime it runs from)
+- On Linux and macOS, `pseudolife-mcp update` could never finish its
+  client side. The launcher runs the update from the current shim
+  runtime; the shim step installs the new release as a newer runtime and
+  then removes unused ones, and the update's own process was never
+  counted as using its runtime. That runtime was deleted under the
+  running update, whose next lazy import failed
+  (`ModuleNotFoundError: No module named
+  'pseudolife_memory.tunnel_profiles'`) after the plugin and Codex steps,
+  so their outcome was never reported and the run ended with a traceback
+  and exit 1. Windows was spared only
+  because it refuses to rename a directory a process runs from. The
+  runtime this interpreter runs from is now always kept and reported like
+  a runtime a session still runs; a later update removes it once idle.
+- A rerun of the client side (`pseudolife-mcp update --clients-only`,
+  the retry the update names) installed yet another runtime of the same
+  release every time. When the current runtime was installed from that
+  same pinned release, the shim step now reports `current:<version>` and
+  installs nothing (`--reinstall` installs it again). Checkout sources
+  still install every time, since their code changes under one version.
+- **Workaround for 0.16.0 on Linux/macOS**: the 0.16.0 updater still has
+  the bug, so after `pseudolife-mcp update` on 0.16.0, finish the client
+  side from a checkout at v0.16.0 with `python ops/update_clients.py
+  --repo <checkout> --only plugin,codex`. Updating from 0.16.0 to the
+  fixed release runs 0.16.0's updater once more and hits the same crash
+  after installing the new runtime; run `pseudolife-mcp update
+  --clients-only` once afterwards and the fixed code completes the
+  client side.
+
+## [0.16.0] - 2026-10-04 — the agent board, one-command updates, and banks other machines can reach
+
+### Fixed (2026-10-04 — the memory_message description names the designated coordinator)
+- The served `memory_message` description said a done session reopens
+  only for urgent mail from the "maintainer/coordinator/clearer". Since
+  the change below, the coordinator that counts is the one the operator
+  designated (the live `designated:coordinator:<project>` lease); holding
+  the open `coordinator:<project>` lease, which the `memory_agents`
+  description tells sessions to claim, grants nothing. Read side by side,
+  the two descriptions suggested that claiming the lease let a session's
+  urgent mail reopen done parks. The sentence now says "designated
+  coordinator", pinned by a test. The docstring was reflowed one line
+  shorter to pay for the word; tier description budgets are unchanged.
+
+### Fixed (2026-10-04 — the Stop gate and lease help name the designated coordinator)
+- The Stop hook's park gate told a stopping session that urgent mail from
+  "the project coordinator" still rings a done park. Since the change
+  below, only the operator-designated coordinator does, so the gate text
+  (`PARK_GATE_MESSAGE`, the hook fallbacks in `stop-wake.sh` and
+  `lifecycle.ps1`, the unserved check-in sentence and the configuration
+  guide's quotes) now says "the project's designated coordinator".
+  `hooks.json` is unchanged, so Codex users approve nothing again.
+- `pseudolife-mcp lease --help` now lists `designate` in its usage line,
+  and `pseudolife-mcp help` names `lease designate PROJECT AGENT` beside
+  `lease break` as an operator command.
+
+### Changed (2026-10-03 — only an operator-designated coordinator reopens a done session)
+- The first version below made the holder of the `coordinator:<project>`
+  lease the coordinator, and any session can claim a free one, possibly
+  steered by text it read. Its urgent mail to `all` then rang every done
+  session in the project as `reason: coordinator`, lending it authority it
+  was never given. Passing the lease between one principal's sessions
+  spread the 12-an-hour authority budget over several senders. And the
+  first holder kept the real coordinator out for up to a day (review of
+  #549). Coordinator power is now the lease
+  `designated:coordinator:<project>`, granted to one agent id by the
+  operator with `pseudolife-mcp lease designate PROJECT AGENT [--for
+  DURATION]` (default 1d, at most 7d). Like `lease break`, it opens the
+  bank directly and logs a `lease_designate` with the operator as actor.
+  Revoke it with `lease break`; the designee may release it to resign.
+  Leases named `designated:` are refused to agents (`reserved_lease`), and a
+  freed one is never granted to a queued session (`lease_dequeue`, reason
+  `reserved`). The trust boundary is database access: a session that can
+  reach the bank (lite tier, `ops/.env`, `docker exec`) could designate
+  itself.
+- **Upgrade: no session has coordinator power until one is designated.**
+  In the Docker tier: `docker exec <daemon container> pseudolife-mcp lease
+  designate PROJECT AGENT --for 7d`. Before deploying, check that
+  `pseudolife-mcp lease list` shows no `designated:` lease held or queued
+  (older code let any session claim one; `lease break` it).
+- Holding `coordinator:<project>` now grants nothing: it stays as
+  bookkeeping, its holder's urgency is a peer's under the plain urgent
+  allowance, and it blocks nothing, since the designation is a separate
+  lease. The maintainer and named-clearer paths are unchanged. A principal
+  list was rejected because every session on a host shares a principal
+  today.
+- A `send` audit event whose mail rang (`rung`, a Codex `attention` grant,
+  or `no_path` with the ring queued) carries `wake_reason`, the authority it used, so
+  `board-audit export` shows which ring was a maintainer, coordinator or
+  clearer reopen. No schema change.
+
+### Changed (2026-10-03 — the maintainer and the coordinator can reopen a done session)
+- A session parked `done` was unreachable: on 2026-10-03 a coordinator's
+  urgent review of PR #548, with two required changes, came back
+  `wake: {decision: not_needed, reason: parked_done}`, and the maintainer
+  had to type into the window. `done` now means "I expect no follow-up":
+  `urgent` mail reopens it when the sender is the maintainer (a bearer
+  principal listed in the new `coordination.maintainer_principals`, empty
+  by default; `default` and `daemon` are refused), the holder of the live
+  `coordinator:<project>` lease for the recipient's own project
+  (superseded the same day by an operator designation, above), or the
+  park's named clearer. The ring's reason is `maintainer`, `coordinator`
+  or `clearer`, and the receipt carries `reopened: true`. Plain mail still
+  never rings a done park, and neither does a peer's urgency (`anyone`
+  included); authority is read from the bearer, the lease table and the
+  park, never from message text. Waking grants nothing.
+- Maintainer and coordinator urgency, to any session, spends a new
+  `coordination.wake.authority_per_sender_per_hour` (12) instead of the
+  6-an-hour urgent allowance, so incident relays are not capped halfway;
+  the per-recipient, nightly and stagger caps still apply. `/health` and
+  `pseudolife-mcp doctor` report the new cap.
+- A `no_path` receipt names the client's other ways in: `fallback_paths`
+  is `codex_doorbell` + `maintainer_types` for a Codex thread and
+  `claude_desktop_send_message` + `maintainer_types` for a Claude Code
+  session, with matching `fallback` text. A `withheld` receipt carries
+  `retry` (resend with `urgent`, or `clears` naming the need), and a
+  `parked_done` one `reopen_by`.
+- A Codex thread parked `done` could not be rung even with an armed
+  doorbell: the daemon served it nothing. It is now served only a reopen
+  sent after its current park, with the audit-sequence proof other Codex
+  grants carry; a grant or attention decided before the park stays
+  unserved and unstamped.
+- `coordination_wakes.urgent` (read by `board-audit stats`, which does not
+  use it, and by anything querying the table) now means "counted against the plain urgent allowance": a maintainer or
+  coordinator ring is stored `urgent = false` with reason `maintainer` /
+  `coordinator`, though its send set `urgent`; a named clearer's reopen
+  is stored `urgent = true`.
+- The Codex doorbell serves CLI threads as well as desktop ones;
+  `capabilities.codex` is the optional live-delivery bridge, not the
+  doorbell. The guide now says so, with what a reopen needs from each
+  client and what to do when the board itself is down.
+- The Stop hook's park prompt (served `PARK_GATE_MESSAGE`, and the
+  `stop-wake.sh` / `lifecycle.ps1` fallbacks), the park check-in sentence,
+  `memory_message`'s description and `examples/hook-instructions.md` say
+  that done stays reachable. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again; the new prompt text reaches a client
+  with its next plugin update. No schema change.
+
+### Fixed (2026-10-03 — a tunnel child launched mid-exec stays recognised)
+- The tunnel supervisor records each child's identity (pid, start time,
+  executable, arguments) right after starting it. On Linux, `Popen`
+  returns before the kernel has published the new program's arguments, so
+  the identity could be recorded with an empty argument list. Every later
+  ownership check then refused the supervisor's own child: a refresh
+  answered "owned tunnel changed before refresh" and left the old child
+  running, cancellation cleanup skipped the child and leaked it,
+  `tunnel stop` reported `stopped` without stopping it, `tunnel status`
+  reported it as not running, and the bridge and `tunnel update` refused
+  the live tunnel. The identity is now read once the arguments appear.
+  If they have not appeared within 5 seconds and the child is still
+  alive, the launch fails and the child is reaped, rather than recording
+  an identity that can never match. A child that has already exited
+  fails the launch as before. Measured 2026-10-03 in WSL2: 10 of 1,732 test
+  launches hit the empty window. Over 1,250 cancellation-test runs under
+  the same load, the unfixed code failed 8 and the fixed code failed none.
+  This was the intermittent `all_reaped` failure (and the 30-second
+  timeout) in `test_refresh_cancellation_reaps_actual_children_and_private_launch`.
+
 ### Changed (2026-10-03 — the update refreshes Codex's plugin hooks itself)
-- When Codex runs the plugin's hooks and only the scripts changed (its
-  `hooks.json` is current), the client step (`pseudolife-mcp update`,
+- When Codex runs the plugin's hooks and its approved definitions remain
+  equivalent, the client step (`pseudolife-mcp update`,
   `ops/update.ps1 -All`, `ops/update.sh --all`, `ops/update_clients.py`)
   now runs Codex's own `codex plugin marketplace upgrade pseudolife-mcp`
   and reports `refreshed`, where it used to report `behind` and ask for a
@@ -16,24 +610,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throwaway Codex home: the upgrade fetches the marketplace and replaces
   its clone and the installed copy, leaves `config.toml` byte-identical,
   and `hooks/list` reports the same keys and hashes, so approvals carry
-  over. A changed `hooks.json` is never upgraded automatically and still
-  names the approval steps. The marketplace serves its branch, which can
-  carry a `hooks.json` the checkout or the deployed release does not, so
-  the update first reads that branch's `hooks.json` from a private,
+  over. A changed approved definition is not knowingly upgraded automatically
+  and still names the approval steps. If the branch moves between inspection
+  and Codex's fetch and a changed definition lands, the read-back reports
+  `stale` with those approval steps. The marketplace serves its branch,
+  which can carry a `hooks.json` the checkout or the deployed release does
+  not, so the update first reads that branch's `hooks.json` from a private,
   blob-less clone in a temporary directory (never Codex's own clone) and
-  upgrades only when it matches the installed one. When the upgrade cannot
-  run (no Codex CLI or git found, a failed fetch, the branch changes
-  `hooks.json`, nothing newer on the branch) the step stays `behind` and
-  says why. Manual hook copies are refreshed as before.
+  upgrades only when its normalized definitions match the installed ones.
+  When the upgrade cannot run (no Codex CLI or git found, a failed fetch,
+  the branch changes an approved definition, nothing newer on the branch)
+  the step stays `behind` and says why. Advice to upgrade manually promises
+  approval carryover only when the branch's normalized definitions were
+  checked and matched; otherwise it says that the upgrade may change the
+  definition and need approval. Manual hook
+  copies are refreshed as before.
 - The Codex CLI is found on PATH, through `PSEUDOLIFE_CODEX_BIN`, in the
   Windows desktop app's build folder, or in the standalone package the
   desktop app keeps under the Codex home
-  (`packages/standalone/current/bin`).
+  (`packages/standalone/current/bin`). A missing or relative configured
+  `PSEUDOLIFE_CODEX_BIN` is reported as a setup error, without falling back
+  to another binary. The git used to inspect the marketplace is resolved
+  only from absolute PATH entries, excluding implicit working-directory
+  lookup, and its `hooks.json` is decoded as UTF-8 on every platform.
 - The Codex hooks check now compares the installed copy Codex runs hooks
   from (`plugins/cache/pseudolife-mcp/pseudolife-memory/local`), and falls
   back to the marketplace clone when there is no installed copy. Codex
   replaces that single copy in place, as its plugin manager does, so there
   is no older copy kept beside it.
+- The shared plugin's SessionEnd timeout now matches Codex's enforced
+  3-second cap, removing the startup clamp warning. Its bash hook makes
+  one request with a 2-second total and 1-second connection timeout, without
+  retries. A missed close is reaped after 30 minutes of inactivity plus
+  the next sweep (5-minute default); Claude Code's plugin SessionEnd budget
+  is 1.5 seconds regardless of the manifest. Codex builds that hash the
+  clamped timeout keep approval for the 10-to-3-second change; approve only
+  if Codex asks. The updater compares normalized SessionEnd/Interrupt
+  timeouts at each consent check and on read-back, so clamp-only changes
+  refresh automatically. Every other field and timeout remains compared,
+  and malformed or unsupported definitions are not refreshed automatically.
 
 ### Fixed (2026-10-03 — Codex queue correlation and bounded recovery)
 - Mailbox reads, acknowledgments and unrelated turns cannot release an unresolved

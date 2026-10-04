@@ -157,11 +157,18 @@ def subprocess_handshake(url: str, credential: tuple, timeout: float = HANDSHAKE
     env.update({URL_KEY: url, NO_SPAWN_KEY: "1", "PSEUDOLIFE_AGENT_COORDINATION": "0",
                 "PYTHONIOENCODING": "utf-8"})
     if kind == "file":
-        env[FILE_KEY] = value
+        # Resolved here, as the checks before this one resolved it: the
+        # child runs from another directory.
+        env[FILE_KEY] = os.path.abspath(os.path.expanduser(value))
     elif kind == "literal":
         env[TOKEN_KEY] = value
     try:
+        # From a neutral directory: `-c` here and the shim's `-m` put the
+        # working directory first on sys.path, so a run from a source
+        # checkout would verify the checkout's package, not the installed
+        # one. Not `-I`, which would also drop PYTHONIOENCODING.
         proc = subprocess.run([sys.executable, "-c", _HANDSHAKE_SCRIPT, str(timeout)], env=env,
+                              cwd=tempfile.gettempdir(),
                               capture_output=True, text=True, timeout=timeout + 15,
                               stdin=subprocess.DEVNULL, errors="replace")
     except (OSError, subprocess.TimeoutExpired) as exc:

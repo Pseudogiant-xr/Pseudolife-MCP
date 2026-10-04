@@ -86,7 +86,7 @@ class FakeTools:
             return self.pip_no_deps
         if argv[1:4] == ["-m", "pip", "install"]:
             return self.pip_deps
-        if argv[1] == "-c" and "importlib.metadata" in argv[2]:
+        if argv[1:3] == ["-I", "-c"] and "importlib.metadata" in argv[3]:
             return 0, self.version + "\n"
         if argv[1] == "-c" and "ScriptMaker" in argv[2]:
             if self.build[0] == 0:
@@ -242,6 +242,48 @@ def test_an_incomplete_directory_is_not_a_runtime(tmp_path, shape, tools):
     assert third.name == "000003"
 
 
+def test_the_version_probe_reads_the_runtime_not_the_callers_directory(tmp_path, monkeypatch):
+    """Observed 2026-10-04: an update run from a checkout holding a stale
+    ``pseudolife_mcp.egg-info`` (an old in-tree build, 0.15.0) installed
+    0.16.1 and recorded 0.15.0, because ``python -c`` puts the working
+    directory first on sys.path. The probe runs for real here, in a real
+    virtualenv, from such a directory; pip is faked by writing the
+    release's dist-info into the venv."""
+    checkout = tmp_path / "checkout"
+    (checkout / "pseudolife_mcp.egg-info").mkdir(parents=True)
+    (checkout / "pseudolife_mcp.egg-info" / "PKG-INFO").write_text(
+        "Metadata-Version: 2.1\nName: pseudolife-mcp\nVersion: 0.15.0\n", encoding="utf-8")
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    windows = os.name == "nt"
+    layout = _layout(tmp_path, "windows" if windows else "posix")
+
+    def run(argv, **kw):
+        argv = [str(a) for a in argv]
+        if argv[1:3] == ["-m", "venv"]:
+            return rt.run_cli([argv[0], "-m", "venv", "--without-pip", argv[3]], **kw)
+        if argv[1:4] == ["-m", "pip", "install"]:
+            if "--no-deps" in argv:
+                site = subprocess.run([argv[0], "-I", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                                      capture_output=True, text=True, check=True, timeout=120).stdout.strip()
+                dist = Path(site) / "pseudolife_mcp-0.16.1.dist-info"
+                dist.mkdir(parents=True)
+                (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: pseudolife-mcp\nVersion: 0.16.1\n",
+                                               encoding="utf-8")
+                (Path(argv[0]).parent / _console_name("windows" if windows else "posix")).write_text(
+                    "console", encoding="utf-8")
+            return 0, ""
+        if any("ScriptMaker" in a for a in argv):
+            target, executable = argv[-3], argv[-2]
+            (Path(target) / "pseudolife-mcp.exe").write_bytes(b"MZ-fake-launcher\n#!" + executable.encode())
+            return 0, ""
+        return rt.run_cli(argv, **kw)
+
+    runtime = rt.install("pseudolife-mcp==0.16.1", layout, python=sys.executable, run=run)
+    assert runtime.version == "0.16.1"
+    assert json.loads((runtime.path / rt.MARKER).read_text(encoding="utf-8"))["version"] == "0.16.1"
+
+
 def test_shim_requirements_match_pyproject():
     """The runtime installs the package with --no-deps and these
     requirements beside it; each must be pyproject's own line for that
@@ -346,6 +388,24 @@ def test_the_helper_itself_never_counts_as_holding_a_runtime(tmp_path, shape, to
             (os.getppid(), 1, str(_scripts(old.path, shape) / _python_name(shape)))]
     result = rt.remove_unused(layout, processes=lambda: rows)
     assert result["removed"] == [str(old.path)]
+
+
+def test_the_runtime_the_caller_runs_from_is_never_removed(tmp_path, shape, tools, monkeypatch):
+    """An update run by the launcher runs from an older runtime and installs
+    a newer one: removing its own runtime left its lazy imports nothing to
+    import on Linux (ModuleNotFoundError after the shim step, 2026-10-04),
+    where nothing refuses to delete a directory a process runs from."""
+    layout = _layout(tmp_path, shape)
+    old = _install(layout, tools, "0.15.0")
+    new = _install(layout, tools, "0.16.0")
+    monkeypatch.setattr(rt.sys, "prefix", str(old.path))
+    rows = [(os.getpid(), os.getppid(), str(_scripts(old.path, shape) / _python_name(shape)))]
+    result = rt.remove_unused(layout, processes=lambda: rows)
+    assert result["removed"] == [] and old.path.is_dir() and new.path.is_dir()
+    assert result["held"] == [{"path": str(old.path), "processes": 1}]
+    # once the update runs from elsewhere, the idle runtime goes
+    monkeypatch.setattr(rt.sys, "prefix", str(new.path))
+    assert rt.remove_unused(layout, processes=lambda: [])["removed"] == [str(old.path)]
 
 
 def _tunnel_record(home: Path, monkeypatch, runtime: Path, pid: int | None = None, supervisor: int = 4200) -> Path:

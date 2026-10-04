@@ -52,6 +52,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -129,6 +130,67 @@ def sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def interactive() -> bool:
+    """A person at a terminal to answer a question (stdin and stdout)."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def ask(question: str) -> str:
+    print(question, end="", flush=True)
+    return sys.stdin.readline().strip().lower()
+
+
+_LOOPBACK = ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::")
+# tests/pg_defaults.py's default when PSEUDOLIFE_TEST_PG_HOST_PORT is unset.
+SUITE_DEFAULT_HOST_PORT = "127.0.0.1:5433"
+SUITE_DEFAULT_SOURCE = "the suite's default"
+
+
+def suite_env_file() -> Path:
+    """The suite settings a host's suite user sources (the box's, per the
+    repository's CLAUDE.md "Running tests")."""
+    return home() / ".config" / "pseudolife-suite" / "env"
+
+
+def suite_test_server() -> tuple[str, str]:
+    """``(host:port, where it came from)`` of the Postgres this account's
+    test suite connects to: ``PSEUDOLIFE_TEST_PG_HOST_PORT``, else that
+    variable in the suite env file, else the suite's default."""
+    value = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "").strip()
+    if value:
+        return value, "PSEUDOLIFE_TEST_PG_HOST_PORT"
+    path = suite_env_file()
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        match = re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_TEST_PG_HOST_PORT\s*=\s*(.*?)\s*$", line)
+        if match and match.group(1).strip("'\""):
+            return match.group(1).strip("'\""), str(path)
+    return SUITE_DEFAULT_HOST_PORT, SUITE_DEFAULT_SOURCE
+
+
+def create_test_login(argv: list[str]) -> dict:
+    """``pseudolife-mcp test-login create`` in this process, its JSON report
+    as a dict (``exit``, ``error``, ``changes``)."""
+    import io
+    from pseudolife_memory import test_login_cli
+    buffer = io.StringIO()
+    code = test_login_cli.main([*argv, "--json"], out=buffer)
+    for line in reversed(buffer.getvalue().splitlines()):
+        try:
+            report = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(report, dict):
+            return report
+    return {"exit": code, "error": "the test-login command printed no report", "changes": []}
+
+
 def _on_shim_runtime() -> bool:
     """Whether this interpreter runs from one of the side-by-side shim
     runtimes (``pseudolife_memory.runtimes``): such a runtime holds no
@@ -177,6 +239,7 @@ class Options:
     health_retries: int = 30
     health_delay_ms: int = 1500
     all_clients: bool = False          # checkout mode: also the client side (-All)
+    no_test_login: bool = False        # checkout mode: do not create the test suite's Postgres login
     clients_only: bool = False
     daemon_only: bool = False
     reinstall: bool = False            # release mode: proceed at the same version
@@ -415,6 +478,9 @@ class Update:
                 if value:
                     raise UpdateError(f"{name} is a release-mode option; a checkout deploy builds what the tree "
                                       f"holds (for the clients alone: python ops/update_clients.py)", 2)
+        elif self.o.no_test_login:
+            raise UpdateError("--no-test-login is a checkout-mode option: a release update never creates the "
+                              "test suite's login", 2)
         if self.o.unattended:
             # The scheduled run passes none of these; a hand-run must not
             # skip the backup or the daemon and then report an update.
@@ -464,6 +530,14 @@ class Update:
             else:
                 self.report.mode = "release"
                 self.deploy_release()
+        # After the lock: the setup may wait minutes for the Console, and an
+        # unattended run must not find the lock held all that time.
+        if not self.o.clients_only:
+            try:
+                self.maintainer_passkeys()
+            except Exception as exc:  # noqa: BLE001 - the update itself succeeded
+                self.warn(f"checking maintainer passkeys failed ({type(exc).__name__}); the update itself "
+                          f"succeeded. Run pseudolife-mcp maintainer setup to check them")
 
     # -- tier --------------------------------------------------------------
     def detect_tier(self) -> str:
@@ -839,7 +913,8 @@ class Update:
         from pseudolife_memory import client_updates
         self.step("updating the client side (shim, plugin cache, Codex hooks)...")
         report = client_updates.run_steps(("shim", "plugin", "codex"), repo=checkout, source=source,
-                                          daemon_digest=(health or {}).get("hooks_digest"))
+                                          daemon_digest=(health or {}).get("hooks_digest"),
+                                          reinstall=self.o.reinstall)
         self.report.clients = report
         if not self.o.as_json:
             client_updates.print_ladder(report)
@@ -923,7 +998,99 @@ class Update:
             self.clients(repo, str(repo), health)
         else:
             self.hooks_changed_note(previous_digest, health)
+        if not self.o.no_test_login:
+            try:
+                self.ensure_test_login()
+            except Exception as exc:  # noqa: BLE001 - the deploy itself succeeded
+                self.warn(f"the test suite's login step failed ({type(exc).__name__}: {exc}); the deploy "
+                          f"itself succeeded. Later: pseudolife-mcp test-login create")
         self.prune_cache(repo)
+
+    def ensure_test_login(self) -> None:
+        """Checkout mode is a contributor's host: give its test suite the
+        Postgres login that cannot open the bank (``test-login create``,
+        never ``--rotate``) when this account has no login file and the
+        bundled Postgres container runs here. A release update never does:
+        an end user's server gets no CREATEDB password login (review,
+        2026-10-04). A refusal leaves the deploy standing."""
+        from pseudolife_memory import test_login_cli
+        path = Path(os.environ.get(test_login_cli.FILE_ENV) or test_login_cli.DEFAULT_FILE)
+        if path.is_file():
+            return
+        code, out = run_cli([self.docker, "inspect", "-f", "{{.State.Running}}", PG_CONTAINER], timeout=60)
+        if code != 0 or out.strip() != "true":
+            return
+        # Only where the suite connects to the bundled server (the
+        # maintainer, 2026-10-05): on the box it holds the live bank and the
+        # suites use a separate server, named in the suite's env file.
+        suite, source = suite_test_server()
+        code, out = run_cli([self.docker, "port", PG_CONTAINER, "5432/tcp"], timeout=60)
+        published = sorted({line.strip().rpartition(":")[2] for line in out.splitlines() if ":" in line}
+                           if code == 0 else set())
+        host, _, port = suite.rpartition(":")
+        if port not in published or host.strip("[]") not in _LOOPBACK:
+            bundled = ", ".join(f"port {p}" for p in published) or "no published port"
+            self.step(f"test login not created: this account's test suite uses the Postgres at {suite} "
+                      f"({source}), not the bundled container ({bundled})")
+            return
+        if source == SUITE_DEFAULT_SOURCE:
+            # Only the suite's bare default matched: nothing on this account
+            # says its suite uses this server, and where suites use another
+            # one (the box, deployed as root) the bundled server holds the
+            # live bank. A person decides; without one, nothing is created.
+            question = (f"This account's test suite would use the bundled Postgres ({suite}), which also holds "
+                        f"the bank. Give it its own login there, one that cannot open the bank? [y/N] ")
+            if self.o.as_json or not interactive() or ask(question) not in ("y", "yes"):
+                self.step(f"test login not created: nothing on this account says its test suite uses the "
+                          f"bundled Postgres (no PSEUDOLIFE_TEST_PG_HOST_PORT, no {suite_env_file()}); if it "
+                          f"does, run pseudolife-mcp test-login create")
+                return
+        self.step(f"creating the test suite's own Postgres login ({path} is missing on this account; "
+                  f"--no-test-login skips this)...")
+        report = create_test_login(["create"])
+        for line in report.get("changes") or []:
+            self.step(str(line).strip())
+        if report.get("exit") == 0:
+            self.step(f"test login ready: this account's test suite logs in with {path}, a role that cannot "
+                      f"open the bank")
+            return
+        self.warn(f"the test suite's login was not created: {report.get('error') or 'exit ' + str(report.get('exit'))}")
+        self.step("to fix it later: copy test-pg.env from the account that made the login into ~/.pseudolife-mcp/, "
+                  "or run `pseudolife-mcp test-login create --rotate` and copy the new file to every other account "
+                  "that runs the suite")
+
+    def maintainer_passkeys(self) -> None:
+        """Until the maintainer's passkeys are set up on this daemon, one
+        line naming the guided command; at a terminal, an offer to run it.
+        A tokenless daemon refuses passkeys, and a state that cannot be read
+        says nothing."""
+        health = self.daemon_health()
+        if not isinstance(health, dict) or health.get("auth") is not True:
+            return
+        from pseudolife_memory import maintainer_setup
+        if maintainer_setup.passkeys_set_up() is not False:
+            return
+        self.step("maintainer passkeys are not set up yet (they sign your Console messages and role changes): "
+                  "run pseudolife-mcp maintainer setup")
+        if self.o.as_json or not interactive():
+            return
+        # One question for the feature and its host changes: --yes carries
+        # the answer; setup still asks the passkey check itself.
+        if ask("Set them up now? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve "
+               "(devices on your tailnet can reach it at https://<this machine>:8443), sets its config and "
+               "restarts it [y/N] ") not in ("y", "yes"):
+            return
+        argv = ["--yes"]
+        try:
+            parts = urllib.parse.urlsplit(self.o.daemon_url)
+            port = parts.port if parts.hostname in ("127.0.0.1", "localhost", "::1") else None
+        except ValueError:
+            port = None
+        if port and port != maintainer_setup.DEFAULT_PORT:
+            argv += ["--port", str(port)]
+        code = maintainer_setup.main(argv)
+        if code != 0:
+            self.warn(f"pseudolife-mcp maintainer setup exited {code} (see above); the update itself succeeded")
 
     # -- docker: release mode ----------------------------------------------
     def deploy_release(self, current: str | None = None, before_recreate: Callable[[], None] | None = None,
@@ -1221,9 +1388,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--health-retries", type=int, default=30)
     parser.add_argument("--health-delay-ms", type=int, default=1500)
     parser.add_argument("--all", action="store_true", help="checkout mode: also move the client side (shim, plugin, Codex)")
+    parser.add_argument("--no-test-login", action="store_true",
+                        help="checkout mode: do not create the test suite's own Postgres login when it is missing")
     parser.add_argument("--clients-only", action="store_true", help="only the client side; the daemon is left as it is")
     parser.add_argument("--daemon-only", action="store_true", help="only the daemon; the client side is left as it is")
-    parser.add_argument("--reinstall", action="store_true", help="release mode: recreate the daemon even at the same version")
+    parser.add_argument("--reinstall", action="store_true", help="release mode: recreate the daemon, and install the shim runtime again, even at the same version")
     parser.add_argument("--allow-downgrade", action="store_true",
                         help="release mode: allow a --tag older than the version the daemon runs")
     parser.add_argument("--env-file", default=None,
@@ -1239,7 +1408,8 @@ def options_from_args(args) -> Options:
                    keep_cache_hours=args.keep_cache_hours, no_cache_prune=args.no_cache_prune,
                    force_rollback_tag=args.force_rollback_tag, allow_dirty=args.allow_dirty,
                    health_retries=args.health_retries, health_delay_ms=args.health_delay_ms,
-                   all_clients=args.all, clients_only=args.clients_only, daemon_only=args.daemon_only,
+                   all_clients=args.all, no_test_login=args.no_test_login,
+                   clients_only=args.clients_only, daemon_only=args.daemon_only,
                    reinstall=args.reinstall, allow_downgrade=args.allow_downgrade,
                    env_file=Path(args.env_file) if args.env_file else None,
                    check=args.check, as_json=args.json, daemon_url=args.daemon_url,

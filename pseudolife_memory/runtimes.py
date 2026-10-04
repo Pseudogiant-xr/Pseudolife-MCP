@@ -377,7 +377,10 @@ def install(source: str, layout: Layout, *, python: str | None = None,
         _step(run, "pip install --no-deps", [venv_python, "-m", "pip", "install", "--no-deps", source])
         log("installing the shim's dependencies")
         _step(run, "pip install (dependencies)", [venv_python, "-m", "pip", "install", *SHIM_REQUIREMENTS])
-        code, out = run([str(venv_python), "-c", _VERSION_PROBE], timeout=120)
+        # Isolated (-I): `python -c` would put the caller's working directory
+        # first on sys.path, and a checkout's stale egg-info there answered
+        # for the runtime (2026-10-04: 0.16.1 installed, 0.15.0 recorded).
+        code, out = run([str(venv_python), "-I", "-c", _VERSION_PROBE], timeout=120)
         version = out.strip().splitlines()[-1].strip() if code == 0 and out.strip() else ""
         if code != 0 or not re.fullmatch(r"[0-9A-Za-z.+-]{1,64}", version):
             raise RuntimeInstallError("version probe", out or f"exit {code}")
@@ -1124,14 +1127,20 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
                   tunnels: Path | None = None) -> dict:
     """Remove every runtime that is not the newest complete one, is not in
     ``pinned`` (a registration still names it), is not used by a running
-    tunnel saved under ``tunnels`` and has no process running from it;
-    likewise unfinished runtimes older than an hour (a younger one may still
-    be installing) and launchers moved aside. Where the process table or a
-    tunnel record cannot be read, nothing is removed and ``error`` says why;
-    where the platform has no process table, only the newest is kept and
-    everything else is left, named under ``unverified``."""
+    tunnel saved under ``tunnels``, is not the one this interpreter runs
+    from and has no process running from it; likewise unfinished runtimes
+    older than an hour (a younger one may still be installing) and
+    launchers moved aside. Where the process table or a tunnel record
+    cannot be read, nothing is removed and ``error`` says why; where the
+    platform has no process table, only the newest is kept and everything
+    else is left, named under ``unverified``."""
     result: dict = {"removed": [], "held": [], "kept": [], "unverified": [], "error": None}
     current = current_runtime(layout)
+    # An update the launcher started runs from an older runtime than the one
+    # it just installed, and imports lazily after this: on Linux nothing
+    # refuses to delete it, and the next step's import failed (2026-10-04).
+    running = running_runtime(layout)
+    own = os.path.normcase(str(running.path)) if running is not None else None
     complete = {os.path.normcase(str(r.path)) for r in list_runtimes(layout)}
     keep = {os.path.normcase(str(p)) for p in pinned}
     if current is not None:
@@ -1175,6 +1184,10 @@ def remove_unused(layout: Layout, *, pinned: Iterable[Path] = (),
     for path in candidates:
         if os.path.normcase(str(path)) in keep:
             result["kept"].append(str(path))
+            continue
+        if os.path.normcase(str(path)) == own:
+            others = processes_inside(rows, path) if rows is not None else []
+            result["held"].append({"path": str(path), "processes": len(others) + 1})
             continue
         if rows is None:
             result["unverified"].append(str(path))

@@ -23,16 +23,29 @@ pip install -e .[dev]
 
 Tests need a Postgres to talk to. Easiest is the bundled stack's instance
 (`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`) — the suite
-finds it at `127.0.0.1:5433` on its own, reading the role password from
-`ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
+finds it at `127.0.0.1:5433` on its own. It logs in with the first of:
+`PSEUDOLIFE_TEST_PG_PASSWORD` (as `PSEUDOLIFE_TEST_PG_USER`, else the bank
+owner); the **test login file** `~/.pseudolife-mcp/test-pg.env`
+(`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it); `POSTGRES_PASSWORD` from
+`ops/.env`, as the bank owner; the compose default. Create the test login
+once with `pseudolife-mcp test-login create` on the daemon host (or install
+with `ops/install.ps1 -TestLogin` / `ops/install.sh --test-login`; a
+checkout deploy, `ops/update.ps1` / `ops/update.sh`, creates it when it is
+missing): it is a
+role that creates and drops
+its own databases and cannot connect to the bank, so no checkout needs
+`ops/.env`, which holds the bank owner's password. A run that still logs in
+as the bank owner prints one line saying so. See
+[agent isolation](docs/guide/agent-isolation.md).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
 password can never produce a green run by accident. A full run checks this
 before it queues for the suite lock and refuses to start, naming where the
-rejected password came from and the fix: copy `ops/.env` from the main
-checkout into the worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD`
-(or correct it, since it overrides `ops/.env`). A targeted run prints one
-warning line and starts. The check is skipped when
+rejected password came from and the fix: create the test login (or re-run
+`test-login create`, which re-applies the file's password), or export
+`PSEUDOLIFE_TEST_PG_USER` and `PSEUDOLIFE_TEST_PG_PASSWORD` (or correct the
+latter, since it overrides the file). A targeted run prints one warning line
+and starts. The check is skipped when
 `PSEUDOLIFE_TEST_DATABASE_URL` is set, in xdist workers, and with
 `PSEUDOLIFE_SUITE_LOCK=off`.
 
@@ -114,13 +127,17 @@ is not a pass for the affected behavior.
 
 A local full suite remains required for schema/DDL/migration changes;
 shared test infrastructure, conftest, fixtures, suite lock or imported test
-helpers; daemon process creation, ownership, shutdown or recovery changes;
-and dependent coverage that cannot be bounded confidently. Finish review
+helpers; and dependent coverage that cannot be bounded confidently. A
+Windows- or macOS-specific daemon process change instead runs that
+platform's affected test files natively and lists them in its CI lite lane
+(`.github/workflows/ci.yml`); on Linux, CI's full PostgreSQL job covers
+daemon processes. Finish review
 fixes and targeted validation before queueing a required full run. Keep
 the suite lock, one local slot, CPU-only execution, PostgreSQL preflight
 and fingerprint guard, and avoid overlapping saturating work. Follow
 [the project validation rules](CLAUDE.md#running-tests-exit-code-discipline)
-for docs-only and test-only changes and merges from master.
+for docs-only and test-only changes, merges from master, review fixes after
+a passing full run, and integration batches.
 
 `tests/conftest.py` enforces the lock for full runs (all of `tests/`, half
 or more of its files, or a `-k`/`-m` that only excludes): it takes
@@ -135,7 +152,14 @@ HEAD's suite in WSL, and `pwsh ops/remote-suite.ps1` runs it on the first
 free machine (local WSL, or a second Linux machine configured outside the
 repository); both refuse a checkout with uncommitted changes (the WSL
 launcher's `PSEUDOLIFE_WSL_SUITE_SOURCE=worktree` tests the working tree
-instead).
+instead). Both run `ops/wsl-suite.sh`, which tags the run with
+`PSEUDOLIFE_SUITE_RUN_ID` and, once pytest exits (also on Ctrl+C or a
+hangup), stops every process still carrying that marker and names each on
+stderr; it exits 130, 129 or 143 for an interrupt, hangup or TERM, else
+with pytest's code. A run dispatched to the second machine refuses a test
+server that holds a production bank, and checks again once it holds the
+suite lock, since a server that refused the first connection may be up by
+then.
 
 All tests must pass. Every PR requires fresh CI for its current head
 integrated with current master, including the full PostgreSQL, lite Linux,

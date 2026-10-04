@@ -19,7 +19,11 @@
 # Environment:
 #   PSEUDOLIFE_SUITE_COMMIT      the commit to test (a full SHA)
 #   PSEUDOLIFE_SUITE_GIT_COMMON  its repository's common git directory
-#   PSEUDOLIFE_SUITE_ENV_FILE    an ops/.env to copy into the test copy
+#   PSEUDOLIFE_SUITE_ENV_FILE    an ops/.env to copy into the test copy; the
+#                                wrapper sends one only without a test login
+#                                (PSEUDOLIFE_TEST_PG_LOGIN_FILE, from
+#                                `pseudolife-mcp test-login create`), which
+#                                the run reads in place
 #   PSEUDOLIFE_SUITE_NAME        the checkout's name (keys the copy and venv)
 #   PSEUDOLIFE_SUITE_VENV        the environment to use (default: one per
 #                                checkout under ~/.venvs/pseudolife)

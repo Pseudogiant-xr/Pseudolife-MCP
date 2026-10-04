@@ -5,6 +5,7 @@
   import TabBar from "./components/TabBar.svelte";
   import TokenDialog from "./components/TokenDialog.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import MaintainerDialog from "./components/MaintainerDialog.svelte";
   import Toasts from "./components/Toasts.svelte";
   import ReviewAsk from "./components/ReviewAsk.svelte";
   import Icon from "./components/Icon.svelte";
@@ -145,6 +146,7 @@
 
 <TokenDialog />
 <ConfirmDialog />
+<MaintainerDialog />
 <ReviewAsk />
 <Toasts />
 

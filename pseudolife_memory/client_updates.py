@@ -40,15 +40,20 @@ Codex: Codex approves a hook by its definition in hooks.json, not by the
 script it runs (measured on Codex 0.158.0, 2026-09-30). Manual copies run
 through a launcher whose commands never change, so this refreshes them to
 the checkout's scripts with no approval. A plugin copy whose scripts are
-behind while its hooks.json is current is refreshed through Codex's own
-``codex plugin marketplace upgrade`` (its approvals carry over); only a
-changed hooks.json names the approval steps (``ops/setup-codex-hooks.py``).
+behind while its normalized hook definitions are current is refreshed
+through Codex's own ``codex plugin marketplace upgrade`` (its approvals
+carry over); only a
+changed approved definition names the approval steps
+(``ops/setup-codex-hooks.py``).
+SessionEnd/Interrupt timeouts that clamp to the same value are
+approval-equivalent; raw file changes still trigger a plugin refresh.
 
-Every CLI call goes through :func:`run_cli`, every lookup through
-:func:`which` and :func:`home` (the Codex CLI through the doorbell's
-resolver, which never takes the working directory, in
-:func:`codex_executable`), so the tests drive the real logic with fakes and
-never touch this machine's registrations. Nothing here prints
+Every CLI call goes through :func:`run_cli`, client homes through
+:func:`home`, and ordinary CLI lookups through :func:`which`. Codex and
+the git used to inspect its marketplace resolve only from absolute paths,
+never implicitly from the working directory, through
+:func:`codex_executable` and :func:`_git_executable`, so tests drive the
+logic with fakes and never touch this machine's registrations. Nothing here prints
 tokens: registration files are parsed for the command line only.
 ``ops/update_clients.py`` runs this from the checkout by putting it first
 on ``sys.path``, so an older installed release never answers for the
@@ -59,6 +64,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import locale
 import os
 import re
 import shutil
@@ -95,19 +101,31 @@ def home() -> Path:
 TIMED_OUT = 124
 
 
-def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
+def run_cli(argv, *, timeout: int = 600, cwd: str | None = None, env: dict | None = None,
+            encoding: str | None = None, errors: str = "replace") -> tuple[int, str]:
     """Run a CLI and return ``(returncode, combined output)``; a missing
     executable reads as code 1 and a hung one as ``TIMED_OUT``, with the
     reason as output."""
     try:
         # No stdin: a CLI that decides to prompt fails fast instead of holding
         # a captured-output deploy for the whole timeout with nothing shown.
-        proc = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
-                              timeout=timeout, check=False, errors="replace",
-                              stdin=subprocess.DEVNULL, cwd=cwd, env=env)
+        # Decode strict output here: Windows text-pipe readers otherwise raise
+        # in their threads and can leave a successful result with empty output.
+        output_options = ({"text": False} if errors == "strict" else
+                          {"text": True, "encoding": encoding, "errors": errors})
+        proc = subprocess.run([str(a) for a in argv], capture_output=True,
+                              timeout=timeout, check=False, stdin=subprocess.DEVNULL,
+                              cwd=cwd, env=env, **output_options)
+        if errors == "strict":
+            codec = encoding or locale.getpreferredencoding(False)
+            proc.stdout = (proc.stdout or b"").decode(codec, errors="strict")
+            proc.stderr = (proc.stderr or b"").decode(codec, errors="strict")
     except subprocess.TimeoutExpired as exc:
+        # subprocess.run stops the direct process only. An npm codex.cmd
+        # wrapper on Windows can leave its Codex child running after a
+        # timeout; this helper does not own or terminate the process tree.
         return TIMED_OUT, f"{type(exc).__name__}: {exc}"
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return 1, f"{type(exc).__name__}: {exc}"
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
@@ -405,12 +423,24 @@ def _legacy_directories(rt, layout) -> list[Path]:
     return [layout.root / n for n in names if rt._sequence_of(n) is None and (layout.root / n).is_dir()]
 
 
-def update_shim(source, repo: Path | None = None) -> dict:
+def _installed_release(rt, layout, source: str):
+    """The current runtime when it was installed from ``source`` itself, a
+    pinned release (``pseudolife-mcp==0.16.0``) it reports as its version;
+    ``None`` for a checkout source, whose code changes under one version."""
+    pinned = re.fullmatch(r"pseudolife-mcp==([0-9A-Za-z.+-]+)", source)
+    current = rt.current_runtime(layout)
+    if pinned is None or current is None or rt.from_checkout(current):
+        return None
+    return current if current.source == source and current.version == pinned.group(1) else None
+
+
+def update_shim(source, repo: Path | None = None, reinstall: bool = False) -> dict:
     """Install ``source`` (a checkout path, or a requirement such as
     ``pseudolife-mcp==0.15.1``) as a new shim runtime and move the
     registrations to the launcher. ``repo`` is the checkout whose ``.venv``
     counts as an editable install; it defaults to ``source`` when that is a
-    directory."""
+    directory. A release the current runtime was installed from is not
+    installed again unless ``reinstall``."""
     source = str(source)
     if repo is None and Path(source).is_dir():
         repo = Path(source)
@@ -495,8 +525,13 @@ def update_shim(source, repo: Path | None = None) -> dict:
         results.sort(key=lambda r: order.index(r["state"]) if r["state"] in order else len(order))
         return {"state": results[0]["state"], "detail": "; ".join(r["detail"] for r in results)}
     lines: list[str] = []
+    installed = None if reinstall else _installed_release(rt, layout, source)
     try:
-        runtime = rt.install(source, layout, run=run_cli, log=lines.append)
+        if installed is not None:
+            # What the install would have done in passing: a launcher that
+            # was removed or is out of date is put back.
+            rt.ensure_launcher(layout, installed, run=run_cli, log=lines.append)
+        runtime = installed or rt.install(source, layout, run=run_cli, log=lines.append)
     except rt.RuntimeInstallError as exc:
         retry = (f"python \"{repo / 'ops' / 'update_clients.py'}\" --only shim --repo \"{repo}\"" if repo
                  else "pseudolife-mcp update --clients-only")
@@ -504,9 +539,13 @@ def update_shim(source, repo: Path | None = None) -> dict:
                   f"registrations were not touched and the runtime that was current stays current. "
                   f"Retry: {retry}")
         return {"state": "failed", "detail": "; ".join([detail] + [r["detail"] for r in results])}
-    detail = [f"runtime {runtime.name} ({runtime.version}"
-              + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
-              + f") installed from {source} behind {layout.launcher}"]
+    if installed is not None:
+        detail = [f"runtime {runtime.name} ({runtime.version}) is already installed from {source} behind "
+                  f"{layout.launcher}; nothing to install (--reinstall to install it again)"]
+    else:
+        detail = [f"runtime {runtime.name} ({runtime.version}"
+                  + (f", commit {runtime.source_commit[:8]}" if runtime.source_commit else "")
+                  + f") installed from {source} behind {layout.launcher}"]
     failed = False
     for registration, kind in managed:
         if kind == "launcher":
@@ -550,8 +589,9 @@ def update_shim(source, repo: Path | None = None) -> dict:
         if not any(rt.registered_runtime(r, layout) == legacy for r in rt.find_registrations(env)):
             detail.append(f"{legacy} is a hand-made runtime no registration names any more; remove it once no "
                           f"session runs from it")
-    detail.append("sessions already running keep their runtime; new sessions start on the new one")
-    state = "failed" if failed else f"installed:{runtime.version}"
+    if installed is None:
+        detail.append("sessions already running keep their runtime; new sessions start on the new one")
+    state = "failed" if failed else f"{'current' if installed else 'installed'}:{runtime.version}"
     return {"state": state, "detail": "; ".join(detail + [r["detail"] for r in results])}
 
 
@@ -624,7 +664,12 @@ def update_plugin(repo: Path | None = None) -> dict:
     14 days later once no session marks it ``.in_use`` (measured on 2.1.283,
     2026-09-30). Nothing here uninstalls: on 2026-09-30 an uninstall followed
     by an install the in-use folder refused (EPERM) left the plugin
-    uninstalled until the apps were restarted."""
+    uninstalled until the apps were restarted.
+
+    A marketplace update that fails leaves the clone where it was, so a
+    cache matching it proves nothing: the step then reports ``failed`` with
+    the CLI's own line, never ``current`` or ``refreshed`` (2026-10-04: the
+    homelab box kept the previous release's hooks behind a green line)."""
     claude = which("claude")
     if not claude:
         return {"state": "no-cli", "detail": "the claude CLI is not on PATH"}
@@ -632,24 +677,112 @@ def update_plugin(repo: Path | None = None) -> dict:
     record = _plugin_record(plugins_dir)
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
+    code, out = run_cli([claude, "plugin", "marketplace", "update", MARKETPLACE])
+    failure = _marketplace_failure(code, out)
+    result = _install_from_clone(claude, plugins_dir, record, repo)
+    if failure is None:
+        return {"state": result["state"], "marketplace_update": "ok", "detail": result["detail"]}
+    remedy = f"{_marketplace_remedy(out)}, then {_plugin_retry(repo)}"
+    said = f"claude plugin marketplace update {MARKETPLACE} failed ({failure})"
+    if result["state"].startswith("current:"):
+        detail = (f"{said}, so the clone the cache matches (v{record.get('version', '')}) may be behind the "
+                  f"marketplace; {remedy}")
+    elif result["state"].startswith("refreshed:"):
+        detail = f"{said}; {result['detail']}, but that clone may be behind the marketplace; {remedy}"
+    else:
+        detail = f"{result['detail']}; {said}: {remedy}"
+    return {"state": "failed", "marketplace_update": "failed", "detail": detail}
+
+
+# Claude Code 2.1.287 reports a marketplace it could not refresh with exit 1
+# and `Failed to update marketplace(s): Failed to refresh marketplace '<name>':
+# ...` on stderr behind a cross mark (U+2718), measured 2026-10-04 in a
+# sandboxed CLAUDE_CONFIG_DIR. The line counts without the exit code, and is
+# found past its mark, which a cp1252 console decodes as other characters.
+_MARKETPLACE_FAILED = re.compile(r"Failed to (?:update|refresh) marketplace")
+MARKETPLACE_HTTPS = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+
+
+def _marketplace_failure(code: int, out: str) -> str | None:
+    """The CLI's failure line for a marketplace update that did not refresh
+    the clone, else None."""
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    for line in lines:
+        found = _MARKETPLACE_FAILED.search(line)
+        if found:
+            return line[found.start():]
+    if code == 0:
+        return None
+    return lines[-1] if lines else f"exit {code}"
+
+
+def _marketplace_remedy(out: str) -> str:
+    """What to do about a failed marketplace update. A github-source
+    marketplace is cloned over SSH, which fails where github.com's host key
+    is not in known_hosts (root on the homelab box, 2026-10-04). Adding it
+    again from its HTTPS URL re-points the existing entry, and the installed
+    plugin follows it (measured on Claude Code 2.1.287, 2026-10-04).
+
+    Claude Code refuses that add while settings.json declares the
+    marketplace under ``extraKnownMarketplaces`` with another source (the
+    box's settings did, 2026-10-04), so the entry is changed first; that
+    step is named only where such a declaration exists. Never ``marketplace
+    remove``: it uninstalls the plugin."""
+    if "known_hosts" not in out and "Host key verification failed" not in out:
+        return f"fix that and run claude plugin marketplace update {MARKETPLACE}"
+    settings, declared = _declared_marketplace()
+    https = {"source": "git", "url": MARKETPLACE_HTTPS}
+    first = ""
+    if declared is not None and declared != https:
+        first = (f"{settings} declares the marketplace under extraKnownMarketplaces with another source, which "
+                 f"refuses that add, so first change that entry's source to {json.dumps(https)}, then run ")
+    return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
+            "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
+            "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
+            f"{first}claude plugin marketplace add {MARKETPLACE_HTTPS} (the README's Updating section has the "
+            "steps)")
+
+
+def _declared_marketplace() -> tuple[Path, object]:
+    """Claude Code's user settings file (``$CLAUDE_CONFIG_DIR/settings.json``,
+    else ``~/.claude/settings.json``) and the source it declares for this
+    marketplace under ``extraKnownMarketplaces``; None when it declares
+    none or cannot be read."""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    settings = (Path(config_dir) if config_dir else home() / ".claude") / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return settings, None
+    declared = data.get("extraKnownMarketplaces") if isinstance(data, dict) else None
+    entry = declared.get(MARKETPLACE) if isinstance(declared, dict) else None
+    return settings, entry.get("source") if isinstance(entry, dict) else None
+
+
+def _plugin_retry(repo: Path | None) -> str:
+    return (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
+            else "pseudolife-mcp update --clients-only")
+
+
+def _install_from_clone(claude: str, plugins_dir: Path, record: dict, repo: Path | None) -> dict:
+    """Compare the marketplace clone with the recorded cache and, when they
+    differ, install the clone's copy beside it (see ``update_plugin``)."""
     version = str(record.get("version", ""))
     cache = Path(str(record.get("installPath", "")))
-    code, _ = run_cli([claude, "plugin", "marketplace", "update", MARKETPLACE])
-    marketplace_update = "ok" if code == 0 else "failed"
     clone = _clone_plugin_dir(plugins_dir)
     if not (clone / ".claude-plugin" / "plugin.json").is_file():
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"no marketplace clone at {clone}; run: claude plugin marketplace add "
-                          f"Pseudogiant-xr/Pseudolife-MCP"}
+                          f"{MARKETPLACE_HTTPS}"}
     if cache.is_dir() and not tree_differs(clone, cache):
-        return {"state": f"current:{version}", "marketplace_update": marketplace_update,
+        return {"state": f"current:{version}",
                 "detail": f"cache matches the marketplace clone (v{version})"}
     # A project or local install is found from its project, at its scope;
     # from anywhere else the update would act on another project's install.
     scope = str(record.get("scope") or "user")
     project = record.get("projectPath") if scope in ("project", "local") else None
     if scope in ("project", "local") and not project:
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the {scope}-scope install of {PLUGIN_ID} names no project; left as it is. Run "
                           f"claude plugin update {PLUGIN_ID} --scope {scope} from that project"}
     code, out = run_cli([claude, "plugin", "update", PLUGIN_ID, "--scope", scope],
@@ -659,25 +792,24 @@ def update_plugin(repo: Path | None = None) -> dict:
     new_cache = Path(str(updated.get("installPath", ""))) if updated else None
     if code == 0 and updated and new_cache.is_dir() and not tree_differs(clone, new_cache):
         new_version = str(updated.get("version", ""))
-        return {"state": f"refreshed:{new_version}", "marketplace_update": marketplace_update,
+        return {"state": f"refreshed:{new_version}",
                 "detail": f"{new_version} installed from the marketplace clone beside {version}; sessions "
                           f"already running keep the copy they loaded, new sessions start on this one, and "
                           f"Claude Code deletes the old copy 14 days after it was replaced, once no session "
                           f"runs from it"}
     if updated is None:
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"{PLUGIN_ID} is no longer recorded as installed after claude plugin update "
                           f"({said}); {INSTALLER_HINT}"}
     kept = (f"{version} was left installed and sessions keep running it" if updated == record
             else f"the record now names {updated.get('installPath')} ({updated.get('version')})")
-    retry = (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
-             else "pseudolife-mcp update --clients-only")
+    retry = _plugin_retry(repo)
     offered = _read_json(clone / ".claude-plugin" / "plugin.json").get("version")
     if code == 0 and updated == record and offered == version:
         # Claude Code found nothing newer: the clone's manifest still
         # carries the installed version, and replacing that folder in place
         # is what failed under running sessions.
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the marketplace clone's plugin differs from the cache but offers the same version "
                           f"({version}; claude said: {said}), so Claude Code will not install it beside the "
                           f"copy sessions run; {kept}. A current clone's plugin.json carries no version: "
@@ -685,12 +817,12 @@ def update_plugin(repo: Path | None = None) -> dict:
     if code == 0 and updated == record:
         # Nothing newer to install, yet the cache is not the clone: the
         # folder the record names is gone or was edited in place.
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the cache folder the plugin record names ({cache}) is missing or was changed by "
                           f"hand, and Claude Code has nothing newer to install (claude said: {said}); {kept}. "
                           f"With no Claude Code session open: claude plugin uninstall {PLUGIN_ID}, then "
                           f"claude plugin install {PLUGIN_ID}"}
-    return {"state": "failed", "marketplace_update": marketplace_update,
+    return {"state": "failed",
             "detail": f"claude plugin update {PLUGIN_ID} did not leave a cache matching the clone ({said}); "
                       f"{kept}. Retry: {retry}"}
 
@@ -735,8 +867,11 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
         return None
     try:
         state = (tomllib.loads(config_text).get("hooks") or {}).get("state") or {}
-        manifest = json.loads((Path(manifest_dir) / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    except (ValueError, OSError, KeyError, AttributeError):
+        definition = _codex_hook_manifest((Path(manifest_dir) / "hooks.json").read_bytes())
+        if definition is None:
+            return None
+        manifest = json.loads(definition)["hooks"]
+    except (ValueError, OSError, KeyError, AttributeError, RecursionError):
         return None
     if not isinstance(state, dict) or not isinstance(manifest, dict):
         return None
@@ -756,12 +891,111 @@ def _unapproved_plugin_handlers(manifest_dir: Path, config_text: str) -> list[st
 # What Codex loses while its hook copy is unapproved, and the steps back.
 # Printed by every update path (pseudolife-mcp update, ops/update.*,
 # ops/update_clients.py, the unattended updater's board notice) when and only
-# when Codex would ask again: a changed hooks.json (Codex approves hook
+# when Codex would ask again: a changed approved definition (Codex approves hook
 # definitions, not scripts), new handler positions, or manual copies that
 # still name a script bundle. An approval is the user's, so no update can
 # finish this.
 CODEX_HOOK_NAMES = HOOK_SCRIPTS + ("hooks.json",)
 CODEX_REAPPROVAL_VERIFY = "pseudolife-mcp doctor reports codex_hooks = current"
+
+
+def _codex_hook_manifest(data: bytes | None) -> str | None:
+    """A conservative command-hook consent comparison, not Codex's trust hash.
+
+    Preserve every field and JSON type; normalize only SessionEnd/Interrupt
+    timeouts, which Codex clamps before hook_hash (discovery.rs at b741e480,
+    checked 2026-10-03). Unsupported or malformed definitions fail closed.
+    """
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate manifest key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("non-JSON number")
+
+    def integer_value(value):
+        # serde_json parses -0 as a float, which unsigned hook fields reject.
+        return -0.0 if value == "-0" else int(value)
+
+    def validate_json(value, depth=0):
+        if isinstance(value, str):
+            value.encode("utf-8")  # Reject unpaired surrogates, including unknown fields.
+        elif type(value) is int:
+            # serde_json rejects integers beyond finite f64 range, even in unknown fields.
+            float(value)
+        elif isinstance(value, (dict, list)):
+            # serde_json 1.0.149 rejects container 128 (probed 2026-10-03).
+            if depth >= 127:
+                raise ValueError("unsupported manifest nesting")
+            if isinstance(value, dict):
+                for key in value:
+                    key.encode("utf-8")
+            for child in (value.values() if isinstance(value, dict) else value):
+                validate_json(child, depth + 1)
+
+    if data is None:
+        return None
+    try:
+        manifest = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object,
+                              parse_constant=invalid_constant, parse_int=integer_value)
+    except (ValueError, UnicodeError, RecursionError, OverflowError):
+        return None
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("hooks"), dict):
+        return None
+    if set(manifest) - {"description", "hooks"}:  # HooksFile denies unknown top-level fields.
+        return None
+    if manifest.get("description") is not None and not isinstance(manifest["description"], str):
+        return None
+    for event, groups in manifest["hooks"].items():
+        if not isinstance(groups, list):
+            return None
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                return None
+            if group.get("matcher") is not None and not isinstance(group["matcher"], str):
+                return None
+            for handler in group["hooks"]:
+                if not isinstance(handler, dict) or handler.get("type") != "command":
+                    return None
+                if not isinstance(handler.get("command"), str) or not handler["command"].strip():
+                    return None
+                for field in ("commandWindows", "command_windows", "statusMessage"):
+                    if handler.get(field) is not None and not isinstance(handler[field], str):
+                        return None
+                if "commandWindows" in handler and "command_windows" in handler:
+                    return None
+                if "async" in handler and type(handler["async"]) is not bool:
+                    return None
+                for field in ("timeout", "additionalContextLimit"):
+                    value = handler.get(field)
+                    if value is not None and (type(value) is not int or not 0 <= value < 2 ** 64):
+                        return None
+                if event in ("SessionEnd", "Interrupt"):
+                    timeout = handler.get("timeout")
+                    handler["timeout"] = min(3, max(1, 1 if timeout is None else timeout))
+    # Dict equality would treat true and 1 as equal in unknown fields.
+    try:
+        validate_json(manifest)
+        return json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (ValueError, UnicodeError, RecursionError, OverflowError):
+        return None
+
+
+def _same_codex_hook_definitions(left: bytes | None, right: bytes | None) -> bool:
+    first, second = _codex_hook_manifest(left), _codex_hook_manifest(right)
+    return first is not None and first == second
+
+
+def _plugin_definitions_match(installed: Path, reference: Path) -> bool:
+    try:
+        return _same_codex_hook_definitions(_normalised(installed / "hooks.json"),
+                                           _normalised(reference / "hooks.json"))
+    except OSError:
+        return False
 
 
 def changed_hook_files(installed: Path, reference: Path) -> list[str] | None:
@@ -866,6 +1100,10 @@ def codex_executable(codex_home: Path) -> str | None:
     found = codex_doorbell.resolve_codex_command()
     if found:
         return found[0]
+    # An invalid configured path is a setup error, as in the doorbell;
+    # another installed binary must not silently replace it.
+    if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip():
+        return None
     standalone = codex_home / "packages" / "standalone" / "current" / "bin" / (
         "codex.exe" if os.name == "nt" else "codex")
     return str(standalone.resolve()) if standalone.is_file() else None
@@ -924,12 +1162,33 @@ def _marketplace_source(codex_home: Path) -> tuple[str | None, str | None]:
 _MARKETPLACE_READ_TIMEOUT_S = 120
 
 
+def _git_executable() -> str | None:
+    """Git from an absolute PATH directory, without shutil.which's implicit
+    Windows working-directory search (the Codex doorbell's resolver rule)."""
+    if os.name == "nt":
+        pathext = os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
+        names = [f"git{ext}" for ext in pathext.split(os.pathsep)
+                 if ext.lower() in (".com", ".exe", ".bat", ".cmd")]
+    else:
+        names = ["git"]
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        directory = directory.strip().strip('"')
+        # Path.is_absolute also rejects drive-relative Windows paths.
+        if not directory or not Path(directory).is_absolute():
+            continue
+        for name in names:
+            candidate = Path(directory) / name
+            if candidate.is_file() and (os.name == "nt" or os.access(candidate, os.X_OK)):
+                return str(candidate)
+    return None
+
+
 def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
     """The hooks.json the marketplace's branch would install (CRLF read as
     LF), or ``(None, why not)``. Read from a private blob-less clone in a
     temporary directory, never from Codex's own clone, which stays Codex's
     to write."""
-    git = which("git")
+    git = _git_executable()
     if not git:
         return None, "git is not on PATH to read the marketplace's hooks.json first"
     source, ref = _marketplace_source(codex_home)
@@ -943,19 +1202,21 @@ def _marketplace_hooks_json(codex_home: Path) -> tuple[bytes | None, str]:
         clone = str(Path(tmp) / "m")
         branch = ["--branch", ref] if ref else []
         code, out = run_cli([git, "clone", "--quiet", "--depth", "1", "--filter=blob:none", "--no-checkout",
-                             *branch, source, clone], timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+                             *branch, "--", source, clone], timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
         if code == 0:
             code, out = run_cli([git, "-C", clone, "show", "HEAD:plugin/hooks/hooks.json"],
-                                timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env)
+                                timeout=_MARKETPLACE_READ_TIMEOUT_S, env=env, encoding="utf-8", errors="strict")
     try:
-        valid = code == 0 and isinstance(json.loads(out).get("hooks"), dict)
-    except (ValueError, AttributeError):
-        valid = False
-    if not valid:
+        data = out.replace("\r\n", "\n").encode("utf-8")
+    except UnicodeError:
+        data = None
+    if code != 0 or _codex_hook_manifest(data) is None:
         lines = out.strip().splitlines()
-        return None, f"could not read the marketplace's hooks.json ({lines[-1] if lines else f'exit {code}'})"
-    # Bytes, as every other hooks.json comparison here (changed_hook_files).
-    return out.replace("\r\n", "\n").encode("utf-8"), ""
+        reason = "invalid or unsupported definition" if code == 0 else (lines[-1] if lines else f"exit {code}")
+        return None, f"could not read the marketplace's hooks.json ({reason})"
+    # Keep raw bytes for changed-file reporting; consent compares normalized
+    # command definitions through _same_codex_hook_definitions.
+    return data, ""
 
 
 def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: str | None,
@@ -971,13 +1232,13 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
     copy and replaces it in place, as its plugin manager's update does;
     there is no copy beside it to keep for running sessions. The upgrade
     takes the marketplace's branch, not the checkout or the release, so it
-    runs only when that branch's hooks.json matches the installed one (read
-    first from a private clone); the copy is read back afterwards, because
-    the read-back is the proof."""
+    runs only when that branch's normalized definitions match the installed
+    ones (read first from a private clone); the copy is read back afterwards,
+    because the read-back is the proof."""
     behind = f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)})"
     manual = (f"run codex plugin marketplace upgrade {MARKETPLACE}, or update the plugin in Codex's plugin "
-              "manager; its approvals carry over (Codex approves hook definitions, which did not change, "
-              "not the scripts)")
+              "manager; that upgrade may change hooks.json and need approval because the marketplace's "
+              "branch has not been checked")
 
     def stays(reason: str, files: list[str] = changed) -> dict:
         return {"state": "behind", "source": "plugin", "changed_files": files,
@@ -985,6 +1246,9 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
 
     codex = codex_executable(codex_home)
     if not codex:
+        if os.environ.get("PSEUDOLIFE_CODEX_BIN", "").strip():
+            return stays("PSEUDOLIFE_CODEX_BIN is not an absolute path to an existing file (setup error), "
+                         f"so it was not refreshed here: {manual}")
         return stays("no Codex CLI was found (PATH, PSEUDOLIFE_CODEX_BIN, or the desktop app's own copy), so "
                      f"it was not refreshed here: {manual}")
     # The marketplace serves its branch, which can carry a hooks.json the
@@ -997,12 +1261,15 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
         installed = _normalised(codex_plugin_hooks(codex_home) / "hooks.json")
     except OSError:
         installed = None
-    if offered != installed:
-        return stays("the marketplace's branch also changes hooks.json, which Codex would ask to approve, so it "
+    if not _same_codex_hook_definitions(offered, installed):
+        return stays("the marketplace's branch changes or cannot verify hooks.json's approved definition, so it "
                      "was not refreshed automatically. When you are ready to approve: update the plugin in "
                      f"Codex's plugin manager (or codex plugin marketplace upgrade {MARKETPLACE}), then approve "
                      "every pseudolife-memory handler with /hooks in a Codex session or "
                      "python ops/setup-codex-hooks.py --source plugin --trust ask")
+    manual = (f"run codex plugin marketplace upgrade {MARKETPLACE}, or update the plugin in Codex's plugin "
+              "manager; its approvals carry over if its normalized definition stays as inspected "
+              "(the branch matched the installed definition; Codex approves definitions, not scripts)")
     code, out = run_cli([codex, "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"],
                         timeout=_CODEX_UPGRADE_TIMEOUT_S, env=dict(os.environ, CODEX_HOME=str(codex_home)))
     report = _json_object(out) if code == 0 else None
@@ -1014,10 +1281,13 @@ def _upgrade_codex_plugin(codex_home: Path, repo: Path | None, daemon_digest: st
         return stays(f"codex plugin marketplace upgrade {MARKETPLACE} did not refresh it ({said}): {manual}")
     after = check_codex_hooks(repo, daemon_digest)
     if after["state"] == "current":
+        if not report.get("upgradedRoots"):
+            return stays("the marketplace has nothing newer than Codex's copy; its hook definitions are "
+                         "equivalent, but the raw hook files were not refreshed")
         return {"state": "refreshed", "source": "plugin", "changed_files": changed,
                 "detail": f"Codex's plugin copy refreshed through codex plugin marketplace upgrade {MARKETPLACE} "
                           f"(changed: {', '.join(changed)}); its approvals carry over: Codex approves hook "
-                          "definitions, which did not change, not the scripts"}
+                          "definitions, which remain equivalent after timeout normalization, not the scripts"}
     if after["state"] == "behind":
         # The marketplace serves its branch (master), which can be behind a
         # checkout under test or past the release just deployed.
@@ -1040,7 +1310,8 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     home>/pseudolife/hooks`` (``setup-codex-hooks.py``) or from the Codex
     plugin, whose marketplace clone Codex keeps itself. Codex approves a hook
     by its definition, not by the script it runs (measured on Codex 0.158.0,
-    2026-09-30), so only a changed ``hooks.json`` asks for approval again.
+    2026-09-30). SessionEnd/Interrupt timeouts normalize before the trust hash,
+    so only a changed approved definition asks for approval again.
     Manual copies run through a launcher whose commands never change; with
     ``refresh`` (the update step) they are moved to the checkout's scripts
     here, with no consent needed, and a plugin copy whose scripts alone are
@@ -1104,8 +1375,17 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
     # digest leaves hooks.json out, so it is compared here too.
     reference = (repo / "plugin" / "hooks") if repo else _daemon_scripts_dir(daemon_digest)
     changed = changed_hook_files(clone_hooks, reference) if (clone_hooks.is_dir() and reference) else None
-    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current and not changed:
+    definitions_match = (_plugin_definitions_match(clone_hooks, reference) if reference else not changed)
+    if clone_hooks.is_dir() and hooks_digest(clone_hooks) == current and definitions_match:
+        # A clamp-only manifest change is approval-equivalent but still needs
+        # the raw-file refresh to remove Codex's startup warning.
+        if refresh and changed:
+            return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
         missing = _unapproved_plugin_handlers(clone_hooks, config_text)
+        if missing is None and not _plugin_definitions_match(clone_hooks, clone_hooks):
+            return {"state": "unknown", "source": "plugin", "changed_files": [],
+                    "detail": "Codex runs the plugin's hooks, but its hooks.json could not be verified; "
+                              "handler approval is unknown"}
         if missing:
             return {"state": "needs-approval", "source": "plugin", "changed_files": [],
                     "detail": f"Codex skips {len(missing)} plugin hook handler(s) it has not approved; "
@@ -1113,16 +1393,16 @@ def check_codex_hooks(repo: Path | None = None, daemon_digest: str | None = None
                               "(or /hooks in the Codex terminal app)"}
         return {"state": "current", "detail": "Codex runs the plugin's hooks; its copy matches "
                                               + ("the checkout's scripts" if repo else "the daemon's scripts")}
-    if changed and "hooks.json" not in changed:
-        # Codex approves hook definitions (hooks.json), not the scripts
-        # they run: only the plugin copy is behind, no approval is due.
+    if changed and definitions_match:
+        # The installed definitions match the reference, but a plain check
+        # does not inspect what the marketplace's branch would bring.
         if refresh:
             return _upgrade_codex_plugin(codex_home, repo, daemon_digest, changed)
         return {"state": "behind", "source": "plugin", "changed_files": changed,
                 "detail": f"Codex's plugin copy is behind the current scripts (changed: {', '.join(changed)}); "
                           "the update refreshes it (codex plugin marketplace upgrade " + MARKETPLACE + "), or "
-                          "update the plugin in Codex's plugin manager. Its approvals carry over: Codex "
-                          "approves hook definitions, which did not change, not the scripts"}
+                          "update the plugin in Codex's plugin manager; that upgrade may change hooks.json "
+                          "and need approval because the marketplace's branch has not been checked"}
     return {"state": "stale" if clone_hooks.is_dir() else "plugin-managed", "source": "plugin",
             "changed_files": changed,
             "detail": "Codex runs the plugin's hooks; refresh them through Codex's plugin manager, or "
@@ -1263,13 +1543,14 @@ def update_tunnels(shim: dict | None) -> dict | None:
                       "again to see why, then `pseudolife-mcp tunnel doctor`"}
 
 
-def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None) -> dict:
+def run_steps(steps, *, repo: Path | None, source: str, daemon_digest: str | None = None,
+              reinstall: bool = False) -> dict:
     """The client-side ladder as a report: ``shim``, ``plugin``, ``codex``
     (those in ``steps``), ``autostart`` when a checkout is known, and
-    ``ok``."""
+    ``ok``. ``reinstall`` installs a release the shim already runs."""
     report: dict = {}
     if "shim" in steps:
-        report["shim"] = update_shim(source, repo)
+        report["shim"] = update_shim(source, repo, reinstall)
     if "plugin" in steps:
         report["plugin"] = update_plugin(repo)
     if "codex" in steps:

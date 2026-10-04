@@ -12,7 +12,7 @@ Claude Code plugin marketplace (`.claude-plugin/marketplace.json` +
 them in this order (first done 2026-07-16, v0.8.0; GHCR images added
 2026-08-14).
 
-0. **Docs currency pass before the cut** — two checks, and (a) is the one
+0. **Docs currency pass before the cut** — three checks, and (a) is the one
    that gets skipped because nothing fails when you miss it.
 
    **(a) Absence — is the new behavior documented at all?** List the
@@ -50,6 +50,14 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    injected into user CLAUDE.md / AGENTS.md files — its tool surface must match exactly),
    docs/runbooks, ops/.env.example comments. The README is the PyPI
    description, so its fixes only reach PyPI at the next version.
+
+   **(c) Setup — does any change since the last tag leave the user a manual
+   step?** For each behavior change, ask what a user must do by hand after
+   `pseudolife-mcp update` or a fresh install: a config edit, a login, a
+   serve, a command to run once. If the answer is anything, the release
+   waits until the installer or update does it (CLAUDE.md, "Install and
+   update experience"). The 2026-10-04 passkey and test-login changes held
+   the release after 0.16.1 this way.
 
 1. **Version cut touches six files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test

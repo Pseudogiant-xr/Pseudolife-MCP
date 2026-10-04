@@ -1,9 +1,13 @@
 <script lang="ts">
-  // The coordination board, read-only. Every refresh is one GET of
-  // /api/agents?view=coordination; nothing here sends, receives or
-  // acknowledges mail, and message bodies are never served to the Console.
+  // The coordination board. Every refresh is one GET of
+  // /api/agents?view=coordination plus the maintainer status; nothing here
+  // reads agent mail, and agent message bodies are never served to the
+  // Console. The only writes are the Roles band's and the role buttons',
+  // each signed with the maintainer's passkey (lib/maintainerFlow.svelte.ts).
   import ErrorState from "../components/ErrorState.svelte";
   import Icon from "../components/Icon.svelte";
+  import RoleButtons from "../components/board/RoleButtons.svelte";
+  import RolesBand from "../components/board/RolesBand.svelte";
   import type { BoardAgent } from "../lib/api/types";
   import {
     adapterText,
@@ -24,6 +28,8 @@
     waitersOmitted,
   } from "../lib/board";
   import { explainBoardUnavailable, explainError } from "../lib/errors";
+  import { roleOf } from "../lib/maintainer";
+  import { loadMaintainer, maintainer } from "../lib/maintainerFlow.svelte";
   import { fmtAgeShort, fmtClock, fmtDateTime, fmtDuration, fmtNum, fmtRelative, plural, shortId, words } from "../lib/format";
   import { loadBoard, refresh, setSubtitle, store, ui } from "../lib/state.svelte";
 
@@ -34,6 +40,13 @@
   $effect(() => {
     void ui.tick;
     void loadBoard();
+  });
+
+  // The maintainer status (roles, passkeys) rides along with every board load.
+  $effect(() => {
+    void ui.tick;
+    void store.board.at;
+    void loadMaintainer();
   });
 
   $effect(() => {
@@ -156,9 +169,14 @@
     </button>
   </div>
   <p class="readonly caption">
-    Read-only board metadata: message bodies are never served to the Console, and there is no compose here. Unread
-    counts are shown only for your own principal's peers. Refreshing never reads mail or changes the board.
+    Board metadata: agent message bodies are never served to the Console. Unread counts are shown only for your own
+    principal's peers. Refreshing never reads mail or changes the board; roles and your messages change only with your
+    passkey.
   </p>
+
+  {#if snap?.available || maintainer.status}
+    <RolesBand {agents} {leases} snapshotAt={snap?.snapshot_at ?? null} {now} />
+  {/if}
 
   {#if problem && !snap?.available}
     <section class="panel pad">
@@ -186,8 +204,9 @@
           {#each shown as a (a.agent_id)}
             {@const chip = stateChip(a, snap?.snapshot_at)}
             {@const isSel = selected?.agent_id === a.agent_id}
-            <li>
-              <button type="button" class="peer" class:selected={isSel} aria-pressed={isSel} onclick={() => pick(a)}>
+            {@const role = roleOf(a, maintainer.status, leases)}
+            <li class="peer-item" class:selected={isSel} class:delegate={role === "delegate"} class:coordinator={role === "coordinator"}>
+              <button type="button" class="peer" aria-pressed={isSel} onclick={() => pick(a)}>
                 <span class="peer-head">
                   <span class="dot {agentTone(a, snap?.snapshot_at)}" aria-hidden="true"></span>
                   <span class="peer-name">{agentName(a)}</span>
@@ -196,6 +215,8 @@
                 {#if scopeLine(a)}<span class="peer-scope">{scopeLine(a)}</span>{/if}
                 <span class="peer-status" class:none={!a.status}>{a.status || "No status set"}</span>
                 <span class="chips">
+                  {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Delegate</span>{/if}
+                  {#if role === "coordinator"}<span class="chip role-chip lav chip-prose">Coordinator</span>{/if}
                   <span class="chip {chip.tone}">{chip.text}</span>
                   {#if a.subagent}<span class="chip">subagent</span>{/if}
                   {#if a.children.length}<span class="chip">{plural(a.children.length, "subagent")}</span>{/if}
@@ -203,6 +224,9 @@
                   {#if a.pending_count}<span class="chip mail">{fmtNum(a.pending_count)} unread</span>{/if}
                 </span>
               </button>
+              {#if !a.subagent}
+                <div class="peer-roles"><RoleButtons agent={a} {leases} {nameOf} /></div>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -226,6 +250,7 @@
               <span class="mono meta" title={selected.agent_id}>{shortId(selected.agent_id)}</span>
             </div>
             {#if scopeLine(selected)}<p class="detail-scope">{scopeLine(selected)}</p>{/if}
+            {#if !selected.subagent}<RoleButtons agent={selected} {leases} {nameOf} wide />{/if}
             <p class="status-box" class:none={!selected.status}>{selected.status || "No status set."}</p>
             <dl class="facts">
               <div>
@@ -520,8 +545,24 @@
     margin: 0;
     padding: 0;
   }
-  .peer-list li + li .peer:not(.selected) {
+  .peer-item {
+    border-radius: 14px;
+    border-top: 1px solid transparent;
+  }
+  .peer-list li + li.peer-item:not(.selected) {
     border-top-color: var(--hairline);
+  }
+  .peer-item:hover {
+    background: var(--fill);
+  }
+  .peer-item.selected {
+    background: var(--selected);
+  }
+  .peer-item.delegate {
+    box-shadow: inset 2px 0 0 var(--canon);
+  }
+  .peer-item.coordinator {
+    box-shadow: inset 2px 0 0 var(--assoc);
   }
   .peer {
     display: flex;
@@ -529,20 +570,26 @@
     gap: 8px;
     width: 100%;
     text-align: left;
-    padding: 14px 14px 12px;
+    padding: 14px 14px 10px;
     border-radius: 14px;
     border: 0;
-    border-top: 1px solid transparent;
     background: transparent;
     color: var(--ink);
     font-size: 13px;
     cursor: pointer;
   }
-  .peer:hover {
-    background: var(--fill);
+  .peer-roles {
+    padding: 0 14px 12px;
   }
-  .peer.selected {
-    background: var(--selected);
+  .role-chip.gold {
+    color: var(--on-accent);
+    background: var(--canon);
+    font-weight: 600;
+  }
+  .role-chip.lav {
+    color: var(--contested-ink);
+    background: color-mix(in srgb, var(--assoc) 16%, transparent);
+    font-weight: 600;
   }
   .peer-head {
     display: flex;

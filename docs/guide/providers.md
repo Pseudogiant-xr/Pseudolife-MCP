@@ -261,10 +261,14 @@ asking, because nothing Codex approved changed. A manual copy set up before
 2026-09-30 names a bundle directly in its commands; the update says so, and
 running `python ops/setup-codex-hooks.py` once more is the last approval it
 needs. Bundles from before the launcher stay, since a Codex session started
-earlier may still run them.
+earlier may still run them. Codex bounds SessionEnd and Interrupt timeouts
+to 1..3 seconds before hashing their definitions
+([verified source](https://github.com/openai/codex/blob/b741e480e203f037ca726bc2a76d99a8e8668e66/codex-rs/hooks/src/engine/discovery.rs#L742-L796)).
+On builds with that normalization, changing a SessionEnd timeout from 10
+to 3 keeps the same trust identity; approve only if Codex asks.
 
 When Codex runs the plugin's hooks instead, the same update refreshes them
-too, as long as only the scripts changed. It runs Codex's own
+too, as long as its approved definitions remain equivalent. It runs Codex's own
 `codex plugin marketplace upgrade pseudolife-mcp`, which fetches the
 marketplace and replaces both its clone and the installed copy Codex runs
 hooks from (`~/.codex/plugins/cache/pseudolife-mcp/pseudolife-memory/local`).
@@ -276,17 +280,29 @@ no older copy kept beside it. The CLI and the desktop app share the Codex home, 
 both pick up the new scripts. The update finds the Codex CLI on PATH, through
 `PSEUDOLIFE_CODEX_BIN`, in the Windows desktop app's build folder, or in the
 standalone package the desktop app installs under the Codex home
-(`packages/standalone/current/bin`). The marketplace serves its branch
+(`packages/standalone/current/bin`). A missing or relative configured
+`PSEUDOLIFE_CODEX_BIN` is a setup error; the update does not fall back to
+another binary. The git used for the branch check comes only from absolute
+PATH entries, excluding implicit working-directory lookup, and reads
+`hooks.json` as UTF-8. The marketplace serves its branch
 (master), which can carry a `hooks.json` change that the checkout or the
 release just deployed does not. So the update first reads that branch's
 `hooks.json` from a private, blob-less clone in a temporary directory (never
-Codex's own clone), and upgrades only when it matches the installed one. If it
+Codex's own clone), and upgrades only when its normalized definitions match
+the installed ones. The updater applies the same timeout normalization when
+comparing the installed copy with the checkout and on read-back. It still
+refreshes raw clamp-only changes to remove the startup warning; every other
+field, JSON type and event's timeout stays compared. Malformed or unsupported
+definitions are not refreshed automatically. If it
 finds no Codex CLI or git, the read or the upgrade fails, the branch changes
-`hooks.json`, or the branch has nothing newer, the step stays `behind` and says
+an approved definition, or the branch has nothing newer, the step stays `behind` and says
 why. Running `codex plugin marketplace upgrade pseudolife-mcp` yourself,
 or updating the plugin in Codex's plugin manager, does the same. A changed
-`hooks.json` is never upgraded automatically: the update prints the approval
-steps instead.
+approved definition is not knowingly upgraded automatically: the update prints the
+approval steps instead. If the branch moves between inspection and Codex's
+fetch and a changed definition lands, the read-back reports `stale` with
+the approval steps. A manual upgrade can also change `hooks.json` and need
+approval when the branch has not been inspected.
 
 The plugin's `hooks.json` also carries Claude Code's wake hook on
 `Stop` (on by default since 2026-09-28), so Codex 0.148 and later lists a
@@ -409,7 +425,7 @@ If the runtime's hook or trust interface is unavailable or unsupported, or a
 hook fails verification, setup reports what remains unresolved and provides
 `/hooks` repair guidance. It installs the standing block only when approved;
 installed files or saved hashes alone never count as working hooks. New or
-changed definitions require approval again. Manual copies run through the
+changed normalized definitions require approval again. Manual copies run through the
 fixed launcher commands above, so a script update needs no new approval:
 the script bundles stay content-addressed, and only the `current` pointer
 moves to a new one after it is verified.
@@ -463,7 +479,7 @@ plugin through the client's plugin manager, or with `pseudolife-mcp update` or
 sessions use ([where the plugin lives](configuration.md#where-the-plugin-lives-one-cache-folder-per-commit)).
 Codex keeps its hook approvals when only the scripts change, and the update
 refreshes its plugin copy through `codex plugin marketplace upgrade`. The
-update says when a changed `hooks.json` needs an approval. Editing a plugin cache directly does not
+update says when a changed approved definition needs an approval. Editing a plugin cache directly does not
 survive plugin updates.
 
 Docker-tier stdio registrations must set `PSEUDOLIFE_MCP_NO_SPAWN=1` so a

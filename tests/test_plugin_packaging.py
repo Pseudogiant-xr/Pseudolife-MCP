@@ -56,6 +56,36 @@ def test_marketplace_manifest_points_at_plugin_dir():
     assert len(entry.get("description", "")) <= 200
 
 
+MARKETPLACE_URL = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+
+
+def test_every_marketplace_add_uses_the_https_url():
+    """Claude Code records an owner/repo shorthand as a `github` source and
+    refreshes it over SSH, so on a host with no GitHub key or known_hosts
+    entry every later `marketplace update` failed and plugin updates stopped
+    (homelab box, 2026-10-04). The repo is public: every place that tells a
+    user, or the installer, to add the marketplace names the HTTPS git URL.
+    CHANGELOG.md and dated design specs are history and keep what they said."""
+    paths = [ROOT / "README.md", ROOT / "plugin" / "README.md",
+             ROOT / "llms.txt", ROOT / "llms-full.txt",
+             ROOT / "ops" / "install.sh", ROOT / "ops" / "install.ps1"]
+    for folder in ("docs/guide", "docs/i18n", "examples"):
+        paths += sorted((ROOT / folder).rglob("*.md"))
+    seen = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"(?<!codex )plugin marketplace add\s+(\S+)", text):
+            source = match.group(1).strip("\"'`")
+            if source.startswith("$"):
+                continue  # an installer's variable, pinned below
+            seen += 1
+            assert source == MARKETPLACE_URL, (
+                f"{path.relative_to(ROOT)}: `marketplace add {source}` — use {MARKETPLACE_URL}")
+    assert seen >= 8, "regex sanity: the README, plugin README, guides and i18n doors carry it"
+    assert f'CLAUDE_PLUGIN_MARKETPLACE_SOURCE="{MARKETPLACE_URL}"' in _read("ops/install.sh")
+    assert f'$claudePluginMarketplaceSource = "{MARKETPLACE_URL}"' in _read("ops/install.ps1")
+
+
 def test_plugin_manifest_carries_no_version():
     """Claude Code keys its plugin cache folder by the manifest version, and
     with none it uses the marketplace commit instead. A pinned version made
@@ -213,15 +243,24 @@ def test_plugin_hook_wiring_session_end():
     script = _read("plugin/hooks/session-end.sh")
     assert "/api/hook/session-end" in script
     assert "curl" in script and "--max-time" in script
-    # Same transient-stall retry contract as session-start.sh.
-    assert re.search(r"--retry\s+\d+", script), \
-        "retry count must be set; retry flags without --retry <n> are no-ops"
-    assert "--retry-delay" in script
+    # Preserve the existing two-second Codex request opportunity and leave
+    # one second within its cap for local work. Claude's plugin deadline is
+    # independently capped at 1.5 seconds and can stop the script earlier.
+    budget = min(h["timeout"] for g in groups for h in g["hooks"])
+    budgets = re.findall(r"CURL_BUDGET=\(([^)]*)\)", script)
+    assert budgets and '"${CURL_BUDGET[@]}"' in script
+    for options in budgets:
+        assert "--retry" not in options
+        max_time = float(re.search(r"--max-time\s+([\d.]+)", options).group(1))
+        assert max_time == 2
+        connect_time = re.search(r"--connect-timeout\s+([\d.]+)", options)
+        assert connect_time, "SessionEnd must bound connection setup explicitly"
+        assert 0 < float(connect_time.group(1)) <= max_time
+        assert max_time + 1 <= min(budget, 3)
     # Banned on the command itself (comments may name it to explain why):
     # it breaks option parsing outright on curl < 7.71, common on LTS hosts.
     assert not any("--retry-all-errors" in ln for ln in script.splitlines()
                    if not ln.lstrip().startswith("#"))
-    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionEnd"])
     assert "-X POST" in script
     # Pin bearer-token forwarding in the actual curl invocation
     assert '"${AUTH[@]}"' in script

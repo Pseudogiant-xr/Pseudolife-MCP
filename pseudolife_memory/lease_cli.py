@@ -142,6 +142,10 @@ DEFAULT_TTL = 120
 MIN_TTL, MAX_TTL = 30, 86400
 MIN_EXPECT, MAX_EXPECT = 1, 604800
 LIST_LIMIT = 50
+# Old action names that still run, each mapped to the action replacing it:
+# ``main`` prints one line naming the replacement, then runs that instead.
+# ``delegate`` was ``designate`` in 0.16.0 (renamed 2026-10-04).
+DEPRECATED_ACTIONS = {"designate": "delegate"}
 
 # Cadences from the lease contract (2026-09-26), not measured tuning: board
 # polls every ~5 s while queued, OS-lock retries every ~2 s, a waiting notice
@@ -165,8 +169,8 @@ CHILD_POLL = 0.2
 # How often ``hold`` looks whether the process it follows is still there.
 PID_POLL = 0.5
 
-_DURATION = re.compile(r"([0-9]+)([smh]?)", re.IGNORECASE)
-_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+_DURATION = re.compile(r"([0-9]+)([smhd]?)", re.IGNORECASE)
+_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
 
 # Why a daemon's refusal means no board for this run, by error code.
@@ -182,10 +186,10 @@ _REFUSALS = {
 
 
 def parse_duration(text: str) -> int:
-    """Whole seconds from ``90``, ``90s``, ``20m`` or ``2h``."""
+    """Whole seconds from ``90``, ``90s``, ``20m``, ``2h`` or ``7d``."""
     match = _DURATION.fullmatch(text.strip())
     if match is None:
-        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m or 2h)")
+        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m, 2h or 7d)")
     return int(match.group(1)) * _UNITS[match.group(2).lower()]
 
 
@@ -1607,6 +1611,18 @@ def _list(args, transport) -> int:
 def _break(args) -> int:
     """Free a held lease through the bank itself (operator only). Prints the
     store's answer as JSON; 1 when no bank is found or the break failed."""
+    return _operator("break", lambda store: store.break_lease(args.name))
+
+
+def _delegate(args) -> int:
+    """Make a session the maintainer's delegate for a project through the
+    bank itself (operator only), as ``break`` does. Prints the store's
+    answer as JSON; 1 when no bank is found or the grant was refused."""
+    return _operator("delegate", lambda store: store.grant_delegate(
+        args.project, args.agent, hold=args.hold))
+
+
+def _operator(verb, act) -> int:
     from pseudolife_memory.backup_cli import _default_data_dir
     from pseudolife_memory.transfer_cli import _resolve_dsn
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
@@ -1623,12 +1639,12 @@ def _break(args) -> int:
             _say(f"cannot open the bank ({type(exc).__name__})")
             return 1
         try:
-            result = CoordinationStore(storage).break_lease(args.name)
+            result = act(CoordinationStore(storage))
         except CoordinationError as exc:
-            _say(f"break refused: {exc.code}")
+            _say(f"{verb} refused: {exc.code}")
             return 1
         except Exception as exc:  # noqa: BLE001
-            _say(f"break failed ({type(exc).__name__}); nothing was changed")
+            _say(f"{verb} failed ({type(exc).__name__}); nothing was changed")
             return 1
         finally:
             storage.close()
@@ -1694,7 +1710,7 @@ signal N (130 Ctrl-C), releasing the lease and leaving PID running.
 
 
 _RUN_EPILOG = """\
-DURATION is whole seconds or minutes or hours: 90, 90s, 20m, 2h.
+DURATION is whole seconds, minutes, hours or days: 90, 90s, 20m, 2h, 7d.
 
 The lease is an OS file lock in ~/.pseudolife-mcp/locks (PSEUDOLIFE_LEASE_LOCK_DIR
 overrides it), released by the OS when this process exits or dies. With a
@@ -1720,7 +1736,7 @@ def _parsers():
                     "maintenance window) around a command. The lease is an OS file lock; "
                     "the agent board, where the daemon has one, mirrors it so other "
                     "agents see the holder, queue in order and see the expected end.")
-    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break}")
+    actions = parser.add_subparsers(dest="action", metavar="{run,hold,check,list,break,delegate}")
     run = actions.add_parser(
         "run", help="run a command while holding a lease",
         usage="pseudolife-mcp lease run NAME [--expect DURATION] [--ttl SECONDS] "
@@ -1802,7 +1818,23 @@ def _parsers():
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
     breaking.add_argument("name", type=_lease_name, metavar="NAME", help="the lease to free")
-    return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking}
+    delegating = actions.add_parser(
+        "delegate", help="(operator) make one session the maintainer's delegate for a project",
+        description="Operator only: make the session AGENT (its id, or a unique prefix) the "
+                    "maintainer's delegate for PROJECT for DURATION, replacing any current "
+                    "one. Its urgent mail then reopens done parks in that project; holding "
+                    "the open coordinator:<project> lease grants nothing. The grant is the "
+                    "board lease delegate:<project>, which no session can take: it opens "
+                    "the bank directly, like break, and the audit log records it with the "
+                    "operator as its actor. Revoke it with: lease break delegate:<project>.")
+    delegating.add_argument("project", type=_lease_name, metavar="PROJECT",
+                            help="the project, as sessions set it on the board")
+    delegating.add_argument("agent", metavar="AGENT", help="the session's agent id or prefix")
+    delegating.add_argument("--for", dest="hold", type=_seconds(60, 7 * 86400), default=86400,
+                            metavar="DURATION",
+                            help="how long the grant lasts (default 1d, at most 7d)")
+    return parser, run, {"hold": hold, "check": check, "list": listing, "break": breaking,
+                         "delegate": delegating}
 
 
 def main(argv: list[str] | None = None, *, transport=None) -> int:
@@ -1814,13 +1846,19 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
     if "--" in argv:
         split = argv.index("--")
         argv, command = argv[:split], argv[split + 1:]
+    if argv and argv[0] in DEPRECATED_ACTIONS:
+        # Renamed before parsing, so help and every parse error speak of
+        # the new name, and no help text advertises the old one.
+        print(f"pseudolife-mcp lease {argv[0]} is deprecated: use "
+              f"pseudolife-mcp lease {DEPRECATED_ACTIONS[argv[0]]}", file=sys.stderr)
+        argv[0] = DEPRECATED_ACTIONS[argv[0]]
     parser, run, others = _parsers()
     try:
         args = parser.parse_args(argv)
         if args.action is None:
             parser.print_usage(sys.stderr)
-            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list or "
-                                    "break (--help explains each)\n")
+            parser.exit(EXIT_USAGE, "pseudolife-mcp lease: choose run, hold, check, list, "
+                                    "break or delegate (--help explains each)\n")
         if args.action == "run" and not command:
             run.error("put the command to run after --, as in: "
                       "pseudolife-mcp lease run gpu -- python train.py")
@@ -1836,4 +1874,6 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _list(args, transport)
     if args.action == "break":
         return _break(args)
+    if args.action == "delegate":
+        return _delegate(args)
     return _run(args, command, transport)

@@ -21,6 +21,11 @@
 # full runs (PSEUDOLIFE_SUITE_WINDOWS / full-suite.windows). Every argument
 # goes to pytest unchanged; PSEUDOLIFE_WSL_DISTRO picks the distribution
 # (default: WSL's default one). The exit code is pytest's.
+#
+# The run logs in to the test Postgres with the test login file
+# (PSEUDOLIFE_TEST_PG_LOGIN_FILE, else ~/.pseudolife-mcp/test-pg.env, written
+# by `pseudolife-mcp test-login create`) when there is one; only without it
+# does the checkout's ops/.env, the bank owner's password, go to WSL.
 
 $ErrorActionPreference = 'Stop'
 # Refusals exit 2 (usage); Write-Error would throw under Stop and exit 1.
@@ -40,7 +45,8 @@ if ($LASTEXITCODE -ne 0 -or -not $linuxRoot) {
 # suite's own settings. /p translates a Windows path into a WSL one.
 $forward = @(@(
     'PSEUDOLIFE_MCP_TOKEN', 'PSEUDOLIFE_MCP_DAEMON_URL', 'PSEUDOLIFE_AGENT_PROJECT',
-    'PSEUDOLIFE_TEST_PG_PASSWORD', 'PSEUDOLIFE_TEST_PG_HOST_PORT', 'PSEUDOLIFE_TEST_DATABASE_URL',
+    'PSEUDOLIFE_TEST_PG_PASSWORD', 'PSEUDOLIFE_TEST_PG_USER', 'PSEUDOLIFE_TEST_PG_HOST_PORT',
+    'PSEUDOLIFE_TEST_DATABASE_URL',
     'PSEUDOLIFE_REQUIRE_TEST_POSTGRES', 'PSEUDOLIFE_TEST_EMBEDDER',
     'PSEUDOLIFE_SUITE_LOCK', 'PSEUDOLIFE_SUITE_SLOTS', 'PSEUDOLIFE_TEST_CUDA',
     'PSEUDOLIFE_SUITE_VENV', 'PSEUDOLIFE_SUITE_PYTHON', 'HF_HUB_OFFLINE'
@@ -53,6 +59,19 @@ if (-not $env:PSEUDOLIFE_MCP_TOKEN -and $env:PSEUDOLIFE_MCP_TOKEN_FILE) {
     $paths = @('PSEUDOLIFE_MCP_TOKEN_FILE/p')
 }
 $copy = @{}
+# The test login (`pseudolife-mcp test-login create`): a Postgres role that
+# cannot open the bank, in a file outside the checkout. The run reads it in
+# place over /mnt/c, and then needs no ops/.env, which holds the bank owner's
+# password beside the daemon's bearer tokens, so that file is not copied.
+$login = $env:PSEUDOLIFE_TEST_PG_LOGIN_FILE
+if (-not $login) {
+    $login = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.pseudolife-mcp/test-pg.env'
+}
+$hasLogin = Test-Path -LiteralPath $login -PathType Leaf
+if ($hasLogin) {
+    $copy['PSEUDOLIFE_TEST_PG_LOGIN_FILE'] = (Resolve-Path -LiteralPath $login).Path
+    $paths += @('PSEUDOLIFE_TEST_PG_LOGIN_FILE/p')
+}
 if ($env:PSEUDOLIFE_WSL_SUITE_SOURCE -ne 'worktree') {
     $dirty = git -C $root status --porcelain --untracked-files=no
     if ($LASTEXITCODE -ne 0) { Fail "$root is not a git checkout" }
@@ -60,13 +79,15 @@ if ($env:PSEUDOLIFE_WSL_SUITE_SOURCE -ne 'worktree') {
         Fail ("$root has uncommitted changes; the run tests the committed HEAD, " +
             "so commit first (or set PSEUDOLIFE_WSL_SUITE_SOURCE=worktree)")
     }
-    $copy = @{
-        PSEUDOLIFE_SUITE_COMMIT     = (git -C $root rev-parse HEAD)
-        PSEUDOLIFE_SUITE_GIT_COMMON = (Resolve-Path (git -C $root rev-parse --path-format=absolute --git-common-dir)).Path
-        PSEUDOLIFE_SUITE_ENV_FILE   = (Join-Path $root 'ops\.env')
-        PSEUDOLIFE_SUITE_NAME       = (Split-Path $root -Leaf)
+    $copy['PSEUDOLIFE_SUITE_COMMIT'] = (git -C $root rev-parse HEAD)
+    $copy['PSEUDOLIFE_SUITE_GIT_COMMON'] = (Resolve-Path (git -C $root rev-parse --path-format=absolute --git-common-dir)).Path
+    $copy['PSEUDOLIFE_SUITE_NAME'] = (Split-Path $root -Leaf)
+    $paths += @('PSEUDOLIFE_SUITE_GIT_COMMON/p')
+    # Without the test login the run falls back to the checkout's ops/.env.
+    if (-not $hasLogin) {
+        $copy['PSEUDOLIFE_SUITE_ENV_FILE'] = (Join-Path $root 'ops\.env')
+        $paths += @('PSEUDOLIFE_SUITE_ENV_FILE/p')
     }
-    $paths += @('PSEUDOLIFE_SUITE_GIT_COMMON/p', 'PSEUDOLIFE_SUITE_ENV_FILE/p')
     $forward += @('PSEUDOLIFE_SUITE_COMMIT', 'PSEUDOLIFE_SUITE_NAME')
 }
 $entries = @($forward) + @($paths)

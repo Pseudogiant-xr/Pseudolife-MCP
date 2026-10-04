@@ -396,6 +396,123 @@ def test_operator_break_frees_the_lease_and_grants_the_next(store):
         "name": "never-existed", "broken": False, "was_held_by": None}
 
 
+# --- the maintainer's delegate (2026-10-03, renamed 2026-10-04) -----------------
+# Any session can claim ``coordinator:<project>``, so the lease cannot carry
+# wake power (review of #549). The operator grants a project's delegate
+# instead, as a ``delegate:`` lease no agent can take. ``designated:`` (its
+# name before 0.16.1) stays reserved.
+
+def test_an_agent_cannot_take_a_reserved_lease(store):
+    a = store.register("alice", project="proj")
+    for name in ("delegate:proj", "delegate:anything", "designated:coordinator:proj",
+                 "designated:anything"):
+        with pytest.raises(CoordinationError, match="^reserved_lease$"):
+            store.acquire_lease(*creds(a), name=name, ttl=3600)
+    assert events(store, "lease_acquire") == [] and events(store, "lease_queue") == []
+    assert store.list_leases()["leases"] == []
+
+
+def test_the_operator_grants_a_delegate_until_it_expires(store):
+    a = store.register("alice", project="proj")
+    b = store.register("alice", project="proj")
+    out = store.grant_delegate("proj", a["agent_id"][:8], hold=3600)
+    assert out == {"name": "delegate:proj", "agent_id": a["agent_id"],
+                   "fence": 1, "expires_at": 4600.0, "replaced": None}
+    [row] = events(store, "lease_delegate")
+    assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
+    assert payload(row) == {"name": "delegate:proj", "fence": 1, "hold": 3600,
+                            "replaced": None}
+    [lease] = store.list_leases()["leases"]
+    assert (lease["name"], lease["holder"]["agent_id"]) == ("delegate:proj",
+                                                           a["agent_id"])
+    # The designee cannot renew it through the board, only the operator can.
+    with pytest.raises(CoordinationError, match="^reserved_lease$"):
+        store.acquire_lease(*creds(a), name="delegate:proj", ttl=3600)
+    # A new grant replaces the old one and says whom it replaced.
+    out = store.grant_delegate("proj", b["agent_id"], hold=60)
+    assert (out["replaced"], out["fence"], out["expires_at"]) == (a["agent_id"], 2, 1060.0)
+    # The export names the session that lost the role, not only the CLI.
+    assert payload(events(store, "lease_delegate")[1])["replaced"] == a["agent_id"]
+    store.test_time[0] = 1061.0
+    assert store.list_leases()["leases"] == []
+    [expired] = events(store, "lease_expire")
+    assert (expired["agent_id"], payload(expired)["name"]) == (b["agent_id"],
+                                                             "delegate:proj")
+
+
+def test_a_grant_drops_a_waiter_queued_before_the_namespace_was_reserved(store):
+    """A bank upgraded from before the namespace was reserved may hold a
+    waiter for it; the operator's grant must not go to that waiter first."""
+    early, a = store.register("alice"), store.register("alice", project="proj")
+    store.storage.conn.execute(
+        "INSERT INTO coordination_leases (name) VALUES ('delegate:proj')")
+    store.storage.conn.execute(
+        "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+        "VALUES ('delegate:proj',%s,'alice',3600,900)", (early["agent_id"],))
+    store.grant_delegate("proj", a["agent_id"], hold=3600)
+    assert events(store, "lease_grant") == []
+    [dequeued] = events(store, "lease_dequeue")
+    assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
+    [lease] = store.list_leases()["leases"]
+    assert (lease["holder"]["agent_id"], lease["queued"]) == (a["agent_id"], 0)
+
+
+@pytest.mark.parametrize("frees", ["break", "release", "expiry"])
+def test_a_freed_delegation_is_never_granted_to_a_queued_waiter(store, frees):
+    """A waiter queued for a reserved lease under older code must not
+    inherit the role when the operator revokes it, the designee resigns or
+    it expires (coordinator review of #550, 2026-10-03): it leaves the
+    queue instead."""
+    a = store.register("alice", project="proj")
+    early = store.register("alice", project="proj")
+    store.grant_delegate("proj", a["agent_id"], hold=3600)
+    store.storage.conn.execute(
+        "INSERT INTO coordination_lease_waiters (name,agent_id,principal,ttl,enqueued_at) "
+        "VALUES ('delegate:proj',%s,'alice',3600,900)", (early["agent_id"],))
+    if frees == "break":
+        store.break_lease("delegate:proj")
+    elif frees == "release":
+        store.release_lease(*creds(a), name="delegate:proj")
+    else:
+        store.test_time[0] += 3601
+    assert store.list_leases()["leases"] == []
+    assert events(store, "lease_grant") == []
+    [dequeued] = events(store, "lease_dequeue")
+    assert (dequeued["agent_id"], payload(dequeued)["reason"]) == (early["agent_id"], "reserved")
+
+
+def test_a_delegate_may_resign_and_the_operator_may_revoke(store):
+    a = store.register("alice", project="proj")
+    store.grant_delegate("proj", a["agent_id"], hold=3600)
+    assert store.release_lease(*creds(a), name="delegate:proj")["released"]
+    store.grant_delegate("proj", a["agent_id"], hold=3600)
+    assert store.break_lease("delegate:proj")["was_held_by"] == a["agent_id"]
+    assert store.list_leases()["leases"] == []
+
+
+@pytest.mark.parametrize("project, agent, hold, code", [
+    ("", "self", 3600, "invalid_project"),
+    ("  ", "self", 3600, "invalid_project"),
+    (" proj", "self", 3600, "invalid_project"),
+    ("proj ", "self", 3600, "invalid_project"),
+    ("p" * 112, "self", 3600, "invalid_project"),
+    ("proj", "nobody", 3600, "instance_not_found"),
+    ("proj", "revoked", 3600, "agent_revoked"),
+    ("proj", "self", 59, "invalid_ttl"),
+    ("proj", "self", 7 * 86400 + 1, "invalid_ttl"),
+])
+def test_a_delegation_needs_a_project_a_live_agent_and_a_bounded_hold(store, project, agent,
+                                                                       hold, code):
+    a = store.register("alice", project="proj")
+    if agent == "revoked":
+        store.storage.conn.execute("UPDATE coordination_agents SET credential_hash=NULL "
+                                   "WHERE agent_id=%s", (a["agent_id"],))
+    agent_id = "f" * 32 if agent == "nobody" else a["agent_id"]
+    with pytest.raises(CoordinationError, match=f"^{code}$"):
+        store.grant_delegate(project, agent_id, hold=hold)
+    assert events(store, "lease_delegate") == []
+
+
 def test_status_expectation_marks_a_status_overdue(store):
     a, b = store.register("alice"), store.register("alice")
     store.update(*creds(a), status="suite=running", expect=1200)

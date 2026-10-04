@@ -203,15 +203,33 @@ def test_probe_reports_held_free_and_missing_without_creating(tmp_path):
 
 @pytest.mark.parametrize(("text", "seconds"), [
     ("90", 90), ("90s", 90), ("20m", 1200), ("2h", 7200), (" 5M ", 300), ("0", 0),
+    ("7d", 604800), ("1D", 86400),
 ])
-def test_durations_accept_seconds_minutes_and_hours(text, seconds):
+def test_durations_accept_seconds_minutes_hours_and_days(text, seconds):
     assert lease_cli.parse_duration(text) == seconds
 
 
-@pytest.mark.parametrize("text", ["", "m", "1.5h", "-5", "5d", "5 m", "abc", "1h30m"])
+@pytest.mark.parametrize("text", ["", "m", "d", "1.5h", "-5", "-1d", "7days", "5 m", "abc",
+                                  "1h30m"])
 def test_malformed_durations_are_refused(text):
     with pytest.raises(ValueError):
         lease_cli.parse_duration(text)
+
+
+def test_a_refused_duration_names_days_among_its_examples():
+    with pytest.raises(ValueError, match=r"\(use .* or 7d\)"):
+        lease_cli.parse_duration("abc")
+
+
+def test_delegate_for_takes_days_up_to_its_one_week_bound():
+    """The docs say ``lease delegate ... --for 7d``; 0.16.0 and 0.16.1 refused
+    it (only seconds, m and h parsed) and needed ``--for 168h`` (2026-10-04)."""
+    _, _, actions = lease_cli._parsers()
+    delegate = actions["delegate"]
+    assert delegate.parse_args(["proj", "abcd1234", "--for", "7d"]).hold == 7 * 86400
+    assert delegate.parse_args(["proj", "abcd1234", "--for", "168h"]).hold == 7 * 86400
+    with pytest.raises(SystemExit):
+        delegate.parse_args(["proj", "abcd1234", "--for", "8d"])
 
 
 def test_renewal_runs_at_a_third_of_the_ttl():
@@ -1021,6 +1039,35 @@ def test_help_exits_0(lease_env, argv, capsys):
     assert "pseudolife-mcp lease" in capsys.readouterr().out
 
 
+def test_the_usage_line_names_every_action(lease_env, capsys):
+    """The usage braces come from a hand-written metavar, so a new action
+    (``designate`` shipped without one) must be added there too."""
+    parser, _, _ = lease_cli._parsers()
+    actions = next(a for a in parser._actions if a.dest == "action").choices
+    assert _run(["--help"], FakeDaemon()) == 0
+    usage = capsys.readouterr().out.split("\n\n", 1)[0]
+    braces = re.search(r"\{([a-z,]+)\}", usage)
+    assert braces is not None, usage
+    assert braces.group(1).split(",") == list(actions)
+    assert "delegate" in braces.group(1).split(",")
+
+
+def test_a_deprecated_action_is_never_advertised_and_always_named(lease_env, capsys):
+    """``designate`` (0.16.0's name for ``delegate``) still runs, but no help
+    text offers it, and every use of it, even ``--help`` or a bad argument,
+    says once which command replaces it."""
+    assert lease_cli.DEPRECATED_ACTIONS == {"designate": "delegate"}
+    assert _run(["--help"], FakeDaemon()) == 0
+    assert "designate" not in capsys.readouterr().out
+    for argv, code in ((["designate", "--help"], 0), (["designate"], lease_cli.EXIT_USAGE)):
+        assert _run(argv, FakeDaemon()) == code
+        captured = capsys.readouterr()
+        notice = [line for line in captured.err.splitlines() if "deprecated" in line]
+        assert notice == ["pseudolife-mcp lease designate is deprecated: use "
+                          "pseudolife-mcp lease delegate"]
+        assert "lease delegate" in captured.out + captured.err
+
+
 # --- lease list -----------------------------------------------------------------
 
 def test_list_without_a_board_reports_local_locks(lease_env, monkeypatch, capsys):
@@ -1112,6 +1159,13 @@ def test_list_falls_back_to_local_state_when_the_board_refuses(lease_env, capsys
 
 def test_the_console_usage_lists_lease():
     assert re.search(r"^  lease\s", console._USAGE, re.M)
+
+
+def test_the_console_usage_names_the_operator_commands():
+    usage = " ".join(console._USAGE.split())
+    assert "`lease break NAME`" in usage
+    assert "`lease delegate PROJECT AGENT`" in usage
+    assert "designate" not in usage
 
 
 def test_the_console_dispatches_lease(lease_env, tmp_path, monkeypatch):

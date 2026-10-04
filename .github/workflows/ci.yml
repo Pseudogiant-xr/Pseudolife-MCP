@@ -65,6 +65,12 @@ jobs:
       # tests/pg_fixtures.py resolves the test server from this; the
       # fixture creates/truncates the test database itself.
       PSEUDOLIFE_TEST_DATABASE_URL: postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test
+      # The service's superuser, for tests/test_test_login_cli.py: it
+      # provisions `pseudolife-mcp test-login create`'s login on this
+      # disposable server and runs a slice of the PG-backed suite under it,
+      # proving the login can do everything the suite does and cannot open
+      # the production-named database. Skipped wherever it is unset.
+      PSEUDOLIFE_TEST_LOGIN_ADMIN_URL: postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres
 
     steps:
       - uses: actions/checkout@v4

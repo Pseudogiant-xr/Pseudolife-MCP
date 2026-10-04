@@ -311,7 +311,8 @@ def _wake_report(health: dict | None) -> dict:
     else:
         caps = {key: value for key, value in coordination["wake"].items()
                 if key in {"per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
-                           "fan_out_stagger_seconds", "active_seconds"}
+                           "fan_out_stagger_seconds", "active_seconds",
+                           "authority_per_sender_per_hour"}
                 and type(value) is int and value >= 0}
     report = {}
     for name, probe in (("claude_code", _claude_code_wake), ("codex", _codex_wake)):
@@ -355,6 +356,91 @@ def _board_probe(timeout: float) -> dict:
 
 def _board_line(timeout: float) -> str:
     return _board_probe(timeout)["line"]
+
+
+# --- maintainer passkeys ------------------------------------------------------
+# Read through the daemon's GET /api/maintainer with the board probe's bearer:
+# doctor has no database connection of its own. The daemon checks the config
+# with MaintainerConfig.problem() and names the rule it broke
+# (``config_problem``), so doctor and daemon never disagree on it.
+
+MAINTAINER_FIX = (
+    "Run `pseudolife-mcp maintainer setup` on the daemon host. By hand: "
+    "in the daemon's config.yaml (file-only), set coordination.maintainer.rp_id to the "
+    "lower-case host name the Console is served at and coordination.maintainer.origin to "
+    "exactly https://<rp_id> or https://<rp_id>:<port> (for local use only, rp_id localhost "
+    "with origin http://localhost:<port>). Restart the daemon, then open the Console at "
+    "that origin.")
+MAINTAINER_NOTE = (
+    "Maintainer authority on this host also rests on the database password and on a "
+    "shell on the daemon host: either can reset the passkeys and enrol another. See the "
+    "guide's \"Maintainer messages and roles from the Console\".")
+
+
+def maintainer_probe(url: str, token: str | None, *, timeout: float = 2.0) -> dict:
+    """Whether maintainer passkeys are on, off, or configured in a way the
+    daemon refuses; ``recovery`` only for the last, which is a failure."""
+    import urllib.error
+    import urllib.request
+    from pseudolife_memory.daemon_url import _NoRedirectHandler
+
+    if not token:
+        return {"state": "not_checked",
+                "line": "not checked - no bearer token (a tokenless daemon refuses passkeys)"}
+    request = urllib.request.Request(url.rstrip("/") + "/api/maintainer")
+    request.add_header("Authorization", f"Bearer {token}")
+    try:
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(request, timeout=timeout) as response:
+            status, body = response.status, response.read(1 << 20)
+    except urllib.error.HTTPError as exc:
+        status, body = exc.code, exc.read(65536)
+    except Exception:  # noqa: BLE001 - any failure is reported plainly
+        return {"state": "not_checked", "line": "not checked - daemon unreachable"}
+    try:
+        answer = json.loads(body)
+    except ValueError:
+        answer = None
+    if not isinstance(answer, dict):
+        answer = {}
+    if status == 200:
+        keys = answer.get("passkeys") if isinstance(answer.get("passkeys"), list) else []
+        active = sum(1 for k in keys if isinstance(k, dict) and k.get("state") == "active")
+        rp_id, origin = answer.get("rp_id"), answer.get("origin")
+        return {"state": "on", "rp_id": rp_id, "origin": origin, "active_keys": active,
+                "line": f"on - rp_id {rp_id}, origin {origin}, {active} active key(s)",
+                "note": MAINTAINER_NOTE}
+    if status in (404, 405):
+        return {"state": "unsupported",
+                "line": "not available - this daemon predates maintainer passkeys"}
+    if status == 409 and answer.get("error") == "maintainer_https_required":
+        problem = answer.get("config_problem")
+        if problem == "unset":
+            return {"state": "off", "line": "off - coordination.maintainer is not configured "
+                                            "(pseudolife-mcp maintainer setup)"}
+        if isinstance(problem, str) and problem:
+            return {"state": "invalid", "line": f"invalid - {problem}",
+                    "recovery": MAINTAINER_FIX}
+        return {"state": "off_or_invalid", "line": (
+            "off - not configured, or configured in a way the daemon refuses (this daemon "
+            "does not say which; its log names the rule)")}
+    code = answer.get("error") if isinstance(answer.get("error"), str) else ""
+    return {"state": "not_checked",
+            "line": f"not checked - HTTP {status}" + (f" {code}" if code else "")}
+
+
+def _maintainer_probe(timeout: float) -> dict:
+    """``maintainer_probe`` with the credential and daemon URL the board
+    probe uses."""
+    from pseudolife_memory.credentials import CredentialProvider
+    from pseudolife_memory.daemon_url import _daemon_url
+
+    try:
+        token = CredentialProvider.from_environment().snapshot().token
+        url = _daemon_url()
+    except (Exception, SystemExit):  # noqa: BLE001 - never serialize credential errors
+        return {"state": "not_checked", "line": "not checked - no usable credential or URL"}
+    return maintainer_probe(url, token, timeout=timeout)
 
 
 async def probe_registration(url, token, state_path, timeout, *, client=None) -> str:
@@ -504,6 +590,10 @@ def run_doctor() -> None:
     report["credential_source"] = credential_source or "none"
     board = _board_probe(min(args.timeout, 2))
     report["board"] = board["line"]
+    # The maintainer routes need the board admitted: probed only then.
+    report["maintainer_passkeys"] = (
+        _maintainer_probe(min(args.timeout, 2)) if board["state"] == "on" else
+        {"state": "not_checked", "line": "not checked - the board is off for this token"})
     health = None
     if _windows():
         report.update(git_bash_report(os.environ))
@@ -575,6 +665,13 @@ def run_doctor() -> None:
         if "error" not in report:
             report["error"] = "GitBashMissing"
             report["recovery"] = report["git_bash_recovery"]
+    # Passkeys configured in a way the daemon refuses fail the report; off
+    # is information.
+    if report["maintainer_passkeys"]["state"] == "invalid":
+        report["ok"] = False
+        if "error" not in report:
+            report["error"] = "MaintainerPasskeysInvalid"
+            report["recovery"] = report["maintainer_passkeys"]["recovery"]
     # Which `pseudolife-mcp` a terminal runs, beside the launcher (informational).
     report["path_resolution"] = path_resolution()
     from pseudolife_memory.tunnel_cli import saved_tunnel_diagnostics

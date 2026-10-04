@@ -462,15 +462,15 @@ codex mcp add pseudolife-memory \
 installed, `<url>` an origin such as `http://100.64.0.2:8765` (no `/mcp`, no
 path).
 
-The shim waits about 20 seconds for a remote daemon that does not answer (a
-first probe, then a 15-second retry loop), which is longer than Codex's default MCP startup timeout. Set the Codex
-startup timeout as the [README's Codex setup](../../README.md#quickstart)
-describes.
+The shim waits up to 5 seconds for a remote daemon that does not answer,
+inside Codex's default 10-second MCP startup timeout, and then starts the
+session without it and gets memory back by itself once the daemon answers
+(see [When the daemon is unreachable](#when-the-daemon-is-unreachable)).
 
 The Claude Code plugin adds the session hooks:
 
 ```bash
-claude plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 claude plugin install pseudolife-memory@pseudolife-mcp --scope user
 ```
 
@@ -597,7 +597,7 @@ after a move that ended that way, read it and run its `manual_rollback`
 lines in order.
 
 **Don't run commands that write the database directly during a move**
-(`lease break`, `board-audit redact`, `coordination-recovery`, a `psql`
+(`lease break`, `lease delegate`, `board-audit redact`, `coordination-recovery`, a `psql`
 session). The move cuts such connections off before the final dump and
 fences the database right after it, but the dump has to connect first, so
 a write landing in those seconds would miss the dump.

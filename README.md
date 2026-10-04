@@ -408,6 +408,7 @@ deep material lives in the user guide:
 | [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 | [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
+| [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -430,7 +431,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Forget from one store: `memory` (by text/substring/source/episode/tag — several filters narrow the match, AND across kinds like `memory_search`; a match over `memory.delete_confirm_threshold` entries, default 20, is refused with `would_delete` until the call repeats with `confirm_bulk=true`) and `fact` hard-delete; `world` and `lesson` (by entity/attribute) retire the slot with an audit row — reversible via `memory_graph_review(action="restore_slot")` |
 | `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_agents(action, project?, task?, status?, lease?, worktree?, repository_id?, path?, expect?, children?, park_reason?, park_needs?, park_clear_by?, park_resume?, park_expires?)` | Experimental peer awareness or update of the caller's registered context, on by default for authenticated installs ([coordination](docs/guide/configuration.md#experimental-agent-coordination)); lists peers active within the hour (three hours while holding a lease), each status with its age and a stale flag past two hours, and counts the rest as `idle_omitted`; `update` sets project, task, status, `expect` (seconds until the status is overdue), `children` (the labels of subagents working under the caller's address, which only read the board; the Claude Code plugin's subagent hooks keep their own entries there, and a Codex subagent's own row carries its `parent_agent_id`) and the park record (why the session stopped, what clears it, who can, what to do then; a plain status clears it), which every listed row carries; `claim`/`release` take or free an advisory `lease`, or an advisory claim on one exact repository file (`worktree` + relative `path` through the stdio shim; a hashed `repository_id` + `path` over direct HTTP; no globs, directories or edit enforcement — [exact repository file claims](docs/guide/configuration.md#exact-repository-file-claims)); unknown episode scope stays unknown, and activity is not a resource reservation |
-| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
+| `memory_message(action, to?, text?, request_id?, reply_to?, after?, message_id?, clears?, urgent?, limit?, peer?)` | Experimental addressed mail: `send` (needs `to`, `text` and a new unique `request_id`; reuse the id only to retry the identical send after an uncertain result) to one agent (its id, or a unique prefix of 8+ hex characters), to `project:<name>` or to `all` (every attached, non-idle peer, at most 50, one request id for the burst, per-recipient receipts), non-destructive `receive`, explicit recipient `ack` (one id or several comma-separated, ids or prefixes), or read-only `history` of this instance's own retained sent and received mail (`limit` ≤ 50, optional exact `peer` id; no delivery, acknowledgement or wake); requires authenticated adapter binding, remains outside memory retrieval, and never grants user approval; a subagent's own address (a Codex subagent) does not send (`child_send_refused`): its parent does. Each receipt carries the daemon's `wake` decision (`hinted`, `not_needed`, `rung`, `withheld` with the parked need, `no_path`, `capped`): a parked peer rings only for mail that clears what it declared it needs (or `urgent` mail), a peer parked `done` only for `urgent` mail from the maintainer, the maintainer's delegate for the project (`pseudolife-mcp lease delegate`) or the park's named clearer, an idle peer that has not parked only for `urgent` mail; plain mail to it waits for its next turn ([park records and wake](docs/guide/configuration.md#park-records-and-the-wake-decision)) |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute, verbose?)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?, authority?, distortion_tolerance?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind; `authority`/`distortion_tolerance` (`auto` = deterministic form heuristic, no model call) inherit the slot's labels unless restated |
@@ -598,6 +599,24 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`:** the installers
+up to 0.16.1 added it by that shorthand, which Claude Code records as a
+`github` source (`"source": "github"` for `pseudolife-mcp` in
+`~/.claude/plugins/known_marketplaces.json`) and refreshes over SSH. On a
+machine with no GitHub SSH key every refresh fails ("SSH host key is not in
+your known_hosts file") and the plugin stops updating. Move it to the HTTPS
+URL: if `~/.claude/settings.json` declares it under `extraKnownMarketplaces`,
+change that entry's `source` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+first (the CLI refuses an add that differs from a declared source), then run:
+
+```bash
+claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+```
+
+Do not `marketplace remove` it first: removing a marketplace uninstalls its
+plugins.
+
 **One command, no checkout:** the installed shim updates the whole install
 from a release:
 
@@ -645,8 +664,11 @@ daily task or timer that applies a new release only while
 agent board, with the same backup and rollback tag, and posts a board
 notice either way. Codex keeps its hook approvals across updates (it
 approves the hook definitions, not the scripts), and an update from a
-checkout refreshes manual Codex hook copies itself; only a changed
-`hooks.json` makes every update path print the approval steps.
+checkout refreshes manual Codex hook copies itself. Where Codex runs the
+plugin's hooks, the client step refreshes Codex's installed plugin copy
+through `codex plugin marketplace upgrade` while the approved hook
+definitions are unchanged ([Codex specifics](docs/guide/providers.md#codex-specifics));
+only a changed `hooks.json` makes every update path print the approval steps.
 See [Updating](docs/guide/configuration.md#updating-pseudolife-mcp-update).
 
 **Lite tier by hand:** one command, bank untouched:
@@ -791,7 +813,7 @@ out; an installed plugin is left alone). It wires the session hooks
 Claude Code do it:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
@@ -1305,7 +1327,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v53 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v54 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1430,11 +1452,13 @@ model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
 suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
 database on the bundled dev container (never your real bank; concurrent
 runs can't collide), dropped on exit, and skip cleanly without Postgres.
-The container's password is read from `ops/.env` (override with
-`PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_TEST_PG_PASSWORD`); a
-server that is reachable but rejects the credentials *errors* the PG-backed
-tests rather than skipping them, so a rotated password can never produce a
-green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
+The suite logs in with its own test login, which cannot open the bank
+(`pseudolife-mcp test-login create` writes `~/.pseudolife-mcp/test-pg.env`;
+see [agent isolation](docs/guide/agent-isolation.md)), else the password in
+`ops/.env` (override with `PSEUDOLIFE_TEST_DATABASE_URL` or
+`PSEUDOLIFE_TEST_PG_PASSWORD`); a server that is reachable but rejects the
+credentials *errors* the PG-backed tests rather than skipping them, so a
+rotated password can never produce a green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet
 

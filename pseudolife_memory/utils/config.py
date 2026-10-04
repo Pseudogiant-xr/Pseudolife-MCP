@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+from pseudolife_memory.principals import DAEMON_PRINCIPAL, DEFAULT_PRINCIPAL
 
 
 @dataclass
@@ -1404,6 +1404,11 @@ class WakeConfig:
     the hourly ring to an idle, unparked session, is retired with that
     ring (2026-10-02, regular mail never wakes): a config.yaml that still
     names it loads, and the key does nothing (``RETIRED_WAKE_KEYS``).
+    ``authority_per_sender_per_hour`` bounds the urgent rings one sender
+    may cause as the maintainer or the maintainer's delegate for a project
+    (2026-10-03), which reopen done parks and no longer spend the plain
+    urgent allowance; the per-recipient, nightly and stagger caps still
+    apply.
     """
 
     per_recipient_per_hour: int = 20
@@ -1411,14 +1416,89 @@ class WakeConfig:
     nightly_total: int = 200
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
+    # A starting value, not a measurement: twice the largest burst the board
+    # has carried (six recipients, a host fix sent to every session on
+    # 2026-09-27), so a delegate can relay one incident decision and a
+    # follow-up to every session in an hour; on 2026-10-03 such relays came
+    # back capped under the 6-an-hour urgent allowance.
+    authority_per_sender_per_hour: int = 12
 
     def __post_init__(self) -> None:
         for name in ("per_recipient_per_hour", "urgent_per_sender_per_hour", "nightly_total",
-                     "fan_out_stagger_seconds", "active_seconds"):
+                     "fan_out_stagger_seconds", "active_seconds",
+                     "authority_per_sender_per_hour"):
             value = getattr(self, name)
             floor = 1 if name == "active_seconds" else 0
             if type(value) is not int or value < floor:
                 raise ValueError(f"coordination.wake.{name} must be a whole number of at least {floor}")
+
+
+@dataclass
+class MaintainerConfig:
+    """Maintainer messages and Board roles from the Console, proven by a
+    passkey (schema v54; specs 2026-10-02-maintainer-wake-design.md and
+    2026-10-04-board-roles-passkey.md). File-only: ``POST /api/config``
+    refuses every ``coordination.maintainer`` path (``config_protected``),
+    since every environment principal can call that route.
+
+    ``rp_id`` is the hostname the Console is served from (a passkey is bound
+    to it) and ``origin`` that exact origin: ``https://<rp_id>`` or
+    ``https://<rp_id>:<port>`` (for example behind ``tailscale serve
+    --https=8443``), or, for local use only, ``http://localhost[:<port>]``
+    with ``rp_id`` ``localhost``; written as a browser serialises it, without
+    the scheme's default port. The origin is never taken from a request
+    header. Unset, or any other shape (see :meth:`problem`), and every
+    maintainer route answers ``409 maintainer_https_required``.
+    ``maintainer_per_recipient_per_hour`` caps the rings maintainer messages
+    cause per recipient; 30 is the design's starting value, not a
+    measurement."""
+
+    rp_id: str = ""
+    origin: str = ""
+    maintainer_per_recipient_per_hour: int = 30
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rp_id, str) or not isinstance(self.origin, str):
+            raise ValueError("coordination.maintainer.rp_id and .origin must be strings")
+        cap = self.maintainer_per_recipient_per_hour
+        if type(cap) is not int or cap < 0:
+            raise ValueError("coordination.maintainer.maintainer_per_recipient_per_hour must "
+                             "be a whole number, 0 or more")
+
+    def problem(self) -> str | None:
+        """Why the maintainer routes cannot run on this configuration, or
+        ``None`` when they can: unset, or an origin that is not exactly the
+        HTTPS origin of ``rp_id`` (or ``http://localhost[:port]``)."""
+        import re
+        from urllib.parse import urlsplit
+        if not self.rp_id or not self.origin:
+            return "unset"
+        host = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*")
+        if len(self.rp_id) > 253 or not host.fullmatch(self.rp_id):
+            return "rp_id must be a lower-case hostname"
+        parts = urlsplit(self.origin)
+        try:
+            port = parts.port
+        except ValueError:
+            return "origin has an invalid port"
+        scheme = parts.scheme
+        if scheme == "http" and self.rp_id != "localhost":
+            return "plain http is allowed for rp_id localhost only"
+        if scheme not in ("https", "http"):
+            return "origin must be https"
+        # A browser serialises the origin without its scheme's default port,
+        # so a configured one would never match an assertion (review of
+        # #569, 2026-10-05).
+        if port == {"https": 443, "http": 80}[scheme]:
+            return f"origin must leave out the default port :{port}"
+        expected = f"{scheme}://{self.rp_id}" + (f":{port}" if port is not None else "")
+        if parts.hostname != self.rp_id or self.origin != expected:
+            return "origin must be exactly <scheme>://<rp_id>[:<port>]"
+        return None
+
+    @property
+    def configured(self) -> bool:
+        return self.problem() is None
 
 
 @dataclass
@@ -1445,6 +1525,13 @@ class CoordinationConfig:
     # An operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal here
     # for the scheduled run's bearer (review of #463, 2026-09-29).
     daemon_notice_principals: list[str] = field(default_factory=list)
+    # Principals whose board mail speaks for the maintainer (2026-10-03):
+    # their urgent mail reopens a done park and spends the authority budget
+    # (``wake.authority_per_sender_per_hour``). Empty by default. An
+    # operator names a dedicated ``PSEUDOLIFE_MCP_TOKENS`` principal whose
+    # bearer only the maintainer holds; ``default``, every ordinary
+    # session's principal, and the daemon's own sender are refused.
+    maintainer_principals: list[str] = field(default_factory=list)
     # Days the board's audit log (coordination_events, schema v42) keeps an
     # event; 0 keeps it forever. Separate from the live mailbox, whose bodies
     # still blank after 24 h. Measured 2026-09-24
@@ -1459,10 +1546,16 @@ class CoordinationConfig:
     audit_retention_days: int = 90
     # The wake caps (schema v49); see WakeConfig.
     wake: WakeConfig = field(default_factory=WakeConfig)
+    # v54: passkey-signed maintainer messages and roles; see MaintainerConfig.
+    maintainer: MaintainerConfig = field(default_factory=MaintainerConfig)
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
+        if isinstance(self.maintainer, dict):
+            self.maintainer = MaintainerConfig(**self.maintainer)
+        if not isinstance(self.maintainer, MaintainerConfig):
+            raise ValueError("coordination.maintainer must be a mapping")
         if isinstance(self.wake, dict):
             self.wake = WakeConfig(**{key: value for key, value in self.wake.items()
                                       if key not in RETIRED_WAKE_KEYS})
@@ -1485,6 +1578,18 @@ class CoordinationConfig:
             raise ValueError("coordination.daemon_notice_principals must be a list of names")
         self.daemon_notice_principals = list(dict.fromkeys(
             p.strip().lower() for p in self.daemon_notice_principals))
+        if not isinstance(self.maintainer_principals, list) or any(
+            not isinstance(p, str) or not p.strip() for p in self.maintainer_principals
+        ):
+            raise ValueError("coordination.maintainer_principals must be a list of names")
+        self.maintainer_principals = list(dict.fromkeys(
+            p.strip().lower() for p in self.maintainer_principals))
+        shared = {DEFAULT_PRINCIPAL, DAEMON_PRINCIPAL} & set(self.maintainer_principals)
+        if shared:
+            raise ValueError(
+                "coordination.maintainer_principals cannot name " + ", ".join(sorted(shared))
+                + ": every ordinary session (default) or the daemon itself would speak "
+                "for the maintainer; name a dedicated token-map principal")
 
 
 @dataclass

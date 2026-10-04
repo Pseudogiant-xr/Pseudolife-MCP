@@ -35,10 +35,23 @@ exactly; they exist because each one was violated at least once.
 
    Ordinary code changes do not require a local full suite. A local full
    suite is required for schema/DDL/migration changes; shared test
-   infrastructure, conftest, fixture or suite-lock changes; daemon process
-   creation, ownership, shutdown or recovery changes; and changes whose
-   dependent coverage cannot be bounded confidently. Documentation-only and
-   test-only changes follow the narrower rules below.
+   infrastructure, conftest, fixture or suite-lock changes; and changes
+   whose dependent coverage cannot be bounded confidently. Daemon process
+   creation, ownership, shutdown or recovery changes are ordinary code on
+   Linux: CI's full PostgreSQL job starts and stops real daemons there and
+   covers recovery against stand-in daemons. When such a change is
+   Windows- or macOS-specific, a local full suite would not help (this
+   host runs full suites only on Linux). Instead, run that platform's
+   affected test files natively as a targeted run (Windows allows one), and
+   make sure they are in its CI lite lane's file list (`test-lite-windows`
+   / `test-lite-macos` in `.github/workflows/ci.yml`), adding them if
+   missing. Platform-specific means code that runs only there (a branch on
+   `os.name` / `sys.platform`, `creationflags`, `msvcrt`, `SIGBREAK`,
+   scheduled tasks or launchd, the `.ps1` launchers), or shared code whose
+   behaviour rests on OS process semantics (signals, terminate and kill,
+   file locks, detached sessions).
+   Documentation-only, test-only and review-fix changes, and integration
+   batches, follow the narrower rules below.
 
    For a required full run, finish review fixes and targeted validation
    before joining the queue, then run
@@ -49,16 +62,23 @@ exactly; they exist because each one was violated at least once.
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
-   revised head.
+   revised head, except as "Review fixes after a passing local full suite"
+   (under "Running tests") allows.
 
    Note that **a full run the bench Postgres rejects refuses to start**
-   (conftest asks the server before queueing for the suite lock): a fresh
-   worktree has no `ops/.env`, or the `.example` copy, so the suite resolves
-   the compose default password and every PG-backed test would ERROR on
-   setup (1,424 in one 2026-09-27 run). The refusal names the fix: copy
-   `ops/.env` from the main checkout into the worktree's `ops/`, or export
-   `PSEUDOLIFE_TEST_PG_PASSWORD` for the pytest process. Targeted runs print
-   one line and start.
+   (conftest asks the server before queueing for the suite lock): without
+   the test login file, a fresh worktree has no `ops/.env`, or the
+   `.example` copy, so the suite resolves the compose default password and
+   every PG-backed test would ERROR on setup (1,424 in one 2026-09-27 run).
+   The refusal names the fix: the **test login** (`pseudolife-mcp
+   test-login create`, once, on the daemon host, by the maintainer) writes
+   `~/.pseudolife-mcp/test-pg.env`, a role that creates its own databases
+   and cannot connect to the bank, and every checkout of that account
+   reads it. **Do not copy `ops/.env` into worktrees**: it holds the bank
+   owner's password and the operator bearer tokens (2026-10-04,
+   `docs/guide/agent-isolation.md`). A run that still logs in as the bank
+   owner, through `ops/.env` or an exported password, prints one line
+   saying so. Targeted runs print one line and start.
 
    Every PR requires passing CI for its current head integrated with current
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
@@ -69,6 +89,13 @@ exactly; they exist because each one was violated at least once.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
+   Amended 2026-10-05 by the maintainer: review fixes, integration batches
+   and the daemon-process trigger. The memo found the local full suite's
+   unique catches over PRs #391–#450 were two real problems, both schema or
+   shared-test-infrastructure changes. Platform failures came from CI, and
+   most defects from reviewers. Three full suites on 2026-10-04/05
+   (integration batches 11 and 12, and #576 before its review fixes) all
+   agreed with CI.
 4. **Deploy only via `pseudolife-mcp update`**
    (`pseudolife_memory/update_cli.py`, the one implementation since #460,
    2026-09-29): backup → rollback tag → daemon-only `--no-deps` recreate →
@@ -94,6 +121,59 @@ exactly; they exist because each one was violated at least once.
    closes; new sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
+6. **Install and update finish the job themselves** (see the next section):
+   a change may land on master before its setup is automated, but it is
+   not released until the installer or `pseudolife-mcp update` does that
+   setup. The release procedure checks it.
+
+## Install and update experience
+
+Maintainer rule, 2026-10-05: the installer (`ops/install.sh`,
+`ops/install.ps1`) and release-mode `pseudolife-mcp update` do the whole
+job. A user should never need to read a guide, edit a config file or run a
+follow-up command to finish an install or an update. The 2026-10-04
+passkey and test-login changes reached master with manual operator steps,
+and the next release is held until the scripts cover them.
+
+These rules govern end-user installs and release-mode `update`. Checkout
+mode (`ops/update.*`, `--checkout`) is a contributor tool and keeps item
+4's steps. New steps follow the rules from now on; existing paths are
+brought in line as they are touched, with no retrofit sweep.
+
+- **A feature that needs host setup ships with that setup automated.** A
+  config key, a login or role, a serve or port, a file to copy, a command to
+  run once: the installer and update do it, in the same PR or one that lands
+  before the release. A manual step written only in the docs or the release
+  notes means the feature is not finished. A PR that adds such a step says
+  in its body what install and update do about it.
+- **Detect, don't ask.** Work out what the host has (tier, local or remote
+  daemon, Tailscale, checkout or release) and choose. Ask only when the
+  answer cannot be detected, or before a persistent change the user did not
+  choose by running the installer: a Tailscale serve, a firewall rule, a
+  program the install does not otherwise configure. The installers' existing
+  client setup (plugin, Codex hooks, instruction files, autostart) is what
+  running them means, and keeps its per-decision flags. Ask once per change,
+  y/N with a stated default; a dedicated flag or `--yes` (`-Yes` in
+  PowerShell) answers it for non-interactive runs.
+- **An unavoidable prompt is plain.** One short sentence on what will happen
+  and why, then the question. A step only a person can do (a passkey tap,
+  an approval in another app) says exactly where to click and what they
+  will see; the script waits for it and checks that it happened.
+- **Rerunning is safe and quiet.** On a host that is already set up, a new
+  step changes nothing and says so in one line.
+- **Unattended runs never hang.** With no terminal (scheduled updates, CI),
+  a step inside install or update that needs a person is skipped with one
+  line naming the command that finishes it, and the run carries on. A
+  standalone command whose whole job is that step (`connect`, `expose`)
+  refuses instead, saying nothing changed and naming `--yes`.
+- **A refusal names its fix and leaves nothing half-done.** Check before
+  changing anything, or undo on failure, and print the one command or edit
+  that fixes it.
+- **Contributor-only setup stays out of end-user installs.** The test login
+  is created only by the installers' `--test-login` / `-TestLogin` and by
+  checkout-mode update (the latter in progress, 2026-10-05), and checkout
+  builds only by checkout mode. A default install and release-mode update
+  do neither.
 
 ## Derived state / caches / indexes
 
@@ -176,9 +256,10 @@ took 143 CUDA OOMs.
   launcher tests the worktree's committed HEAD from a copy on WSL's own
   filesystem (it refuses uncommitted changes to tracked files: commit
   first), keeps a uv environment per checkout under `~/.venvs/pseudolife`
-  in WSL, needs the worktree's `ops/.env` like any run and the models in
-  WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and forwards the
-  bearer, so the run still shows as the `full-suite` lease; from Windows,
+  in WSL, forwards the test login file (`~/.pseudolife-mcp/test-pg.env`;
+  only without one does it copy the worktree's `ops/.env`), needs the
+  models in WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and
+  forwards the bearer, so the run still shows as the `full-suite` lease; from Windows,
   `lease check full-suite` sees it through the board only (its local-lock
   line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
   with the lock, so it is never a way to start a Windows full run here.
@@ -306,7 +387,25 @@ took 143 CUDA OOMs.
   the overlap, plus doc guards when docs overlap, and require fresh CI on
   the updated merge ref. A manually resolved code conflict requires a local
   full suite. Ordinary code branches with no local-full requirement do not
-  acquire one merely by merging master forward.
+  acquire one merely by merging master forward. A pass carried forward
+  under the review-fix rule below counts as the branch's passed run.
+- **Review fixes after a passing local full suite need no new one** unless
+  the fixes themselves fall under a class that requires one (shipping
+  checklist item 3, including its platform-specific process rule). A review
+  fix answers findings on the same PR; a fix that widens the PR's scope is
+  a new change. Run the touched and dependent tests for the fixes, and
+  require CI on the current merge ref. The PR says "local full suite:
+  passed at `<head>`; later commits are review fixes" with the targeted
+  runs listed (maintainer decision 2026-10-05, after #576).
+- **An integration batch needs no batch-level local full suite** when every
+  merge into it is clean (no code conflict resolved by hand) and each PR's
+  own required local validation has passed. An integration batch is an
+  `integrate/<date>-batch-N` branch that lands several reviewed PRs under
+  one CI run. CI on the batch's merge ref is the combined check; run the
+  test files covering any overlap, plus the doc guards when docs overlap.
+  The PR says "local full suite: not required, clean integration batch". A
+  hand-resolved code conflict requires a local full suite on the batch
+  head.
 - **Test-only changes skip the local full suite** when the diff touches only
   `tests/test_*.py`, non-code test data and optional docs-only files, and
   does not change shared fixture behavior, module-level state affecting
@@ -320,8 +419,8 @@ took 143 CUDA OOMs.
   head, then record its actual result. Merge only after all required local
   validation and current-merge-ref CI pass. Ordinary code PRs state the
   local selection and “local full suite: not required under the
-  ordinary-code rule”; an old-head full pass is not evidence for a changed
-  head.
+  ordinary-code rule”. An old-head full pass is not evidence for a changed
+  head, except under the review-fix rule above.
 
 ## Review discipline
 

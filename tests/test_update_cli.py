@@ -173,8 +173,9 @@ def clients(monkeypatch):
     """The client side, recorded not run."""
     seen: list[dict] = []
 
-    def run_steps(steps, *, repo, source, daemon_digest=None):
-        seen.append({"steps": tuple(steps), "repo": repo, "source": source, "daemon_digest": daemon_digest})
+    def run_steps(steps, *, repo, source, daemon_digest=None, reinstall=False):
+        seen.append({"steps": tuple(steps), "repo": repo, "source": source, "daemon_digest": daemon_digest,
+                     "reinstall": reinstall})
         return {"shim": {"state": "installed:0.15.1", "detail": "ok"}, "plugin": {"state": "current:0.15.1", "detail": "ok"},
                 "codex": {"state": "current", "detail": "ok"}, "ok": True}
 
@@ -238,7 +239,7 @@ def test_a_release_update_pulls_backs_up_tags_recreates_and_moves_the_clients(wo
     assert any(n.startswith("pseudolife_state-") for n in backups)
     assert not any(n.endswith(".part") for n in backups)
     assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
-                        "daemon_digest": "e" * 64}]
+                        "daemon_digest": "e" * 64, "reinstall": False}]
     out = capsys.readouterr().out
     assert "healthy. version=0.15.1" in out
     # the overlay selects the image through PSEUDOLIFE_IMAGE_TAG: that is the rollback
@@ -254,6 +255,8 @@ def test_the_same_version_is_not_redeployed_without_reinstall(world, clients, tm
     assert clients == []
     assert _run(["--reinstall", "--health-delay-ms", "1"]) == 0
     assert any(c.startswith("compose") for c in world.docker_calls())
+    # the shim step installs the release again too, not only the daemon
+    assert clients[-1]["reinstall"] is True
 
 
 def test_a_pinned_tag_wins_over_pypi_and_a_failed_pull_changes_nothing(world, clients, tmp_path, capsys):
@@ -383,7 +386,7 @@ def test_clients_only_and_daemon_only(world, clients, tmp_path):
     _project(world, tmp_path)
     assert _run(["--clients-only"]) == 0
     assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None, "source": "pseudolife-mcp==0.15.1",
-                        "daemon_digest": "d" * 64}]
+                        "daemon_digest": "d" * 64, "reinstall": False}]
     assert not any(c.startswith(("pull", "compose")) for c in world.docker_calls())
     clients.clear()
     world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
@@ -638,7 +641,8 @@ def test_a_clean_checkout_is_built_with_its_commit_stamp(world, clients, tmp_pat
 def test_all_moves_the_clients_from_the_checkout(world, clients, tmp_path):
     root, _ = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--all"]) == 0
-    assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": root, "source": str(root), "daemon_digest": None}]
+    assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": root, "source": str(root), "daemon_digest": None,
+                       "reinstall": False}]
 
 
 def test_a_dirty_tree_is_refused_before_anything_runs(world, clients, tmp_path, capsys):
@@ -969,7 +973,7 @@ def test_a_client_only_machine_updates_its_clients_to_the_daemons_release(world,
         clients.clear()
         assert _run(argv + ["--daemon-url", "http://10.0.0.7:8765"]) == 0, argv
         assert clients == [{"steps": ("shim", "plugin", "codex"), "repo": None,
-                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64}]
+                            "source": "pseudolife-mcp==0.15.1", "daemon_digest": "d" * 64, "reinstall": False}]
         captured = capsys.readouterr()
         assert "docker" not in (captured.out + captured.err).lower()
     assert not any(c[1:4] == ["-m", "pip", "install"] for c in world.calls)
@@ -1016,7 +1020,7 @@ def test_a_checkout_runtime_is_not_replaced_by_the_same_release(world, clients, 
     assert "checkout" in err and "ops/update.sh --all" in err and "--reinstall" in err
     assert clients == []
     assert _run(["--clients-only", "--tag", "0.15.0", "--reinstall"]) == 0
-    assert clients[0]["source"] == "pseudolife-mcp==0.15.0"
+    assert clients[0]["source"] == "pseudolife-mcp==0.15.0" and clients[0]["reinstall"] is True
 
 
 def test_a_release_runtime_or_a_newer_release_is_not_refused(world, clients, tmp_path):
@@ -1133,3 +1137,331 @@ def test_step_lines_and_streamed_children_land_in_the_order_they_happened(tmp_pa
 
     order = [first(m) for m in markers]
     assert order == sorted(order), "\n".join(lines)
+
+
+# ── contributor hosts: the test suite's own Postgres login ─────────────────
+
+@pytest.fixture
+def test_login(world, tmp_path, monkeypatch):
+    """The test-login command, recorded not run, with its file in tmp_path
+    and the bundled Postgres container local and running."""
+    from pseudolife_memory import test_login_cli
+    seen: list[list[str]] = []
+    answer = {"exit": 0, "error": None,
+              "changes": ["  role pseudolife_test: created: LOGIN CREATEDB, not superuser"]}
+
+    def create(argv):
+        seen.append(list(argv))
+        return dict(answer)
+
+    monkeypatch.setattr(up, "create_test_login", create)
+    monkeypatch.setenv(test_login_cli.FILE_ENV, str(tmp_path / "test-pg.env"))
+    # The suite says where it connects: the bundled server (an explicit
+    # setting; the suite's bare default only asks, see below).
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
+    monkeypatch.setattr(up, "home", lambda: tmp_path / "home")      # no suite env file
+    state = {"tty": False, "answer": "", "asked": []}
+    monkeypatch.setattr(up, "interactive", lambda: state["tty"])
+    monkeypatch.setattr(up, "ask", lambda q: state["asked"].append(q) or state["answer"])
+    world.pg_running = "true"
+    world.pg_published = "127.0.0.1:5433"
+    return {"seen": seen, "answer": answer, "file": tmp_path / "test-pg.env", "term": state}
+
+
+def _pg_aware(world: World) -> None:
+    """``docker inspect`` of the Postgres container answers the table's state."""
+    inner = world.docker
+
+    def docker(a):
+        if a[:2] == ["inspect", "-f"] and a[3] == PG:
+            state = getattr(world, "pg_running", None)
+            return (0, state + "\n") if state else (1, "Error: No such object")
+        if a[:2] == ["port", PG]:
+            published = getattr(world, "pg_published", None)
+            return (0, published + "\n") if published else (1, "Error: no public port '5432/tcp'")
+        return inner(a)
+
+    world.docker = docker
+
+
+def test_a_checkout_deploy_creates_the_missing_test_login(world, clients, test_login, tmp_path, capsys):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]]                 # never --rotate
+    out = capsys.readouterr().out
+    assert "role pseudolife_test: created" in out and "test login" in out
+    compose = next(i for i, c in enumerate(world.calls) if c[1:2] == ["compose"])
+    inspect = next(i for i, c in enumerate(world.calls) if c[-1] == PG)
+    assert compose < inspect                                  # after the daemon is back
+
+
+def test_a_present_test_login_file_is_left_alone(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    test_login["file"].write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n", encoding="utf-8")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_no_local_bundled_postgres_no_test_login(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    world.pg_running = None
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+    world.pg_running = "false"
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_refused_test_login_warns_with_the_fix_and_the_deploy_stands(world, clients, test_login,
+                                                                       tmp_path, capsys):
+    _pg_aware(world)
+    test_login["answer"].update(exit=4, changes=[], error=(
+        "role pseudolife_test already exists and ~/.pseudolife-mcp/test-pg.env holds no "
+        "password for it"))
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    captured = capsys.readouterr()
+    assert "already exists" in captured.err
+    fix = [line for line in (captured.out + captured.err).splitlines() if "--rotate" in line]
+    assert len(fix) == 1 and "test-login create" in fix[0]
+
+
+def test_no_test_login_skips_it(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--no-test-login"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_release_update_never_creates_a_test_login(world, clients, test_login, tmp_path):
+    """End users' bank servers get no CREATEDB password login (review,
+    2026-10-04): only checkout mode, a contributor's host, makes one."""
+    _pg_aware(world)
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--health-delay-ms", "1"]) == 0
+    assert _run(["--reinstall", "--health-delay-ms", "1"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_no_test_login_is_a_checkout_option(world, clients, tmp_path, capsys):
+    _project(world, tmp_path)
+    assert _run(["--no-test-login"]) == 2
+    assert "--no-test-login" in capsys.readouterr().err
+
+
+def test_create_test_login_runs_the_command_and_reads_its_report(monkeypatch):
+    from pseudolife_memory import test_login_cli
+
+    def fake_main(argv, *, out=None, executor=None):
+        assert argv == ["create", "--json"]
+        print(json.dumps({"exit": 0, "error": None, "changes": ["x"]}), file=out)
+        return 0
+
+    monkeypatch.setattr(test_login_cli, "main", fake_main)
+    assert up.create_test_login(["create"]) == {"exit": 0, "error": None, "changes": ["x"]}
+
+
+# ── maintainer passkeys: a reminder, and an offer at a terminal ─────────────
+
+@pytest.fixture
+def passkeys(monkeypatch):
+    from pseudolife_memory import maintainer_setup
+    state = {"set_up": False, "ran": [], "tty": False, "answer": "n", "asked": []}
+    monkeypatch.setattr(maintainer_setup, "passkeys_set_up", lambda: state["set_up"])
+    monkeypatch.setattr(maintainer_setup, "main", lambda argv: state["ran"].append(argv) or 0)
+    monkeypatch.setattr(up, "interactive", lambda: state["tty"])
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
+    monkeypatch.setattr(up, "ask", lambda question: state["asked"].append(question) or state["answer"])
+    return state
+
+
+def _auth(world: World) -> None:
+    for answer in world.health:
+        if isinstance(answer, dict):
+            answer["auth"] = True
+
+
+def test_an_update_points_at_the_setup_until_passkeys_are_set_up(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    _auth(world)
+    assert _run(["--health-delay-ms", "1"]) == 0
+    out = capsys.readouterr().out
+    [line] = [line for line in out.splitlines() if "maintainer setup" in line]
+    assert "pseudolife-mcp maintainer setup" in line
+    assert passkeys["ran"] == []                               # no terminal: no offer
+    passkeys["set_up"] = True
+    assert _run(["--health-delay-ms", "1"]) == 0               # already current: still checked
+    assert "maintainer setup" not in capsys.readouterr().out
+
+
+def test_a_checkout_deploy_reminds_too(world, clients, passkeys, tmp_path, capsys):
+    root, _ = _checkout(world, tmp_path)
+    _auth(world)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert "pseudolife-mcp maintainer setup" in capsys.readouterr().out
+
+
+def test_at_a_terminal_the_update_offers_to_run_it(world, clients, passkeys, tmp_path):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run([]) == 0
+    assert passkeys["ran"] == [["--yes"]]                      # the one question answered for it
+    assert "tailscale serve" in passkeys["asked"][0] and "restart" in passkeys["asked"][0]
+    assert "tailnet" in passkeys["asked"][0] and ":8443" in passkeys["asked"][0]
+    passkeys.update(answer="")
+    assert _run([]) == 0
+    assert passkeys["ran"] == [["--yes"]]                      # the default is no
+
+
+def test_a_tokenless_or_unreadable_daemon_gets_no_reminder(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path, version="0.15.1")
+    assert _run([]) == 0                                       # /health without "auth": true
+    passkeys["set_up"] = None
+    _auth(world)
+    assert _run([]) == 0                                       # state unknown
+    assert "maintainer setup" not in capsys.readouterr().out
+
+
+def test_json_and_clients_only_runs_never_ask(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run(["--json"]) == 0
+    assert _run(["--clients-only"]) == 0
+    assert passkeys["ran"] == []
+
+
+def test_the_passkey_offer_runs_after_the_update_lock_is_released(world, clients, passkeys, tmp_path, monkeypatch):
+    """Review 2026-10-05: enrolment waits minutes for the Console; an
+    unattended update must not find the lock held all that time."""
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    held = []
+    from pseudolife_memory import maintainer_setup
+    monkeypatch.setattr(maintainer_setup, "main", lambda argv: held.append(up.UpdateLock()._lock.acquire()) or 0)
+    passkeys.update(tty=True, answer="y")
+    assert _run([]) == 0
+    assert held == [True]
+
+
+def test_a_failing_passkey_check_never_fails_a_finished_update(world, clients, passkeys, tmp_path, monkeypatch, capsys):
+    """Delegate review 2026-10-05: the deploy succeeded; a hint must not
+    turn it into exit 1 with a traceback."""
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    from pseudolife_memory import maintainer_setup
+    monkeypatch.setattr(maintainer_setup, "passkeys_set_up", lambda: {}["rp_id"])
+    assert _run([]) == 0
+    assert "maintainer setup" in capsys.readouterr().err
+
+
+def test_a_failing_test_login_step_never_fails_a_finished_deploy(world, clients, test_login, tmp_path, monkeypatch, capsys):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    scripts = _scripts(root)
+
+    def boom(argv):
+        raise OSError("disk full")
+    monkeypatch.setattr(up, "create_test_login", boom)
+    assert _run(["--checkout", str(root)]) == 0
+    assert "disk full" in capsys.readouterr().err
+    assert _script_calls(world, scripts["prune-build-cache"])        # the deploy still finished
+
+
+def test_the_offer_runs_setup_against_the_updates_daemon_port(world, clients, passkeys, tmp_path):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run(["--daemon-url", "http://127.0.0.1:9876"]) == 0
+    assert passkeys["ran"] == [["--yes", "--port", "9876"]]
+
+
+
+# The maintainer's decision (2026-10-05): create the test login only where the
+# suite actually connects to the bundled server; on the box the bundled
+# Postgres holds the live bank and the suites use a separate server (5434).
+
+def test_a_suite_pointed_at_another_server_gets_no_test_login(world, clients, test_login, tmp_path,
+                                                               monkeypatch, capsys):
+    _pg_aware(world)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5434")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+    [line] = [l for l in capsys.readouterr().out.splitlines() if "test login" in l]
+    assert "127.0.0.1:5434" in line and "5433" in line
+
+
+def test_the_box_suite_env_file_counts_as_where_the_suite_connects(world, clients, test_login, tmp_path,
+                                                                   monkeypatch):
+    _pg_aware(world)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    env =tmp_path / "home" / ".config" / "pseudolife-suite" / "env"
+    env.parent.mkdir(parents=True)
+    env.write_text("# suite settings\nexport PSEUDOLIFE_TEST_PG_HOST_PORT='127.0.0.1:5434'\n"
+                   "PSEUDOLIFE_TEST_PG_PASSWORD=x\n", encoding="utf-8")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_bundled_postgres_the_suite_cannot_reach_gets_no_test_login(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    world.pg_published = None
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_the_suite_on_the_bundled_port_by_any_loopback_name_gets_it(world, clients, test_login, tmp_path,
+                                                                     monkeypatch):
+    _pg_aware(world)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "localhost:5433")
+    world.pg_published = "0.0.0.0:5433\n[::]:5433"
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]]
+
+
+
+# The box, measured by the delegate (2026-10-05): deploys run as root, which
+# has no suite env file, so the suite's bare default (127.0.0.1:5433) matched
+# the bundled container that holds the live bank. A default-only match is
+# unconfirmed: no login without a person saying so (maintainer decision).
+
+def test_a_root_deploy_without_the_suite_env_file_creates_no_test_login(world, clients, test_login,
+                                                                        tmp_path, monkeypatch, capsys):
+    _pg_aware(world)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [] and test_login["term"]["asked"] == []
+    [line] = [l for l in capsys.readouterr().out.splitlines() if "test login" in l]
+    assert "pseudolife-mcp test-login create" in line and "PSEUDOLIFE_TEST_PG_HOST_PORT" in line
+
+
+@pytest.mark.parametrize("answer,created", [("y", True), ("", False), ("n", False)])
+def test_at_a_terminal_a_default_only_match_is_asked_default_no(world, clients, test_login, tmp_path,
+                                                                 monkeypatch, answer, created):
+    _pg_aware(world)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    test_login["term"].update(tty=True, answer=answer)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    [question] = test_login["term"]["asked"]
+    assert "[y/N]" in question and "bank" in question
+    assert test_login["seen"] == ([["create"]] if created else [])
+
+
+def test_an_explicit_suite_setting_decides_without_asking(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    test_login["term"].update(tty=True, answer="n")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]] and test_login["term"]["asked"] == []
