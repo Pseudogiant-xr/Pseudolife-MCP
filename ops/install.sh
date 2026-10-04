@@ -2871,6 +2871,31 @@ describe_endpoint_container() {
     esac
 }
 # <<< endpoint container probe <<<
+
+# >>> test login >>>
+# The test suite's own Postgres login (`pseudolife-mcp test-login create`,
+# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# databases and cannot connect to the bank, written to
+# ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
+# ops/.env. So no checkout or agent session needs ops/.env, which holds the
+# bank owner's password (2026-10-04). Idempotent: a re-run re-applies the same
+# password. It runs psql in the Postgres container as its own superuser; a
+# failure leaves the install working.
+setup_test_login() {
+    local py
+    py="$(installer_python)"
+    if [ -z "$py" ]; then
+        echo "WARNING: no Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from $repo: python3 -m pseudolife_memory.cli test-login create" >&2
+        return 0
+    fi
+    step "Setting up the test suite's Postgres login (it cannot open the bank)..."
+    if ! (cd "$repo" && PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$py" -m pseudolife_memory.test_login_cli create); then
+        echo "WARNING: the test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from $repo: $py -m pseudolife_memory.test_login_cli create" >&2
+    fi
+    return 0
+}
+# <<< test login <<<
+
 # ── 12a. CLI shim autostart (Claude / Codex modes) ──────────────────────────
 # Placed here, at the top of stage 12, for three reasons: after stage 11's
 # shim install (below); before the health wait, so a daemon that is not yet
@@ -2936,6 +2961,7 @@ if [ -z "$CLIENT_ONLY" ]; then
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     endpoint_container_probe
+    setup_test_login
 fi
 
 # >>> client-only claude hook >>>
