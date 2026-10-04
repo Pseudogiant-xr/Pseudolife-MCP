@@ -4864,7 +4864,7 @@ continues under the OS lock. A lock held by something the board does not show
 The command inherits the terminal and the environment, plus
 `PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
 value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
-`20m`, `2h`) expired before the lease was held, and the command did not run;
+`20m`, `2h`, `7d`) expired before the lease was held, and the command did not run;
 `128+N` when stopped by signal N (`130` Ctrl-C, `143` SIGTERM, `129` SIGHUP);
 `64` for a run nested inside a run of the same lease (its name is in
 `PSEUDOLIFE_LEASES_HELD` while that lease's lock is held), which would

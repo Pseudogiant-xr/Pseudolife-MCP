@@ -12,8 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for days, so `--for 7d` is 604800 seconds, alongside the bare seconds,
   `s`, `m` and `h` forms that keep working; each argument's own bounds
   still apply (`--for` at most a week). 0.16.0 and 0.16.1 refused `7d` with
-  "not a duration" although their CHANGELOG entries and the configuration
-  guide show `lease delegate PROJECT AGENT --for 7d`: on those versions use
+  "not a duration" although their CHANGELOG entries show `lease designate
+  PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
+  7d` (0.16.1, and the configuration guide): on those versions use
   `--for 168h`.
 
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
