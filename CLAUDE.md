@@ -100,18 +100,24 @@ exactly; they exist because each one was violated at least once.
    closes; new sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
-6. **Install and update finish the job themselves** (see the next section): a
-   change that adds a setup step a user would do by hand automates it in
-   the installer or `pseudolife-mcp update` before it is released.
+6. **Install and update finish the job themselves** (see the next section):
+   a change may land on master before its setup is automated, but it is
+   not released until the installer or `pseudolife-mcp update` does that
+   setup. The release procedure checks it.
 
 ## Install and update experience
 
 Maintainer rule, 2026-10-05: the installer (`ops/install.sh`,
-`ops/install.ps1`) and `pseudolife-mcp update` do the whole job. A user
-should never need to read a guide, edit a config file or run a follow-up
-command to finish an install or an update. The 2026-10-04 passkey and
-test-login changes each shipped with manual operator steps, and the next
-release waited until the scripts covered them.
+`ops/install.ps1`) and release-mode `pseudolife-mcp update` do the whole
+job. A user should never need to read a guide, edit a config file or run a
+follow-up command to finish an install or an update. The 2026-10-04
+passkey and test-login changes reached master with manual operator steps,
+and the next release is held until the scripts cover them.
+
+These rules govern end-user installs and release-mode `update`. Checkout
+mode (`ops/update.*`, `--checkout`) is a contributor tool and keeps item
+4's steps. New steps follow the rules from now on; existing paths are
+brought in line as they are touched, with no retrofit sweep.
 
 - **A feature that needs host setup ships with that setup automated.** A
   config key, a login or role, a serve or port, a file to copy, a command to
@@ -121,26 +127,32 @@ release waited until the scripts covered them.
   in its body what install and update do about it.
 - **Detect, don't ask.** Work out what the host has (tier, local or remote
   daemon, Tailscale, checkout or release) and choose. Ask only when the
-  answer cannot be detected, or before a persistent change outside
-  Pseudolife's own files (Tailscale serve, a firewall rule, another
-  program's config). Then ask once, as y/N with a stated default, and accept
-  `--yes` for non-interactive runs.
+  answer cannot be detected, or before a persistent change the user did not
+  choose by running the installer: a Tailscale serve, a firewall rule, a
+  program the install does not otherwise configure. The installers' existing
+  client setup (plugin, Codex hooks, instruction files, autostart) is what
+  running them means, and keeps its per-decision flags. Ask once per change,
+  y/N with a stated default; a dedicated flag or `--yes` (`-Yes` in
+  PowerShell) answers it for non-interactive runs.
 - **An unavoidable prompt is plain.** One short sentence on what will happen
   and why, then the question. A step only a person can do (a passkey tap,
   an approval in another app) says exactly where to click and what they
   will see; the script waits for it and checks that it happened.
-- **Rerunning is safe and quiet.** On a host that is already set up,
-  install and update change nothing and say so in one line.
-- **Unattended runs never hang.** With no terminal (scheduled updates, CI), a
-  step that needs a person is skipped with one line naming the command that
-  finishes it.
+- **Rerunning is safe and quiet.** On a host that is already set up, a new
+  step changes nothing and says so in one line.
+- **Unattended runs never hang.** With no terminal (scheduled updates, CI),
+  a step inside install or update that needs a person is skipped with one
+  line naming the command that finishes it, and the run carries on. A
+  standalone command whose whole job is that step (`connect`, `expose`)
+  refuses instead, saying nothing changed and naming `--yes`.
 - **A refusal names its fix and leaves nothing half-done.** Check before
   changing anything, or undo on failure, and print the one command or edit
   that fixes it.
 - **Contributor-only setup stays out of end-user installs.** The test login
-  and checkout builds run from checkout mode (`ops/update.*`, `--checkout`)
-  or an explicit installer flag, never on a default install or from
-  release-mode update.
+  is created only by the installers' `--test-login` / `-TestLogin` and by
+  checkout-mode update (the latter in progress, 2026-10-05), and checkout
+  builds only by checkout mode. A default install and release-mode update
+  do neither.
 
 ## Derived state / caches / indexes
 
