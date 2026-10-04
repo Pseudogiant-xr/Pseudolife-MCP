@@ -132,7 +132,7 @@
           <div class="holder">
             <span class="dot big {delegateAgent ? agentTone(delegateAgent, snapshotAt) : ''}" aria-hidden="true"></span>
             <span class="holder-name big">{nameOf(h)}</span>
-            <span class="mono meta" title={h.agent_id}>{shortId(h.agent_id)}</span>
+            {#if nameOf(h) !== shortId(h.agent_id)}<span class="mono meta" title={h.agent_id}>{shortId(h.agent_id)}</span>{/if}
           </div>
           <p class="holder-status" class:none={!delegateAgent?.status}>
             {delegateAgent ? delegateAgent.status || "No status set." : "Not in the board's recent list."}
@@ -221,7 +221,7 @@
           <div class="holder">
             <span class="dot {coordinatorAgent ? agentTone(coordinatorAgent, snapshotAt) : ''}" aria-hidden="true"></span>
             <span class="holder-name">{nameOf(h)}</span>
-            <span class="mono meta" title={h.agent_id}>{shortId(h.agent_id)}</span>
+            {#if nameOf(h) !== shortId(h.agent_id)}<span class="mono meta" title={h.agent_id}>{shortId(h.agent_id)}</span>{/if}
           </div>
           <p class="holder-status" class:none={!coordinatorAgent?.status}>
             {coordinatorAgent ? coordinatorAgent.status || "No status set." : "Not in the board's recent list."}
