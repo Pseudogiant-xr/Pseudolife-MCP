@@ -664,7 +664,12 @@ def update_plugin(repo: Path | None = None) -> dict:
     14 days later once no session marks it ``.in_use`` (measured on 2.1.283,
     2026-09-30). Nothing here uninstalls: on 2026-09-30 an uninstall followed
     by an install the in-use folder refused (EPERM) left the plugin
-    uninstalled until the apps were restarted."""
+    uninstalled until the apps were restarted.
+
+    A marketplace update that fails leaves the clone where it was, so a
+    cache matching it proves nothing: the step then reports ``failed`` with
+    the CLI's own line, never ``current`` or ``refreshed`` (2026-10-04: the
+    homelab box kept the previous release's hooks behind a green line)."""
     claude = which("claude")
     if not claude:
         return {"state": "no-cli", "detail": "the claude CLI is not on PATH"}
@@ -672,24 +677,83 @@ def update_plugin(repo: Path | None = None) -> dict:
     record = _plugin_record(plugins_dir)
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
+    code, out = run_cli([claude, "plugin", "marketplace", "update", MARKETPLACE])
+    failure = _marketplace_failure(code, out)
+    result = _install_from_clone(claude, plugins_dir, record, repo)
+    if failure is None:
+        return {"state": result["state"], "marketplace_update": "ok", "detail": result["detail"]}
+    remedy = f"{_marketplace_remedy(out)}, then {_plugin_retry(repo)}"
+    said = f"claude plugin marketplace update {MARKETPLACE} failed ({failure})"
+    if result["state"].startswith("current:"):
+        detail = (f"{said}, so the clone the cache matches (v{record.get('version', '')}) may be behind the "
+                  f"marketplace; {remedy}")
+    elif result["state"].startswith("refreshed:"):
+        detail = f"{said}; {result['detail']}, but that clone may be behind the marketplace; {remedy}"
+    else:
+        detail = f"{result['detail']}; {said}: {remedy}"
+    return {"state": "failed", "marketplace_update": "failed", "detail": detail}
+
+
+# Claude Code 2.1.287 reports a marketplace it could not refresh with exit 1
+# and `Failed to update marketplace(s): Failed to refresh marketplace '<name>':
+# ...` on stderr behind a cross mark (U+2718), measured 2026-10-04 in a
+# sandboxed CLAUDE_CONFIG_DIR. The line counts without the exit code, and
+# without its mark, which a non-UTF-8 console decodes as something else.
+_MARKETPLACE_FAILED = ("Failed to update marketplace", "Failed to refresh marketplace")
+MARKETPLACE_HTTPS = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+
+
+def _marketplace_failure(code: int, out: str) -> str | None:
+    """The CLI's failure line for a marketplace update that did not refresh
+    the clone, else None."""
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    flagged = next((line for line in lines
+                    if line.startswith("\u2718") or line.startswith(_MARKETPLACE_FAILED)), None)
+    if flagged is not None:
+        return flagged.lstrip("\u2718").strip()
+    if code == 0:
+        return None
+    return lines[-1] if lines else f"exit {code}"
+
+
+def _marketplace_remedy(out: str) -> str:
+    """What to do about a failed marketplace update. A github-source
+    marketplace is cloned over SSH, which fails where github.com's host key
+    is not in known_hosts (root on the homelab box, 2026-10-04). Adding it
+    again from its HTTPS URL re-points the existing entry, and the installed
+    plugin follows it (measured on Claude Code 2.1.287, 2026-10-04)."""
+    if "known_hosts" in out or "Host key verification failed" in out:
+        return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
+                "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
+                "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
+                f"claude plugin marketplace add {MARKETPLACE_HTTPS}")
+    return f"fix that and run claude plugin marketplace update {MARKETPLACE}"
+
+
+def _plugin_retry(repo: Path | None) -> str:
+    return (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
+            else "pseudolife-mcp update --clients-only")
+
+
+def _install_from_clone(claude: str, plugins_dir: Path, record: dict, repo: Path | None) -> dict:
+    """Compare the marketplace clone with the recorded cache and, when they
+    differ, install the clone's copy beside it (see ``update_plugin``)."""
     version = str(record.get("version", ""))
     cache = Path(str(record.get("installPath", "")))
-    code, _ = run_cli([claude, "plugin", "marketplace", "update", MARKETPLACE])
-    marketplace_update = "ok" if code == 0 else "failed"
     clone = _clone_plugin_dir(plugins_dir)
     if not (clone / ".claude-plugin" / "plugin.json").is_file():
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"no marketplace clone at {clone}; run: claude plugin marketplace add "
                           f"https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}
     if cache.is_dir() and not tree_differs(clone, cache):
-        return {"state": f"current:{version}", "marketplace_update": marketplace_update,
+        return {"state": f"current:{version}",
                 "detail": f"cache matches the marketplace clone (v{version})"}
     # A project or local install is found from its project, at its scope;
     # from anywhere else the update would act on another project's install.
     scope = str(record.get("scope") or "user")
     project = record.get("projectPath") if scope in ("project", "local") else None
     if scope in ("project", "local") and not project:
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the {scope}-scope install of {PLUGIN_ID} names no project; left as it is. Run "
                           f"claude plugin update {PLUGIN_ID} --scope {scope} from that project"}
     code, out = run_cli([claude, "plugin", "update", PLUGIN_ID, "--scope", scope],
@@ -699,25 +763,24 @@ def update_plugin(repo: Path | None = None) -> dict:
     new_cache = Path(str(updated.get("installPath", ""))) if updated else None
     if code == 0 and updated and new_cache.is_dir() and not tree_differs(clone, new_cache):
         new_version = str(updated.get("version", ""))
-        return {"state": f"refreshed:{new_version}", "marketplace_update": marketplace_update,
+        return {"state": f"refreshed:{new_version}",
                 "detail": f"{new_version} installed from the marketplace clone beside {version}; sessions "
                           f"already running keep the copy they loaded, new sessions start on this one, and "
                           f"Claude Code deletes the old copy 14 days after it was replaced, once no session "
                           f"runs from it"}
     if updated is None:
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"{PLUGIN_ID} is no longer recorded as installed after claude plugin update "
                           f"({said}); {INSTALLER_HINT}"}
     kept = (f"{version} was left installed and sessions keep running it" if updated == record
             else f"the record now names {updated.get('installPath')} ({updated.get('version')})")
-    retry = (f"python \"{Path(repo) / 'ops' / 'update_clients.py'}\" --only plugin" if repo
-             else "pseudolife-mcp update --clients-only")
+    retry = _plugin_retry(repo)
     offered = _read_json(clone / ".claude-plugin" / "plugin.json").get("version")
     if code == 0 and updated == record and offered == version:
         # Claude Code found nothing newer: the clone's manifest still
         # carries the installed version, and replacing that folder in place
         # is what failed under running sessions.
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the marketplace clone's plugin differs from the cache but offers the same version "
                           f"({version}; claude said: {said}), so Claude Code will not install it beside the "
                           f"copy sessions run; {kept}. A current clone's plugin.json carries no version: "
@@ -725,12 +788,12 @@ def update_plugin(repo: Path | None = None) -> dict:
     if code == 0 and updated == record:
         # Nothing newer to install, yet the cache is not the clone: the
         # folder the record names is gone or was edited in place.
-        return {"state": "failed", "marketplace_update": marketplace_update,
+        return {"state": "failed",
                 "detail": f"the cache folder the plugin record names ({cache}) is missing or was changed by "
                           f"hand, and Claude Code has nothing newer to install (claude said: {said}); {kept}. "
                           f"With no Claude Code session open: claude plugin uninstall {PLUGIN_ID}, then "
                           f"claude plugin install {PLUGIN_ID}"}
-    return {"state": "failed", "marketplace_update": marketplace_update,
+    return {"state": "failed",
             "detail": f"claude plugin update {PLUGIN_ID} did not leave a cache matching the clone ({said}); "
                       f"{kept}. Retry: {retry}"}
 

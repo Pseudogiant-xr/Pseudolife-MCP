@@ -7355,6 +7355,17 @@ its own and an update never replaces a folder a session is using:
   in `installed_plugins.json`, and they compare again. Nothing is
   uninstalled at any point: an update that fails leaves the installed copy
   installed.
+- A marketplace update that fails (a non-zero exit, or Claude Code's
+  `Failed to update marketplace` line) leaves the clone where it was, so a
+  cache matching it proves nothing: the step reports `failed`, never
+  `current`, quoting the CLI's line, and the run exits with the client-step
+  code. Claude Code clones a GitHub-source marketplace over SSH, which fails
+  on a host with no github.com key in `known_hosts`. Add the key after
+  checking its fingerprint against GitHub's published ones, or point the
+  marketplace at HTTPS with
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which replaces the existing entry's source (the installed plugin follows
+  it), then run the update again.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code

@@ -70,6 +70,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
   Do not remove the marketplace first: that uninstalls its plugins.
 
+### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
+- The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
+  `ops/update_clients.py`) runs `claude plugin marketplace update
+  pseudolife-mcp` and then compares the marketplace clone with the installed
+  cache. It ignored a failed marketplace update, so a cache matching a clone
+  that could not be refreshed read `current`. On 2026-10-04 the homelab box
+  had no github.com host key for root: Claude Code's SSH clone failed, the
+  clone stayed at 0.16.0's commit, and the box kept 0.16.0's plugin hooks
+  after a 0.16.1 deploy that reported the plugin green.
+- A failed marketplace update (a non-zero exit, or the CLI's `Failed to
+  update marketplace` / `Failed to refresh marketplace` line even with exit
+  0) now makes the step `failed`, which fails the run with the client-step
+  exit code. The detail quotes the CLI's line and the remedy: for a missing
+  host key, add github.com's key to `known_hosts` after checking its
+  fingerprint, or point the marketplace at HTTPS with `claude plugin
+  marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which re-points the existing entry in place (measured on Claude Code
+  2.1.287). The step still installs a clone that differs from the cache,
+  since that is progress, but it reports `failed` and says the clone may be
+  behind, not `refreshed`. A successful marketplace update behaves as
+  before.
+
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
 ### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
