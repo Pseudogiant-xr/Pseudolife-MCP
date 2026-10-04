@@ -56,6 +56,36 @@ def test_marketplace_manifest_points_at_plugin_dir():
     assert len(entry.get("description", "")) <= 200
 
 
+MARKETPLACE_URL = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+
+
+def test_every_marketplace_add_uses_the_https_url():
+    """Claude Code records an owner/repo shorthand as a `github` source and
+    refreshes it over SSH, so on a host with no GitHub key or known_hosts
+    entry every later `marketplace update` failed and plugin updates stopped
+    (homelab box, 2026-10-04). The repo is public: every place that tells a
+    user, or the installer, to add the marketplace names the HTTPS git URL.
+    CHANGELOG.md and dated design specs are history and keep what they said."""
+    paths = [ROOT / "README.md", ROOT / "plugin" / "README.md",
+             ROOT / "llms.txt", ROOT / "llms-full.txt",
+             ROOT / "ops" / "install.sh", ROOT / "ops" / "install.ps1"]
+    for folder in ("docs/guide", "docs/i18n", "examples"):
+        paths += sorted((ROOT / folder).rglob("*.md"))
+    seen = 0
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"(?<!codex )plugin marketplace add\s+(\S+)", text):
+            source = match.group(1).strip("\"'`")
+            if source.startswith("$"):
+                continue  # an installer's variable, pinned below
+            seen += 1
+            assert source == MARKETPLACE_URL, (
+                f"{path.relative_to(ROOT)}: `marketplace add {source}` — use {MARKETPLACE_URL}")
+    assert seen >= 8, "regex sanity: the README, plugin README, guides and i18n doors carry it"
+    assert f'CLAUDE_PLUGIN_MARKETPLACE_SOURCE="{MARKETPLACE_URL}"' in _read("ops/install.sh")
+    assert f'$claudePluginMarketplaceSource = "{MARKETPLACE_URL}"' in _read("ops/install.ps1")
+
+
 def test_plugin_manifest_carries_no_version():
     """Claude Code keys its plugin cache folder by the manifest version, and
     with none it uses the marketplace commit instead. A pinned version made

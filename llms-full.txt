@@ -604,6 +604,24 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`:** the installers
+up to 0.16.1 added it by that shorthand, which Claude Code records as a
+`github` source (`"source": "github"` for `pseudolife-mcp` in
+`~/.claude/plugins/known_marketplaces.json`) and refreshes over SSH. On a
+machine with no GitHub SSH key every refresh fails ("SSH host key is not in
+your known_hosts file") and the plugin stops updating. Move it to the HTTPS
+URL: if `~/.claude/settings.json` declares it under `extraKnownMarketplaces`,
+change that entry's `source` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+first (the CLI refuses an add that differs from a declared source), then run:
+
+```bash
+claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+```
+
+Do not `marketplace remove` it first: removing a marketplace uninstalls its
+plugins.
+
 **One command, no checkout:** the installed shim updates the whole install
 from a release:
 
@@ -800,7 +818,7 @@ out; an installed plugin is left alone). It wires the session hooks
 Claude Code do it:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
@@ -10464,7 +10482,7 @@ session without it and gets memory back by itself once the daemon answers
 The Claude Code plugin adds the session hooks:
 
 ```bash
-claude plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 claude plugin install pseudolife-memory@pseudolife-mcp --scope user
 ```
 

@@ -25,7 +25,10 @@ from tests.test_installer_existing_upgrade import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "pseudolife-memory@pseudolife-mcp"
-MARKETPLACE_SOURCE = "Pseudogiant-xr/Pseudolife-MCP"
+# The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
+# shorthand as a `github` source and refreshes it over SSH, which fails on a
+# host with no GitHub key or known_hosts entry (homelab box, 2026-10-04).
+MARKETPLACE_SOURCE = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
 FAKE_VERSION = "0.15.0"
 
 
@@ -45,7 +48,7 @@ def _record_plugin(home: Path, version: str = FAKE_VERSION) -> None:
 
 def _record_marketplace(home: Path) -> None:
     (_plugins_dir(home) / "known_marketplaces.json").write_text(json.dumps({
-        "pseudolife-mcp": {"source": {"source": "github", "repo": MARKETPLACE_SOURCE}},
+        "pseudolife-mcp": {"source": {"source": "git", "url": MARKETPLACE_SOURCE}},
     }, indent=2), encoding="utf-8")
 
 
