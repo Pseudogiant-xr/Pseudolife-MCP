@@ -670,15 +670,18 @@ def _iso_seconds(ts: float | None) -> str | None:
 # (TTL/3 — the stale flag at 2×TTL fires too late for the incident shape).
 
 CORRECTION_NOTE = (
-    "Facts flagged correct_with above are aged or contested. If one "
-    "contradicts what you observe, run its correction call NOW with the "
+    "Facts flagged correct_with above are aged or contested. If an aged "
+    "fact contradicts what you observe, run its call NOW with the "
     "verified value (re-assert the same value if it checks out) — noticing "
-    "without writing leaves the error for the next session.")
+    "without writing leaves the error for the next session. For a "
+    "contested fact, read the contenders; resolve only once the human "
+    "decides.")
 
 
 def _cortex_correct_with(f: dict[str, Any]) -> str | None:
-    """The copy-paste correction call for a cortex fact, or None when the
-    fact is fresh enough (or durable enough) not to warrant one."""
+    """The copy-paste correction call for a cortex fact (the read-then-
+    resolve path for a contested one), or None when the fact is fresh
+    enough (or durable enough) not to warrant one."""
     from pseudolife_memory.memory.freshness import needs_correction_nudge
     aged = needs_correction_nudge(
         f.get("freshness_class") or "evergreen",
@@ -697,7 +700,17 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     # The active affordance at correction time is `memory_supersede`'s
     # `derived_flagged`, which names exactly the facts affected by that
     # explicit correction.
-    if not (f.get("contested") or f.get("stale") or aged):
+    if f.get("contested"):
+        # A contested slot is settled by a human decision, not a write:
+        # ``memory_fact_set`` there parks one more contender, and a
+        # prefilled ``accept`` would let a model settle it blindly
+        # (2026-10-04: a live recall served a contested slot with a
+        # ``memory_fact_set`` call). Takes precedence over aged/stale.
+        slot = f"entity={f['entity']!r}, attribute={f['attribute']!r}"
+        return (f"memory_fact_get({slot}) to read the contenders; once the "
+                f"human decides, memory_fact_resolve({slot}, "
+                f"accept=<the human's decision>) (core tier)")
+    if not (f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
             f"attribute={f['attribute']!r}, "
@@ -944,8 +957,9 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
                     {"pinned": True}
                     if f.get("pinned") else {}
                 ),
-                # Supersede-at-discovery: aged/stale/contested facts
-                # carry their exact correction call (see CORRECTION_NOTE).
+                # Supersede-at-discovery: aged/stale facts carry their
+                # exact correction call, contested ones the resolve path
+                # (see CORRECTION_NOTE).
                 **(
                     {"correct_with": cw}
                     if (cw := _cortex_correct_with(f)) else {}
@@ -1259,7 +1273,8 @@ def memory_fact_get(
     if (rec is None or is_empty_set) and not out["contenders"]:
         out["candidates"] = service.cortex_candidates(entity, attribute)
     # Supersede-at-discovery: an aged/stale record carries its exact
-    # correction call, and the response states the norm once.
+    # correction call (a contested one the resolve path), and the response
+    # states the norm once.
     if rec is not None and not is_empty_set:
         cw = _cortex_correct_with(
             {**rec, "contested": bool(out["contenders"])})

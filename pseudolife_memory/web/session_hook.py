@@ -263,7 +263,7 @@ your starting point for re-verification, never the current answer).
 When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
 same slot) — a stale fact nobody corrects is one the next session will
-believe too. Recall results mark aged/contested facts with a ready-made
+believe too. Recall results mark aged facts with a ready-made
 `correct_with` call: run it the moment you notice the mismatch, filling in
 the verified value (re-assert the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
