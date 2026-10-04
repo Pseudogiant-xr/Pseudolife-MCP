@@ -70,7 +70,7 @@ def _bank(pg_url):
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
             "WHERE datname = current_database() AND pid <> pg_backend_pid() "
-            "AND backend_type = 'client backend'"
+            "AND backend_type = 'client backend' AND usename = current_user"
         )
         conn.commit()
         ensure_schema(conn)

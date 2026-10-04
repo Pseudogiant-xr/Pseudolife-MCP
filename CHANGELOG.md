@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — `test-login create` no longer locks out a daemon it cannot see, and restores close their scratch copy)
+- An independent review of `pseudolife-mcp test-login create` found that its
+  daemon-lockout check ran only when `PSEUDOLIFE_MCP_DATABASE_URL` was in
+  the operator's shell. With `--admin-url` against a server whose daemon
+  reaches the bank only through PUBLIC, the revoke locked that daemon out at
+  its next connection. It now also refuses, before any change and naming
+  the `GRANT CONNECT` to run, when any role connected to a bank now
+  (`pg_stat_activity`) would lose CONNECT, and says "daemon user not
+  checked" when that variable is absent. A daemon that is down and reaches
+  the bank only through PUBLIC is still not seen: the guides now say so
+  instead of claiming the check unconditionally.
+- `--role` naming the daemon's own database user is refused outright (the
+  check skipped exactly that case).
+- The role changes run as one transaction: a statement failing part way
+  (a bank dropped meanwhile) left the role with a new password no file held,
+  since the staged file was removed.
+- A login file that cannot be written safely (`PrivateStateError`, or an
+  OS error) ends with one `test-login:` line and exit 1, not a traceback.
+- `ops/restore.*` rehearsals close their scratch copy
+  (`pseudolife_restore_rehearsal`, the whole bank) to PUBLIC before the
+  replay, and stop if they cannot; the test login could read it meanwhile.
+  The REVOKE a real restore runs on the bank (2026-10-04) is unconditional:
+  it runs whether or not a test login exists, so a custom role that reached
+  the bank only through PUBLIC's CONNECT loses it after a restore and needs
+  its own `GRANT CONNECT`.
+- Test infrastructure: the suite's refusal of a per-run database another
+  role owns no longer applies under `PSEUDOLIFE_TEST_DATABASE_URL`, whose
+  contract leaves the database to its caller; the bulk session reaps in
+  `tests/` and `evals/` also require `usename = current_user`, since a
+  non-superuser login cannot terminate another role's session; two
+  `tests/test_pg_defaults.py` tests hide a provisioned machine's login file
+  so they keep exercising `ops/.env`; and the server half of
+  `tests/test_test_login_cli.py` fails, rather than skips, in CI's
+  PostgreSQL job when `PSEUDOLIFE_TEST_LOGIN_ADMIN_URL` is missing.
+
 ### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
 - The maintainer could not reach a board session at all, and changing who
   holds a project's delegate or coordinator role took a shell on the daemon

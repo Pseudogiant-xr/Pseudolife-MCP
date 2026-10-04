@@ -114,6 +114,15 @@ try {
         Write-Host "==> Rehearsal: restoring into scratch db '$scratch' (live bank untouched)"
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch"
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $scratch"
+        # The scratch copy holds the whole bank and a plain CREATE DATABASE
+        # is open to PUBLIC: close it before the replay, as a real restore
+        # closes the bank, or the test login (`pseudolife-mcp test-login
+        # create`) could read it while the rehearsal runs.
+        docker exec $Container psql -q -U $User -d postgres -c "REVOKE CONNECT ON DATABASE $scratch FROM PUBLIC"
+        if ($LASTEXITCODE -ne 0) {
+            docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch" *> $null
+            throw "could not revoke CONNECT on the scratch db from PUBLIC; not restoring the bank into a database any login could open"
+        }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $scratch > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "restore into scratch db FAILED - the backup may be unusable" }
 
