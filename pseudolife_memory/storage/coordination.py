@@ -2,11 +2,13 @@
 
 Mutation paths: bank identity establishment, register, update, attach, heartbeat,
 detach, send, receive (first read), acknowledge, attempt, prune, restore
-recovery, operator rebind and operator redaction, and the v45 resource
+recovery, operator rebind and operator redaction, the v45 resource
 leases: acquire (grant, queue, renew), release, operator break, and the
-settling any lease call, listing, prune or recovery does (expire, grant).
+settling any lease call, listing, prune or recovery does (expire, grant),
+and the v55 naming of rows by a session retitle (``title_names``).
 Every one of them except a heartbeat and a plain lease renewal appends to
-the audit log (``coordination_events``) in its own transaction; see
+the audit log (``coordination_events``) in its own transaction; a heartbeat
+that changes the row's name (v55) logs that one change. See
 ``_append``. A renewal that changes a lease's purpose or estimate is
 logged. Only redaction (a send event's ``body``, which is outside the hash)
 and prune's retention cut change existing log rows, both under the chain
@@ -121,6 +123,14 @@ class CoordinationConnection:
 MAX_TEXT_BYTES = 8192
 MAX_LABEL = 120
 MAX_SCOPE = 120
+# v55: the name a row shows on the board, bounded like the label. Sources in
+# ascending precedence: a lower one never replaces a name a higher one set,
+# an equal or higher one always does. Clients may claim only 'agent' and
+# 'harness'; 'title' is the daemon's, from a session retitle.
+MAX_NAME = MAX_LABEL
+NAME_SOURCES = ("", "title", "agent", "harness")
+_NAME_RANK = {source: rank for rank, source in enumerate(NAME_SOURCES)}
+CLIENT_NAME_SOURCES = frozenset({"agent", "harness"})
 # v47: the subagents a session names under its own address. Room for a
 # short work-item label each, and a list small enough to read at a glance
 # in a peer listing, like the 240-character status.
@@ -586,6 +596,14 @@ def _string(value: Any, limit: int, field: str, *, empty: bool = True) -> str:
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
         raise CoordinationError(f"invalid_{field}")
     return value
+
+
+def _board_name(agent_id: str, label: str | None, name: str | None) -> str:
+    """What the board shows for a row (v55): its name, else its label and
+    the first 8 characters of its id, so rows that all registered as
+    "claude-code" still tell apart."""
+    short = agent_id[:8]
+    return name or (f"{label} {short}" if label else short)
 
 
 def _excerpt(text: Any) -> str:
@@ -1325,6 +1343,11 @@ class CoordinationStore:
         result["subagent"] = row.get("parent_thread") is not None
         result["adapter_available"] = bool(row["attachment_id"] and
                                            (row["lease_until"] or 0) > self.clock())
+        # v55: what the board shows for the row, and who set it. An unnamed
+        # row (name_source "") reads as its label and short id, so rows that
+        # all registered as "claude-code" still tell apart.
+        result["name"] = _board_name(row["agent_id"], row["label"], row.get("name"))
+        result["name_source"] = row.get("name_source") or ""
         return result
 
     @staticmethod
@@ -1343,6 +1366,55 @@ class CoordinationStore:
             raise CoordinationError("invalid_label")
 
     @staticmethod
+    def _check_name(name):
+        """A v55 board name from a client: one line of at most MAX_NAME
+        characters that names no reserved sender and holds nothing shaped
+        like a credential (hashed into the audit chain for good). Returned
+        stripped; empty clears. No control or format character either
+        (Unicode category C: bidi overrides, zero-width marks, C1): the
+        reserved-word check reads past them, so one could make a name
+        render as a reserved word (review of 2026-10-05)."""
+        _string(name, MAX_NAME, "name")
+        if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
+            raise CoordinationError("invalid_name")
+        _refuse_secret(name)
+        return name.strip()
+
+    @staticmethod
+    def _title_name(title):
+        """The name a session title gives (v55), or ``None`` when it gives
+        none: the title is cleaned to one bounded line, and one that names a
+        reserved sender or looks like a credential names nothing (a retitle
+        must not fail over its board side)."""
+        from pseudolife_memory.harness_names import clean_name
+        name = clean_name(title)
+        if name is None or reserved_name(name) or looks_like_secret(name):
+            return None
+        return name
+
+    @staticmethod
+    def _name_change(row, name, source, now):
+        """The columns that apply ``name`` from ``source`` to ``row`` under
+        the v55 precedence, or ``{}`` when nothing changes: a lower source
+        never replaces a higher one's name, an equal or higher one does, and
+        an empty name clears a name no higher source set."""
+        current = row.get("name_source") or ""
+        if _NAME_RANK[source] < _NAME_RANK.get(current, 0):
+            return {}
+        if not name:
+            return {"name": "", "name_source": "", "name_set_at": now} if current else {}
+        if (row.get("name") or "") == name and current == source:
+            return {}
+        return {"name": name, "name_source": source, "name_set_at": now}
+
+    def _name_event(self, row, naming, principal, *, actor="agent"):
+        return self._event(
+            "update", {"fields": {k: naming[k] for k in ("name", "name_source")},
+                       "before": {k: row.get(k) or "" for k in ("name", "name_source")}},
+            actor=actor, principal=principal, agent_id=row["agent_id"],
+            project=row["project"], task=row["task"])
+
+    @staticmethod
     def _codex_thread(fields) -> str | None:
         """The Codex thread a row speaks for: its episode, on a row whose
         capabilities name the ``codex`` transport (the shim's Codex adapter
@@ -1353,7 +1425,8 @@ class CoordinationStore:
         return fields["episode"]
 
     def register(self, principal, *, label="", project="", task="", episode="", status="",
-                 capabilities=None, wake_enabled=False, parent_thread=None):
+                 capabilities=None, wake_enabled=False, parent_thread=None, name="",
+                 name_source=None):
         """``parent_thread`` (v50) is the parent Codex thread a native child
         read from Codex's turn metadata: a canonical UUID, on a Codex row
         (``_codex_thread``) for another thread. It marks the row a subagent
@@ -1365,6 +1438,14 @@ class CoordinationStore:
                               capabilities={} if capabilities is None else capabilities,
                               wake_enabled=wake_enabled)
         thread = self._codex_thread(fields)
+        # v55: a name at register is the agent's own unless it says it is
+        # the harness's.
+        if name_source is not None and (name_source not in CLIENT_NAME_SOURCES or not name):
+            raise CoordinationError("invalid_name")
+        if name:
+            name = self._check_name(name)
+        if name:
+            fields.update(name=name, name_source=name_source or "agent")
         if parent_thread is not None:
             try:
                 canonical = str(uuid.UUID(parent_thread)) if isinstance(parent_thread, str) else None
@@ -1382,11 +1463,13 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
                 "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity,"
-                "parent_thread,parent_agent_id) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "parent_thread,parent_agent_id,name,name_source,name_set_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (agent_id, principal, _hash(credential), fields["label"], fields["project"],
                  fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
-                 fields["wake_enabled"], now, now, parent_thread, parent))
+                 fields["wake_enabled"], now, now, parent_thread, parent,
+                 fields.get("name", ""), fields.get("name_source", ""),
+                 now if fields.get("name") else None))
             events = [self._event("register", fields, principal=principal, agent_id=agent_id,
                                   project=fields["project"], task=fields["task"])]
             if thread is not None:
@@ -1491,12 +1574,16 @@ class CoordinationStore:
                 raise CoordinationError("invalid_update")
         return fields
 
-    def update(self, principal, agent_id, credential, *, expect=None, **fields):
+    def update(self, principal, agent_id, credential, *, expect=None, name=None, **fields):
         """Change the caller's own row. ``expect`` (seconds) says when the
         status stops being true: past it the peer list marks the row
         ``status_overdue``. A new status without one clears the old
-        expectation; ``expect`` alone re-times the current status."""
+        expectation; ``expect`` alone re-times the current status.
+        ``name`` (v55) is the agent naming its row (source ``agent``): it
+        does not replace a name the harness set, and ``""`` clears its own."""
         fields = self._fields(**fields)
+        if name is not None:
+            name = self._check_name(name)
         self._check_label(principal, fields)
         if expect is not None and (type(expect) is not int
                                    or not 1 <= expect <= LEASE_EXPECT_MAX):
@@ -1546,9 +1633,13 @@ class CoordinationStore:
                 fields["status_expires_at"] = now + expect
             elif "status" in fields and row["status_expires_at"] is not None:
                 fields["status_expires_at"] = None
-            assignments = [f"{key}=%s" for key in fields]
+            naming = {} if name is None else self._name_change(row, name, "agent", now)
+            columns = {**fields, **naming}
+            # The event says what the name became; the time is the event's.
+            fields.update({k: v for k, v in naming.items() if k != "name_set_at"})
+            assignments = [f"{key}=%s" for key in columns]
             values = [Jsonb(v) if k in {"capabilities", "children"} else v
-                      for k, v in fields.items()]
+                      for k, v in columns.items()]
             self.storage.conn.execute(
                 "UPDATE coordination_agents SET " + ",".join(assignments + ["last_activity=%s"])
                 + " WHERE agent_id=%s", (*values, now, agent_id))
@@ -1925,16 +2016,20 @@ class CoordinationStore:
         if row["holder_agent_id"] is None:
             return None
         holder = {"agent_id": row["holder_agent_id"], "label": row.get("label") or "",
-                "principal": row["holder_principal"], "purpose": row["purpose"],
-                "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
-                "expected_end": row["expected_end"]}
+                  # v55: the holder's board name, as the roster shows it.
+                  "name": _board_name(row["holder_agent_id"], row.get("label"),
+                                      row.get("holder_name")),
+                  "principal": row["holder_principal"], "purpose": row["purpose"],
+                  "acquired_at": row["acquired_at"], "expires_at": row["expires_at"],
+                  "expected_end": row["expected_end"]}
         if row["name"].startswith("claim:file:"):
             holder["fence"] = row["fence"]
         return holder
 
     def _lease_row(self, name):
         return self._one(
-            "SELECT l.*,a.label FROM coordination_leases l LEFT JOIN coordination_agents a "
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
             "ON a.agent_id=l.holder_agent_id WHERE l.name=%s", (name,))
 
     def _lease_view(self, name, agent_id):
@@ -2083,7 +2178,8 @@ class CoordinationStore:
         busy = ("(l.holder_agent_id IS NOT NULL OR EXISTS (SELECT 1 FROM "
                 "coordination_lease_waiters w WHERE w.name=l.name))")
         rows = self._all(
-            "SELECT l.*,a.label FROM coordination_leases l LEFT JOIN coordination_agents a "
+            "SELECT l.*,a.label,a.name AS holder_name FROM coordination_leases l "
+            "LEFT JOIN coordination_agents a "
             "ON a.agent_id=l.holder_agent_id WHERE " + busy
             + (" AND l.name=%s" if name is not None else "")
             # Resource leases (suite, GPU, coordinator) before the day-long
@@ -2098,14 +2194,18 @@ class CoordinationStore:
             # Bound each queue before joining its labels; the truncated lease
             # page's extra row does not need a queue read.
             waiters = self._all(
-                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,w.enqueued_at,w.purpose "
+                "SELECT wanted.name,w.agent_id,coalesce(a.label,'') AS label,a.name AS agent_name,"
+                "w.enqueued_at,w.purpose "
                 "FROM unnest(%s::text[]) AS wanted(name) CROSS JOIN LATERAL "
                 "(SELECT agent_id,enqueued_at,purpose,ticket FROM coordination_lease_waiters "
                 "WHERE name=wanted.name ORDER BY ticket LIMIT %s) w "
                 "LEFT JOIN coordination_agents a ON a.agent_id=w.agent_id "
                 "ORDER BY wanted.name,w.ticket", (names, LEASE_LIST_QUEUE))
             for waiter in waiters:
-                queues[waiter.pop("name")].append(dict(waiter))
+                lease = waiter.pop("name")
+                waiter["name"] = _board_name(waiter["agent_id"], waiter["label"],
+                                             waiter.pop("agent_name"))
+                queues[lease].append(dict(waiter))
             counts = {row["name"]: row["n"] for row in self._all(
                 "SELECT name,count(*) AS n FROM coordination_lease_waiters "
                 "WHERE name=ANY(%s::text[]) GROUP BY name", (names,))}
@@ -2428,13 +2528,17 @@ class CoordinationStore:
                 "lease_until": row["lease_until"], "wake_enabled": row["wake_enabled"]}
 
     def heartbeat(self, principal, agent_id, credential, *, attachment_id, generation,
-                  active=False, ring_armed_until=None):
+                  active=False, ring_armed_until=None, name=None):
         """Renew the lease. ``active`` says the shim forwarded a tool call
         since its previous heartbeat; only then does the renewal count as
         activity, so a parked shim is not ranked or retained as a working
-        one."""
+        one. ``name`` (v55) is the title the harness shows for the session
+        (source ``harness``); the shim sends it only when it changed, and
+        only a real change is written and logged."""
         if not isinstance(active, bool):
             raise CoordinationError("invalid_active")
+        if name is not None:
+            name = self._check_name(name)
         with self.storage._txn():
             row = self._auth(principal, agent_id, credential, lock=True)
             self._attachment(row, attachment_id, generation)
@@ -2445,11 +2549,47 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
+            naming = {} if name is None else self._name_change(row, name, "harness", now)
+            if naming:
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET name=%s,name_source=%s,name_set_at=%s "
+                    "WHERE agent_id=%s", (naming["name"], naming["name_source"],
+                                         naming["name_set_at"], agent_id))
+                self._append([self._name_event(row, naming, principal)], now)
             self._record_listener(row, armed_until)
             mailbox = self._mailbox_state(agent_id)
             ring = self._serve_wake(agent_id, now)
         return {"agent_id": agent_id, "generation": generation, "lease_until": until,
                 "ring_armed_until": armed_until or 0, **mailbox, "wake": ring}
+
+    def title_names(self, episodes, title, *, principal=None):
+        """Name the rows registered under any of ``episodes`` (the session
+        keys a ``memory_session_title`` rename resolved) after ``title``,
+        with source ``title`` (v55): only rows no agent or harness named,
+        only those of ``principal`` when one is given, one ``update`` event
+        per row that changed, by the daemon. Returns how many changed."""
+        name = self._title_name(title)
+        episodes = sorted({e for e in episodes if isinstance(e, str) and e})
+        if name is None or not episodes:
+            return 0
+        now = self.clock()
+        params = [name, now, episodes, name]
+        scope = ""
+        if principal is not None:
+            scope = " AND a.principal=%s"
+            params.append(principal)
+        with self.storage._txn():
+            rows = self._all(
+                "UPDATE coordination_agents a SET name=%s,name_source='title',name_set_at=%s "
+                "FROM coordination_agents b WHERE a.agent_id=b.agent_id "
+                "AND a.episode=ANY(%s) AND a.episode<>'' AND a.credential_hash IS NOT NULL "
+                "AND a.name_source IN ('','title') AND a.name<>%s" + scope +
+                " RETURNING a.agent_id,a.principal,a.project,a.task,b.name,b.name_source",
+                params)
+            self._append([self._name_event(row, {"name": name, "name_source": "title"},
+                                           row["principal"], actor="daemon")
+                          for row in sorted(rows, key=lambda r: r["agent_id"])], now)
+        return len(rows)
 
     def _serve_wake(self, agent_id, now):
         """Offer the newest pending ring; the adapter deduplicates its identity.

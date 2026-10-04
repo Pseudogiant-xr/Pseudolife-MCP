@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 54
+SCHEMA_META_VERSION = 55
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -763,6 +763,28 @@ BEGIN
             ADD COLUMN IF NOT EXISTS repudiated_at DOUBLE PRECISION;
     END IF;
 END $$;
+-- v55: the name a row shows on the board (maintainer request 2026-10-02:
+-- nearly every row read "claude-code" or "codex", the label being set once
+-- at register). name_source says who set it, by precedence: 'harness' (the
+-- shim, from the title the harness already shows) over 'agent'
+-- (memory_agents update) over 'title' (a memory_session_title rename of the
+-- row's session); '' means unnamed. name_set_at is when it last changed.
+-- Guarded like the v47, v49 and v50 columns: one probe, then the ALTER only
+-- when missing.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_agents'::regclass
+                     AND attname = 'name_source' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_agents
+            ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS name_source TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS name_set_at DOUBLE PRECISION;
+    END IF;
+END $$;
+-- v55: a session retitle names the rows registered under that session.
+CREATE INDEX IF NOT EXISTS coordination_agents_episode_idx
+    ON coordination_agents (episode) WHERE episode <> '';
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.

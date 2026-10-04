@@ -167,6 +167,16 @@ class CodexCoordinationRegistry:
         self._failure_reported = False
         self._capacity_reported = False
         self._delivery_setup_reported = False
+        # v55: one reader of Codex's session_index.jsonl for every thread.
+        self._thread_names = None
+
+    def _thread_name_reader(self, thread_id):
+        """What a thread's adapter asks for the name Codex shows (v55)."""
+        if self._thread_names is None:
+            from .harness_names import CodexThreadNames
+            self._thread_names = CodexThreadNames()
+        names = self._thread_names
+        return lambda: names.name(thread_id)
 
     def _factory(self):
         if self._adapter_factory is not None:
@@ -387,7 +397,8 @@ class CodexCoordinationRegistry:
                     label=os.environ.get("PSEUDOLIFE_AGENT_LABEL", "codex"),
                     project=os.environ.get("PSEUDOLIFE_AGENT_PROJECT", ""),
                     task=os.environ.get("PSEUDOLIFE_AGENT_TASK", ""),
-                    episode=thread_id)
+                    episode=thread_id,
+                    harness_name=self._thread_name_reader(thread_id))
                 adapter = await asyncio.wait_for(
                     candidate_adapter.__aenter__(), timeout=self._startup_seconds)
             except asyncio.CancelledError:
