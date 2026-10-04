@@ -32,6 +32,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Docs: the v54 schema comment and version-history row said spent nonces
   are kept until their payload expires; they are kept 7 days past it. The
   row also names `maintainer_bootstrap.failed_attempts`.
+
 ### Fixed (2026-10-05 — `test-login create` no longer locks out a daemon it cannot see, and restores close their scratch copy)
 - An independent review of `pseudolife-mcp test-login create` found that its
   daemon-lockout check ran only when `PSEUDOLIFE_MCP_DATABASE_URL` was in
