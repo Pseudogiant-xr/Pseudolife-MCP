@@ -38,6 +38,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fix and leaves the deploy standing; `-NoTestLogin` /
   `--no-test-login` skips it. A release update never creates it.
 
+### Fixed (2026-10-05 — board roles and maintainer messages: follow-ups to the #569 review)
+- A session that held both a project's delegate and coordinator leases from
+  before v54 could no longer renew its coordinator lease (`already_delegate`),
+  so the lease lapsed under it. The live holder now renews it; a delegate
+  still cannot newly claim or queue for `coordinator:<project>`, so once that
+  old hold lapses or is released the session keeps one role. The upgrade
+  leaves such a pair in place until then; the maintainer can revoke either
+  role from the Console.
+- `memory_message history` returned the full text of a message the
+  maintainer withdrew, without `repudiated_at`, where `receive` shows the
+  withdrawal sentence. History now shows it the same way. A withdrawal also
+  appends a `maintainer_repudiate` event to the board's audit log, so history
+  keeps withholding the text after the live message row is pruned (history
+  keeps bodies for the audit retention, longer than the live row).
+- A grant or assignment signed while the recipient held neither role still
+  broke the other role if the recipient took it before the tap, although the
+  signed preview said `also_breaks: null`. The other role's holder is now
+  signed too (`other_holder`), so such a change answers `409 role_changed`.
+- `coordination.maintainer.origin` with an explicit default port
+  (`https://host:443`, `http://localhost:80`) passed validation, but browsers
+  serialise the origin without it, so every assertion failed while doctor
+  reported passkeys on. That origin is now refused with
+  `409 maintainer_https_required`, naming the default port.
+- Docs: the v54 schema comment and version-history row said spent nonces
+  are kept until their payload expires; they are kept 7 days past it. The
+  row also names `maintainer_bootstrap.failed_attempts`.
+
+### Fixed (2026-10-05 — `test-login create` no longer locks out a daemon it cannot see, and restores close their scratch copy)
+- An independent review of `pseudolife-mcp test-login create` found that its
+  daemon-lockout check ran only when `PSEUDOLIFE_MCP_DATABASE_URL` was in
+  the operator's shell. With `--admin-url` against a server whose daemon
+  reaches the bank only through PUBLIC, the revoke locked that daemon out at
+  its next connection. It now also refuses, before any change and naming
+  the `GRANT CONNECT` to run, when any role connected to a bank now
+  (`pg_stat_activity`) would lose CONNECT, and says "daemon user not
+  checked" when that variable is absent or names no user. A daemon that
+  is down and reaches
+  the bank only through PUBLIC is still not seen: the guides now say so
+  instead of claiming the check unconditionally.
+- `--role` naming the daemon's own database user (from that variable) is
+  refused outright (the check skipped exactly that case).
+- The role changes run as one transaction: a statement failing part way
+  (a bank dropped meanwhile) left the role with a new password no file held,
+  since the staged file was removed.
+- A login file that cannot be written safely (`PrivateStateError`, or an
+  OS error) ends with one `test-login:` line and exit 1, not a traceback.
+  When the file cannot be moved into place after the role change, the
+  message says the role already has the new password and names the staged
+  file that holds it.
+- `ops/restore.*` rehearsals close their scratch copy
+  (`pseudolife_restore_rehearsal`, the whole bank) to PUBLIC before the
+  replay, and stop if they cannot; the test login could read it meanwhile.
+  The REVOKE a real restore runs on the bank (2026-10-04) is unconditional:
+  it runs whether or not a test login exists, so a custom role that reached
+  the bank only through PUBLIC's CONNECT loses it after a restore and needs
+  its own `GRANT CONNECT`.
+- Test infrastructure: the suite's refusal of a per-run database another
+  role owns no longer applies under `PSEUDOLIFE_TEST_DATABASE_URL`, whose
+  contract leaves the database to its caller; the bulk session reaps in
+  `tests/` and `evals/` also require `usename = current_user`, since a
+  non-superuser login cannot terminate another role's session; two
+  `tests/test_pg_defaults.py` tests hide a provisioned machine's login file
+  so they keep exercising `ops/.env`; and the server half of
+  `tests/test_test_login_cli.py` fails, rather than skips, in CI's
+  PostgreSQL job when `PSEUDOLIFE_TEST_LOGIN_ADMIN_URL` is missing.
+
 ### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
 - The maintainer could not reach a board session at all, and changing who
   holds a project's delegate or coordinator role took a shell on the daemon

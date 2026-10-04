@@ -49,7 +49,7 @@ anything when that connection is not a superuser. Idempotently, it:
 | What | Why |
 |---|---|
 | Creates or resets the role `pseudolife_test`: `LOGIN CREATEDB`, not superuser, no `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, every role membership revoked | It can create, reset and drop the databases it creates, which is everything the suite does on the server, and nothing else |
-| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner. When `PSEUDOLIFE_MCP_DATABASE_URL` names another user that reaches the bank only through `PUBLIC`, it refuses before any change and names the `GRANT CONNECT` to run first |
+| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner. When a role connected to the bank now, or the user `PSEUDOLIFE_MCP_DATABASE_URL` names (when that shell has it), reaches the bank only through `PUBLIC`, it refuses before any change and names the `GRANT CONNECT` to run first. Without that variable it says the daemon user was not checked: a daemon that is down and reaches the bank only through `PUBLIC` is not seen. `--role` naming that user is refused (so only when the shell has the URL). The role changes run as one transaction |
 | Installs (and updates) `vector` in `template1` | pgvector does not mark its extension trusted, so `CREATE EXTENSION vector` needs a superuser. `CREATE DATABASE` copies `template1`, so the login's databases already have it and the schema's `CREATE EXTENSION IF NOT EXISTS` skips |
 | Hands leftover run databases (`pseudolife_memory_test_<pid>`, `pseudolife_memory_bench_..._<pid>`: the names the suite's prune drops) to the role with `ALTER DATABASE ... OWNER TO`, printing each | A hard-killed run as the bank owner leaves one the login could not drop. Nothing else changes owner. Until then, a run whose name is such a leftover is refused with one line naming the `DROP DATABASE` to run as its owner |
 | `REVOKE CONNECT ON DATABASE template1 FROM PUBLIC` | A session connected to `template1` makes every `CREATE DATABASE` that copies it fail, the owner's after a restore's `DROP` included. Copying a template needs no `CONNECT` on it, so the login still creates its databases; the superuser keeps access |
@@ -68,7 +68,11 @@ upgrading the Postgres image, run it again to update `vector` in `template1`.
 A bank restore (`ops/restore.ps1 -Apply`, `ops/restore.sh --apply`)
 recreates the database, and a plain dump carries no database-level grants,
 so the restore scripts revoke `CONNECT` from `PUBLIC` again right after
-`CREATE DATABASE`, before the replay. Re-running `test-login create` after
+`CREATE DATABASE`, before the replay; a rehearsal does the same to its
+scratch copy, `pseudolife_restore_rehearsal`, and stops if it cannot. The
+revoke runs on every restore, with or without a test login: a custom role
+that reached the bank only through `PUBLIC` loses `CONNECT` and needs a
+`GRANT CONNECT` after the restore. Re-running `test-login create` after
 a restore is the check: it reports the bank as "already closed to PUBLIC".
 
 The installers run it only when asked: `ops/install.ps1 -TestLogin` or
@@ -245,7 +249,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `Get-Content C:\Users\<maintainer>\<deployment checkout>\ops\.env` | access denied |
 | `net user <agent>` | local group memberships: `Users` only |
 | `pseudolife-mcp board-audit stats` (or any operator command that opens the bank) | fails: no database URL, and no owner password to make one |
-| `python -c "import psycopg; psycopg.connect('postgresql://pseudolife_test:<password from test-pg.env>@127.0.0.1:5433/pseudolife_memory')"` | `permission denied for database "pseudolife_memory"` |
+| `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
 | `pseudolife-mcp maintainer list` (once the maintainer-passkey change lands) | fails, for the same reason |
