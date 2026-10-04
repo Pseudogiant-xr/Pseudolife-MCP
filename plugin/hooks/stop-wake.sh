@@ -81,21 +81,32 @@
 # and an older watcher that finds another token there exits quietly at its
 # next poll, so the newest turn end always owns the wait.
 #
-# Budget: hooks.json sets "timeout": 3600, which Claude Code enforces on
-# asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. An hour
-# covers twice the p90 acknowledgement latency (1,740 s) that sessions
-# without a watcher showed in the 2026-09-23 10-session messageboard trial;
-# The arm expires after 59 minutes; longer waits need a background wait-mail
-# arm (four hours by default), or their mail surfaces on the next prompt.
-# PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT shortens the
-# wait, never lengthens it.
-MAX_WAIT=3540
+# Budget: hooks.json sets "timeout": 1209600, which Claude Code enforces on
+# asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. A
+# session stays reachable for as long as it is open (maintainer requirement
+# 2026-10-05): fourteen days is twice the longest delegate lease, so a lease
+# granted any time in the week after the session's last turn is covered to
+# its end. Claude Code takes the timeout as is (timeout * 1000 ms, no
+# ceiling, in the 2.1.286 and 2.1.287 bundles read 2026-10-05) into a Node
+# timer, which fires at once above 2**31 - 1 ms (24.8 days). Until then the
+# hook stopped after 59 minutes and a longer wait needed wait-mail, which a
+# background Bash task cannot hold past two hours (the Bash tool stops one
+# at its own timeout: 30 minutes by default). PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT
+# shortens the wait, never lengthens it.
+MAX_WAIT=1209540
 # Matches the board's 60 s listener lease ceiling; renew every poll so a
 # killed watcher is no longer advertised as armed after one minute.
 LISTENER_LEASE=60
 # The shim rewrites the digest on its 20 s heartbeat, so a 5 s poll adds
-# little latency; each poll spawns one sleep.
+# little latency; each poll spawns a sleep, a date and a mv.
 POLL=5
+# After FAST_WAIT seconds (the hour the hook used to stop at) the watcher
+# polls every IDLE_POLL seconds. A session idle for days would otherwise keep
+# spawning three processes every 5 s; under Git Bash, bursts of 10-32 spawns
+# a second stalled mouse input on the maintainer's host (2026-10-02). Half
+# the listener lease keeps the record renewed with room for a slow spawn.
+FAST_WAIT=3540
+IDLE_POLL=30
 # At most MAX_WAKES wakes in any WAKE_WINDOW seconds. Two opted-in sessions
 # can keep waking each other, and every wake is an unattended model turn;
 # mail over the cap waits for the window, delayed but never dropped. The
@@ -453,7 +464,7 @@ fi
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
 case "$WAIT" in ''|*[!0123456789]*) WAIT=$MAX_WAIT ;; esac
-[ "${#WAIT}" -le 5 ] || WAIT=$MAX_WAIT
+[ "${#WAIT}" -le 7 ] || WAIT=$MAX_WAIT
 WAIT=$((10#$WAIT))
 [ "$WAIT" -le "$MAX_WAIT" ] || WAIT=$MAX_WAIT
 
@@ -610,7 +621,7 @@ wait_for_mail() {
             esac
         fi
         [ "$SECONDS" -lt "$deadline" ] || return 3
-        sleep "$POLL"
+        if [ "$SECONDS" -lt "$FAST_WAIT" ]; then sleep "$POLL"; else sleep "$IDLE_POLL"; fi
     done
 }
 

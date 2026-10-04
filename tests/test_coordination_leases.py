@@ -416,8 +416,10 @@ def test_the_operator_grants_a_delegate_until_it_expires(store):
     a = store.register("alice", project="proj")
     b = store.register("alice", project="proj")
     out = store.grant_delegate("proj", a["agent_id"][:8], hold=3600)
-    assert out == {"name": "delegate:proj", "agent_id": a["agent_id"],
-                   "fence": 1, "expires_at": 4600.0, "replaced": None}
+    assert {k: v for k, v in out.items() if k not in ("reachable", "reason", "warning")} == {
+        "name": "delegate:proj", "agent_id": a["agent_id"],
+        "fence": 1, "expires_at": 4600.0, "replaced": None}
+    assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
     [row] = events(store, "lease_delegate")
     assert (row["actor"], row["principal"], row["agent_id"]) == ("operator", "", a["agent_id"])
     assert payload(row) == {"name": "delegate:proj", "fence": 1, "hold": 3600,

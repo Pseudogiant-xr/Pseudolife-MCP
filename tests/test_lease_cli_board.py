@@ -245,7 +245,10 @@ def test_the_operator_grants_a_projects_delegate(board, pg_url, monkeypatch, cap
                            "--for", "12h"]) == 0
     captured = capsys.readouterr()
     out = json.loads(captured.out)
-    assert captured.err == ""
+    # Registered but never attached: no live listener, so the operator is
+    # told maintainer mail would wait for its next turn (2026-10-05).
+    assert out["reachable"] is False
+    assert captured.err == out["warning"] + "\n"
     assert (out["name"], out["agent_id"], out["replaced"]) == (
         "delegate:pseudolife-mcp", delegate["agent_id"], None)
     [lease] = _post(bridge, "leases", {"name": "delegate:pseudolife-mcp"})["leases"]
