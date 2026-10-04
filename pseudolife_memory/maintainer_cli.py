@@ -14,7 +14,8 @@ These reach the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or
 the lite tier's embedded instance, so they need the database owner's
 credentials, never a bearer token: that is what keeps an agent holding only
 a bearer from enrolling, confirming or revoking a key. Run them on the
-daemon host. Exit status: 0 done, 1 refused, 2 nothing could be done.
+daemon host; with neither there, they re-run inside the Docker tier's daemon
+container (daemon_exec.py). Exit status: 0 done, 1 refused, 2 nothing could be done.
 """
 from __future__ import annotations
 
@@ -23,6 +24,8 @@ from contextlib import contextmanager
 import os
 import sys
 import time
+
+from pseudolife_memory.daemon_exec import NoBank, no_bank_message, run_in_daemon
 
 EXIT_OK, EXIT_REFUSED, EXIT_ERROR = 0, 1, 2
 
@@ -58,9 +61,7 @@ def _bank():
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
     try:
         if not dsn:
-            raise MaintainerCliError("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the "
-                                     "bank's database URL, or run where the lite tier's data "
-                                     "dir holds one")
+            raise NoBank
         import psycopg
         conn = psycopg.connect(dsn, connect_timeout=5, autocommit=True)
         try:
@@ -130,7 +131,8 @@ def main(argv=None, out=None) -> int:
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp maintainer",
         description="Host-side management of the maintainer's passkeys (operator-only). "
-                    "Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank.")
+                    "Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank, else runs "
+                    "inside the pseudolife-mcp-daemon container when it runs here.")
     actions = parser.add_subparsers(dest="action", required=True)
     actions.add_parser("setup", help="guided: the Console's HTTPS name, the daemon's config and "
                                      "the first passkey (see `maintainer setup --help`)")
@@ -188,6 +190,12 @@ def main(argv=None, out=None) -> int:
     except MaintainerError as exc:
         print(f"refused: {_REFUSALS.get(exc.code, exc.code)}", file=sys.stderr)
         return EXIT_REFUSED
+    except NoBank:
+        ran = run_in_daemon("maintainer", argv)
+        if ran is not None:
+            return ran.returncode
+        print(f"error: {no_bank_message('maintainer')}", file=sys.stderr)
+        return EXIT_ERROR
     except MaintainerCliError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
