@@ -363,7 +363,8 @@ def test_maintainer_passkeys_on_reports_rp_id_origin_and_active_keys():
         out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
     assert daemon.seen == [("/api/maintainer", "Bearer fixture-token")]
     assert out["state"] == "on" and out["active_keys"] == 1
-    assert "box.example" in out["line"] and "https://box.example:8443" in out["line"]
+    assert (out["rp_id"], out["origin"]) == ("box.example", "https://box.example:8443")
+    assert out["line"] == "on - rp_id box.example, origin https://box.example:8443, 1 active key(s)"
     assert "database password" in out["note"]
     assert "Maintainer messages and roles from the Console" in out["note"]
 
@@ -381,8 +382,8 @@ def test_a_maintainer_config_the_daemon_refuses_is_a_failure_with_the_fix():
     with _MaintainerDaemon(409, body) as daemon:
         out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
     assert out["state"] == "invalid" and "plain http" in out["line"]
-    assert "coordination.maintainer.origin" in out["recovery"]
-    assert "http://localhost:<port>" in out["recovery"]
+    assert out["recovery"] == doctor_cli.MAINTAINER_FIX
+    assert "coordination.maintainer.origin" in doctor_cli.MAINTAINER_FIX
 
 
 @pytest.mark.parametrize("status,body,state", [
