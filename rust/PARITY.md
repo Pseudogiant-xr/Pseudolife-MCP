@@ -291,7 +291,9 @@ They remain deferred without introducing a database client into this binary.
 The first slice implements help and unknown dispatch and adds a separate 15-case
 CLI corpus, strict byte self-replay/candidate judge, environment selector and help
 cold-start-to-exit measurement instrument. Windows focused checks and a private
-15-case debug-binary proof passed; no committed first-slice receipts, Linux/CI
+15-case debug-binary proof passed for UTF-8 stdout/stderr and valid Unicode scalar
+argv, with Windows CRLF preserved. Locale/default and other output encodings and
+non-UTF-8/surrogate argv remain deferred. No committed first-slice receipts, Linux/CI
 proof or paired measurements exist yet, so help and CLI-DISPATCH remain deferred. The five existing
 `cli-main-process` nodes remain the only routed CLI nodes. Other entries below
 name concrete oracle nodes or internal test-function pools awaiting a process
@@ -299,7 +301,7 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 
 | Mode | Phase | Status | Evidence |
 |---|---|---|---|
-| help | 1 | deferred | A carried gap; implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; exact-byte corpus, both-OS local/CI receipts and measurement pending |
+| help | 1 | deferred | A carried gap; implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; exact UTF-8 stream/scalar argv corpus with Windows CRLF, both-OS local/CI receipts and measurement pending |
 | version | 1 | deferred | A carried gap; runtime identity is Python `sys.prefix` (`runtimes.py::running_runtime`); `test_cli_dispatch.py::test_version_prints_the_package_version[--version]`, `[version]`, `test_version_from_a_runtime_names_its_directory_and_commit` remain internal; Rust runtime identity decision and process equivalents pending |
 | shim | 1 | deferred | No accepted Rust evidence |
 | serve | 3/4 | deferred | Outside client leaves; `daemon.py`, storage/model ownership; `test_daemon_http.py` oracle pool |

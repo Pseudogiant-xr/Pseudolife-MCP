@@ -304,6 +304,9 @@ order and repeat-block p50/p95 floors from `shim_measurement.py`: three repeats
 of ten samples per arm, with an untimed exact-byte control before timing and
 unchanged bytes in every cell. Use the genuine prepared pinned Python runtime,
 a committed clean candidate root, and a quiet authorized CPU window. Required
+stream scope is UTF-8 stdout/stderr and valid Unicode scalar argv, with Windows
+CRLF preserved and LF elsewhere; receipts record this boundary. Locale/default
+and other output encodings and non-UTF-8 or surrogate argv remain deferred. Required
 arguments are `--oracle-root`, `--candidate-root`, `--candidate`, `--out` and
 the existing resource-check option; optional `--candidate-sha256` binds a frozen
 binary. `--smoke` permits smaller positive counts and marks the output as plumbing

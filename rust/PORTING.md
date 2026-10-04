@@ -348,10 +348,13 @@ change a public wire format, merge, deploy or mutate a live bank.
 ## Phase 2 CLI contract
 
 Phase 2 CLI dispatch reads only the first argument and keeps the binary named
-`pseudolife-stdio`; help bytes are the literal pinned `cli.py::_USAGE`, with
-Python's Windows text-stream CRLF translation preserved. Unknown Unicode scalar
+`pseudolife-stdio`; the current proof and help measurement select UTF-8 stdout/stderr.
+Help bytes are the literal pinned `cli.py::_USAGE`, kept LF by the Rust-local
+checkout attribute, with Python's Windows CRLF translation preserved and LF
+elsewhere. Unknown valid Unicode scalar
 argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing the
-existing pinned table. Non-UTF-8/surrogate argv remains deferred. Recognized modes
+existing pinned table. Locale/default and other output encodings and
+non-UTF-8/surrogate argv remain deferred. Recognized modes
 without an implementation emit a candidate-only deferred diagnostic, never the
 Python unknown-mode contract. No runtime identity is invented for version:
 `runtimes.running_runtime` depends on Python `sys.prefix`, so its three named

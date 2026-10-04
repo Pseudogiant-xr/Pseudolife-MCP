@@ -99,15 +99,18 @@ def run(root, command, candidate_root, evidence_directory, resource):
             "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "resource_check": resource, "capture_runtime": runtime,
             "candidate_identity": identity, "oracle_command_identity": python_identity,
-            "policy": "ordinary exit and exact stdout/stderr bytes; no normalization",
+            "policy": "ordinary exit and exact UTF-8 stdout/stderr bytes for valid Unicode scalar argv; "
+                      "Windows CRLF, LF elsewhere; no normalization",
             "transcript": transcript, "python_self_replay": control,
             "candidate_replay": candidate, "graded_controls": controls,
             "process_tests": tests, "unchanged_sources_sha256": before,
             "passed": control["passed"] and candidate["passed"]
                       and all(cell["rejected"] for cell in controls)
                       and all(result["passed"] for result in tests.values()),
-            "limitation": "Help and Unicode-scalar unknown dispatch only; version/runtime identity, "
-                          "non-UTF-8 argv and other mode contracts remain deferred."}
+            "limitation": "Help and valid Unicode-scalar unknown dispatch with UTF-8 stdout/stderr only; "
+                          "Windows CRLF is preserved. Locale/default and other output encodings, "
+                          "version/runtime identity, non-UTF-8 or surrogate argv and other mode contracts "
+                          "remain deferred."}
 
 
 def main():

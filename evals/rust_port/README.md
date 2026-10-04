@@ -319,9 +319,12 @@ unchanged and noncomparable; its canonical LF Git blob SHA256 is
 Final full-suite, integrated-head CI and independent review gates remain pending.
 
 Phase 2 adds `cli_corpus.py` and `cli_dispatch.py` without changing the historical
-Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown Unicode
-scalar arguments, including Python quote/control/separator spelling. They capture
-ordinary exit status and raw stdout/stderr from the genuine pinned Python 3.11
+Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown valid
+Unicode scalar arguments, including Python quote/control/separator spelling, with
+UTF-8 stdout/stderr explicitly selected. Windows CRLF is preserved; other platforms
+use LF. The Rust-local attribute keeps the compiled help asset canonical LF in a
+fresh `core.autocrlf=true` checkout. The cases capture ordinary exit status and
+raw stdout/stderr from the genuine pinned Python 3.11
 runtime, self-replay on the same platform, then compare the candidate with no
 newline normalization. Three mutations per case prove that both streams and the
 exit code are compared. Five immutable dispatcher tests route through the external
@@ -334,5 +337,7 @@ Run `evals.rust_port.cli_dispatch` under the prepared pinned interpreter with
 `--oracle-root`, `--candidate-root`, `--candidate-json`, `--evidence-directory`,
 `--out` and the existing resource-check option. Candidate Rust source must be
 committed and clean. The existing Parity job runs this additive lane on both OS.
-Version/runtime identity, non-UTF-8 argv and all other mode contracts stay deferred;
+Receipts record the UTF-8 stream, scalar argv and platform newline boundary.
+Locale/default and other output encodings, non-UTF-8 or surrogate argv,
+version/runtime identity and all other mode contracts stay deferred;
 passing this slice alone does not accept the entire CLI dispatch row.

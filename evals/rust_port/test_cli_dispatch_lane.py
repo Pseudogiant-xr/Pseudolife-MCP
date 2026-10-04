@@ -2,6 +2,7 @@
 import ast
 import base64
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -35,6 +36,11 @@ def test_cli_corpus_is_additive_and_does_not_invent_outputs():
                for case in cases)
     assert {tuple(case["request"]["argv"]) for case in cases} >= {
         ("--help",), ("-h",), ("help",), ("help", "anything"), ("bogus",)}
+    contract = cli_corpus.corpus()["fixture"]["stream_contract"]
+    assert contract["stdout_stderr_encoding"] == "utf-8"
+    assert contract["argv_domain"] == "valid Unicode scalar strings"
+    assert contract["newlines"] == "Windows CRLF; LF on other platforms"
+    assert "locale/default and other output encodings" in contract["deferred"]
 
 
 @pytest.mark.parametrize("field,replacement", [
@@ -49,11 +55,37 @@ def test_cli_judge_rejects_exit_stream_and_newline_changes(field, replacement):
                            harness.Policy(source_text_paths=(), ignored_values=()))
 
 
-def test_help_source_matches_python_literal():
+def pinned_usage():
     root = Path(__file__).resolve().parents[2]
-    tree = ast.parse((root / "pseudolife_memory/cli.py").read_text(encoding="utf-8"))
-    usage = next(ast.literal_eval(node.value) for node in tree.body
-                 if isinstance(node, ast.Assign) and any(
-                     isinstance(target, ast.Name) and target.id == "_USAGE"
-                     for target in node.targets))
-    assert (root / "rust/shim/src/cli_help.txt").read_text(encoding="utf-8") == usage
+    source = subprocess.check_output([
+        "git", "show", "f709abb54f7912ae9cd767998d0926ca33df4bcd:pseudolife_memory/cli.py"],
+        cwd=root)
+    tree = ast.parse(source.decode("utf-8"))
+    return next(ast.literal_eval(node.value) for node in tree.body
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == "_USAGE"
+                    for target in node.targets)).encode("utf-8")
+
+
+def test_help_source_matches_pinned_python_literal_bytes():
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()
+
+
+def test_help_asset_stays_canonical_in_autocrlf_checkout(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    source = tmp_path / "source"
+    asset = source / "rust/shim/src/cli_help.txt"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes((root / "rust/shim/src/cli_help.txt").read_bytes())
+    attributes = root / "rust/.gitattributes"
+    if attributes.exists():
+        (source / "rust/.gitattributes").write_bytes(attributes.read_bytes())
+    subprocess.run(["git", "init", "--quiet", str(source)], check=True)
+    subprocess.run(["git", "-c", "core.autocrlf=true", "add", "rust"],
+                   cwd=source, check=True)
+    checkout = tmp_path / "checkout"
+    subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",
+                    f"--prefix={checkout.as_posix()}/", "--", "rust/shim/src/cli_help.txt"],
+                   cwd=source, check=True)
+    assert (checkout / "rust/shim/src/cli_help.txt").read_bytes() == pinned_usage()

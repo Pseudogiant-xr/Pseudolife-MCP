@@ -8,6 +8,7 @@ import time
 
 from .common import lease_gate, provenance
 from .shim_measurement import artifact_identity, metric_cells, require_pinned_source
+from evals.rust_port.cli_corpus import STREAM_CONTRACT
 from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
 from evals.rust_port.provenance import require_import_root, runtime_metadata
@@ -60,13 +61,16 @@ def measure(args, resource):
             "capture_platform": capture_platform(), "provenance": provenance(source_root=root),
             "python_oracle": pin, "candidate_identity": identity,
             "candidate_executable": binary, "python_executable": python_identity,
-            "mode": "help", "argv": ["help"], "resource_check": resource,
+            "mode": "help", "argv": ["help"], "stream_contract": STREAM_CONTRACT,
+            "resource_check": resource,
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
             "metrics": {arm: metric_cells(rows, ("cold_start_to_exit_ms", "executable_bytes"))
                         for arm, rows in runs.items()},
             "byte_control": controls,
             "limitations": ["Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
+                            "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+                            "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
                             "Timing includes owned-process setup, complete output collection and clean exit.",
                             "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
                             "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",

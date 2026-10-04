@@ -1,5 +1,11 @@
 """Additive Phase 2 CLI cases; outputs come only from the pinned process."""
 
+STREAM_CONTRACT = {"stdout_stderr_encoding": "utf-8",
+                   "argv_domain": "valid Unicode scalar strings",
+                   "newlines": "Windows CRLF; LF on other platforms",
+                   "deferred": ["locale/default and other output encodings",
+                                "non-UTF-8 or surrogate argv"]}
+
 
 def corpus():
     arguments = (
@@ -20,7 +26,8 @@ def corpus():
         ("unknown-category-c", ["mode\u200b\ue000\U000f0000"]),
     )
     return {"schema": 1, "fixture": {"kind": "isolated-cli-dispatch",
-            "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd"},
+            "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+            "stream_contract": STREAM_CONTRACT},
             "cases": [{"id": name, "surface": "cli", "request": {"argv": argv},
                        "policy": {"source_text_paths": [], "ignored_values": []}}
                       for name, argv in arguments]}

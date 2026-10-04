@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+use sha2::{Digest, Sha256};
 use std::process::Command;
 
 fn bytes(text: &str) -> Vec<u8> {
@@ -25,7 +26,13 @@ fn help_aliases_ignore_trailing_arguments_before_daemon_attachment() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(0));
-        assert_eq!(output.stdout, bytes(include_str!("../src/cli_help.txt")));
+        // SHA-256 of pinned cli.py::_USAGE UTF-8 bytes, with Windows CRLF.
+        let expected = if cfg!(windows) {
+            "9ccc588d6cecc91c1cd69cae360941e501552ec7c5a5a18d8881f6c9b4af4eba"
+        } else {
+            "759a7ecda00a610211478fa811804ee5bba9092f55ebf7478bed54c041c9230a"
+        };
+        assert_eq!(format!("{:x}", Sha256::digest(&output.stdout)), expected);
         assert!(output.stderr.is_empty());
     }
 }
