@@ -72,8 +72,26 @@ fn assertion_child() {
             .enable_all()
             .build()
             .unwrap();
-        let runtime = rt.block_on(Runtime::from_environment(&python())).unwrap();
-        println!("runtime-note:{}", runtime.instructions_note);
+        let runtime = rt.block_on(Runtime::from_environment()).unwrap();
+        // Match the production scheduling seam: emit and flush before updating.
+        assert!(
+            runtime
+                .instructions_note
+                .contains("update --clients-only --tag 99.0.0")
+        );
+        assert!(
+            !PathBuf::from(
+                std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap()
+            )
+            .join(".pseudolife-mcp/update-clients.99.0.0.attempt")
+            .exists()
+        );
+        println!("first-frame:{}", runtime.instructions_note);
+        std::io::stdout().flush().unwrap();
+        println!(
+            "runtime-note:{}",
+            runtime.client_updates_after_first_frame()
+        );
     } else {
         panic!("unknown fixture mode");
     }
@@ -282,11 +300,15 @@ fn test_shim_runs_the_client_half_unattended_when_the_daemon_is_newer() {
     assert!(String::from_utf8(out.stderr).unwrap().contains("[shim]"));
 }
 #[test]
-fn test_shim_accept_health_says_the_runtime_is_being_installed() {
+fn test_shim_accept_health_gives_a_manual_remedy_before_the_postframe_update() {
     let (_, out, _) = runtime_update_fixture();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("unattended") && stderr.contains("99.0.0"));
-    assert!(!stderr.contains("python ops/update_clients.py"));
+    assert!(stderr.contains("python ops/update_clients.py"));
+    assert!(
+        stderr.find("then start a new session.").unwrap()
+            < stderr.find("started the unattended client update").unwrap()
+    );
 }
 
 #[test]

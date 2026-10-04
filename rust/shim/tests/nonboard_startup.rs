@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use std::{
     io::{self, Read, Write},
     net::TcpListener,
-    time::Duration,
+    sync::mpsc,
+    time::{Duration, Instant},
 };
 
 #[derive(Default)]
@@ -69,6 +70,27 @@ async fn test_no_spawn_env_falsy_value_still_spawns() {
         );
         assert_eq!(control.spawns, 1);
     }
+}
+#[tokio::test]
+async fn unconfigured_spawn_uses_the_no_spawn_wait_and_names_the_substitution() {
+    let home = DisposableHome::new();
+    let url = "http://127.0.0.1:18765";
+    let mut options = EnsureOptions::new(url, true, &home.0);
+    options.no_spawn_reason = Some(lifecycle::NO_CONFIGURED_SPAWN_NOTE);
+    let mut control = Control::default();
+    assert!(
+        lifecycle::ensure_daemon(url, &mut control, &options)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(control.spawns, 0);
+    assert_eq!(control.notes[0], lifecycle::NO_CONFIGURED_SPAWN_NOTE);
+    assert_eq!(
+        control.notes[1],
+        "[shim] no daemon at http://127.0.0.1:18765 and PSEUDOLIFE_MCP_NO_SPAWN is set — waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)..."
+    );
+    assert!(control.notes[2].starts_with("[shim] no answer from the memory daemon at http://127.0.0.1:18765.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n"));
 }
 #[tokio::test]
 async fn test_loopback_daemon_url_forms_still_spawn() {
@@ -147,18 +169,8 @@ fn auth_startup(degraded: bool, missing_file: bool) {
     let home = DisposableHome::new();
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", socket.local_addr().unwrap());
-    let worker = std::thread::spawn(move || {
-        let (mut stream, _) = socket.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let mut input = [0; 8192];
-        let size = stream.read(&mut input).unwrap();
-        assert!(String::from_utf8_lossy(&input[..size]).starts_with("GET /health "));
-        let body = json!({"status":if degraded{"degraded"}else{"ok"},"auth":true}).to_string();
-        write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
-        socket
-    });
+    let (cancel, cancelled) = mpsc::channel();
+    let worker = std::thread::spawn(move || auth_health(socket, degraded, cancelled));
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
     command
         .env_clear()
@@ -171,15 +183,21 @@ fn auth_startup(degraded: bool, missing_file: bool) {
         .env("PSEUDOLIFE_AGENT_STATE_DIR", &home.0)
         .env("PSEUDOLIFE_MCP_NO_SPAWN", "1")
         .env("PSEUDOLIFE_MCP_DAEMON_URL", url);
-    command.env(
-        "PSEUDOLIFE_MCP_PYTHON",
-        std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python".into()),
-    );
     if missing_file {
         command.env("PSEUDOLIFE_MCP_TOKEN_FILE", home.path("missing-token"));
     }
-    let output = command.output().unwrap();
-    let socket = worker.join().unwrap();
+    let output = command.output();
+    // Child creation failure or early exit must not strand the health listener.
+    let _ = cancel.send(());
+    let health = worker.join().unwrap();
+    let output = output.unwrap();
+    let socket = health.unwrap_or_else(|error| {
+        panic!(
+            "health fixture: {error}; child status: {}; child stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
     socket.set_nonblocking(true).unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
@@ -193,4 +211,64 @@ fn auth_startup(degraded: bool, missing_file: bool) {
         assert!(stderr.contains("missing-token"));
         assert!(stderr.contains("PSEUDOLIFE_MCP_TOKEN_FILE"));
     }
+}
+
+fn auth_health(
+    socket: TcpListener,
+    degraded: bool,
+    cancelled: mpsc::Receiver<()>,
+) -> io::Result<TcpListener> {
+    socket.set_nonblocking(true)?;
+    // This bounds only fixture failure; the required health request still fails
+    // the test when absent, instead of hanging nextest until its job timeout.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let (mut stream, _) = loop {
+        match socket.accept() {
+            Ok(connection) => break connection,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                match cancelled.recv_timeout(Duration::from_millis(5)) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "child exited before GET /health",
+                        ));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "child never issued GET /health",
+                    ));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    // Accepted sockets may inherit nonblocking mode on Windows.
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+    let mut input = [0; 8192];
+    let size = stream.read(&mut input)?;
+    assert!(String::from_utf8_lossy(&input[..size]).starts_with("GET /health "));
+    let body = json!({"status":if degraded{"degraded"}else{"ok"},"auth":true}).to_string();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )?;
+    Ok(socket)
+}
+
+#[test]
+fn auth_fixture_cancels_when_a_child_exits_before_health() {
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap();
+    let (cancel, cancelled) = mpsc::channel();
+    let worker = std::thread::spawn(move || auth_health(socket, false, cancelled));
+    cancel.send(()).unwrap();
+    let error = worker.join().unwrap().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    assert!(TcpListener::bind(address).is_ok());
 }

@@ -184,6 +184,13 @@ test/admin URLs internally, and stops the listener before writing
 external pytest adapter. Unmapped functions and private Python entrypoints are
 rejected. Without these switches, tests retain their Python default. Only public
 default, `shim` and `channel` launches can be replaced.
+The stdio harness binds `PSEUDOLIFE_MCP_PYTHON` to its own `sys.executable`;
+`env_extra` may override it, including with an empty value. The external stdio
+adapter preserves a selector in the test's child environment, otherwise uses
+the explicitly configured caller selector or its own interpreter. The CLI
+adapter uses that same caller-or-interpreter choice. These bindings do not
+change remote or no-spawn controls. The Parity workflow runs the instrument
+with the prepared oracle interpreter and explicitly selects it for children.
 For a full-suite gate, add `--port-full-suite` with `--port-stdio-json`:
 all mapped stdio nodes use Rust, and every other collected node runs its original
 Python assertions. This mode reports both counts and refuses a selection with
@@ -205,9 +212,16 @@ pass through the shared boundary observation wrapper and generic comparator.
 The identity proxy seeds a fresh bank and must make zero mutations and produce
 zero differences. HTTP raw bodies remain retained but ignored until Phase 3.
 Deterministic test embeddings establish protocol and storage execution, not
-model or retrieval parity. All 125 scoped Phase 1 internal functions now name Rust targets with
-Windows/Linux assertion evidence; 56 internal functions remain outside this
-phase. This mapping completion does not establish final acceptance.
+model or retrieval parity. Historically, at `2e628b27`, all 125 scoped Phase 1
+internal functions named Rust targets with Windows/Linux assertion evidence.
+The current mapping contains 121 completed equivalents, exactly 3 SDK cases
+retired-by-decision, and 1 pending postframe update-scheduling substitution.
+The pending row now records targeted Windows/Linux evidence at frozen tree
+`a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
+and successful reruns, and Linux passed all four checks (66 integration and
+5 wire cases). The 56 other internal functions remain outside this phase.
+Substitution acceptance, final-head CI, receipts, measurements and full suites
+remain pending.
 
 After merging newer Python source, keep the oracle at its recorded pin. Prepare
 an isolated oracle from the current checkout-installed dependency runtime:

@@ -75,18 +75,11 @@ pub fn armed_until_at(digest: Option<&Path>, now: f64) -> f64 {
     }
     latest
 }
-fn member(value: char, ranges: &[(u32, u32)]) -> bool {
-    let value = value as u32;
-    let index = ranges.partition_point(|(_, last)| *last < value);
-    ranges
-        .get(index)
-        .is_some_and(|(first, last)| *first <= value && value <= *last)
-}
 pub fn alphanumeric(value: char) -> bool {
-    member(value, super::reason14::ALNUM)
+    value.is_alphanumeric()
 }
 pub fn whitespace(value: char) -> bool {
-    member(value, super::reason14::SPACE)
+    value.is_whitespace()
 }
 pub fn reason(value: &str) -> String {
     let compact = value

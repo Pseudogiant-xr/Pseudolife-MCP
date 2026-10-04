@@ -90,8 +90,27 @@ def test_phase1_scoped_equivalents_preserve_complete_ownership(inventory):
     scoped = [item for item in functions if item["bucket"] == "internal" and item["scope"] == "phase1"]
     assert len(scoped) == 125
     assert all(item["required_equivalent"] or item.get("equivalence_evidence") for item in scoped)
-    assert all(item["acceptance"] == "pending" for item in functions)
+    retired = {item["nodeid"] for item in functions if item["acceptance"] == "retired-by-decision"}
+    assert retired == {
+        "tests/test_shim.py::test_sdk_guard_passes_on_a_v2_environment",
+        "tests/test_shim.py::test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic",
+        "tests/test_shim.py::test_sdk_guard_survives_a_fully_absent_mcp",
+    }
+    assert all(item["acceptance"] == "pending" for item in functions if item["nodeid"] not in retired)
     assert all(item["equivalent"] == "pending" for item in functions if item["required_equivalent"])
+
+
+def test_postframe_mapping_keeps_acceptance_pending_with_both_platforms(inventory):
+    manifest = json.loads(inventory.source("rust/phase1-test-buckets.json"))
+    item = next(item for item in manifest["phase1_functions"] if item["nodeid"] ==
+                "tests/test_update_offer.py::test_shim_accept_health_says_the_runtime_is_being_installed")
+    assert item["acceptance"] == item["equivalent"] == "pending"
+    assert item["required_equivalent"]
+    evidence = item["equivalence_evidence"]
+    assert evidence["status"] == "validated-targeted"
+    assert evidence["candidate_tree"] == "a4ff3236eb349aaed427d80129513fe22cf0183f"
+    assert evidence["validation"]["windows"] == "closeout-final-assertions-green-windows.log"
+    assert evidence["validation"]["linux"] == "closeout-targeted-linux.log"
 
 
 @pytest.mark.parametrize("fault,error", [

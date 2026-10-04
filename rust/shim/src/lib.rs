@@ -9,7 +9,6 @@ pub mod lifecycle;
 mod owned_transport;
 mod raw_http;
 mod recovery;
-pub mod sdk_guard;
 mod subscriptions;
 mod upstream;
 mod wire_compatibility;
@@ -114,11 +113,7 @@ impl Proxy {
         Self::attach_mode(false).await
     }
     pub async fn attach_mode(channel: bool) -> Result<Self, lifecycle::StartupError> {
-        let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON").unwrap_or_else(|| "python".into());
-        sdk_guard::require_sdk(std::path::Path::new(&python), sdk_guard::PROBE_MODULE).await?;
-        let runtime = std::sync::Arc::new(
-            lifecycle::Runtime::from_environment(std::path::Path::new(&python)).await?,
-        );
+        let runtime = std::sync::Arc::new(lifecycle::Runtime::from_environment().await?);
         let upstream = Upstream::new(runtime.clone());
         let (board, fetched) = tokio::join!(
             board::Board::attach(runtime.clone(), channel),
@@ -472,12 +467,21 @@ fn toolset_changed(result: &CallToolResult) -> bool {
 }
 
 pub async fn serve(handler: impl ServerHandler, ownership: Ownership) -> Result<(), &'static str> {
+    serve_after_first_frame(handler, ownership, || {}).await
+}
+
+pub async fn serve_after_first_frame(
+    handler: impl ServerHandler,
+    ownership: Ownership,
+    first_frame: impl FnOnce() + Send + 'static,
+) -> Result<(), &'static str> {
     let (output_read, output_write) = tokio::io::duplex(64 * 1024);
     let ids = wire_ids::Ids::default();
-    let output = tokio::spawn(wire_json::output(
+    let output = tokio::spawn(wire_json::output_after_first_frame(
         output_read,
         tokio::io::stdout(),
         ids.clone(),
+        first_frame,
     ));
     let transport = owned_transport::OwnedTransport {
         inner: AsyncRwTransport::new_server(

@@ -34,7 +34,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install the preserved SDK preflight dependency
+      - name: Bind the selected Python interpreter for Rust fixtures
+        shell: pwsh
+        run: |
+          $selectedPython = python -c 'import sys; print(sys.executable)'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PSEUDOLIFE_MCP_PYTHON=$selectedPython" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install the Python SDK fixture dependency
         run: python -m pip install "mcp==2.1.1"
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -130,6 +136,7 @@ jobs:
           } else {
             Join-Path $oracleRoot 'runtime/bin/python'
           }
+          $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
           Push-Location (Join-Path $oracleRoot 'source')
           try {

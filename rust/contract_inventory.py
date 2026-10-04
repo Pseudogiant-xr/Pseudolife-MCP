@@ -196,6 +196,20 @@ def validate(*, phase1: bool = False) -> dict:
             names = {node.name for node in ast.parse(pinned_source(path, oracle=oracle)).body
                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
             assert function in names, "function absent from oracle"
+            retired_sdk_nodes = {
+                "tests/test_shim.py::test_sdk_guard_passes_on_a_v2_environment",
+                "tests/test_shim.py::test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic",
+                "tests/test_shim.py::test_sdk_guard_survives_a_fully_absent_mcp",
+            }
+            if item["nodeid"] in retired_sdk_nodes:
+                evidence = item.get("equivalence_evidence", {})
+                assert (item["acceptance"] == "retired-by-decision"
+                        and item["equivalent"] == "retired-by-decision"
+                        and item["required_equivalent"] is None
+                        and evidence.get("status") == "retired-by-decision"
+                        and evidence.get("decision") == "Maintainer 2026-10-05 phase 2 brief, section 1; PORTING.md no-python-before-first-frame"
+                        and evidence.get("rust_tests") == []), "SDK retirement differs from the maintainer decision"
+                continue
             assert item["acceptance"] == "pending", "Phase 1 acceptance requires execution evidence"
             if item["required_equivalent"]:
                 assert item["equivalent"] == "pending", "proposed target is not a passed equivalent"
@@ -256,7 +270,7 @@ def validate(*, phase1: bool = False) -> dict:
             mode_index = cells.index("Mode") if "Mode" in cells else None
             surface_index = cells.index("Row") if "Row" in cells else None
         elif status_index is not None:
-            assert cells[status_index] in {"ported", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
+            assert cells[status_index] in {"ported", "ported-with-substitution", "deferred", "retired-by-decision"}, f"invalid parity status: {line}"
             if mode_index is not None:
                 checked_cli_modes.add(cells[mode_index])
             if surface_index is not None:

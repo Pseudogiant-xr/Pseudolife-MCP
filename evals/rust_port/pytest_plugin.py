@@ -77,8 +77,12 @@ def _port_selected_boundary(request):
             # The selected tests keep their own daemon, environment and SDK assertions.
             # Fail closed if a test changes to a private Python entrypoint.
             modes = public_shim_arguments(server.command, server.args)
+            env = dict(server.env or {})
+            # Retain an intentional selector, including an empty no-Python override.
+            env.setdefault("PSEUDOLIFE_MCP_PYTHON",
+                           os.environ.get("PSEUDOLIFE_MCP_PYTHON", sys.executable))
             updated = server.model_copy(update={"command": stdio_prefix[0],
-                                               "args": [*stdio_prefix[1:], *modes]})
+                                               "args": [*stdio_prefix[1:], *modes], "env": env})
             async with original(updated, *args, **kwargs) as streams:
                 yield streams
 
@@ -93,8 +97,10 @@ def _port_selected_boundary(request):
     tmp_path = request.getfixturevalue("tmp_path")
 
     def main():
+        env = isolated_env(tmp_path)
+        env["PSEUDOLIFE_MCP_PYTHON"] = os.environ.get("PSEUDOLIFE_MCP_PYTHON", sys.executable)
         result = run_cli(prefix, sys.argv[1:], cwd=Path.cwd(),
-                         env=isolated_env(tmp_path), timeout=10)
+                         env=env, timeout=10)
         # capsys sees the candidate's streams; original test assertions and
         # expected SystemExit stay intact. No Python CLI implementation is run.
         sys.stdout.write(base64.b64decode(result["stdout_b64"]).decode("utf-8"))

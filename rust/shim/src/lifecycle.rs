@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-pub const PACKAGE_VERSION: &str = "0.16.0";
+pub const PACKAGE_VERSION: &str = "0.16.1";
 pub const SPAWN_WAIT: Duration = Duration::from_secs(25);
 pub const SPAWN_WAIT_ALIVE: Duration = Duration::from_secs(180);
 pub const EXTERNAL_WAIT: Duration = Duration::from_secs(5);
@@ -200,6 +200,7 @@ impl Drop for SpawnLock {
 #[derive(Clone, Debug)]
 pub struct EnsureOptions {
     pub no_spawn: bool,
+    pub no_spawn_reason: Option<&'static str>,
     pub lock_path: PathBuf,
     pub external_wait: Duration,
     pub spawn_floor: Duration,
@@ -209,6 +210,7 @@ impl EnsureOptions {
     pub fn new(url: &str, no_spawn: bool, temporary: &Path) -> Self {
         Self {
             no_spawn,
+            no_spawn_reason: None,
             lock_path: spawn_lock_path(url, temporary),
             external_wait: EXTERNAL_WAIT,
             spawn_floor: SPAWN_WAIT,
@@ -228,14 +230,58 @@ pub trait DaemonControl {
     fn exited(&mut self, child: &mut Self::Child) -> Option<i32>;
     fn note(&mut self, message: &str);
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaemonLaunch {
+    pub program: std::ffi::OsString,
+    pub args: Vec<std::ffi::OsString>,
+}
+impl DaemonLaunch {
+    pub fn from_settings(
+        python: Option<&std::ffi::OsStr>,
+        serve_command: Option<&str>,
+    ) -> Result<Option<Self>, StartupError> {
+        if let Some(command) = serve_command {
+            let argv: Vec<String> = serde_json::from_str(command).map_err(|_| {
+                StartupError::fatal("[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable")
+            })?;
+            let mut argv = argv.into_iter();
+            let program = argv.next().filter(|program| !program.is_empty()).ok_or_else(|| {
+                StartupError::fatal("[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable")
+            })?;
+            return Ok(Some(Self {
+                program: program.into(),
+                args: argv.map(Into::into).collect(),
+            }));
+        }
+        Ok(python
+            .filter(|python| !python.is_empty())
+            .map(|python| Self {
+                program: python.to_owned(),
+                args: ["-m", "pseudolife_memory.cli", "serve"]
+                    .map(Into::into)
+                    .to_vec(),
+            }))
+    }
+    pub fn spawn(&self) -> io::Result<Child> {
+        let mut command = Command::new(&self.program);
+        command
+            .args(&self.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detached(&mut command);
+        command.spawn()
+    }
+}
+pub const NO_CONFIGURED_SPAWN_NOTE: &str = "[shim] fallback spawning is disabled: set PSEUDOLIFE_MCP_PYTHON to an explicit interpreter or PSEUDOLIFE_MCP_SERVE_COMMAND to a JSON argv array; using the PSEUDOLIFE_MCP_NO_SPAWN waiting path.";
 pub struct HttpDaemonControl {
-    python: PathBuf,
+    launch: Option<DaemonLaunch>,
     epoch: Instant,
 }
 impl HttpDaemonControl {
-    pub fn new(python: impl Into<PathBuf>) -> Self {
+    pub fn new(launch: Option<DaemonLaunch>) -> Self {
         Self {
-            python: python.into(),
+            launch,
             epoch: Instant::now(),
         }
     }
@@ -252,7 +298,10 @@ impl DaemonControl for HttpDaemonControl {
         probe_health(url, timeout).await
     }
     fn spawn(&mut self) -> io::Result<Child> {
-        spawn_daemon(&self.python)
+        self.launch
+            .as_ref()
+            .ok_or_else(|| io::Error::other("fallback spawning is disabled"))?
+            .spawn()
     }
     fn exited(&mut self, child: &mut Child) -> Option<i32> {
         child
@@ -320,6 +369,9 @@ pub async fn ensure_daemon<C: DaemonControl>(
         return Ok(None);
     }
     if options.no_spawn {
+        if let Some(reason) = options.no_spawn_reason {
+            control.note(reason);
+        }
         control.note(&format!("[shim] no daemon at {url} and PSEUDOLIFE_MCP_NO_SPAWN is set — waiting up to {:.0}s for it instead of spawning a fallback (Docker may still be starting)...", options.external_wait.as_secs_f64()));
         let start = control.now();
         while control.now().saturating_sub(start) < options.external_wait {
@@ -551,38 +603,46 @@ pub struct Runtime {
     pub cache: Option<HandshakeCache>,
 }
 impl Runtime {
-    /// The caller supplies the same Python interpreter that runs the oracle.
-    pub async fn from_environment(python: &Path) -> Result<Self, StartupError> {
+    pub async fn from_environment() -> Result<Self, StartupError> {
         let url = daemon_url::from_environment().map_err(StartupError::fatal)?;
         let no_spawn = spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref());
-        let options = EnsureOptions::new(&url, no_spawn, &std::env::temp_dir());
-        let mut control = HttpDaemonControl::new(python);
+        let launch = if no_spawn || !daemon_url::is_loopback(&url) {
+            None
+        } else {
+            let python = std::env::var_os("PSEUDOLIFE_MCP_PYTHON");
+            let serve_command = std::env::var("PSEUDOLIFE_MCP_SERVE_COMMAND").map(Some).or_else(|error| {
+                if matches!(error, std::env::VarError::NotPresent) { Ok(None) }
+                else { Err(StartupError::fatal("[shim] PSEUDOLIFE_MCP_SERVE_COMMAND must be a JSON argv array with a nonempty executable")) }
+            })?;
+            DaemonLaunch::from_settings(python.as_deref(), serve_command.as_deref())?
+        };
+        let mut options =
+            EnsureOptions::new(&url, no_spawn || launch.is_none(), &std::env::temp_dir());
+        if !no_spawn && launch.is_none() && daemon_url::is_loopback(&url) {
+            options.no_spawn_reason = Some(NO_CONFIGURED_SPAWN_NOTE);
+        }
+        let mut control = HttpDaemonControl::new(launch);
         let health = ensure_daemon(&url, &mut control, &options).await?;
         let mut instructions_note = String::new();
         if let Some(health) = &health {
             let command = launcher_command();
-            let mut updates = ClientUpdates::new(
+            let updates = ClientUpdates::new(
                 crate::credentials::expand_user(Path::new("~"))
                     .ok()
                     .unwrap_or_else(|| PathBuf::from("."))
                     .join(".pseudolife-mcp"),
-                python,
+                Path::new(""),
                 PACKAGE_VERSION,
                 &command,
                 no_spawn,
             );
             instructions_note = updates.version_note(&url, health);
             if !instructions_note.is_empty() {
-                let unattended = updates.unattended(&url, health);
-                if unattended.is_empty() {
-                    eprintln!(
-                        "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon ({command} update); then start a new session.",
-                        health["version"].as_str().unwrap_or(""),
-                        health["version"].as_str().unwrap_or("")
-                    );
-                } else {
-                    instructions_note = unattended;
-                }
+                eprintln!(
+                    "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon ({command} update); then start a new session.",
+                    health["version"].as_str().unwrap_or(""),
+                    health["version"].as_str().unwrap_or("")
+                );
             }
             notice_inert(health);
         }
@@ -601,6 +661,31 @@ impl Runtime {
             health,
             instructions_note,
         })
+    }
+    /// The stdout writer calls this only after its first complete frame flush.
+    pub fn client_updates_after_first_frame(&self) -> String {
+        if !daemon_url::is_loopback(&self.url) {
+            return String::new();
+        }
+        let Some(health) = &self.health else {
+            return String::new();
+        };
+        let Some(python) =
+            std::env::var_os("PSEUDOLIFE_MCP_PYTHON").filter(|python| !python.is_empty())
+        else {
+            return String::new();
+        };
+        let mut updates = ClientUpdates::new(
+            crate::credentials::expand_user(Path::new("~"))
+                .ok()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".pseudolife-mcp"),
+            PathBuf::from(python),
+            PACKAGE_VERSION,
+            &launcher_command(),
+            spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref()),
+        );
+        updates.unattended(&self.url, health)
     }
     pub fn daemon_unreachable(&self) -> bool {
         self.health.is_none()

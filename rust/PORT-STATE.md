@@ -23,7 +23,7 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | In progress; master-forward inventory closed; acceptance gates pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Frozen 2e628b27 checks and strict judges pass on both platforms; all 125 scoped equivalents have evidence. Paired measurements are recorded; required full suites and final-head CI remain pending; no Rust acceptance claimed |
+| 1: Stdio shim | In progress; master-forward inventory and close-out b implemented; acceptance gates pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Historical 2e628b27 judges and measurements retained. Current mapping: 121 completed equivalents, 3 SDK cases retired-by-decision, 1 pending postframe substitution with Windows/Linux targeted evidence at a4ff3236. Current receipts, post-retirement measurements, full suites and final-head CI remain pending; no Rust acceptance claimed |
 | 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -77,9 +77,11 @@ No production Rust surface has been accepted.
   Both remain unchanged here. Phase 3 requires maintainer docs resolution and a
   named same-graph/tokenizer comparison with measured error before a tolerance
   or embedding-equivalence claim is accepted.
-- All 125 scoped internal cases have targeted Rust equivalents; 56 other
-  internal cases remain outside Phase 1's scope. Inventory and component
-  coverage alone do not close production behavior rows.
+- Historically, `2e628b27` named targeted Rust equivalents for all 125 scoped
+  internal cases. The current mapping has 121 completed equivalents, 3 SDK
+  retirements and 1 pending postframe substitution with targeted evidence on
+  both platforms; 56 other internal cases remain outside Phase 1's scope.
+  Inventory and component coverage alone do not close production behavior rows.
 - The legacy MCP negotiation evidence from #540 is about its original pin;
   current and earlier protocol revisions require separate current-pin evidence.
 
@@ -118,9 +120,10 @@ and oracle identities and are not relabeled as current acceptance.
 
 The initial independent whole-branch review of `4d31fd56` found four blockers.
 A fresh independent review of `2e628b27` verified their fixes and approved the
-code conditional on the remaining acceptance gates. The selected Python SDK
-preflight remains preserved before daemon traffic; its startup cost belongs
-in the measurements. No maintainer retirement decision is implemented.
+code conditional on the remaining acceptance gates. That historical candidate
+preserved the Python SDK preflight before daemon traffic, and its startup cost
+belongs in the historical measurements. Close-out item b below implements the
+subsequent authorized retirement and substitutions.
 
 The first hosted Rust workflow attempt at `2e628b27` failed in new fixtures:
 Linux ran 171/262 (169 passed, two Board retry failures); Windows ran 230/280
@@ -155,8 +158,8 @@ no green hosted CI or Phase 1 acceptance is claimed.
 
 Paired measurements at `2e628b27` completed three repeats of ten samples per
 arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
-The real Python SDK preflight remains inside Rust startup; its descendants
-contribute to sampled process-tree RSS. Receipts are
+That historical candidate includes the real Python SDK preflight inside Rust
+startup; its descendants contribute to sampled process-tree RSS. Receipts are
 `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
 `evals/results/rust-phase1-measurement-linux-2e628b27.json`.
 
@@ -196,6 +199,36 @@ Item a is complete: both inventory audits pass with no missing surfaces;
 the inventory/provenance selection passes 56 tests, including unknown-reference
 negative controls. Validation: `python rust/contract_inventory.py --phase1`,
 `python rust/contract_inventory.py` and the targeted inventory/provenance files.
-Next: apply the authorized
-retirements and substitutions in item b, then run item c; no compilation,
-full suite or receipt replay is claimed for this integration alone.
+Item b is now implemented as recorded below; item c and the remaining final-head
+gates are next. No full suite or receipt replay is claimed for item a alone.
+
+## Phase 2 close-out item b
+
+The authorized SDK preflight and wake-reason table retirements and explicit
+daemon-spawn and postframe-update substitutions are implemented over integrated
+HEAD `7d0ee5997acb4c74196a0d46fa9f2fc20aa3e860`. Exactly three SDK mapping rows
+are retired-by-decision. The update-scheduling row stays pending with its
+proposed Rust target and current Windows/Linux targeted evidence; the other
+121 completed equivalents retain their recorded component evidence.
+The harness and external adapter explicitly bind the selected Python runtime,
+and the Parity workflow selects its prepared oracle interpreter.
+
+Frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f` passed Windows and Linux
+all-target check/clippy and 71 affected Rust cases (66 integration, 5 wire).
+Windows evidence is `closeout-check-windows.log`, `closeout-clippy-windows.log`,
+`closeout-targeted-green-windows.log`, `closeout-final-assertions-green-windows.log`
+and `closeout-wire-windows.log`. The aggregate Windows run retained a transient
+ConnectionReset; its exact rerun and the full nine-test final-assertions file
+passed, so no clean aggregate-run claim is made. Linux evidence is
+`closeout-check-linux.log`, `closeout-clippy-linux.log`, `closeout-targeted-linux.log`
+and `closeout-wire-linux.log`, each with a saved exit 0. These private logs bind
+to the frozen tree; they do not validate later changes. Both platforms reported
+zero owned candidates after cleanup.
+
+The two interim review findings are repaired in the interpreter bindings and
+current evidence descriptions; their follow-up independent review is pending.
+Items c through g remain open: fixture fixes and final nextest, executing Parity
+and green final-head CI, current per-node receipts and Python self-replay,
+post-retirement paired measurements, remaining small review items, committed
+candidate-routed full suites on both machines, and final independent review.
+No production acceptance row changes status on this component evidence.

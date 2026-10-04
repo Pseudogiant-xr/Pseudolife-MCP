@@ -26,13 +26,30 @@ between implementations. Keep the Python oracle available through cutover.
 Worker output is evidence to verify, not automatic acceptance; only the lead
 updates parity rows and phase state.
 
-The experimental shim retains the oracle's Python MCP SDK startup preflight.
-It invokes `PSEUDOLIFE_MCP_PYTHON` when selected, otherwise `python` on `PATH`,
-and requires the `mcp.server.subscriptions` capability before daemon traffic.
-Missing or older SDK environments preserve the oracle's diagnostic and exit 1;
-a successful preflight is silent. Rust owns the subsequent stdio protocol and
-HTTP lifecycle. Measurements include the preflight process and its memory.
-The parity lane supplies the pinned Python 3.11 / MCP 2.1.1 environment.
+The maintainer's 2026-10-05 phase 2 decision retires the Python MCP SDK
+preflight in the Rust candidate (`retired-by-decision`). The checked modules
+are Python imports; Rust imports none of them. The Python oracle and its
+existing tests retain that guard.
+
+**`no-python-before-first-frame`:** the Rust candidate runs no Python
+interpreter before its first complete stdout frame is successfully written
+and flushed, except when it must spawn the local daemon. A remote daemon URL
+never runs Python. Local fallback spawning requires `PSEUDOLIFE_MCP_PYTHON`
+or `PSEUDOLIFE_MCP_SERVE_COMMAND` (a nonempty JSON argv array, preferred when
+both are set). Without either, the candidate takes the existing no-spawn wait
+and prints the named explanation `NO_CONFIGURED_SPAWN_NOTE`; it never invents
+`python` from PATH. This is `ported-with-substitution` for the Python oracle's
+`sys.executable` spawn. A configured command is passed as argv, without a shell.
+
+Unattended client updates retain their loopback/no-spawn/newer-version gates
+and require the explicit interpreter setting. The writer schedules them once,
+after the first successful frame flush; no frame or a failed flush starts no
+update. Startup retains the truthful manual version remedy in stderr and
+initialize instructions, plus all authentication checks. An update launch
+diagnostic appears only after that launch succeeds. An explicit serve command
+alone does not identify a Python interpreter for client updates. This changes
+the scheduling and initialize version note by the same maintainer decision;
+the candidate remains uninstalled by the port.
 
 ## Types and serialization
 
@@ -130,8 +147,13 @@ behavior: casefold, then NFC, with category-C inputs rejected. The pinned
 `unicode-casefold` crate uses Unicode 9.0.0; a full code-point probe found 129
 casefold differences. `shim/src/board/unicode14.rs` records those corrections
 and the 701 category-C ranges, with dedicated normalization assertions.
-This compatibility table preserves the oracle's label policy; it does not
-authorize normalization at other boundaries.
+This compatibility table pins CPython 3.11's Unicode 14 for repository claims;
+it does not pin every Rust text operation to Python. Wake-reason sanitization
+uses Rust `char::is_alphanumeric` and `char::is_whitespace` by the maintainer's
+2026-10-05 phase 2 decision (`ported-with-substitution`); it still compacts,
+limits to 60 characters, filters punctuation and falls back to `unknown`.
+Unicode 14's U+001C separator is therefore filtered rather than split in a wake
+reason. Claim casefold/category-C/NFC behavior keeps `unicode14.rs` unchanged.
 
 ## HTTP and authentication
 

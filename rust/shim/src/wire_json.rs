@@ -110,11 +110,21 @@ pub(crate) fn encode(mut value: Value) -> Result<Vec<u8>, serde_json::Error> {
 }
 /// Keep RMCP's input decoding, dispatch and request ownership. Its output is
 /// framed here to reproduce the oracle's typed-field order and text newline.
+#[cfg(test)]
 pub(crate) async fn output<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    read: R,
+    write: W,
+    ids: crate::wire_ids::Ids,
+) -> Result<(), std::io::Error> {
+    output_after_first_frame(read, write, ids, || {}).await
+}
+pub(crate) async fn output_after_first_frame<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     read: R,
     mut write: W,
     ids: crate::wire_ids::Ids,
+    first_frame: impl FnOnce(),
 ) -> Result<(), std::io::Error> {
+    let mut first_frame = Some(first_frame);
     let mut reader = BufReader::new(read);
     let mut line = Vec::new();
     loop {
@@ -127,12 +137,88 @@ pub(crate) async fn output<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         let bytes = encode(value).map_err(std::io::Error::other)?;
         write.write_all(&bytes).await?;
         write.flush().await?;
+        if let Some(first_frame) = first_frame.take() {
+            first_frame();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        pin::Pin,
+        sync::{Arc, Mutex},
+        task::{Context, Poll},
+    };
+
+    #[derive(Clone, Default)]
+    struct ObservedWrite {
+        events: Arc<Mutex<Vec<&'static str>>>,
+        bytes: Arc<Mutex<Vec<u8>>>,
+        fail_flush: bool,
+    }
+    impl AsyncWrite for ObservedWrite {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.events.lock().unwrap().push("write");
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Poll::Ready(Ok(bytes.len()))
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            self.events.lock().unwrap().push("flush");
+            if self.fail_flush {
+                Poll::Ready(Err(std::io::Error::other("fixture flush failure")))
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+    #[tokio::test]
+    async fn first_frame_callback_runs_once_after_write_and_flush() {
+        let write = ObservedWrite::default();
+        let observed = write.clone();
+        let events = write.events.clone();
+        output_after_first_frame(
+            &b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n"[..],
+            write,
+            crate::wire_ids::Ids::default(),
+            move || {
+                assert!(observed.bytes.lock().unwrap().ends_with(b"\n"));
+                let mut events = observed.events.lock().unwrap();
+                assert_eq!(events.as_slice(), ["write", "flush"]);
+                events.push("update");
+            },
+        ).await.unwrap();
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            ["write", "flush", "update", "write", "flush", "flush"]
+        );
+    }
+    #[tokio::test]
+    async fn failed_or_absent_first_frame_does_not_run_the_callback() {
+        for input in [
+            &b""[..],
+            &b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"[..],
+        ] {
+            let write = ObservedWrite {
+                fail_flush: !input.is_empty(),
+                ..Default::default()
+            };
+            let result =
+                output_after_first_frame(input, write, crate::wire_ids::Ids::default(), || {
+                    panic!("update before a successful first frame")
+                })
+                .await;
+            assert_eq!(result.is_ok(), input.is_empty());
+        }
+    }
     #[test]
     fn oracle_envelope_order_and_platform_newline() {
         let input: Value = serde_json::from_str(r#"{"result":{"serverInfo":{"version":"","name":"pseudolife-memory"},"protocolVersion":"2025-11-25","instructions":"fixture","capabilities":{"tools":{"listChanged":true},"experimental":{}}},"id":"open","jsonrpc":"2.0"}"#).unwrap();

@@ -204,7 +204,7 @@ fn respond(
         }
         Reply::Http(
             200,
-            json!({"status":"ok","auth_required":false,"version":"0.16.0"}).to_string(),
+            json!({"status":"ok","auth_required":false,"version":pseudolife_stdio::lifecycle::PACKAGE_VERSION}).to_string(),
         )
     } else if verb == "DELETE" {
         deleted.lock().unwrap().insert(session.clone());

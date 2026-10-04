@@ -22,7 +22,11 @@ async fn main() -> ExitCode {
     let runtime = proxy.runtime();
     let board = proxy.board();
     let ownership = proxy.ownership();
-    let result = pseudolife_stdio::serve(proxy, ownership).await;
+    let updates = runtime.clone();
+    let result = pseudolife_stdio::serve_after_first_frame(proxy, ownership, move || {
+        updates.client_updates_after_first_frame();
+    })
+    .await;
     board.close().await;
     runtime.close_episode().await;
     match result {

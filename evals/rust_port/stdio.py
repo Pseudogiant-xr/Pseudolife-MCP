@@ -5,6 +5,7 @@ import base64
 import hashlib
 import queue
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -85,6 +86,7 @@ class Wire:
 def shim_environment(home: Path, url: str, token: str | None = None):
     env = isolated_env(home)
     env.update({"PSEUDOLIFE_MCP_DAEMON_URL": url, "PSEUDOLIFE_MCP_NO_SPAWN": "1",
+                "PSEUDOLIFE_MCP_PYTHON": sys.executable,
                 "PSEUDOLIFE_AGENT_COORDINATION": "0", "PSEUDOLIFE_CODEX_DOORBELL": "0",
                 "PSEUDOLIFE_RELEASE_CHECK": "0", "PYTHONDONTWRITEBYTECODE": "1",
                 "PSEUDOLIFE_AGENT_STATE_DIR": str(home)})
