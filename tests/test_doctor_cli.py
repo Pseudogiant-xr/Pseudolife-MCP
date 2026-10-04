@@ -312,3 +312,126 @@ def test_doctor_reports_path_resolution(tmp_path, monkeypatch, capsys):
         doctor_cli.run_doctor()
     report = json.loads(capsys.readouterr().out)
     assert set(report["path_resolution"]) >= {"on_path", "launcher"}
+
+
+# --- maintainer passkeys ------------------------------------------------------
+#
+# Read through the daemon's own GET /api/maintainer with the bearer the board
+# probe uses; doctor opens no database connection. Off is information, a
+# configuration the daemon refuses is a failure with the fix.
+
+class _MaintainerDaemon:
+    def __init__(self, status: int, body: dict):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import threading
+        self.seen = []
+        daemon = self
+        raw = json.dumps(body).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server's naming
+                daemon.seen.append((self.path, self.headers.get("Authorization")))
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+_KEY = {"credential_id": "k", "state": "active", "active_from": 1.0}
+
+
+def test_maintainer_passkeys_on_reports_rp_id_origin_and_active_keys():
+    body = {"available": True, "rp_id": "box.example", "origin": "https://box.example:8443",
+            "passkeys": [_KEY, {**_KEY, "state": "revoked"}, {**_KEY, "state": "pending"}]}
+    with _MaintainerDaemon(200, body) as daemon:
+        out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
+    assert daemon.seen == [("/api/maintainer", "Bearer fixture-token")]
+    assert out["state"] == "on" and out["active_keys"] == 1
+    assert (out["rp_id"], out["origin"]) == ("box.example", "https://box.example:8443")
+    assert out["line"] == "on - rp_id box.example, origin https://box.example:8443, 1 active key(s)"
+    assert "database password" in out["note"]
+    assert "Maintainer messages and roles from the Console" in out["note"]
+
+
+def test_maintainer_passkeys_unset_is_information_not_failure():
+    body = {"error": "maintainer_https_required", "config_problem": "unset"}
+    with _MaintainerDaemon(409, body) as daemon:
+        out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
+    assert out["state"] == "off" and "recovery" not in out
+    assert "pseudolife-mcp maintainer setup" in out["line"]      # the way to turn it on
+
+
+def test_a_maintainer_config_the_daemon_refuses_is_a_failure_with_the_fix():
+    body = {"error": "maintainer_https_required",
+            "config_problem": "plain http is allowed for rp_id localhost only"}
+    with _MaintainerDaemon(409, body) as daemon:
+        out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
+    assert out["state"] == "invalid" and "plain http" in out["line"]
+    assert out["recovery"] == doctor_cli.MAINTAINER_FIX
+    assert "coordination.maintainer.origin" in doctor_cli.MAINTAINER_FIX
+    assert doctor_cli.MAINTAINER_FIX.startswith("Run `pseudolife-mcp maintainer setup`")
+
+
+@pytest.mark.parametrize("status,body,state", [
+    (404, {"error": "not_found"}, "unsupported"),
+    (409, {"error": "maintainer_https_required"}, "off_or_invalid"),   # an older daemon
+    (503, {"error": "coordination_unavailable"}, "not_checked"),
+])
+def test_other_maintainer_answers_are_reported_plainly(status, body, state):
+    with _MaintainerDaemon(status, body) as daemon:
+        out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
+    assert out["state"] == state and "recovery" not in out
+    assert doctor_cli.maintainer_probe(daemon.url, None, timeout=2)["state"] == "not_checked"
+
+
+def test_doctor_fails_on_a_maintainer_config_the_daemon_refuses(monkeypatch, capsys):
+    async def handshake():
+        return {"instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}
+
+    _doctor_with_auth(monkeypatch, handshake)
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-token")
+    monkeypatch.setattr(doctor_cli, "_board_probe", lambda timeout: {"state": "on", "line": "on"})
+    probe = {"state": "invalid", "line": "invalid - origin must be https",
+             "recovery": "fix it"}
+    monkeypatch.setattr(doctor_cli, "_maintainer_probe", lambda timeout: probe)
+    with pytest.raises(SystemExit) as exit_info:
+        doctor_cli.run_doctor()
+    report = json.loads(capsys.readouterr().out)
+    assert report["maintainer_passkeys"] == probe
+    assert exit_info.value.code == 1 and report["ok"] is False
+    assert report["error"] == "MaintainerPasskeysInvalid" and report["recovery"] == "fix it"
+    # Off is information: the report stays ok.
+    monkeypatch.setattr(doctor_cli, "_maintainer_probe",
+                        lambda timeout: {"state": "off", "line": "off"})
+    with pytest.raises(SystemExit) as exit_info:
+        doctor_cli.run_doctor()
+    assert exit_info.value.code == 0
+
+
+def test_doctor_skips_the_maintainer_check_while_the_board_is_off(monkeypatch, capsys):
+    async def handshake():
+        return {"instructions_present": True, "tool_count": 3, "tools_missing_annotations": []}
+
+    _doctor_with_auth(monkeypatch, handshake)
+    monkeypatch.setattr(doctor_cli, "_maintainer_probe",
+                        lambda timeout: pytest.fail("probed with the board off"))
+    with pytest.raises(SystemExit):
+        doctor_cli.run_doctor()
+    report = json.loads(capsys.readouterr().out)
+    assert report["maintainer_passkeys"]["state"] == "not_checked"

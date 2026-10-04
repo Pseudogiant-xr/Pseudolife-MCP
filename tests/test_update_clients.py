@@ -91,7 +91,7 @@ class FakeCli:
             return self.pip_no_deps
         if rest[:3] == ["-m", "pip", "install"]:
             return self.pip_deps
-        if name.startswith("python") and rest[:1] == ["-c"] and "importlib.metadata" in rest[1]:
+        if name.startswith("python") and rest[:2] == ["-I", "-c"] and "importlib.metadata" in rest[2]:
             return 0, self.version + "\n"
         if name.startswith("python") and rest[:1] == ["-c"] and "ScriptMaker" in rest[1]:
             target, executable, body = rest[1:][1], rest[1:][2], rest[1:][3]
@@ -953,14 +953,127 @@ def test_a_project_install_without_its_project_is_not_updated_from_here(cli, tmp
     assert cli.update_calls == []
 
 
-def test_plugin_refresh_survives_a_failed_marketplace_update(cli, tmp_path):
-    """Offline: the clone is what it is; the comparison still runs against
-    it and the failure is on the ladder, not fatal."""
-    _plugin_fixture(cli, tmp_path, differ=True)
-    cli.marketplace_update = (1, "fatal: unable to access")
+# What Claude Code 2.1.287 printed for a github-source marketplace with no
+# github.com host key in known_hosts (measured 2026-10-04 in a sandboxed
+# CLAUDE_CONFIG_DIR; exit 1, the failure on stderr after the progress line).
+HOST_KEY_FAILURE = (
+    "Updating marketplace: pseudolife-mcp...\n"
+    "✘ Failed to update marketplace(s): Failed to refresh marketplace 'pseudolife-mcp': Failed to clone "
+    "marketplace repository: SSH host key is not in your known_hosts file. To add it, connect once manually "
+    "(this will show the fingerprint for you to verify):\n"
+    "  ssh -T git@github.com\n\n"
+    "Or use an HTTPS URL instead (recommended for public repos).\n\n"
+    "Original error: Cloning into '/root/.claude/plugins/marketplaces/pseudolife-mcp..clone'...\n"
+    "No ED25519 host key is known for github.com and you have requested strict checking.\n"
+    "Host key verification failed.\n"
+    "fatal: Could not read from remote repository.\n")
+
+
+# run_cli decodes with the locale codec: on a cp1252 Windows console Node's
+# UTF-8 cross mark arrives as three other characters ahead of the line.
+GARBLED_HOST_KEY_FAILURE = HOST_KEY_FAILURE.encode("utf-8").decode("cp1252", errors="replace")
+
+
+@pytest.mark.parametrize("answer", [(1, HOST_KEY_FAILURE), (0, HOST_KEY_FAILURE), (0, GARBLED_HOST_KEY_FAILURE)],
+                         ids=["exit-1", "exit-0-with-failure-line", "exit-0-with-garbled-mark"])
+def test_a_failed_marketplace_update_never_reads_as_current(cli, tmp_path, answer):
+    """2026-10-04 on the homelab box: the marketplace update failed (no
+    github.com host key for root), the clone stayed at the previous release,
+    and a cache matching that stale clone was reported `current` while the
+    box kept the old release's hooks. A clone that could not be refreshed
+    proves nothing about the cache, whichever way the CLI signals it."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    cli.marketplace_update = answer
     result = uc.update_plugin(ROOT)
     assert result["marketplace_update"] == "failed"
-    assert result["state"] == "refreshed:4352892f0db6"
+    assert result["state"] == "failed", result
+    assert "Failed to refresh marketplace 'pseudolife-mcp'" in result["detail"]
+    assert "known_hosts" in result["detail"] and "fingerprint" in result["detail"]
+    assert "claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in result["detail"]
+    assert not any(c[:2] == ["plugin", "update"] for c in _claude_calls(cli))
+
+
+def _declare_marketplace(home: Path, source: dict) -> Path:
+    settings = home / "settings.json"   # the fixture's CLAUDE_CONFIG_DIR is the fake home
+    settings.write_text(json.dumps({"env": {"X": "1"}, "extraKnownMarketplaces": {
+        "pseudolife-mcp": {"source": source}}}), encoding="utf-8")
+    return settings
+
+
+def test_a_declared_github_marketplace_is_changed_before_the_https_add(cli, tmp_path):
+    """2026-10-04 on the homelab box the HTTPS add was refused: settings.json
+    declared the marketplace's github source under extraKnownMarketplaces,
+    and Claude Code refuses an add from another source ("its source doesn't
+    match its extraKnownMarketplaces entry"; reproduced on 2.1.287, where
+    changing the entry's source first let the same add re-point it). The
+    remedy names that step only where the declaration exists, and never the
+    remove, which uninstalls the plugin."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    settings = _declare_marketplace(cli.home, {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"})
+    cli.marketplace_update = (1, HOST_KEY_FAILURE)
+    detail = uc.update_plugin(ROOT)["detail"]
+    step = detail.index(f"{settings} declares")
+    assert '{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}' in detail[step:]
+    assert step < detail.index("claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git")
+    assert "marketplace remove" not in detail
+
+
+@pytest.mark.parametrize("declared", [None, {"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}],
+                         ids=["undeclared", "declared-https"])
+def test_the_settings_step_is_only_named_where_a_declaration_blocks_the_add(cli, tmp_path, declared):
+    _plugin_fixture(cli, tmp_path, differ=False)
+    if declared:
+        _declare_marketplace(cli.home, declared)
+    cli.marketplace_update = (1, HOST_KEY_FAILURE)
+    detail = uc.update_plugin(ROOT)["detail"]
+    assert "extraKnownMarketplaces" not in detail and "declares" not in detail
+    assert "claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in detail
+
+
+def test_a_marketplace_update_that_timed_out_is_named(cli, tmp_path):
+    """A hung clone stopped at run_cli's timeout carries no CLI line; the
+    reason run_cli gives is quoted instead, with the generic remedy."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    cli.marketplace_update = (uc.TIMED_OUT, "TimeoutExpired: Command 'claude' timed out after 600 seconds")
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed", result
+    assert "timed out after 600 seconds" in result["detail"]
+    assert "run claude plugin marketplace update pseudolife-mcp" in result["detail"]
+
+
+def test_a_failed_marketplace_update_fails_the_ladder(cli, tmp_path, capsys):
+    """The run's exit code is what an unattended deploy reads."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    cli.marketplace_update = (1, HOST_KEY_FAILURE)
+    assert uc.main(["--repo", str(ROOT), "--only", "plugin"]) == 1
+    assert "[!] Plugin" in capsys.readouterr().out
+
+
+def test_plugin_refresh_from_a_clone_that_could_not_be_updated_is_not_a_success(cli, tmp_path):
+    """Offline: the clone is what it is, and installing its copy is still
+    progress, so the refresh runs; but the clone may be behind the
+    marketplace, so the step says so instead of `refreshed`."""
+    _plugin_fixture(cli, tmp_path, differ=True)
+    cli.marketplace_update = (1, "Updating marketplace: pseudolife-mcp...\n"
+                                 "✘ Failed to update marketplace(s): fatal: unable to access "
+                                 "'https://github.com/Pseudogiant-xr/Pseudolife-MCP.git/'")
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_update"] == "failed"
+    assert result["state"] == "failed", result
+    assert uc._plugin_record(uc.plugins_root())["version"] == "4352892f0db6"
+    assert "4352892f0db6 installed from the marketplace clone" in result["detail"]
+    assert "fatal: unable to access" in result["detail"]
+    assert "known_hosts" not in result["detail"]
+
+
+def test_a_successful_marketplace_update_with_noise_still_reads_as_current(cli, tmp_path):
+    """Only a failure line counts: a successful update's own output is not
+    mistaken for one."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    cli.marketplace_update = (0, "Updating marketplace: pseudolife-mcp...\n"
+                                 "✔ Successfully updated marketplace: pseudolife-mcp")
+    result = uc.update_plugin(ROOT)
+    assert result["marketplace_update"] == "ok" and result["state"] == "current:0.15.0", result
 
 
 def test_a_project_scoped_install_is_updated_in_its_project(cli, tmp_path):
@@ -991,6 +1104,18 @@ def test_plugin_not_installed_points_at_the_installer(cli, tmp_path):
     result = uc.update_plugin(ROOT)
     assert result["state"] == "not-installed"
     assert "install" in result["detail"]
+
+
+def test_a_missing_marketplace_clone_names_the_https_add(cli, tmp_path):
+    """The advice adds the marketplace by its HTTPS URL: the owner/repo
+    shorthand records a `github` source that Claude Code refreshes over
+    SSH, which fails on a host with no GitHub key (2026-10-04)."""
+    clone, _ = _plugin_fixture(cli, tmp_path, differ=False)
+    shutil.rmtree(clone)
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert ("claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+            in result["detail"])
 
 
 def test_main_exits_zero_when_the_plugin_updates_beside_a_running_session(cli, tmp_path, capsys):

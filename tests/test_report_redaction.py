@@ -262,10 +262,22 @@ def test_known_passwords_come_from_every_place_a_run_reads_them(tmp_path):
         "PSEUDOLIFE_TEST_DATABASE_URL": "postgresql://u:from-test-dsn@h/db",
         "PSEUDOLIFE_BENCH_ADMIN_URL": "host=h password=from-bench-dsn",
         "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://u:from%40daemon@h/db",
+        "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL": "postgresql://u:from-login-admin@h/postgres",
+        # Not this machine's own test login file, if it has one.
+        pg_defaults.LOGIN_FILE_ENV: str(tmp_path / "no-test-login.env"),
     }
     assert report_redaction.known_passwords(environ, env_file) == {
         "from-env-file", "from-test-var", "from-libpq-var", "from-test-dsn",
-        "from-bench-dsn", "from@daemon"}
+        "from-bench-dsn", "from@daemon", "from-login-admin"}
+
+
+def test_the_test_login_files_password_is_a_known_password(tmp_path):
+    login = tmp_path / "test-pg.env"
+    login.write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n"
+                     "PSEUDOLIFE_TEST_PG_PASSWORD=from-login-file\n", encoding="utf-8")
+    environ = {pg_defaults.LOGIN_FILE_ENV: str(login)}
+    assert report_redaction.known_passwords(environ, tmp_path / "absent") == {
+        "from-login-file"}
 
 
 def test_the_published_defaults_are_not_known_passwords(tmp_path):
@@ -276,7 +288,8 @@ def test_the_published_defaults_are_not_known_passwords(tmp_path):
     env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED\n", encoding="utf-8")
     environ = {"PSEUDOLIFE_TEST_PG_PASSWORD": pg_defaults.COMPOSE_DEFAULT_PASSWORD,
                "PGPASSWORD": "postgres",
-               "PSEUDOLIFE_TEST_DATABASE_URL": "not a dsn = = ="}
+               "PSEUDOLIFE_TEST_DATABASE_URL": "not a dsn = = =",
+               pg_defaults.LOGIN_FILE_ENV: str(tmp_path / "no-test-login.env")}
     assert report_redaction.known_passwords(environ, env_file) == frozenset()
 
 

@@ -114,6 +114,15 @@ try {
         Write-Host "==> Rehearsal: restoring into scratch db '$scratch' (live bank untouched)"
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch"
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $scratch"
+        # The scratch copy holds the whole bank and a plain CREATE DATABASE
+        # is open to PUBLIC: close it before the replay, as a real restore
+        # closes the bank, or the test login (`pseudolife-mcp test-login
+        # create`) could read it while the rehearsal runs.
+        docker exec $Container psql -q -U $User -d postgres -c "REVOKE CONNECT ON DATABASE $scratch FROM PUBLIC"
+        if ($LASTEXITCODE -ne 0) {
+            docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $scratch" *> $null
+            throw "could not revoke CONNECT on the scratch db from PUBLIC; not restoring the bank into a database any login could open"
+        }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $scratch > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "restore into scratch db FAILED - the backup may be unusable" }
 
@@ -208,6 +217,16 @@ try {
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $Db"
         if ($LASTEXITCODE -ne 0) {
             throw "CREATE DATABASE $Db failed after the drop - the bank no longer exists in Postgres. Re-run this restore (the dump is still at $BackupFile) before starting the daemon."
+        }
+        # A plain dump carries no database ACL, so the new database is open to
+        # PUBLIC again: close it before the replay, as `pseudolife-mcp
+        # test-login create` does, so the test login cannot open it. The
+        # daemon connects as the owner, who keeps CONNECT. A failure only
+        # warns: the replay matters more, and re-running `test-login create`
+        # closes it.
+        docker exec $Container psql -q -U $User -d postgres -c "REVOKE CONNECT ON DATABASE $Db FROM PUBLIC"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "could not revoke CONNECT on $Db from PUBLIC; after the restore, run 'pseudolife-mcp test-login create' to close it again."
         }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $Db > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data\backups." }

@@ -12,8 +12,9 @@ frame held the value.
 
 Two layers, both applied to every string in the report:
 
-* the passwords this run knows (``ops/.env``, the test/libpq password
-  variables, the DSN variables), masked wherever they appear;
+* the passwords this run knows (``ops/.env``, the test login file, the
+  test/libpq password variables, the DSN variables), masked wherever they
+  appear;
 * credential shapes — URI userinfo, ``password=``, ``'password': '...'`` and
   ``password = '...'`` — masked whatever the value, for a DSN whose password
   the run was never told.
@@ -37,12 +38,14 @@ from urllib.parse import quote
 
 import pytest
 
-from tests.pg_defaults import COMPOSE_DEFAULT_PASSWORD, env_file_password
+from tests.pg_defaults import (
+    COMPOSE_DEFAULT_PASSWORD, env_file_password, login_file_credentials, login_file_path,
+)
 
 MASK = "***"
 _PASSWORD_ENV = ("PSEUDOLIFE_TEST_PG_PASSWORD", "PGPASSWORD")
 _DSN_ENV = ("PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_BENCH_ADMIN_URL",
-            "PSEUDOLIFE_MCP_DATABASE_URL")
+            "PSEUDOLIFE_MCP_DATABASE_URL", "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL")
 # Published defaults, never masked by value: the compose stack's (also the
 # role and package name) and the stock ``postgres`` (CONTRIBUTING.md's test
 # URL, pg0's default for the lite CI lane). Masking either everywhere turns
@@ -88,6 +91,12 @@ def known_passwords(environ=None, env_file=None) -> frozenset[str]:
         found = {env_file_password(env_file)}
     except ValueError:  # unsupported env-file syntax; the run refuses it too
         found = set()
+    try:  # the test login file (`pseudolife-mcp test-login create`)
+        login = login_file_credentials(login_file_path(environ))
+    except ValueError:
+        login = None
+    if login:
+        found.add(login[1])
     found.update(environ.get(name) for name in _PASSWORD_ENV)
     found.update(_dsn_password(environ[name]) for name in _DSN_ENV
                  if environ.get(name))

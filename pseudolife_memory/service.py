@@ -62,6 +62,8 @@ from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 from pseudolife_memory.service_dream import DreamOps
+# v54: the Console's passkey-proven maintainer routes (one method each).
+from pseudolife_memory.maintainer import MaintainerOps
 from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.session_title import (
@@ -782,7 +784,7 @@ class _UseLabelFailed:
 _USE_LABEL_FAILED = _UseLabelFailed()
 
 
-class MemoryService(DreamOps):
+class MemoryService(DreamOps, MaintainerOps):
     """Thin orchestration over CMS + embedder + reference bank + contrastive.
 
     Construct once per process. All public methods are thread-safe via

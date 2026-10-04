@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.16.0"
+version = "0.16.1"
 description = "Pseudolife persistent long-term memory for MCP-compatible coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,6 +47,11 @@ dependencies = [
     "pgvector>=0.3",
     "uvicorn>=0.30",
     "networkx>=3.0",
+    # Declared 2026-10-04 (schema v54, maintainer passkeys): first-party code
+    # verifies ES256 / EdDSA / RS256 WebAuthn signatures with it
+    # (maintainer_webauthn.py; the CBOR/COSE decoding is our own). Already in
+    # the daemon image's lock (50.0.0) as a transitive dependency.
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

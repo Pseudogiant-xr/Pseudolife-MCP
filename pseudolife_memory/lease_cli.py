@@ -93,6 +93,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pseudolife_memory import os_lock
+from pseudolife_memory.daemon_exec import NoBank, no_bank_message, run_in_daemon
 
 EXIT_USAGE = 2
 EXIT_NESTED = 64  # sysexits EX_USAGE: run inside a run of the same lease
@@ -169,8 +170,8 @@ CHILD_POLL = 0.2
 # How often ``hold`` looks whether the process it follows is still there.
 PID_POLL = 0.5
 
-_DURATION = re.compile(r"([0-9]+)([smh]?)", re.IGNORECASE)
-_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+_DURATION = re.compile(r"([0-9]+)([smhd]?)", re.IGNORECASE)
+_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
 
 # Why a daemon's refusal means no board for this run, by error code.
@@ -186,10 +187,10 @@ _REFUSALS = {
 
 
 def parse_duration(text: str) -> int:
-    """Whole seconds from ``90``, ``90s``, ``20m`` or ``2h``."""
+    """Whole seconds from ``90``, ``90s``, ``20m``, ``2h`` or ``7d``."""
     match = _DURATION.fullmatch(text.strip())
     if match is None:
-        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m or 2h)")
+        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m, 2h or 7d)")
     return int(match.group(1)) * _UNITS[match.group(2).lower()]
 
 
@@ -1628,9 +1629,7 @@ def _operator(verb, act) -> int:
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
     try:
         if not dsn:
-            _say("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, "
-                 "or run where the lite tier's data dir holds one")
-            return 1
+            raise NoBank
         from pseudolife_memory.storage.coordination import (
             CoordinationConnection, CoordinationError, CoordinationStore)
         try:
@@ -1710,7 +1709,7 @@ signal N (130 Ctrl-C), releasing the lease and leaving PID running.
 
 
 _RUN_EPILOG = """\
-DURATION is whole seconds or minutes or hours: 90, 90s, 20m, 2h.
+DURATION is whole seconds, minutes, hours or days: 90, 90s, 20m, 2h, 7d.
 
 The lease is an OS file lock in ~/.pseudolife-mcp/locks (PSEUDOLIFE_LEASE_LOCK_DIR
 overrides it), released by the OS when this process exits or dies. With a
@@ -1813,7 +1812,8 @@ def _parsers():
         description="Operator only: free the lease NAME on the board, whatever its holder "
                     "says, and grant it to the next waiter. It opens the bank directly, "
                     "the way board-audit and export find it (PSEUDOLIFE_MCP_DATABASE_URL, "
-                    "else the lite tier's data dir), never through an agent's credential, "
+                    "else the lite tier's data dir, else inside the pseudolife-mcp-daemon "
+                    "container when it runs here), never through an agent's credential, "
                     "and the audit log records the break with the operator as its actor. "
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
@@ -1872,8 +1872,13 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _check(args, transport)
     if args.action == "list":
         return _list(args, transport)
-    if args.action == "break":
-        return _break(args)
-    if args.action == "delegate":
-        return _delegate(args)
+    if args.action in ("break", "delegate"):
+        try:
+            return _break(args) if args.action == "break" else _delegate(args)
+        except NoBank:
+            ran = run_in_daemon("lease", argv)
+            if ran is not None:
+                return ran.returncode
+            _say(no_bank_message("lease"))
+            return 1
     return _run(args, command, transport)

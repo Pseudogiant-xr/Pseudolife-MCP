@@ -1434,6 +1434,74 @@ class WakeConfig:
 
 
 @dataclass
+class MaintainerConfig:
+    """Maintainer messages and Board roles from the Console, proven by a
+    passkey (schema v54; specs 2026-10-02-maintainer-wake-design.md and
+    2026-10-04-board-roles-passkey.md). File-only: ``POST /api/config``
+    refuses every ``coordination.maintainer`` path (``config_protected``),
+    since every environment principal can call that route.
+
+    ``rp_id`` is the hostname the Console is served from (a passkey is bound
+    to it) and ``origin`` that exact origin: ``https://<rp_id>`` or
+    ``https://<rp_id>:<port>`` (for example behind ``tailscale serve
+    --https=8443``), or, for local use only, ``http://localhost[:<port>]``
+    with ``rp_id`` ``localhost``; written as a browser serialises it, without
+    the scheme's default port. The origin is never taken from a request
+    header. Unset, or any other shape (see :meth:`problem`), and every
+    maintainer route answers ``409 maintainer_https_required``.
+    ``maintainer_per_recipient_per_hour`` caps the rings maintainer messages
+    cause per recipient; 30 is the design's starting value, not a
+    measurement."""
+
+    rp_id: str = ""
+    origin: str = ""
+    maintainer_per_recipient_per_hour: int = 30
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rp_id, str) or not isinstance(self.origin, str):
+            raise ValueError("coordination.maintainer.rp_id and .origin must be strings")
+        cap = self.maintainer_per_recipient_per_hour
+        if type(cap) is not int or cap < 0:
+            raise ValueError("coordination.maintainer.maintainer_per_recipient_per_hour must "
+                             "be a whole number, 0 or more")
+
+    def problem(self) -> str | None:
+        """Why the maintainer routes cannot run on this configuration, or
+        ``None`` when they can: unset, or an origin that is not exactly the
+        HTTPS origin of ``rp_id`` (or ``http://localhost[:port]``)."""
+        import re
+        from urllib.parse import urlsplit
+        if not self.rp_id or not self.origin:
+            return "unset"
+        host = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*")
+        if len(self.rp_id) > 253 or not host.fullmatch(self.rp_id):
+            return "rp_id must be a lower-case hostname"
+        parts = urlsplit(self.origin)
+        try:
+            port = parts.port
+        except ValueError:
+            return "origin has an invalid port"
+        scheme = parts.scheme
+        if scheme == "http" and self.rp_id != "localhost":
+            return "plain http is allowed for rp_id localhost only"
+        if scheme not in ("https", "http"):
+            return "origin must be https"
+        # A browser serialises the origin without its scheme's default port,
+        # so a configured one would never match an assertion (review of
+        # #569, 2026-10-05).
+        if port == {"https": 443, "http": 80}[scheme]:
+            return f"origin must leave out the default port :{port}"
+        expected = f"{scheme}://{self.rp_id}" + (f":{port}" if port is not None else "")
+        if parts.hostname != self.rp_id or self.origin != expected:
+            return "origin must be exactly <scheme>://<rp_id>[:<port>]"
+        return None
+
+    @property
+    def configured(self) -> bool:
+        return self.problem() is None
+
+
+@dataclass
 class CoordinationConfig:
     """Peer awareness and addressed mail; limits bound injected session context.
 
@@ -1478,10 +1546,16 @@ class CoordinationConfig:
     audit_retention_days: int = 90
     # The wake caps (schema v49); see WakeConfig.
     wake: WakeConfig = field(default_factory=WakeConfig)
+    # v54: passkey-signed maintainer messages and roles; see MaintainerConfig.
+    maintainer: MaintainerConfig = field(default_factory=MaintainerConfig)
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise ValueError("coordination.enabled must be a boolean")
+        if isinstance(self.maintainer, dict):
+            self.maintainer = MaintainerConfig(**self.maintainer)
+        if not isinstance(self.maintainer, MaintainerConfig):
+            raise ValueError("coordination.maintainer must be a mapping")
         if isinstance(self.wake, dict):
             self.wake = WakeConfig(**{key: value for key, value in self.wake.items()
                                       if key not in RETIRED_WAKE_KEYS})

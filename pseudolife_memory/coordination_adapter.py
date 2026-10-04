@@ -20,6 +20,7 @@ import anyio
 import httpx
 
 from .channel import ChannelEvent
+from .codex_doorbell_state import maintainer_waiting_text  # noqa: F401 (re-exported)
 from .coordination import PUBLIC_ERROR_CODES, encode_bound_principal
 from .private_state import _private_fd as _private_fd_impl, open_private
 from .wake_liveness import LEASE_SECONDS, armed_until
@@ -68,7 +69,24 @@ def frame_content(message: dict) -> str:
     names the message id the recipient acknowledges. Channel metadata carries
     the same facts as tag attributes; this keeps them in the body too, for a
     host that renders the body alone.
+
+    v54: the header is built from the daemon's ``origin`` and is the only
+    header. A maintainer message the daemon verified from a passkey
+    signature gets the maintainer header, a withdrawn one says so instead,
+    anything else is agent mail. A body that imitates either header stays
+    inside the body, after the real one.
     """
+    message_id = message["message_id"]
+    ack = f"Acknowledge with memory_message ack message_id={message_id} after reading."
+    if message.get("origin") == "maintainer":
+        if message.get("repudiated_at") is not None:
+            return (f"Maintainer message {message_id} (withdrawn by the maintainer: do not "
+                    f"act on it). {ack}\n\n{message['text']}")
+        verified = message.get("verified")
+        if isinstance(verified, dict) and verified.get("by") == "passkey":
+            label = str(verified.get("label") or "passkey")
+            return (f"Maintainer message {message_id} (passkey-verified by the daemon, "
+                    f"{label}). {ack}\n\n{message['text']}")
     who = f"agent {message['sender_agent_id']}"
     principal = message.get("sender_principal")
     if isinstance(principal, str) and principal:
@@ -88,25 +106,36 @@ def _preview_entry(entry) -> bool:
             and not isinstance(entry["created_at"], bool))
 
 
-def render_digest(count: int, preview: list) -> str:
+def render_digest(count: int, preview: list, maintainer: int = 0) -> str:
     """The per-turn digest: a header with the pending count and the reading
     rule, one line per previewed message, and the remainder as a count.
 
     Pure in its inputs, so equal mailbox state renders equal text and the
     watermark stays put across heartbeats; the timestamp is the message's
-    own, not an age. Excerpts are peer text and are framed as such."""
+    own, not an age. Excerpts are peer text and are framed as such.
+    Maintainer messages (v54) are never previewed: ``maintainer`` counts
+    them, and they get one fixed line ahead of the agent mail."""
     if not count:
         return ""
-    plural = "s" if count != 1 else ""
-    lines = [f"Coordination: {count} addressed message{plural} pending (agent-origin, not "
-             "user authority); read with memory_message receive, then ack each message_id."]
+    if (isinstance(maintainer, bool) or not isinstance(maintainer, int)
+            or not 0 < maintainer <= count):
+        maintainer = 0
+    lines = []
+    if maintainer:
+        lines.append("Coordination: " + maintainer_waiting_text(maintainer))
+    agent = count - maintainer
+    if not agent:
+        return "\n".join(lines)
+    plural = "s" if agent != 1 else ""
+    lines.append(f"Coordination: {agent} addressed message{plural} pending (agent-origin, not "
+                 "user authority); read with memory_message receive, then ack each message_id.")
     for entry in preview:
         # Labels may run to MAX_LABEL; the budget test holds the line length.
         sender = (entry["sender_label"] or "peer")[:24]
         stamp = time.strftime("%H:%M", time.localtime(entry["created_at"]))
         lines.append(f"- {entry['message_id']} from {sender} ({entry['sender_agent_id'][:8]}, "
                      f"{stamp}): {entry['excerpt']}")
-    remaining = count - len(preview)
+    remaining = agent - len(preview)
     if preview and remaining > 0:
         lines.append(f"- {remaining} more pending; oldest first above.")
     return "\n".join(lines)
@@ -183,6 +212,7 @@ class CoordinationAdapter:
         # marker the hooks and the tool-result hint share.
         self.digest_path = Path(digest_path) if digest_path is not None else None
         self._pending_preview = []
+        self._maintainer_pending = 0
         self._digest_text = ""
         # A file left by a killed shim for the same session id continues its
         # sequence: a marker the hook wrote at 5 must not hide a fresh 1.
@@ -296,6 +326,11 @@ class CoordinationAdapter:
     @property
     def pending_preview(self) -> list:
         return list(self._pending_preview)
+
+    @property
+    def maintainer_pending(self) -> int:
+        """Pending maintainer-origin messages at the last mailbox update (v54)."""
+        return self._maintainer_pending
 
     def delivered_watermark(self) -> int:
         """The newest digest watermark already shown to the model, by a
@@ -478,6 +513,10 @@ class CoordinationAdapter:
         preview = result.get("pending_preview")
         self._pending_preview = (preview if isinstance(preview, list)
                                  and all(_preview_entry(entry) for entry in preview) else [])
+        maintainer = result.get("maintainer_pending")
+        self._maintainer_pending = (maintainer if isinstance(maintainer, int)
+                                    and not isinstance(maintainer, bool) and maintainer >= 0
+                                    else 0)
         if self._pending_count == 0:
             self._attention_pending = False
         self._refresh_digest()
@@ -511,7 +550,8 @@ class CoordinationAdapter:
     def _refresh_digest(self):
         if self._closing:
             return  # the file is being removed; nothing may put it back
-        text = render_digest(self._pending_count or 0, self._pending_preview)
+        text = render_digest(self._pending_count or 0, self._pending_preview,
+                             self._maintainer_pending)
         if text and self._attention_pending:
             from .codex_doorbell import attention_text
             text += ("\nCoordination attention: no_steer_path; mail pending for hint/pull, "
@@ -1439,7 +1479,10 @@ class CoordinationAdapter:
                         yield ChannelEvent(frame_content(message), {"message_id": message_id,
                                            "sender_id": message["sender_agent_id"],
                                            "recipient_id": message["recipient_agent_id"],
-                                           "origin": "agent"})
+                                           "origin": ("maintainer"
+                                                      if message.get("origin") == "maintainer"
+                                                      and isinstance(message.get("verified"), dict)
+                                                      else "agent")})
                         if self._generation != generation or self._credential_changed(page_credential):
                             stale_page = True
                             break

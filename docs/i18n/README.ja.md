@@ -56,7 +56,7 @@ ops\install.ps1         # Windows (pwsh 7+)
 Claude Code が選択したクライアントに含まれている場合、インストーラーは Claude Code の**プラグイン**も追加します(`--claude-plugin skip` / `-ClaudePlugin skip` で追加しないようにできます)。プラグインのメモリ用セッション開始フック(検証済みの Codex フックが実行するのも同じフックです)は、メモリループのガイダンスを凝縮したコアと、分量に上限のあるライブブリーフィングを提供します。プラグインはさらに、プロンプトごとのリマインダーと、`/dream`・`/memory-status` コマンドも追加します。プラグインがない場合は、インストーラーが書き込む Claude Code の `settings.json` フックがブリーフィングだけを届けます。どちらもメモリループのガイダンス全文は提供しません。全文が必要な場合は、`examples/CLAUDE.memory.md` をお使いの `CLAUDE.md` または `AGENTS.md` に追記してください。MCP サーバー自体はインストーラーが登録するため、プラグインがツールを二重に登録することはありません。プラグインを手動で追加するには、Claude Code 内で次を実行します:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

@@ -35,6 +35,9 @@
 #   prompts; unattended runs keep them).
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
+# -TestLogin (switch): also give the test suite its own Postgres login, which
+#   cannot open the bank (`pseudolife-mcp test-login create`): for
+#   contributors who run the suite against this server; off by default.
 #
 # Client-only install (this machine runs no daemon; one runs elsewhere,
 # typically reached over a tailnet): no Docker, volumes, ops/.env, token
@@ -125,7 +128,9 @@ param(
     [switch]$ReadToken,
     [string]$PairingCode = "",
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
-    [switch]$Tunnel
+    [switch]$Tunnel,
+    # Also give the test suite its own Postgres login (see the header).
+    [switch]$TestLogin
 )
 $ErrorActionPreference = "Stop"
 
@@ -437,6 +442,57 @@ function Invoke-SharedBankExposeOffer {
 }
 # <<< shared bank notes <<<
 
+# >>> maintainer setup offer >>>
+# The maintainer's passkeys (signed Console messages and roles) on a daemon
+# host: `pseudolife-mcp maintainer setup` does every host step and asks
+# before each change; only the passkey itself needs the maintainer. A
+# tokenless daemon refuses passkeys, so a tokenless install is not asked.
+function Invoke-MaintainerSetupOffer {
+    if ($tokenState -notin "minted", "present") { return }
+    $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
+    # A re-run on a host where they are set up asks nothing.
+    if ($haveShim) {
+        $global:LASTEXITCODE = 1
+        try { & $script:shimInstallPath maintainer setup --check *> $null } catch { $global:LASTEXITCODE = 1 }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Maintainer passkeys: in place."
+            return
+        }
+    }
+    if (-not $interactive) {
+        Write-Host "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
+        return
+    }
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    $reply = Read-BankAnswer "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]"
+    if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
+        Write-Host "  Not now: run pseudolife-mcp maintainer setup when you want them."
+        return
+    }
+    if (-not $haveShim) {
+        Write-Warning "The pseudolife-mcp shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed."
+        return
+    }
+    $oldTokenFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
+    try {
+        if ($boardFile) { $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile }
+        $global:LASTEXITCODE = 0
+        & $script:shimInstallPath maintainer setup --yes
+        $setupExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $setupExit = 1
+    } finally {
+        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $oldTokenFile
+    }
+    if ($setupExit -ne 0) {
+        Write-Warning "pseudolife-mcp maintainer setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed."
+    }
+}
+# <<< maintainer setup offer <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 function Get-ProviderList([string]$Spec) {
     $expanded = @()
@@ -673,6 +729,7 @@ if ($ClientOnly) {
     if ($Model) { $localFlags += "-Model" }
     if ($ShimPort -ne 0) { $localFlags += "-ShimPort" }
     if ($NoToken) { $localFlags += "-NoToken" }
+    if ($TestLogin) { $localFlags += "-TestLogin" }
     if ($Transport -ne "shim") { $localFlags += "-Transport http" }
     if ($localFlags) {
         Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
@@ -1238,7 +1295,10 @@ if (-not $ClientOnly) {
 # and the daemon's session briefing says when it is behind.
 $claudePluginId = "pseudolife-memory@pseudolife-mcp"
 $claudePluginMarketplace = "pseudolife-mcp"
-$claudePluginMarketplaceSource = "Pseudogiant-xr/Pseudolife-MCP"
+# The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
+# shorthand as a GitHub source and refreshes it over SSH, which fails on a
+# host with no GitHub key (seen 2026-10-04). The repository is public.
+$claudePluginMarketplaceSource = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
 $script:pluginClaude = ""
 $script:pluginClaudeRecovery = ""
 function Get-ClaudePluginManual {
@@ -2788,6 +2848,45 @@ function Show-EndpointContainer {
     }
 }
 # <<< endpoint container probe <<<
+
+# >>> test login >>>
+# The test suite's own Postgres login (`pseudolife-mcp test-login create`,
+# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# databases and cannot connect to the bank, written to
+# ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
+# ops/.env. So no checkout or agent session needs ops/.env, which holds the
+# bank owner's password (2026-10-04). Only with -TestLogin: an end user's
+# server has no use for a CREATEDB password login (review, 2026-10-04).
+# Idempotent: a re-run re-applies the same password. It runs psql in the
+# Postgres container as its own superuser; a failure leaves the install
+# working.
+function Invoke-TestLoginSetup {
+    $py = Get-InstallerPython
+    if (-not $py) {
+        Write-Warning "No Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from ${repo}: python -m pseudolife_memory.cli test-login create"
+        return
+    }
+    Step "Setting up the test suite's Postgres login (it cannot open the bank)..."
+    $savedPath = $env:PYTHONPATH
+    $code = 1
+    try {
+        $env:PYTHONPATH = if ($savedPath) { "$repo$([IO.Path]::PathSeparator)$savedPath" } else { "$repo" }
+        Push-Location $repo
+        try {
+            & $py -m pseudolife_memory.test_login_cli create
+            $code = $LASTEXITCODE
+        } finally { Pop-Location }
+    } catch {
+        $code = 1
+    } finally {
+        $env:PYTHONPATH = $savedPath
+    }
+    if ($code -ne 0) {
+        Write-Warning "The test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from ${repo}: python -m pseudolife_memory.test_login_cli create"
+    }
+}
+# <<< test login <<<
+
 # -- 12a. CLI shim autostart (Claude / Codex modes) -------------------------------
 # Placed here, at the top of stage 12, for three reasons: after stage 11's
 # shim install (below); before the health wait, so a daemon that is not yet
@@ -2859,6 +2958,7 @@ if (-not $ClientOnly) {
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     Invoke-EndpointContainerProbe
+    if ($TestLogin) { Invoke-TestLoginSetup }
 }
 
 # >>> client-only claude hook >>>
@@ -3066,6 +3166,7 @@ if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
+if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this

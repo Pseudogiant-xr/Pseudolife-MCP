@@ -377,7 +377,10 @@ def install(source: str, layout: Layout, *, python: str | None = None,
         _step(run, "pip install --no-deps", [venv_python, "-m", "pip", "install", "--no-deps", source])
         log("installing the shim's dependencies")
         _step(run, "pip install (dependencies)", [venv_python, "-m", "pip", "install", *SHIM_REQUIREMENTS])
-        code, out = run([str(venv_python), "-c", _VERSION_PROBE], timeout=120)
+        # Isolated (-I): `python -c` would put the caller's working directory
+        # first on sys.path, and a checkout's stale egg-info there answered
+        # for the runtime (2026-10-04: 0.16.1 installed, 0.15.0 recorded).
+        code, out = run([str(venv_python), "-I", "-c", _VERSION_PROBE], timeout=120)
         version = out.strip().splitlines()[-1].strip() if code == 0 and out.strip() else ""
         if code != 0 or not re.fullmatch(r"[0-9A-Za-z.+-]{1,64}", version):
             raise RuntimeInstallError("version probe", out or f"exit {code}")

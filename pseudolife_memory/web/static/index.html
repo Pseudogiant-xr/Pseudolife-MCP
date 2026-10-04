@@ -6,15 +6,10 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="robots" content="noindex" />
     <title>Cortex Console</title>
-    <script>
-      // Apply the stored theme before first paint; same key as the classic console.
-      try {
-        var t = localStorage.getItem("pl_theme");
-        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-      } catch (e) {}
-    </script>
-    <script type="module" crossorigin src="/ui/assets/index-D6Ue6bBm.js"></script>
-    <link rel="stylesheet" crossorigin href="/ui/assets/index-IaeLXksu.css">
+    <!-- Classic, blocking: applies the stored theme before first paint. -->
+    <script src="/ui/theme.js"></script>
+    <script type="module" crossorigin src="/ui/assets/index-DssZGTra.js"></script>
+    <link rel="stylesheet" crossorigin href="/ui/assets/index-B7xGu03Z.css">
   </head>
   <body>
     <div id="app"></div>

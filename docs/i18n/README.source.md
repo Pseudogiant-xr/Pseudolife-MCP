@@ -103,7 +103,7 @@ installer, so the plugin never doubles its tools. To add the plugin by
 hand, inside Claude Code:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

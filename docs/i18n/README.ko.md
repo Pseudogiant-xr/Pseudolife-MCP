@@ -98,7 +98,7 @@ Claude Code가 선택된 클라이언트에 포함되면, 설치 스크립트는
 일은 없습니다. 플러그인을 직접 추가하려면 Claude Code 안에서 다음을 실행하세요:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

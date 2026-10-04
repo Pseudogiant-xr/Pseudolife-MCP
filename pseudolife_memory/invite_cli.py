@@ -59,7 +59,7 @@ import subprocess
 import sys
 import time
 
-from pseudolife_memory import expose_cli
+from pseudolife_memory import daemon_exec, expose_cli
 from pseudolife_memory.principals import (
     RESERVED_PRINCIPALS, format_pairing_code, valid_principal_name,
 )
@@ -69,7 +69,7 @@ EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_REFUSED = 4
 
-CONTAINER = "pseudolife-mcp-daemon"
+CONTAINER = daemon_exec.CONTAINER
 POSTGRES_CONTAINER = "pseudolife-mcp-postgres"
 # psql inside the Postgres container, as ops/restore.sh runs it: the local
 # socket, the container's own user and database, no password.

@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v53). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v54). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -555,7 +555,7 @@ continues under the OS lock. A lock held by something the board does not show
 The command inherits the terminal and the environment, plus
 `PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
 value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
-`20m`, `2h`) expired before the lease was held, and the command did not run;
+`20m`, `2h`, `7d`) expired before the lease was held, and the command did not run;
 `128+N` when stopped by signal N (`130` Ctrl-C, `143` SIGTERM, `129` SIGHUP);
 `64` for a run nested inside a run of the same lease (its name is in
 `PSEUDOLIFE_LEASES_HELD` while that lease's lock is held), which would
@@ -683,17 +683,21 @@ session's claim of one is refused `reserved_lease`, so a delegate cannot
 renew its own. It may release it to resign; revoke it with
 `pseudolife-mcp lease break delegate:<PROJECT>`. A freed grant is never
 passed to a queued session: any waiter leaves the queue (`lease_dequeue`,
-reason `reserved`). In the Docker tier, run both inside the daemon container,
-where the bank's URL is set:
-
-```sh
-docker exec <daemon container> pseudolife-mcp lease delegate PROJECT AGENT --for 7d
-```
+reason `reserved`). In the Docker tier the bank's URL is set only inside the
+daemon container: run either on the daemon's host as it is, and when the
+shell has no bank but the `pseudolife-mcp-daemon` container runs there, the
+command re-runs itself inside it (one line says so) with the same
+arguments, output and exit code. The same holds for `maintainer` and
+`board-audit`.
 
 The delegate is not the coordinator: `coordinator:<project>` is the open role
-any session may claim to say it is coordinating, and it grants nothing.
-`pseudolife-mcp lease designate`, the command's name in 0.16.0, still works
-and prints one line naming `lease delegate`.
+any session may claim to say it is coordinating, and it grants nothing. A
+session holds at most one of the two: granting the delegate to the current
+coordinator also frees its `coordinator:<project>` lease (the answer names it
+in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
+0.16.0, still works and prints one line naming `lease delegate`. Both roles
+can also be given and taken from the Console, signed with your passkey: see
+[Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
@@ -780,6 +784,135 @@ Filesystem validation is a snapshot, and later edits can change the path's
 type or target. Claims remain advisory: no edit, commit or push guard consumes
 the fence. Existing literal `claim:<text>` and generic resource leases keep
 their semantics and do not overlap repository file claims.
+
+### Maintainer messages and roles from the Console
+
+The Console's Board can send a session a message that carries your authority,
+and give or take the project's delegate and coordinator roles. Each of these
+is signed by your passkey (Windows Hello, Touch ID, a phone passkey through
+the browser's QR flow, or a FIDO2 security key): one fresh tap per action, and
+the confirm dialog shows exactly what you are signing before the prompt. A
+bearer token alone can do none of it.
+
+**What a signed message does.** It arrives with `origin: "maintainer"` and a
+`verified` field in the recipient's `memory_message` receive result, which the
+served instructions tell the agent to treat as if you typed it in its own
+chat. It rings the session when it has a live wake listener, including one
+parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
+there is no separate urgent setting, and the payload's `urgent` field changes
+nothing.
+The agent replies with `reply_to` and no `to`; replies appear in the Console's
+thread. The Sent log can withdraw a message: the recipient's next receive shows
+it as withdrawn, and an already-acknowledged one gets a follow-up.
+
+**Roles.** The Roles band on the Board shows, per project, the delegate (the
+session whose urgent mail reopens done parks there, see
+[Leases](#leases-pseudolife-mcp-lease)) and the coordinator. Make delegate asks
+how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
+the lease. Coordinator changes are signed too, although the role grants no
+authority: otherwise any session could evict another's coordinator. A session
+holds one of the two roles at most: the delegate's own claim of the
+coordinator lease is refused `already_delegate`, and a session queued for it
+leaves the queue when it is made the delegate.
+
+**Setup.** On the daemon host, run:
+
+```sh
+pseudolife-mcp maintainer setup
+```
+
+A daemon-host install offers it at the end (default no, since it can put
+the daemon on your tailnet), and `pseudolife-mcp update` names it until it
+is done. It shows what it will change and asks once
+before changing anything (`--yes` answers for it), then:
+
+1. Names the Console at one fixed address. Browsers offer passkeys only
+   over HTTPS (or on `localhost`), and a passkey is bound to that name. With
+   Tailscale running and the tailnet's HTTPS certificates on, the name is
+   `https://<machine>.<tailnet>.ts.net:8443`, served by `tailscale serve --bg
+   --https=8443 http://127.0.0.1:8765` (verified, and taken back off if it
+   does not take). Without Tailscale, or with `--local`, it is
+   `http://localhost:8765`, for a browser on this machine only. Tailscale
+   installed but stopped, or without HTTPS certificates, is refused, and the
+   message names both ways out. `--port` and `--https-port` pick other
+   ports.
+2. Writes `coordination.maintainer.rp_id` and `origin` into the daemon's
+   config file, with a backup beside it, and restarts the daemon container
+   (`docker restart`: the same container and volumes). A lite daemon is not
+   restarted for you: stop `pseudolife-mcp serve` and run the command again.
+3. Prints a one-time enrolment code, valid for 10 minutes. In the Console,
+   open Settings, Your passkeys, enter the code and a label, and create the
+   passkey. The command prints the new key's id prefix and label and asks
+   whether the Console shows the same: `y` activates the key, anything else
+   revokes it (someone else may have redeemed the code); run the command
+   again to retry.
+
+Run again, it reports what is in place and changes nothing (`--check`
+only answers: exit 0 set up, 1 not), and an installer re-run asks nothing
+once passkeys are in place. It never renames a valid name, since every
+passkey bound to it would stop working.
+It reads and writes the daemon's config and the bank from the daemon's own
+environment (inside the container on the Docker tier), so it needs no
+bearer token.
+
+By hand, the same steps: serve the Console over HTTPS as above; set the
+name in the daemon's config file (these keys are refused through `POST
+/api/config`, which any principal can call), then restart the daemon:
+
+```yaml
+coordination:
+  maintainer:
+    rp_id: <machine>.<tailnet>.ts.net
+    origin: https://<machine>.<tailnet>.ts.net:8443
+```
+
+(`rp_id: localhost` with `origin: http://localhost:8765` for local use;
+any other plain-HTTP origin is refused, `409 maintainer_https_required`, and
+so is an origin written with its scheme's default port, `https://<rp_id>:443`
+or `http://localhost:80`, since browsers send it without);
+then run `pseudolife-mcp maintainer enrol-code` on the daemon host (on the
+Docker tier it runs itself inside the daemon container, as
+[`lease delegate`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
+prefix against it, and run `pseudolife-mcp maintainer confirm <prefix>`.
+Only then is the key active.
+
+Add more keys from Settings: an active key approves the new one, which waits
+24 hours before it can sign anything, and any older key can cancel it in
+that time. A key can revoke itself; only the host revokes an older key:
+`pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes every
+key and reopens enrolment. `pseudolife-mcp maintainer list` shows them all.
+
+**What a passkey does not prove.**
+
+- The passkey prompt shows only the site, not the action. Tap only for a
+  prompt you started yourself in the Console. A session that can drive your
+  browser (browser automation), or the platform passkey API as your user,
+  can start one with a payload it prepared.
+- Check afterwards. Every signed message is listed in the Console's Sent log,
+  and a surprise one can be withdrawn there. A signed role change shows only
+  as the current holder in the Roles band; its record is in the board's
+  [audit log](#audit-log) (`pseudolife-mcp board-audit export`, actor
+  `maintainer`). Key changes show in Settings, Your passkeys: every
+  enrolment, confirmation, added key, cancel, revoke and reset, with the
+  path it came by (Console or host). A change from the last 7 days that
+  this browser did not make is a banner there and on the Roles band; if you
+  did not make it, run `pseudolife-mcp maintainer list` on the host.
+- Anyone who can run `pseudolife-mcp maintainer ...` on the daemon host, or
+  who holds the database owner's credentials, can reset the keys and enrol
+  their own. Root and the docker group on the host can run that command too.
+  So the daemon host and the database password are part of your trust
+  boundary. Keep the database password where agent sessions cannot read it.
+  Agent sessions that run as your own OS user can read what you can and
+  use Docker if you can, so on such a host the passkey makes a takeover
+  visible (above) rather than impossible.
+- A one-time enrolment code burns after 5 wrong attempts; run
+  `pseudolife-mcp maintainer enrol-code` again for a new one.
+- Moving the bank to another host changes the name, so every passkey stops
+  working: run `pseudolife-mcp maintainer reset` on the new host and enrol
+  again.
+- The board proves who sent a message. It does not change what an agent's
+  harness lets the model do: an agent that reserves purchases or destructive
+  actions for its own chat still asks there.
 
 ### Codex CLI and desktop
 
@@ -1253,9 +1386,10 @@ must be unfiltered, since a filtered one has gaps, and a line that repeats a
 key is refused. Export and verify with a v46 or later CLI: an export written
 by an older one has no `body` fields, so its v46 sends fail as
 `body_not_exported`, and an older `verify` checks no bodies at all. An export
-of a pre-v46 log still verifies. In the Docker tier run it
-inside the daemon container, which already has the database URL:
-`docker exec pseudolife-mcp-daemon pseudolife-mcp board-audit verify`.
+of a pre-v46 log still verifies. In the Docker tier, run it on the daemon's
+host: with no database URL in the shell it runs itself inside the daemon
+container, which has one, and files it names (`--out`, `--append`,
+`--durations`) stay on the host.
 
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written
@@ -3028,6 +3162,23 @@ its own and an update never replaces a folder a session is using:
   in `installed_plugins.json`, and they compare again. Nothing is
   uninstalled at any point: an update that fails leaves the installed copy
   installed.
+- A marketplace update that fails (a non-zero exit, or Claude Code's
+  `Failed to update marketplace` line) leaves the clone where it was, so a
+  cache matching it proves nothing: the step reports `failed`, never
+  `current`, quoting the CLI's line, and the run exits with the client-step
+  code. Claude Code clones a GitHub-source marketplace over SSH, which fails
+  on a host with no github.com key in `known_hosts`. Add the key after
+  checking its fingerprint against GitHub's published ones, or point the
+  marketplace at HTTPS with
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+  (it replaces the existing entry's source, and the installed plugin
+  follows it), then run the update again; the README's Updating section
+  has the same steps. Claude Code refuses that add while
+  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
+  with another source: change that entry's source to
+  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  first (the step names the file when it finds one). Do not use
+  `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
@@ -3161,6 +3312,47 @@ In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
 just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
+
+## The test suite's Postgres login: `pseudolife-mcp test-login`
+
+The bundled Postgres serves the bank and the test suite's databases under
+one superuser role, `pseudolife`, whose password is `POSTGRES_PASSWORD` in
+`ops/.env`. So that test runs (and the agent sessions that start them) do
+not need that password, run once on the daemon host:
+
+```bash
+pseudolife-mcp test-login create            # --rotate for a new password
+```
+
+It creates the role `pseudolife_test` (`LOGIN CREATEDB`, nothing more),
+revokes `CONNECT` on the bank and on `template1` from `PUBLIC` (refusing
+first if a role connected to the bank now would lose it, or the daemon's
+database user when `PSEUDOLIFE_MCP_DATABASE_URL` is set in that shell;
+without it the daemon user is reported as not checked), hands it leftover
+per-run test databases so the suite can prune them, installs `vector` in
+`template1`, and writes the login to an owner-only
+`~/.pseudolife-mcp/test-pg.env`, which the suite reads before `ops/.env`
+(`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it). It runs `psql` inside the
+`pseudolife-mcp-postgres` container, or uses `--admin-url` for another
+server, and is idempotent. The installers run it only with `-TestLogin` /
+`--test-login` (for contributors who run the suite against this server). A
+checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's host)
+runs it when this account has no login file, the bundled Postgres
+container runs here, and this account's suite connects to it (its
+`PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
+`~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`, is the container's
+published port; a host whose suites use another server is skipped with one
+line). When only the suite's default matched (no variable, no env file, as
+for a deploy run as root), it asks once at a terminal, default no, and
+without one skips with one line naming `test-login create`. It never passes
+`--rotate` (`-NoTestLogin` / `--no-test-login` skips
+it); a refusal only warns, with the fix. A release
+update (`pseudolife-mcp update`) never does. A bank restore keeps the bank closed
+(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it,
+and from a rehearsal's scratch copy; this runs on every restore, so a
+custom role that reached the bank only through `PUBLIC` needs its own
+`GRANT CONNECT` again afterwards); re-running `test-login create` checks it. Details, and running agent
+sessions under a separate account: [agent isolation](agent-isolation.md).
 
 ## Windows / WSL2 memory (Docker tier)
 
@@ -3345,6 +3537,16 @@ installer and the session notices print.
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+Until maintainer passkeys are set up on a daemon that requires a bearer, a
+Docker-tier update (release or checkout, not `--clients-only`) ends with
+one line naming `pseudolife-mcp maintainer setup`; at a terminal it offers
+to run it, default no (see
+[Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console)).
+A checkout deploy also creates the test suite's own Postgres login when it
+is missing (see
+[The test suite's Postgres login](#the-test-suites-postgres-login-pseudolife-mcp-test-login));
+a release update never does.
 
 What it refuses: a target it cannot read (PyPI unreachable and no
 `--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,
@@ -3650,7 +3852,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v53**; migrations are additive
+The current Postgres meta version is **v54**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3709,6 +3911,7 @@ The milestones:
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
+| v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
