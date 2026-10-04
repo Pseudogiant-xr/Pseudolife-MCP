@@ -35,6 +35,9 @@
 #   prompts; unattended runs keep them).
 # -NoToken (switch): open-loopback install - mint no bearer token, so the
 #   agent board stays off.
+# -TestLogin (switch): also give the test suite its own Postgres login, which
+#   cannot open the bank (`pseudolife-mcp test-login create`): for
+#   contributors who run the suite against this server; off by default.
 #
 # Client-only install (this machine runs no daemon; one runs elsewhere,
 # typically reached over a tailnet): no Docker, volumes, ops/.env, token
@@ -125,7 +128,9 @@ param(
     [switch]$ReadToken,
     [string]$PairingCode = "",
     # Optional guided ChatGPT Secure MCP Tunnel setup after local installation.
-    [switch]$Tunnel
+    [switch]$Tunnel,
+    # Also give the test suite its own Postgres login (see the header).
+    [switch]$TestLogin
 )
 $ErrorActionPreference = "Stop"
 
@@ -673,6 +678,7 @@ if ($ClientOnly) {
     if ($Model) { $localFlags += "-Model" }
     if ($ShimPort -ne 0) { $localFlags += "-ShimPort" }
     if ($NoToken) { $localFlags += "-NoToken" }
+    if ($TestLogin) { $localFlags += "-TestLogin" }
     if ($Transport -ne "shim") { $localFlags += "-Transport http" }
     if ($localFlags) {
         Write-Host "client-only install: the daemon runs elsewhere, so these flags do not apply: $($localFlags -join ' ') (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$clientOnlyVia"
@@ -2798,9 +2804,11 @@ function Show-EndpointContainer {
 # databases and cannot connect to the bank, written to
 # ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
 # ops/.env. So no checkout or agent session needs ops/.env, which holds the
-# bank owner's password (2026-10-04). Idempotent: a re-run re-applies the same
-# password. It runs psql in the Postgres container as its own superuser; a
-# failure leaves the install working.
+# bank owner's password (2026-10-04). Only with -TestLogin: an end user's
+# server has no use for a CREATEDB password login (review, 2026-10-04).
+# Idempotent: a re-run re-applies the same password. It runs psql in the
+# Postgres container as its own superuser; a failure leaves the install
+# working.
 function Invoke-TestLoginSetup {
     $py = Get-InstallerPython
     if (-not $py) {
@@ -2899,7 +2907,7 @@ if (-not $ClientOnly) {
     }
     Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     Invoke-EndpointContainerProbe
-    Invoke-TestLoginSetup
+    if ($TestLogin) { Invoke-TestLoginSetup }
 }
 
 # >>> client-only claude hook >>>

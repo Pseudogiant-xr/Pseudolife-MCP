@@ -28,11 +28,12 @@ finds it at `127.0.0.1:5433` on its own. It logs in with the first of:
 owner); the **test login file** `~/.pseudolife-mcp/test-pg.env`
 (`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it); `POSTGRES_PASSWORD` from
 `ops/.env`, as the bank owner; the compose default. Create the test login
-once with `pseudolife-mcp test-login create` on the daemon host (the
-installer does it on a fresh install): it is a role that creates and drops
+once with `pseudolife-mcp test-login create` on the daemon host (or install
+with `ops/install.ps1 -TestLogin` / `ops/install.sh --test-login`): it is a
+role that creates and drops
 its own databases and cannot connect to the bank, so no checkout needs
 `ops/.env`, which holds the bank owner's password. A run that still logs in
-through `ops/.env` prints one line saying so. See
+as the bank owner prints one line saying so. See
 [agent isolation](docs/guide/agent-isolation.md).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
