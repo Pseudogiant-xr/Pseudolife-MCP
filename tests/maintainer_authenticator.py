@@ -16,8 +16,8 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 
 from pseudolife_memory.maintainer_webauthn import b64url_encode
 
-RP_ID = "box.example.ts.net"
-ORIGIN = "https://box.example.ts.net:8443"
+RP_ID = "console.example.com"
+ORIGIN = "https://console.example.com:8443"
 
 
 def cbor(value) -> bytes:

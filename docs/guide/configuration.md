@@ -555,7 +555,7 @@ continues under the OS lock. A lock held by something the board does not show
 The command inherits the terminal and the environment, plus
 `PSEUDOLIFE_LEASES_HELD` (comma-separated names, appended to any inherited
 value). Exit codes: the command's own; `75` when `--timeout` (`90`, `90s`,
-`20m`, `2h`) expired before the lease was held, and the command did not run;
+`20m`, `2h`, `7d`) expired before the lease was held, and the command did not run;
 `128+N` when stopped by signal N (`130` Ctrl-C, `143` SIGTERM, `129` SIGHUP);
 `64` for a run nested inside a run of the same lease (its name is in
 `PSEUDOLIFE_LEASES_HELD` while that lease's lock is held), which would
@@ -3115,6 +3115,23 @@ its own and an update never replaces a folder a session is using:
   in `installed_plugins.json`, and they compare again. Nothing is
   uninstalled at any point: an update that fails leaves the installed copy
   installed.
+- A marketplace update that fails (a non-zero exit, or Claude Code's
+  `Failed to update marketplace` line) leaves the clone where it was, so a
+  cache matching it proves nothing: the step reports `failed`, never
+  `current`, quoting the CLI's line, and the run exits with the client-step
+  code. Claude Code clones a GitHub-source marketplace over SSH, which fails
+  on a host with no github.com key in `known_hosts`. Add the key after
+  checking its fingerprint against GitHub's published ones, or point the
+  marketplace at HTTPS with
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+  (it replaces the existing entry's source, and the installed plugin
+  follows it), then run the update again; the README's Updating section
+  has the same steps. Claude Code refuses that add while
+  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
+  with another source: change that entry's source to
+  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  first (the step names the file when it finds one). Do not use
+  `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code

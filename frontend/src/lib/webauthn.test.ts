@@ -67,14 +67,14 @@ describe("options from the daemon's JSON", () => {
   it("decodes the request options' byte fields and keeps the rest", () => {
     const o = requestOptionsFromJSON({
       challenge,
-      rpId: "box.example.ts.net",
+      rpId: "console.example.com",
       timeout: 120000,
       userVerification: "required",
       allowCredentials: [{ type: "public-key", id: credId, transports: ["internal"] }],
     });
     expect(o.challenge).toBeInstanceOf(Uint8Array);
     expect(new TextDecoder().decode(o.challenge as Uint8Array)).toBe("sha256-of-payload-32-bytes-long!");
-    expect(o.rpId).toBe("box.example.ts.net");
+    expect(o.rpId).toBe("console.example.com");
     expect(o.userVerification).toBe("required");
     expect(o.timeout).toBe(120000);
     expect([...(o.allowCredentials![0].id as Uint8Array)]).toEqual([1, 2, 3, 250]);

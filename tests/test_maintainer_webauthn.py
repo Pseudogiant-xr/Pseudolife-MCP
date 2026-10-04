@@ -94,7 +94,7 @@ def test_wrong_challenge_is_refused():
 def test_wrong_origin_is_refused():
     auth = SoftAuthenticator()
     _refused("client_data_origin", _assert, auth,
-             auth.assertion(CHALLENGE, origin="https://box.example.ts.net"))
+             auth.assertion(CHALLENGE, origin="https://console.example.com"))
 
 
 def test_non_json_client_data_is_refused():

@@ -103,7 +103,7 @@ const ready = (status: MaintainerStatus | null, extra: Partial<Parameters<typeof
     status,
     statusError: null,
     support: okSupport,
-    pageOrigin: "https://box.example.ts.net:8443",
+    pageOrigin: "https://console.example.com:8443",
     fixtures: false,
     nowMs: NOW_MS,
     ...extra,
@@ -224,11 +224,11 @@ describe("readiness", () => {
   });
 
   it("refuses an insecure page and a page at the wrong origin", () => {
-    const status = { available: true, origin: "https://box.example.ts.net:8443", passkeys: [key()] };
+    const status = { available: true, origin: "https://console.example.com:8443", passkeys: [key()] };
     const insecure = ready(status, { support: { ok: false, why: "insecure", message: "Not secure." } });
     expect(insecure.ok === false && insecure.body).toBe("Not secure.");
     const elsewhere = ready(status, { pageOrigin: "http://127.0.0.1:8765" });
-    expect(elsewhere.ok === false && elsewhere.body).toMatch(/box\.example\.ts\.net/);
+    expect(elsewhere.ok === false && elsewhere.body).toMatch(/console\.example\.com/);
     expect(ready(status).ok).toBe(true);
   });
 

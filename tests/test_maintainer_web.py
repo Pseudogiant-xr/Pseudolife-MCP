@@ -121,7 +121,7 @@ def test_a_wrong_bearer_is_unauthorized():
     (MaintainerError("recipient_reserved"), 400, "recipient_reserved"),
     (MaintainerError("rate_capped"), 429, "rate_capped"),
     (ValueError("challenge_spent"), 410, "challenge_spent"),       # a fixture's plain refusal
-    (ValueError("C:\\Users\\someone secret"), 400, "invalid_request"),
+    (ValueError("C:\\Users\\<user> secret"), 400, "invalid_request"),
     (RuntimeError("password=hunter2 in a database error"), 503, "coordination_unavailable"),
 ])
 def test_refusals_answer_their_status_and_never_echo(error, status, code):

@@ -55,9 +55,154 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `pseudolife-mcp lease delegate` now also frees the grantee's
   `coordinator:<project>` lease (one role per session; the answer names it in
   `also_broken`).
-- Served MCP instructions now say a receive result's origin "maintainer"
-  can grant approval; the rest of the text was tightened to stay within
-  Codex's 512 characters.
+- `memory_message` documents replying with `reply_to` and no `to` (how a
+  session answers the maintainer); a receive result that holds maintainer
+  mail carries `maintainer_note`, saying that mail was signed by the maintainer.
+
+### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
+- `memory_agents` and `memory_message` served 26 parameters with no
+  description and docstrings in compressed shorthand ("Bearer required;
+  list before shared work/resume."). Two reviews of the served surface, one
+  reading it from Claude Code's transcripts and one from inside Codex,
+  converged on the same findings: a model cannot see a cap Codex strips
+  from the schema (`maxLength`, `minimum`, `maximum`), so 63 of Codex's 110
+  model-caused errors in five weeks were `string_too_long` on these fields;
+  a send without `request_id` fails with a bare `missing_parameter` that
+  models retried three or four times; and the wording `""/plain status
+  clears` sent models after the empty-string route (89 malformed calls in
+  17 Claude sessions) when a status update with no park fields already
+  clears a park. Every parameter of both tools now carries a description
+  that names its action, whether it is required there, and its cap; the
+  docstrings lead with purpose, say that a wake receipt describes
+  notification rather than delivery (a `withheld` send is queued, not
+  failed, and must not be resent with `clears` or `urgent` just to ring),
+  and that reusing a `request_id` with changed inputs is a
+  `request_conflict`.
+- `memory_search` opens with what it searches (including ingested
+  documents) and which sibling to call instead (`memory_fact_get`,
+  `memory_recall`, `memory_lesson_search`, `memory_world_search`,
+  `document_search`, with their tier), and says what its filters reach:
+  `sources` / `bands` / `episodes` / `tags` narrow direct neural hits only,
+  not cortex facts, reference documents or contiguity neighbours, and `[]`
+  means no filter. `top_k` says "use top_k, not limit" — both model
+  families sent `limit`, which the server ignored silently (140 calls).
+  The "~4 in 10" figure on `verified: false` moves out of the served text
+  (a ratio without its population or date is not a runtime contract; the
+  measurement stays in the 2026-09-23 review's test comment).
+- `memory_toolset` says what expanding does and does not do: one tier per
+  call, `list_changed_sent` means the notification was sent, not that the
+  client refreshed its tool list (observed from Codex: `status` said
+  `full` while the callable catalog stayed at 24), so rediscover tools
+  after expanding and report a mismatch rather than expanding again. Its
+  `status` ladder now lists the board tools under core and
+  `memory_episode_summary` / `memory_graph_unrelate` under full.
+- The MCP initialization text is 502 characters composed (was 508): the
+  base says "pass episode where accepted" (only the tools with an
+  `episode` parameter can record one; the others ignored it silently),
+  and the shim's check-in suffix says "Subagents never send; all may
+  receive; update/ack need an own board ID" instead of "only read the
+  board", which was wrong for a Codex subagent (its own address does
+  update, receive and ack) and overstated for a Claude Code one (it may
+  receive). Codex prefixes this text to every tool declaration it shows
+  the model, so it is paid 24 times per session. The bench-pinned
+  `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again.
+- The parameter-description budgets move to the measured totals plus a
+  tenth of headroom (3,000 / 8,750 / 12,500); the description budgets and
+  the per-tool client limits (1,600 characters, 4,000 schema bytes) are
+  unchanged and every tool stays under them (largest schema
+  `memory_agents`, 3,459 bytes).
+
+### Fixed (2026-10-04 — `lease delegate --for 7d` works as documented)
+- The `pseudolife-mcp lease` duration arguments (`delegate --for`,
+  `run`/`hold --expect`, `--ttl` and `--timeout`) now accept a `d` suffix
+  for days, so `--for 7d` is 604800 seconds, alongside the bare seconds,
+  `s`, `m` and `h` forms that keep working; each argument's own bounds
+  still apply (`--for` at most a week). 0.16.0 and 0.16.1 refused `7d` with
+  "not a duration" although their CHANGELOG entries show `lease designate
+  PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
+  7d` (0.16.1, and the configuration guide): on those versions use
+  `--for 168h`.
+
+### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
+- A shim runtime installed by `pseudolife-mcp update` run from inside a
+  checkout could record the wrong version in its `runtime.json`. The
+  install asks the new runtime's Python which `pseudolife-mcp` it holds,
+  and `python -c` puts the working directory first on `sys.path`, so a
+  stale `pseudolife_mcp.egg-info` left in the checkout by an earlier
+  in-tree build answered instead (seen on Linux: 0.16.1 installed,
+  0.15.0 recorded). The wrong label made the same-release check miss, so
+  every rerun installed yet another runtime. The probe now runs isolated
+  (`python -I`), reading only the runtime's own packages.
+- A runtime already labelled wrongly is harmless: the launcher picks a
+  runtime by its sequence number, not its label, so it runs the right
+  code. The first update run by a release with this fix installs one
+  correctly labelled runtime, and a later update removes the mislabelled
+  one once nothing runs from it.
+- The probe runs inside the updater doing the install, so an updater
+  without this fix still mislabels the runtime it installs, the fixed
+  release's included. Run `pseudolife-mcp update` from outside a
+  checkout to avoid that.
+
+### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
+- `connect`'s MCP handshake ran its child Python, and the shim that child
+  starts, in the current directory. `python -c` and `-m` put that directory
+  first on `sys.path`, so `connect` run from inside a source checkout
+  validated the checkout's `pseudolife_memory` instead of the installed one.
+  The handshake child now runs from the system temporary directory, and the
+  shim it starts inherits that directory, and a relative token-file path
+  in a registration is resolved against the directory `connect` ran from
+  before the child gets it, as the checks before the handshake already
+  resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
+  which `-I` would ignore.
+
+### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
+- The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
+  plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
+  that shorthand as a `github` source and refreshes it over SSH, so on a host
+  with no GitHub SSH key or known_hosts entry every later
+  `claude plugin marketplace update` failed ("SSH host key is not in your
+  known_hosts file") and the plugin silently stopped updating (seen on a
+  Linux host, 2026-10-04). They now add it by
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`, as do the manual
+  `/plugin marketplace add` commands in the README, the plugin README, the
+  remote-bank guide, the translated READMEs, and the client step's advice
+  when the marketplace clone is missing. `tests/test_plugin_packaging.py`
+  fails while any of them names the shorthand.
+- **Existing installs** keep the `github` source until it is moved; the
+  README's Updating section gives the steps. If `~/.claude/settings.json`
+  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
+  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  (the CLI refuses an add that differs from a declared source), then run
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
+  Do not remove the marketplace first: that uninstalls its plugins.
+
+### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
+- The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
+  `ops/update_clients.py`) runs `claude plugin marketplace update
+  pseudolife-mcp` and then compares the marketplace clone with the installed
+  cache. It ignored a failed marketplace update, so a cache matching a clone
+  that could not be refreshed read `current`. On 2026-10-04 the homelab box
+  had no github.com host key for root: Claude Code's SSH clone failed, the
+  clone stayed at 0.16.0's commit, and the box kept 0.16.0's plugin hooks
+  after a 0.16.1 deploy that reported the plugin green.
+- A failed marketplace update (a non-zero exit, or the CLI's `Failed to
+  update marketplace` / `Failed to refresh marketplace` line even with exit
+  0) now makes the step `failed`, which fails the run with the client-step
+  exit code. The detail quotes the CLI's line and the remedy: for a missing
+  host key, add github.com's key to `known_hosts` after checking its
+  fingerprint, or point the marketplace at HTTPS with `claude plugin
+  marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which re-points the existing entry in place (measured on Claude Code
+  2.1.287). Claude Code refuses that add while `settings.json` declares the
+  marketplace under `extraKnownMarketplaces` with another source, as the
+  box's did, so where such a declaration exists the detail names the file
+  and says to change the entry's source to the HTTPS git URL first; it
+  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  still installs a clone that differs from the cache,
+  since that is progress, but it reports `failed` and says the clone may be
+  behind, not `refreshed`. A successful marketplace update behaves as
+  before.
 
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 

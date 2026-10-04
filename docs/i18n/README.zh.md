@@ -56,7 +56,7 @@ ops\install.ps1         # Windows (pwsh 7+)
 当 Claude Code 是所选客户端之一时,安装脚本还会添加 Claude Code 的**插件**(可用 `--claude-plugin skip` / `-ClaudePlugin skip` 跳过)。插件的记忆会话开始钩子(经过验证的 Codex 钩子运行的也是同一个)会提供记忆循环指导的精简核心,以及一份有长度上限的实时简报;插件还会添加每次提交提示词时的提醒,以及 `/dream` 与 `/memory-status` 命令。没有插件时,安装脚本写入 Claude Code `settings.json` 的钩子只传递简报本身。两者都不会提供完整的记忆循环指导:如需完整指导,请将 `examples/CLAUDE.memory.md` 追加到你的 `CLAUDE.md` 或 `AGENTS.md` 中。MCP 服务器本身由安装脚本注册,因此插件绝不会重复注册它的工具。如需手动添加插件,请在 Claude Code 中执行:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

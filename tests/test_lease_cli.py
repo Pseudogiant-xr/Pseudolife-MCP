@@ -203,15 +203,33 @@ def test_probe_reports_held_free_and_missing_without_creating(tmp_path):
 
 @pytest.mark.parametrize(("text", "seconds"), [
     ("90", 90), ("90s", 90), ("20m", 1200), ("2h", 7200), (" 5M ", 300), ("0", 0),
+    ("7d", 604800), ("1D", 86400),
 ])
-def test_durations_accept_seconds_minutes_and_hours(text, seconds):
+def test_durations_accept_seconds_minutes_hours_and_days(text, seconds):
     assert lease_cli.parse_duration(text) == seconds
 
 
-@pytest.mark.parametrize("text", ["", "m", "1.5h", "-5", "5d", "5 m", "abc", "1h30m"])
+@pytest.mark.parametrize("text", ["", "m", "d", "1.5h", "-5", "-1d", "7days", "5 m", "abc",
+                                  "1h30m"])
 def test_malformed_durations_are_refused(text):
     with pytest.raises(ValueError):
         lease_cli.parse_duration(text)
+
+
+def test_a_refused_duration_names_days_among_its_examples():
+    with pytest.raises(ValueError, match=r"\(use .* or 7d\)"):
+        lease_cli.parse_duration("abc")
+
+
+def test_delegate_for_takes_days_up_to_its_one_week_bound():
+    """The docs say ``lease delegate ... --for 7d``; 0.16.0 and 0.16.1 refused
+    it (only seconds, m and h parsed) and needed ``--for 168h`` (2026-10-04)."""
+    _, _, actions = lease_cli._parsers()
+    delegate = actions["delegate"]
+    assert delegate.parse_args(["proj", "abcd1234", "--for", "7d"]).hold == 7 * 86400
+    assert delegate.parse_args(["proj", "abcd1234", "--for", "168h"]).hold == 7 * 86400
+    with pytest.raises(SystemExit):
+        delegate.parse_args(["proj", "abcd1234", "--for", "8d"])
 
 
 def test_renewal_runs_at_a_third_of_the_ttl():
