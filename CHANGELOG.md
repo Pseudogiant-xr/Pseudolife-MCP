@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
+- A shim runtime installed by `pseudolife-mcp update` run from inside a
+  checkout could record the wrong version in its `runtime.json`. The
+  install asks the new runtime's Python which `pseudolife-mcp` it holds,
+  and `python -c` puts the working directory first on `sys.path`, so a
+  stale `pseudolife_mcp.egg-info` left in the checkout by an earlier
+  in-tree build answered instead (seen on Linux: 0.16.1 installed,
+  0.15.0 recorded). The wrong label made the same-release check miss, so
+  every rerun installed yet another runtime. The probe now runs isolated
+  (`python -I`), reading only the runtime's own packages.
+- A runtime already labelled wrongly is harmless: the launcher picks a
+  runtime by its sequence number, not its label, so it runs the right
+  code. The next update installs one correctly labelled runtime beside it
+  and removes the mislabelled one once nothing runs from it.
+
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
 ### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
