@@ -36,9 +36,13 @@ exactly; they exist because each one was violated at least once.
    Ordinary code changes do not require a local full suite. A local full
    suite is required for schema/DDL/migration changes; shared test
    infrastructure, conftest, fixture or suite-lock changes; daemon process
-   creation, ownership, shutdown or recovery changes; and changes whose
-   dependent coverage cannot be bounded confidently. Documentation-only and
-   test-only changes follow the narrower rules below.
+   creation, ownership, shutdown or recovery changes in Windows- or
+   macOS-specific code, which CI runs only in its lite lanes; and changes
+   whose dependent coverage cannot be bounded confidently. CI's full
+   PostgreSQL job starts, stops and recovers real daemons on Linux, so a
+   process change that is not platform-specific is ordinary code.
+   Documentation-only, test-only and review-fix changes, and integration
+   batches, follow the narrower rules below.
 
    For a required full run, finish review fixes and targeted validation
    before joining the queue, then run
@@ -49,7 +53,8 @@ exactly; they exist because each one was violated at least once.
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
-   revised head.
+   revised head, except as "Review fixes after a passing local full suite"
+   (under "Running tests") allows.
 
    Note that **a full run the bench Postgres rejects refuses to start**
    (conftest asks the server before queueing for the suite lock): without
@@ -75,6 +80,13 @@ exactly; they exist because each one was violated at least once.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
+   Amended 2026-10-05 by the maintainer: review fixes, integration batches
+   and the daemon-process trigger. The memo found the local full suite's
+   unique catches over PRs #391–#450 were two real problems, both schema or
+   shared-test-infrastructure changes. Platform failures came from CI, and
+   most defects from reviewers. Three full suites on 2026-10-04/05
+   (integration batches 11 and 12, and #576 before its review fixes) all
+   agreed with CI.
 4. **Deploy only via `pseudolife-mcp update`**
    (`pseudolife_memory/update_cli.py`, the one implementation since #460,
    2026-09-29): backup → rollback tag → daemon-only `--no-deps` recreate →
@@ -367,6 +379,19 @@ took 143 CUDA OOMs.
   the updated merge ref. A manually resolved code conflict requires a local
   full suite. Ordinary code branches with no local-full requirement do not
   acquire one merely by merging master forward.
+- **Review fixes after a passing local full suite need no new one** unless
+  the fixes themselves touch a class that requires it: schema, DDL or
+  migration, or shared test infrastructure (conftest, fixtures, the suite
+  lock, imported test helpers). Run the touched and dependent tests for the
+  fixes, record them in the PR beside the earlier full run's head and
+  result, and require CI on the current merge ref (maintainer decision
+  2026-10-05, after #576).
+- **An integration batch needs no batch-level local full suite** when every
+  merge into it is clean (no code conflict resolved by hand) and each PR's
+  own required local validation has passed. CI on the batch's merge ref is
+  the combined check; run the test files covering any overlap, plus the doc
+  guards when docs overlap. A hand-resolved code conflict requires a local
+  full suite on the batch head.
 - **Test-only changes skip the local full suite** when the diff touches only
   `tests/test_*.py`, non-code test data and optional docs-only files, and
   does not change shared fixture behavior, module-level state affecting
@@ -380,8 +405,8 @@ took 143 CUDA OOMs.
   head, then record its actual result. Merge only after all required local
   validation and current-merge-ref CI pass. Ordinary code PRs state the
   local selection and “local full suite: not required under the
-  ordinary-code rule”; an old-head full pass is not evidence for a changed
-  head.
+  ordinary-code rule”. An old-head full pass is not evidence for a changed
+  head, except under the review-fix rule above.
 
 ## Review discipline
 
