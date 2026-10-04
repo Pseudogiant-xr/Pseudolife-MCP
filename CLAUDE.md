@@ -100,6 +100,47 @@ exactly; they exist because each one was violated at least once.
    closes; new sessions start on them.
 5. **After deploy, verify live**, not just `/health`: exercise the changed path
    through the daemon (an MCP call, a psql check of new DDL).
+6. **Install and update finish the job themselves** (see the next section): a
+   change that adds a setup step a user would do by hand automates it in
+   the installer or `pseudolife-mcp update` before it is released.
+
+## Install and update experience
+
+Maintainer rule, 2026-10-05: the installer (`ops/install.sh`,
+`ops/install.ps1`) and `pseudolife-mcp update` do the whole job. A user
+should never need to read a guide, edit a config file or run a follow-up
+command to finish an install or an update. The 2026-10-04 passkey and
+test-login changes each shipped with manual operator steps, and the next
+release waited until the scripts covered them.
+
+- **A feature that needs host setup ships with that setup automated.** A
+  config key, a login or role, a serve or port, a file to copy, a command to
+  run once: the installer and update do it, in the same PR or one that lands
+  before the release. A manual step written only in the docs or the release
+  notes means the feature is not finished. A PR that adds such a step says
+  in its body what install and update do about it.
+- **Detect, don't ask.** Work out what the host has (tier, local or remote
+  daemon, Tailscale, checkout or release) and choose. Ask only when the
+  answer cannot be detected, or before a persistent change outside
+  Pseudolife's own files (Tailscale serve, a firewall rule, another
+  program's config). Then ask once, as y/N with a stated default, and accept
+  `--yes` for non-interactive runs.
+- **An unavoidable prompt is plain.** One short sentence on what will happen
+  and why, then the question. A step only a person can do (a passkey tap,
+  an approval in another app) says exactly where to click and what they
+  will see; the script waits for it and checks that it happened.
+- **Rerunning is safe and quiet.** On a host that is already set up,
+  install and update change nothing and say so in one line.
+- **Unattended runs never hang.** With no terminal (scheduled updates, CI), a
+  step that needs a person is skipped with one line naming the command that
+  finishes it.
+- **A refusal names its fix and leaves nothing half-done.** Check before
+  changing anything, or undo on failure, and print the one command or edit
+  that fixes it.
+- **Contributor-only setup stays out of end-user installs.** The test login
+  and checkout builds run from checkout mode (`ops/update.*`, `--checkout`)
+  or an explicit installer flag, never on a default install or from
+  release-mode update.
 
 ## Derived state / caches / indexes
 
