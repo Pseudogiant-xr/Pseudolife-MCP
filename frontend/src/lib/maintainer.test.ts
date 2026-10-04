@@ -21,6 +21,7 @@ import {
   OWN_KEYS_KEY,
   payloadMismatch,
   projectsOf,
+  reachText,
   readList,
   SEND_WAKE,
   roleEligible,
@@ -136,9 +137,35 @@ describe("roles", () => {
       acquired_at: NOW - 3600,
       granted_by: "maintainer",
       label: "label-d1",
+      reachable: null,
+      reach_reason: null,
     });
     expect(r.coordinator?.agent_id).toBe("c1");
     expect(r.coordinator?.acquired_at).toBeNull();
+  });
+
+  it("carries whether the daemon can ring each holder now", () => {
+    // Maintainer requirement 2026-10-05: the delegate above all must be
+    // reachable, and the band says so when it is not.
+    const served: MaintainerStatus = {
+      available: true,
+      roles: {
+        P: {
+          delegate: { agent_id: "d1", expires_at: NOW + 60, granted_by: "maintainer", reachable: true, reason: null },
+          coordinator: { agent_id: "c1", expires_at: NOW + 60, reachable: false, reason: "listener_expired" },
+        },
+      },
+    };
+    const r = rolesFor("P", served, []);
+    expect([r.delegate?.reachable, r.delegate?.reach_reason]).toEqual([true, null]);
+    expect([r.coordinator?.reachable, r.coordinator?.reach_reason]).toEqual([false, "listener_expired"]);
+    expect(reachText(r.delegate!)).toEqual({ ok: true, text: "Reachable now: your messages ring it." });
+    expect(reachText(r.coordinator!)).toEqual({
+      ok: false,
+      text: "No live wake listener (its listener lapsed): your messages wait for its next turn.",
+    });
+    // An older daemon serves no reachability, and the lease alone says nothing.
+    expect(reachText(rolesFor("P", null, [lease("delegate:P", "d2")]).delegate!)).toBeNull();
   });
 
   it("trusts the served map over a lease that names someone else", () => {
@@ -194,7 +221,15 @@ describe("roles", () => {
   it("says how long is left and how much of the hold remains", () => {
     expect(timeLeft(NOW + 22 * 3600, NOW_MS)).toBe("22 h left");
     expect(timeLeft(NOW - 5, NOW_MS)).toBe("ending now");
-    const h = { agent_id: "d", expires_at: NOW + 3600, acquired_at: NOW - 3600, granted_by: null, label: null };
+    const h = {
+      agent_id: "d",
+      expires_at: NOW + 3600,
+      acquired_at: NOW - 3600,
+      granted_by: null,
+      label: null,
+      reachable: null,
+      reach_reason: null,
+    };
     expect(leftPercent(h, NOW_MS)).toBe(50);
     expect(leftPercent({ ...h, acquired_at: null }, NOW_MS)).toBeNull();
   });
@@ -425,6 +460,11 @@ describe("messages", () => {
     expect(wakeText("rang")).toBe("rang its session");
     expect(wakeText("no_path")).toMatch(/next turn/);
     expect(wakeText({ decision: "capped", reason: "maintainer_hour" })).toMatch(/hourly wake limit/);
+    // Why there was no path, and a cap that is not the hourly one.
+    expect(wakeText({ decision: "no_path", reason: "listener_expired", queued: true })).toBe(
+      "no live listener (its listener lapsed), read on its next turn",
+    );
+    expect(wakeText({ decision: "capped", reason: "nightly" })).toBe("delivered, not rung: a wake limit is reached");
     expect(wakeText(null)).toBe("");
     expect(wakeText("some_new_state")).toBe("some new state");
   });

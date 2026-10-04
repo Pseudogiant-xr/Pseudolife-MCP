@@ -1617,7 +1617,8 @@ def _break(args) -> int:
 def _delegate(args) -> int:
     """Make a session the maintainer's delegate for a project through the
     bank itself (operator only), as ``break`` does. Prints the store's
-    answer as JSON; 1 when no bank is found or the grant was refused."""
+    answer as JSON, and its warning on stderr when the session has no live
+    wake path; 1 when no bank is found or the grant was refused."""
     return _operator("delegate", lambda store: store.grant_delegate(
         args.project, args.agent, hold=args.hold))
 
@@ -1649,6 +1650,10 @@ def _operator(verb, act) -> int:
         finally:
             storage.close()
         print(json.dumps(result))
+        # A grant to a session with no live wake path still succeeds; the
+        # operator is told that maintainer mail waits for its next turn.
+        if result.get("warning"):
+            _say(result["warning"])
         return 0
     finally:
         if own_instance is not None:

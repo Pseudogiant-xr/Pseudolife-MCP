@@ -781,14 +781,23 @@ GATE_MESSAGE = ("Before ending: update your board status with why you stopped an
                 "needs_approval with park_clear_by set to the reviewer's agent id or maintainer, "
                 "or waiting_peer. A park records intent; automatic wake requires a live listener. "
                 "Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. "
-                "For waits over 59 minutes, especially needs_approval waiting on maintainer, arm wait-mail "
-                "in the background or keep the Codex doorbell active; otherwise record that you are "
-                "reachable on your next turn.")
+                "Claude Code's Stop hook keeps listening while this session stays open, and a Codex "
+                "thread needs its doorbell active; without either, record that you are reachable on "
+                "your next turn.")
 
 
 def test_the_served_park_gate_prompt_names_the_followup_distinction():
     from pseudolife_memory.coordination import PARK_GATE_MESSAGE
     assert PARK_GATE_MESSAGE == GATE_MESSAGE
+
+
+def test_the_hooks_own_park_prompt_matches_the_served_one():
+    """stop-wake.sh shows its own copy when the daemon's block carries no
+    text; since the watcher listens while the session is open, neither copy
+    sends a session to arm wait-mail (2026-10-05)."""
+    script = HOOK.read_text(encoding="utf-8")
+    default = re.search(r'^\s*DEFAULT_MESSAGE="([^"]*)"$', script, re.M)
+    assert default is not None and default.group(1) == GATE_MESSAGE
 
 
 @pytest.mark.parametrize("surface", ["checkin_sentence", "configuration", "stop_hook_quote"])

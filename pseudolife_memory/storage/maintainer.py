@@ -670,7 +670,7 @@ class MaintainerStore:
         """Every project with a live role lease: its delegate (with who
         granted it, read from the grant's audit record for the current
         fence; a hold without one grants nothing and is left out) and its
-        coordinator."""
+        coordinator, each with whether maintainer mail rings it now."""
         now = self.clock()
         out: dict = {}
         for row in self._all(
@@ -679,20 +679,26 @@ class MaintainerStore:
                 "AND e.agent_id=l.holder_agent_id AND CASE WHEN e.event='lease_delegate' "
                 "THEN e.payload::jsonb->>'name'=l.name "
                 "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END "
-                "ORDER BY e.seq DESC LIMIT 1) AS granted_by "
-                "FROM coordination_leases l WHERE l.holder_agent_id IS NOT NULL "
+                "ORDER BY e.seq DESC LIMIT 1) AS granted_by,"
+                "a.agent_id AS row_agent_id,a.attachment_id,a.lease_until,a.wake_enabled,"
+                "a.capabilities "
+                "FROM coordination_leases l LEFT JOIN coordination_agents a "
+                "ON a.agent_id=l.holder_agent_id WHERE l.holder_agent_id IS NOT NULL "
                 "AND l.expires_at>%s AND (l.name LIKE %s OR l.name LIKE %s) ORDER BY l.name",
                 (now, DELEGATE_PREFIX + "%", COORDINATOR_PREFIX + "%")):
+            reach = CoordinationStore.reachability(
+                row if row["row_agent_id"] is not None else None, now)
             if row["name"].startswith(DELEGATE_PREFIX):
                 if row["granted_by"] not in ("operator", "maintainer"):
                     continue
                 project = row["name"][len(DELEGATE_PREFIX):]
                 entry = {"agent_id": row["holder_agent_id"], "expires_at": row["expires_at"],
-                         "granted_by": row["granted_by"]}
+                         "granted_by": row["granted_by"], **reach}
                 slot = "delegate"
             else:
                 project = row["name"][len(COORDINATOR_PREFIX):]
-                entry = {"agent_id": row["holder_agent_id"], "expires_at": row["expires_at"]}
+                entry = {"agent_id": row["holder_agent_id"], "expires_at": row["expires_at"],
+                         **reach}
                 slot = "coordinator"
             out.setdefault(project, {"delegate": None, "coordinator": None})[slot] = entry
         return out
