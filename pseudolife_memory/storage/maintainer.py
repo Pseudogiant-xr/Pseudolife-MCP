@@ -71,6 +71,11 @@ SPENT_NONCE_RETENTION = 7 * 24 * 3600
 # The host's one-time bootstrap code: 10 base32 characters, 10 minutes.
 BOOTSTRAP_TTL = 600
 BOOTSTRAP_CODE_LENGTH = 10
+# How many characters of a passkey's credential id the host prints and the
+# Console shows (KEY_PREFIX_LEN in frontend/src/lib/format.ts, pinned equal
+# by tests/test_console_build.py): setup asks the maintainer to check the two
+# match, so they must be the same string.
+KEY_PREFIX_LEN = 12
 # Wrong-code redemptions that burn the live code; the host must then issue a
 # new one. A wrong code rolls its redemption back, so before this one
 # payload could carry unlimited guesses (security review, 2026-10-04). Five
@@ -154,6 +159,11 @@ def normalize_code(code) -> str:
 
 def code_hash(code) -> str:
     return hashlib.sha256(normalize_code(code).encode("ascii", "ignore")).hexdigest()
+
+
+def key_prefix(credential_id: str) -> str:
+    """A passkey's id as the host prints it and the Console shows it."""
+    return credential_id[:KEY_PREFIX_LEN]
 
 
 def check_label(label) -> str:

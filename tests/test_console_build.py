@@ -127,3 +127,28 @@ def test_console_build_carries_no_inline_script():
     assert _inline_scripts(html) == [], "inline <script> in the built index.html"
     assert (STATIC / "theme.js").is_file()
     assert '<script src="/ui/theme.js"></script>' in html
+
+
+def test_console_shows_passkey_ids_with_the_hosts_prefix_length():
+    """Setup asks the maintainer to check that the Console shows the prefix
+    the host printed (2026-10-05: the host printed 12 characters, the
+    Console 8, and the check read as a mismatch). One constant per side,
+    pinned equal; every credential id in the Console goes through it."""
+    from pseudolife_memory.storage.maintainer import KEY_PREFIX_LEN, key_prefix
+    fmt = (FRONTEND / "src" / "lib" / "format.ts").read_text(encoding="utf-8")
+    match = re.search(r"^export const KEY_PREFIX_LEN = (\d+);", fmt, re.M)
+    assert match, "frontend/src/lib/format.ts must export KEY_PREFIX_LEN"
+    assert int(match.group(1)) == KEY_PREFIX_LEN
+    assert key_prefix("x" * 40) == "x" * KEY_PREFIX_LEN
+    passkey_id = re.compile(r"shortId\([^)]*(?:credential|enrolled_by|\bc\.by\b)[^)]*\)")
+    shortened = []
+    for src in (FRONTEND / "src").rglob("*"):
+        if src.suffix in {".ts", ".svelte"} and not src.name.endswith(".test.ts"):
+            text = src.read_text(encoding="utf-8")
+            shortened += [f"{src.name}: {m.group(0)}" for m in passkey_id.finditer(text)]
+    assert not shortened, f"use keyPrefix() for passkey ids: {shortened}"
+    host = [f"{p.name}" for p in (ROOT / "pseudolife_memory").rglob("*.py")
+            if re.search(r"""(?:credential_id|enrolled_by)['"]\]\[:\d+\]""",
+                         p.read_text(encoding="utf-8"))]
+    assert not host, f"use key_prefix() for passkey ids: {host}"
+

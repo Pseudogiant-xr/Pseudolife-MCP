@@ -36,6 +36,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The park prompt (Stop-hook gate) and the no-path fallback text no longer
   tell Claude Code sessions to arm `wait-mail` for waits over 59 minutes.
 
+### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
+- On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's
+  shell printed "no bank found" and worked only as `docker exec
+  pseudolife-mcp-daemon pseudolife-mcp lease delegate ...`: the bank's
+  database URL lives in the daemon container's environment, not the
+  operator's. The commands that open the bank directly (`lease break` and
+  `lease delegate`, every `maintainer` action except the already guided
+  `setup`, and `board-audit export`, `verify`, `redact` and `stats`) now,
+  when they find no database URL and no lite bank but the
+  `pseudolife-mcp-daemon` container is running on the host, re-run
+  themselves inside it with the same arguments (`docker exec`, honouring
+  `PSEUDOLIFE_DOCKER` as `maintainer setup` does), print one line saying
+  so, and exit with the container's code. A terminal is passed through
+  (`-it`) when stdin and stdout are both terminals, `-i` otherwise, so
+  piped JSON stays byte-clean. `board-audit` keeps the files it names on the
+  host: `export --out` and `stats --out` / `--append` are written here (an
+  export that fails or is interrupted leaves no file, as before), and
+  `stats` sends this host's suite-lock durations file to the container on
+  stdin. The re-run marks itself (`PSEUDOLIFE_DAEMON_EXEC`) and never
+  re-runs again. With no running container the old message stays, now
+  naming the `docker exec` form. The configuration guide no longer tells
+  operators to `docker exec` these commands by hand.
+
+### Fixed (2026-10-05 — the Console shows the passkey prefix the host prints)
+- `pseudolife-mcp maintainer setup` asks the maintainer to check that the
+  Console shows the passkey prefix the host printed. The host printed 12
+  characters (`Ab3dEf6hIj_k`) and the Console 8 (`Ab3dEf6h`), so the check
+  read as a mismatch. The Console now shows 12 everywhere it names a
+  passkey (Settings, Your passkeys; the `maintainer confirm` command it
+  suggests; key-change notices and history; the signing preview). One
+  constant per side (`KEY_PREFIX_LEN` in `storage/maintainer.py` and in
+  `frontend/src/lib/format.ts`), pinned equal by `tests/test_console_build.py`.
+- Setup's browser step sends the maintainer to a new HTTPS address, where
+  the browser has no Console token yet (the Console stores one per
+  address). It now says so up front: click "Set a bearer token" and paste
+  the token the Console uses at its usual address (the daemon's
+  `PSEUDOLIFE_MCP_TOKEN`, which a single-token install also keeps in the
+  client's token file). It never prints the token. The Console's own "did not accept this console's token" panel
+  says the same.
+
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
 - Turning on maintainer passkeys took four manual steps on the daemon host:
   a `tailscale serve` command, a hand edit of the daemon's config file, a

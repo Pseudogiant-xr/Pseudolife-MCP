@@ -35,10 +35,23 @@ exactly; they exist because each one was violated at least once.
 
    Ordinary code changes do not require a local full suite. A local full
    suite is required for schema/DDL/migration changes; shared test
-   infrastructure, conftest, fixture or suite-lock changes; daemon process
-   creation, ownership, shutdown or recovery changes; and changes whose
-   dependent coverage cannot be bounded confidently. Documentation-only and
-   test-only changes follow the narrower rules below.
+   infrastructure, conftest, fixture or suite-lock changes; and changes
+   whose dependent coverage cannot be bounded confidently. Daemon process
+   creation, ownership, shutdown or recovery changes are ordinary code on
+   Linux: CI's full PostgreSQL job starts and stops real daemons there and
+   covers recovery against stand-in daemons. When such a change is
+   Windows- or macOS-specific, a local full suite would not help (this
+   host runs full suites only on Linux). Instead, run that platform's
+   affected test files natively as a targeted run (Windows allows one), and
+   make sure they are in its CI lite lane's file list (`test-lite-windows`
+   / `test-lite-macos` in `.github/workflows/ci.yml`), adding them if
+   missing. Platform-specific means code that runs only there (a branch on
+   `os.name` / `sys.platform`, `creationflags`, `msvcrt`, `SIGBREAK`,
+   scheduled tasks or launchd, the `.ps1` launchers), or shared code whose
+   behaviour rests on OS process semantics (signals, terminate and kill,
+   file locks, detached sessions).
+   Documentation-only, test-only and review-fix changes, and integration
+   batches, follow the narrower rules below.
 
    For a required full run, finish review fixes and targeted validation
    before joining the queue, then run
@@ -49,7 +62,8 @@ exactly; they exist because each one was violated at least once.
    the PostgreSQL authentication preflight: a fresh worktree must have the
    correct bench configuration before queueing. A refused or interrupted run
    is not a pass; a changed imported tree requires a fresh process on the
-   revised head.
+   revised head, except as "Review fixes after a passing local full suite"
+   (under "Running tests") allows.
 
    Note that **a full run the bench Postgres rejects refuses to start**
    (conftest asks the server before queueing for the suite lock): without
@@ -75,6 +89,13 @@ exactly; they exist because each one was violated at least once.
 
    Trial from 2026-09-28; the maintainer reassesses on 2026-10-12 against
    the measures in the maintainer's private suite-gate memo of 2026-09-28.
+   Amended 2026-10-05 by the maintainer: review fixes, integration batches
+   and the daemon-process trigger. The memo found the local full suite's
+   unique catches over PRs #391–#450 were two real problems, both schema or
+   shared-test-infrastructure changes. Platform failures came from CI, and
+   most defects from reviewers. Three full suites on 2026-10-04/05
+   (integration batches 11 and 12, and #576 before its review fixes) all
+   agreed with CI.
 4. **Deploy only via `pseudolife-mcp update`**
    (`pseudolife_memory/update_cli.py`, the one implementation since #460,
    2026-09-29): backup → rollback tag → daemon-only `--no-deps` recreate →
@@ -374,7 +395,25 @@ took 143 CUDA OOMs.
   the overlap, plus doc guards when docs overlap, and require fresh CI on
   the updated merge ref. A manually resolved code conflict requires a local
   full suite. Ordinary code branches with no local-full requirement do not
-  acquire one merely by merging master forward.
+  acquire one merely by merging master forward. A pass carried forward
+  under the review-fix rule below counts as the branch's passed run.
+- **Review fixes after a passing local full suite need no new one** unless
+  the fixes themselves fall under a class that requires one (shipping
+  checklist item 3, including its platform-specific process rule). A review
+  fix answers findings on the same PR; a fix that widens the PR's scope is
+  a new change. Run the touched and dependent tests for the fixes, and
+  require CI on the current merge ref. The PR says "local full suite:
+  passed at `<head>`; later commits are review fixes" with the targeted
+  runs listed (maintainer decision 2026-10-05, after #576).
+- **An integration batch needs no batch-level local full suite** when every
+  merge into it is clean (no code conflict resolved by hand) and each PR's
+  own required local validation has passed. An integration batch is an
+  `integrate/<date>-batch-N` branch that lands several reviewed PRs under
+  one CI run. CI on the batch's merge ref is the combined check; run the
+  test files covering any overlap, plus the doc guards when docs overlap.
+  The PR says "local full suite: not required, clean integration batch". A
+  hand-resolved code conflict requires a local full suite on the batch
+  head.
 - **Test-only changes skip the local full suite** when the diff touches only
   `tests/test_*.py`, non-code test data and optional docs-only files, and
   does not change shared fixture behavior, module-level state affecting
@@ -388,8 +427,8 @@ took 143 CUDA OOMs.
   head, then record its actual result. Merge only after all required local
   validation and current-merge-ref CI pass. Ordinary code PRs state the
   local selection and “local full suite: not required under the
-  ordinary-code rule”; an old-head full pass is not evidence for a changed
-  head.
+  ordinary-code rule”. An old-head full pass is not evidence for a changed
+  head, except under the review-fix rule above.
 
 ## Review discipline
 
