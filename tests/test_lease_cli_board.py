@@ -223,6 +223,8 @@ def test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it(board, pg_url, 
     assert json.loads(capsys.readouterr().out)["broken"] is False
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL")
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path / "no-bank-here"))
+    # Never a real daemon container on a test host (tests/test_daemon_exec.py).
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_EXEC", "1")
     assert lease_cli.main(["break", "gpu"]) == 1
     assert "no bank found" in capsys.readouterr().err
 

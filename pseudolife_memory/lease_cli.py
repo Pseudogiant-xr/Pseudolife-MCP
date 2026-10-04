@@ -93,6 +93,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pseudolife_memory import os_lock
+from pseudolife_memory.daemon_exec import NoBank, no_bank_message, run_in_daemon
 
 EXIT_USAGE = 2
 EXIT_NESTED = 64  # sysexits EX_USAGE: run inside a run of the same lease
@@ -1628,9 +1629,7 @@ def _operator(verb, act) -> int:
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
     try:
         if not dsn:
-            _say("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's database URL, "
-                 "or run where the lite tier's data dir holds one")
-            return 1
+            raise NoBank
         from pseudolife_memory.storage.coordination import (
             CoordinationConnection, CoordinationError, CoordinationStore)
         try:
@@ -1813,7 +1812,8 @@ def _parsers():
         description="Operator only: free the lease NAME on the board, whatever its holder "
                     "says, and grant it to the next waiter. It opens the bank directly, "
                     "the way board-audit and export find it (PSEUDOLIFE_MCP_DATABASE_URL, "
-                    "else the lite tier's data dir), never through an agent's credential, "
+                    "else the lite tier's data dir, else inside the pseudolife-mcp-daemon "
+                    "container when it runs here), never through an agent's credential, "
                     "and the audit log records the break with the operator as its actor. "
                     "It frees the board's record only: a process still holding the local "
                     "lock keeps it until it exits.")
@@ -1872,8 +1872,13 @@ def main(argv: list[str] | None = None, *, transport=None) -> int:
         return _check(args, transport)
     if args.action == "list":
         return _list(args, transport)
-    if args.action == "break":
-        return _break(args)
-    if args.action == "delegate":
-        return _delegate(args)
+    if args.action in ("break", "delegate"):
+        try:
+            return _break(args) if args.action == "break" else _delegate(args)
+        except NoBank:
+            ran = run_in_daemon("lease", argv)
+            if ran is not None:
+                return ran.returncode
+            _say(no_bank_message("lease"))
+            return 1
     return _run(args, command, transport)

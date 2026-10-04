@@ -5013,12 +5013,12 @@ session's claim of one is refused `reserved_lease`, so a delegate cannot
 renew its own. It may release it to resign; revoke it with
 `pseudolife-mcp lease break delegate:<PROJECT>`. A freed grant is never
 passed to a queued session: any waiter leaves the queue (`lease_dequeue`,
-reason `reserved`). In the Docker tier, run both inside the daemon container,
-where the bank's URL is set:
-
-```sh
-docker exec <daemon container> pseudolife-mcp lease delegate PROJECT AGENT --for 7d
-```
+reason `reserved`). In the Docker tier the bank's URL is set only inside the
+daemon container: run either on the daemon's host as it is, and when the
+shell has no bank but the `pseudolife-mcp-daemon` container runs there, the
+command re-runs itself inside it (one line says so) with the same
+arguments, output and exit code. The same holds for `maintainer` and
+`board-audit`.
 
 The delegate is not the coordinator: `coordinator:<project>` is the open role
 any session may claim to say it is coordinating, and it grants nothing. A
@@ -5267,8 +5267,9 @@ coordination:
 any other plain-HTTP origin is refused, `409 maintainer_https_required`, and
 so is an origin written with its scheme's default port, `https://<rp_id>:443`
 or `http://localhost:80`, since browsers send it without);
-then run `pseudolife-mcp maintainer enrol-code` (on the Docker tier, inside
-the daemon container), redeem the code in the Console, check the printed
+then run `pseudolife-mcp maintainer enrol-code` on the daemon host (on the
+Docker tier it runs itself inside the daemon container, as
+[`lease delegate`](#leases-pseudolife-mcp-lease) does), redeem the code in the Console, check the printed
 prefix against it, and run `pseudolife-mcp maintainer confirm <prefix>`.
 Only then is the key active.
 
@@ -5782,9 +5783,10 @@ must be unfiltered, since a filtered one has gaps, and a line that repeats a
 key is refused. Export and verify with a v46 or later CLI: an export written
 by an older one has no `body` fields, so its v46 sends fail as
 `body_not_exported`, and an older `verify` checks no bodies at all. An export
-of a pre-v46 log still verifies. In the Docker tier run it
-inside the daemon container, which already has the database URL:
-`docker exec pseudolife-mcp-daemon pseudolife-mcp board-audit verify`.
+of a pre-v46 log still verifies. In the Docker tier, run it on the daemon's
+host: with no database URL in the shell it runs itself inside the daemon
+container, which has one, and files it names (`--out`, `--append`,
+`--durations`) stay on the host.
 
 What `verify` shows: no row was edited, inserted or reordered, and none was
 removed except the oldest, behind a cut record whose own fields add up (written

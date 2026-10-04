@@ -222,15 +222,18 @@ describe("readiness", () => {
   });
 
   it("asks for the host confirm while the only key is pending", () => {
-    const r = ready({ available: true, passkeys: [key({ state: "pending", credential_id: "abcdef123456" })] });
-    expect(r.ok === false && r.command).toBe("pseudolife-mcp maintainer confirm abcdef12");
+    // The host prints a key's first 12 characters (KEY_PREFIX_LEN); the
+    // command the Console names must be the same prefix, or the check that
+    // setup asks for reads as a mismatch.
+    const r = ready({ available: true, passkeys: [key({ state: "pending", credential_id: "abcdef123456789xyz" })] });
+    expect(r.ok === false && r.command).toBe("pseudolife-mcp maintainer confirm abcdef123456");
     // The daemon says "not enrolled" until a key can sign; the key list says why.
     const served = ready({
       available: false,
       reason: "maintainer_not_enrolled",
-      passkeys: [key({ state: "pending", credential_id: "abcdef123456" })],
+      passkeys: [key({ state: "pending", credential_id: "abcdef123456789xyz" })],
     });
-    expect(served.ok === false && served.command).toBe("pseudolife-mcp maintainer confirm abcdef12");
+    expect(served.ok === false && served.command).toBe("pseudolife-mcp maintainer confirm abcdef123456");
   });
 
   it("does not let a quarantined key sign", () => {
@@ -474,13 +477,13 @@ describe("key-change notices", () => {
   });
 
   it("puts each change in words, naming the path", () => {
-    expect(keyChangeText(change())).toBe("“laptop” (keyA0000) was revoked on the daemon host");
-    expect(keyChangeText(change({ by: "keyA0000000000", path: "console" }))).toBe("“laptop” (keyA0000) revoked itself");
+    expect(keyChangeText(change())).toBe("“laptop” (keyA00000000) was revoked on the daemon host");
+    expect(keyChangeText(change({ by: "keyA0000000000", path: "console" }))).toBe("“laptop” (keyA00000000) revoked itself");
     expect(keyChangeText(change({ change: "reset", credential_id: null, label: null, revoked: 2 }))).toBe(
       "every passkey was revoked on the daemon host (reset; 2 revoked)",
     );
-    expect(keyChangeText(change({ change: "add", by: "keyZ9999999", path: "console" }))).toMatch(
-      /was added in the Console, approved by key keyZ9999/,
+    expect(keyChangeText(change({ change: "add", by: "keyZ999999999999", path: "console" }))).toMatch(
+      /was added in the Console, approved by key keyZ99999999$/,
     );
     expect(keyChangeText(change({ change: "enrol", by: "bootstrap", path: "console" }))).toMatch(/one-time code/);
     expect(keyChangeText(change({ change: "confirm" }))).toMatch(/confirmed on the daemon host/);
