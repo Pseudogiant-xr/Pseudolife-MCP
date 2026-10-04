@@ -42,8 +42,9 @@ Run it where the owner credentials already are: on a Docker install it runs
 `psql` inside the `pseudolife-mcp-postgres` container over the container's
 local socket, as the container's own superuser, so the host never handles the
 owner's password (`--admin-url <superuser URL>` instead, for a server
-elsewhere). It refuses before changing anything when that connection is not
-a superuser. Idempotently, it:
+elsewhere: leave the password out of the URL and libpq reads `PGPASSWORD`
+or `~/.pgpass`; an error never prints it). It refuses before changing
+anything when that connection is not a superuser. Idempotently, it:
 
 | What | Why |
 |---|---|
@@ -191,9 +192,17 @@ account's key, to the box user in `full-suite.remote`. For agent sessions:
   the `docker` group (membership there is root-equivalent) and cannot read the
   live stack's checkout or its `ops/.env`.
 - That user's suites log in as configured in `env=` or, failing that, as the
-  test login in its own `~/.pseudolife-mcp/test-pg.env`; run `pseudolife-mcp
-  test-login create --admin-url <the box test server's superuser URL>` for
-  the box's separate test server, as the box's maintainer.
+  test login in its own `~/.pseudolife-mcp/test-pg.env`. For the box's
+  separate test server, as the box's maintainer, give `--admin-url` a
+  superuser URL without its password and let libpq read it from
+  `PGPASSWORD` or `~/.pgpass`, so it stays off the command line and out of
+  the shell history:
+
+  ```bash
+  read -rs PGPASSWORD && export PGPASSWORD   # the test server's superuser password
+  pseudolife-mcp test-login create --admin-url postgresql://<superuser>@127.0.0.1:<port>/postgres
+  unset PGPASSWORD
+  ```
 - A dispatched run wraps pytest in `sudo systemd-run` for its memory limit,
   and password-free `sudo` for `systemd-run` is root-equivalent (it can run
   any command as root). Such a user is not isolated. Until the launcher can

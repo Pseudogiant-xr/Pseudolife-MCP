@@ -302,6 +302,49 @@ def test_a_failing_psql_raises_with_its_message(monkeypatch):
         cli.ContainerPsql("c").query(None, ["SELECT 1"])
 
 
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_a_bad_admin_url_never_prints_its_password(tmp_path, as_json):
+    """psycopg quotes the token it cannot decode, here the URL's password
+    (review, 2026-10-04: `invalid percent-encoded token: "<password>%zz"`)."""
+    secret = "FAKESECRET" + "q" * 12
+    out = io.StringIO()
+    code = cli.main(["create", "--admin-url", f"postgresql://admin:{secret}%zz@127.0.0.1:1/postgres",
+                     "--file", str(tmp_path / "f.env"), *(["--json"] if as_json else [])], out=out)
+    assert code == cli.EXIT_FAILED
+    assert "test-login" in out.getvalue() or as_json
+    assert secret not in out.getvalue(), out.getvalue()
+
+
+@pytest.mark.parametrize("text", [
+    'invalid percent-encoded token: "s3cr%zz"',
+    "could not parse postgresql://admin:s3cr%zz@host/db",
+    "bad conninfo: host=h password=s3cr%zz user=u",
+    "bad conninfo: host=h password='s3cr%zz' user=u",
+])
+def test_error_text_is_masked_for_the_urls_password_and_any_password_shaped_token(text):
+    masked = cli.mask_secrets(text, "postgresql://admin:s3cr%zz@host/db")
+    assert "s3cr" not in masked, masked
+    masked = cli.mask_secrets(text, None)  # no URL to learn the password from
+    assert "s3cr" not in masked, masked
+
+
+def test_the_admin_url_needs_no_password_on_the_command_line(tmp_path, monkeypatch):
+    """libpq reads PGPASSWORD and ~/.pgpass, so the runbook's form keeps the
+    superuser's password out of argv and shell history."""
+    seen = {}
+
+    class _Probe(cli.AdminUrl):
+        def query(self, database, statements):
+            seen["url"] = self._url
+            raise cli.DatabaseError("stop here")
+
+    monkeypatch.setattr(cli, "AdminUrl", _Probe)
+    code = cli.main(["create", "--admin-url", "postgresql://admin@127.0.0.1:1/postgres",
+                     "--file", str(tmp_path / "f.env")], out=io.StringIO())
+    assert code == cli.EXIT_FAILED
+    assert seen["url"] == "postgresql://admin@127.0.0.1:1/postgres"
+
+
 def test_the_command_is_dispatched_and_listed():
     from pseudolife_memory import cli as dispatch
 

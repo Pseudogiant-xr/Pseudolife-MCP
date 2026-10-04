@@ -32,7 +32,9 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
 The password is drawn here and never sent: the server gets its SCRAM-SHA-256
 verifier, so it is in no statement, log line or process argument.
 
-Where it runs: with ``--admin-url`` (a superuser URL), through psycopg.
+Where it runs: with ``--admin-url`` (a superuser URL, best without its
+password: libpq reads ``PGPASSWORD`` or ``~/.pgpass``), through psycopg; an
+error never prints the URL's password.
 Otherwise on the Docker host, through ``psql`` in the ``pseudolife-mcp-postgres``
 container over its local socket as the container's ``POSTGRES_USER``, as
 ``ops/restore.sh`` and ``invite --revoke`` do: the host never handles the
@@ -125,8 +127,46 @@ class ContainerPsql:
         return lines[-1].strip() if lines else ""
 
 
+# A URL's userinfo password, a conninfo ``password=`` value, and the token
+# libpq quotes when it cannot percent-decode one: psycopg's error text can
+# carry any of them (review, 2026-10-04: a bad --admin-url printed its
+# password inside `invalid percent-encoded token: "..."`).
+_URL_PASSWORD = re.compile(r"(://[^:/?#@\s]*:)[^@\s]*@")
+_KEYWORD_PASSWORD = re.compile(r"(password\s*=\s*)('(?:[^'\\]|\\.)*'|\S+)", re.IGNORECASE)
+_QUOTED_TOKEN = re.compile(r'(percent-encoded token:\s*)"[^"]*"', re.IGNORECASE)
+
+
+def _url_passwords(url: str | None) -> list[str]:
+    """The password an admin URL carries, raw and decoded; none when the
+    URL has none (libpq then reads PGPASSWORD or ~/.pgpass)."""
+    if not url:
+        return []
+    from urllib.parse import unquote
+
+    found = []
+    match = re.match(r"\s*[a-z]+://([^/?#]*)@", url, re.IGNORECASE)
+    if match and ":" in match.group(1):
+        found.append(match.group(1).split(":", 1)[1])
+    match = re.search(r"password\s*=\s*('(?:[^'\\]|\\.)*'|\S+)", url, re.IGNORECASE)
+    if match:
+        found.append(match.group(1).strip("'"))
+    found += [unquote(value) for value in found]
+    return [value for value in dict.fromkeys(found) if value]
+
+
+def mask_secrets(text: str, url: str | None = None) -> str:
+    """``text`` with the admin URL's password, and anything shaped like a
+    password, replaced by ``***``."""
+    for secret in sorted(_url_passwords(url), key=len, reverse=True):
+        text = text.replace(secret, "***")
+    text = _URL_PASSWORD.sub(r"\1***@", text)
+    text = _KEYWORD_PASSWORD.sub(r"\1***", text)
+    return _QUOTED_TOKEN.sub(r'\1"***"', text)
+
+
 class AdminUrl:
-    """psycopg to a superuser URL (``--admin-url``)."""
+    """psycopg to a superuser URL (``--admin-url``). The URL need not carry a
+    password: libpq reads ``PGPASSWORD`` and ``~/.pgpass``."""
 
     def __init__(self, url: str):
         self._url = url
@@ -148,7 +188,8 @@ class AdminUrl:
                         result = "" if row is None or row[0] is None else str(row[0])
                 return result
         except psycopg.Error as exc:
-            raise DatabaseError(f"{type(exc).__name__}: {str(exc).strip()}") from None
+            raise DatabaseError(mask_secrets(f"{type(exc).__name__}: {str(exc).strip()}",
+                                             self._url)) from None
 
 
 # ── SQL ───────────────────────────────────────────────────────────────────────
@@ -319,6 +360,7 @@ class _Report:
             print(line, file=self.out, flush=True)
 
     def finish(self, code: int, error: str | None = None) -> int:
+        error = mask_secrets(error) if error else error
         if error and not self.as_json:
             print(f"test-login: {error}", file=self.out, flush=True)
         if self.as_json:
@@ -347,7 +389,9 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--bank", action="append", default=[], metavar="DB",
                         help="another production database to close (repeatable)")
     create.add_argument("--admin-url", default=None,
-                        help="a superuser URL; without it, psql in the Postgres container")
+                        help=("a superuser URL, best without its password (libpq reads "
+                              "PGPASSWORD or ~/.pgpass); without it, psql in the Postgres "
+                              "container"))
     create.add_argument("--container", default=POSTGRES_CONTAINER,
                         help=f"the Postgres container (default {POSTGRES_CONTAINER})")
     create.add_argument("--json", action="store_true", help="print one JSON report")
