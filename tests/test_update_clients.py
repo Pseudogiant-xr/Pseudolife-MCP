@@ -993,6 +993,18 @@ def test_plugin_not_installed_points_at_the_installer(cli, tmp_path):
     assert "install" in result["detail"]
 
 
+def test_a_missing_marketplace_clone_names_the_https_add(cli, tmp_path):
+    """The advice adds the marketplace by its HTTPS URL: the owner/repo
+    shorthand records a `github` source that Claude Code refreshes over
+    SSH, which fails on a host with no GitHub key (2026-10-04)."""
+    clone, _ = _plugin_fixture(cli, tmp_path, differ=False)
+    shutil.rmtree(clone)
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed"
+    assert ("claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
+            in result["detail"])
+
+
 def test_main_exits_zero_when_the_plugin_updates_beside_a_running_session(cli, tmp_path, capsys):
     """The acceptance bar: sessions open, one command, exit 0, nothing to
     rerun."""

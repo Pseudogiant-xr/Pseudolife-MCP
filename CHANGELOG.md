@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
+- The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
+  plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
+  that shorthand as a `github` source and refreshes it over SSH, so on a host
+  with no GitHub SSH key or known_hosts entry every later
+  `claude plugin marketplace update` failed ("SSH host key is not in your
+  known_hosts file") and the plugin silently stopped updating (seen on a
+  Linux host, 2026-10-04). They now add it by
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`, as do the manual
+  `/plugin marketplace add` commands in the README, the plugin README, the
+  remote-bank guide, the translated READMEs, and the client step's advice
+  when the marketplace clone is missing. `tests/test_plugin_packaging.py`
+  fails while any of them names the shorthand.
+- **Existing installs** keep the `github` source until it is moved; the
+  README's Updating section gives the steps. If `~/.claude/settings.json`
+  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
+  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  (the CLI refuses an add that differs from a declared source), then run
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
+  Do not remove the marketplace first: that uninstalls its plugins.
+
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
 ### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)

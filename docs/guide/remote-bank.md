@@ -470,7 +470,7 @@ session without it and gets memory back by itself once the daemon answers
 The Claude Code plugin adds the session hooks:
 
 ```bash
-claude plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 claude plugin install pseudolife-memory@pseudolife-mcp --scope user
 ```
 
