@@ -24,8 +24,9 @@ def pytest_configure(config):
     for option, attribute in (("--port-cli-json", "_port_cli_prefix"),
                               ("--port-stdio-json", "_port_stdio_prefix")):
         value = config.getoption(option)
-        if value is None and option == "--port-stdio-json":
-            value = os.environ.get("PSEUDOLIFE_PORT_STDIO_JSON")
+        if value is None:
+            value = os.environ.get({"--port-cli-json": "PSEUDOLIFE_PORT_CLI_JSON",
+                                    "--port-stdio-json": "PSEUDOLIFE_PORT_STDIO_JSON"}[option])
         if value is None:
             continue
         try:

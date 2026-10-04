@@ -298,3 +298,22 @@ Receipts are `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
 executable size excludes runtime/dependency footprint. Windows Rust is slower
 and heavier in this fixture. Linux pooled latency is modestly lower, with the
 p95 difference within descriptive repeat floors. No general speed claim follows.
+
+Phase 2 adds `cli_corpus.py` and `cli_dispatch.py` without changing the historical
+Phase 0b corpus. The 15 cases cover help aliases/trailing argv and unknown Unicode
+scalar arguments, including Python quote/control/separator spelling. They capture
+ordinary exit status and raw stdout/stderr from the genuine pinned Python 3.11
+runtime, self-replay on the same platform, then compare the candidate with no
+newline normalization. Three mutations per case prove that both streams and the
+exit code are compared. Five immutable dispatcher tests route through the external
+plugin via `PSEUDOLIFE_PORT_CLI_JSON`; explicit `--port-cli-json` takes precedence,
+and the default remains Python. JUnit outcomes, executable/source hashes and
+unchanged dispatcher/conftest hashes bind the receipt. Logs and JUnit stay in the
+private `--evidence-directory`; `--out` is a new public-safe receipt path.
+
+Run `evals.rust_port.cli_dispatch` under the prepared pinned interpreter with
+`--oracle-root`, `--candidate-root`, `--candidate-json`, `--evidence-directory`,
+`--out` and the existing resource-check option. Candidate Rust source must be
+committed and clean. The existing Parity job runs this additive lane on both OS.
+Version/runtime identity, non-UTF-8 argv and all other mode contracts stay deferred;
+passing this slice alone does not accept the entire CLI dispatch row.

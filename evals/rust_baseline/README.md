@@ -283,3 +283,15 @@ recipes work on a clean Linux checkout without Windows checkout filters.
 Source bindings resolve by path plus raw digest. Different selfcheck versions
 retain older source recipes with their declared `source_commit`, while this
 baseline and the full-bank capture remain unchanged.
+
+`cli_measurement.py` measures help cold-start-to-exit separately from shim
+first-frame and initialize-return timing. It uses the same alternating paired
+order and repeat-block p50/p95 floors from `shim_measurement.py`: three repeats
+of ten samples per arm, with an untimed exact-byte control before timing and
+unchanged bytes in every cell. Use the genuine prepared pinned Python runtime,
+a committed clean candidate root, and a quiet authorized CPU window. Required
+arguments are `--oracle-root`, `--candidate-root`, `--candidate`, `--out` and
+the existing resource-check option; optional `--candidate-sha256` binds a frozen
+binary. `--smoke` permits smaller positive counts and marks the output as plumbing
+evidence. Version, lease check and doctor measurements remain deferred until their
+mode contracts are implemented; no measurement has yet been promoted for this slice.

@@ -2,6 +2,7 @@
 
 pub mod board;
 pub mod cache;
+pub mod cli;
 pub mod credentials;
 pub mod daemon_url;
 mod errors;

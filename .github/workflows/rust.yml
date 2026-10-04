@@ -147,11 +147,24 @@ jobs:
           raise SystemExit(subprocess.run(command, cwd=root).returncode)
           '@
           & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $phase2Bootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.cli_dispatch", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          $phase2Evidence = Join-Path $env:RUNNER_TEMP 'phase2-cli-tests'
+          $phase2Receipt = Join-Path $checkoutRoot "evals/results/rust-phase2-ci-$env:RUNNER_OS.json"
+          & $oraclePython -c $phase2Bootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --evidence-directory $phase2Evidence --out $phase2Receipt --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rust-parity-${{ runner.os }}
-          path: evals/results/rust-phase1-ci-*.json
+          path: |
+            evals/results/rust-phase1-ci-*.json
+            evals/results/rust-phase2-ci-*.json
           if-no-files-found: warn

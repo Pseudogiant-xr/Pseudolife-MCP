@@ -3,15 +3,10 @@ use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    let channel = match arguments.as_slice() {
-        [] => false,
-        [mode] if mode == "shim" => false,
-        [mode] if mode == "channel" => true,
-        _ => {
-            pseudolife_stdio::stderrln!("usage: pseudolife-stdio [shim|channel]");
-            return ExitCode::FAILURE;
-        }
-    };
+    if let Some(code) = pseudolife_stdio::cli::dispatch(arguments.first().map(String::as_str)) {
+        return code;
+    }
+    let channel = arguments.first().is_some_and(|mode| mode == "channel");
     let proxy = match pseudolife_stdio::Proxy::attach_mode(channel).await {
         Ok(proxy) => proxy,
         Err(error) => {

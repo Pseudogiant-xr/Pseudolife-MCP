@@ -274,36 +274,56 @@ Source: `pseudolife_memory/coordination.py`. Each item requires normal, invalid-
 
 ## CLI mode acceptance checklist
 
-Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h` and `--help`, and version also accepts `--version`. Every mode preserves exit status, both output streams and argument validation. Subcommands remain part of each mode's contract.
+Source: `pseudolife_memory/cli.py` at `f709abb54f7912ae9cd767998d0926ca33df4bcd`.
+The default is `shim`; help aliases are `-h` and `--help`, and version also accepts
+`--version`. Dispatch reads the first argument; help/shim/channel ignore trailing
+arguments. Every mode preserves exit status, both output streams and argument
+validation. Subcommands remain part of each mode's contract.
+
+The requested 19 Phase 2 modes are ten Tier A leaves, six Tier B modes and three
+Tier C modes. Help/version are two carried Phase 1 gaps; channel is the shared
+Phase 1/2 remainder. The original 26 plus upstream maintainer/test-login make the
+current 28. Tier labels record the requested scope, not a claim of HTTP-only
+dependencies: recovery, audit and lease operator actions reach PostgreSQL directly.
+They remain deferred without introducing a database client into this binary.
+
+The first slice implements help and unknown dispatch and adds a separate 15-case
+CLI corpus, strict byte self-replay/candidate judge, environment selector and help
+cold-start-to-exit measurement instrument. Windows focused checks and a private
+15-case debug-binary proof passed; no committed first-slice receipts, Linux/CI
+proof or paired measurements exist yet, so help and CLI-DISPATCH remain deferred. The five existing
+`cli-main-process` nodes remain the only routed CLI nodes. Other entries below
+name concrete oracle nodes or internal test-function pools awaiting a process
+adapter; a function name without parameter suffixes is not a routed node claim.
 
 | Mode | Phase | Status | Evidence |
 |---|---|---|---|
-| help | 1 | deferred | No accepted Rust evidence |
-| version | 1 | deferred | No accepted Rust evidence |
+| help | 1 | deferred | A carried gap; implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; exact-byte corpus, both-OS local/CI receipts and measurement pending |
+| version | 1 | deferred | A carried gap; runtime identity is Python `sys.prefix` (`runtimes.py::running_runtime`); `test_cli_dispatch.py::test_version_prints_the_package_version[--version]`, `[version]`, `test_version_from_a_runtime_names_its_directory_and_commit` remain internal; Rust runtime identity decision and process equivalents pending |
 | shim | 1 | deferred | No accepted Rust evidence |
-| serve | 3/4 | deferred | No accepted Rust evidence |
-| embedded | 3/5 | deferred | No accepted Rust evidence |
-| channel | 1/2 | deferred | Process boundary in phase 1; only named internal channel remainder may defer to phase 2 |
-| coordination-recovery | 2 | deferred | No accepted Rust evidence |
-| board-audit | 2 | deferred | No accepted Rust evidence |
-| briefing | 2 | deferred | No accepted Rust evidence |
-| prompt-hook | 2 | deferred | No accepted Rust evidence |
-| doctor | 2 | deferred | No accepted Rust evidence |
-| connect | 2 | deferred | No accepted Rust evidence |
-| tunnel | 2 | deferred | No accepted Rust evidence |
-| update | 5 | deferred | No accepted Rust evidence |
-| backup | 2 | deferred | No accepted Rust evidence |
-| export | 2 | deferred | No accepted Rust evidence |
-| import | 2 | deferred | No accepted Rust evidence |
-| episode-start | 2 | deferred | No accepted Rust evidence |
-| episode-end | 2 | deferred | No accepted Rust evidence |
-| wait-mail | 2 | deferred | No accepted Rust evidence |
-| doorbell-prompt-seen | 1/2 | deferred | Doorbell receipt correlation; no accepted Rust evidence |
-| lease | 2 | deferred | No accepted Rust evidence |
-| invite | 2 | deferred | No accepted Rust evidence |
-| pair | 2 | deferred | No accepted Rust evidence |
-| expose | 2 | deferred | No accepted Rust evidence |
-| move | 2 | deferred | No accepted Rust evidence |
+| serve | 3/4 | deferred | Outside client leaves; `daemon.py`, storage/model ownership; `test_daemon_http.py` oracle pool |
+| embedded | 3/5 | deferred | Outside client leaves; in-process `mcp_server.py` with storage/models/install behavior; `test_mcp_server.py` internal pool |
+| channel | 1/2 | deferred | Phase 1 process boundary; internal remainder `test_channel.py::test_channel_serializes_simultaneous_writes`, `test_channel_startup_failure_closes_output_without_opening_inbox`; inherited Phase 1 equivalents and receipts remain separately governed |
+| coordination-recovery | 2 | deferred | Requested A, actual direct PostgreSQL via `coordination_recovery.py`/CoordinationStore; Phase 4 recovery transaction; `test_coordination_recovery.py::test_recovery_revokes_and_rebinds_private_state_without_exposing_key`, `test_rebind_state_failure_rolls_back_credential_issuance` |
+| board-audit | 2 | deferred | Requested A, direct PostgreSQL/container operator path in `board_audit_cli.py`; Phase 3 reads/4 redact; `test_board_audit_cli.py::test_export_writes_json_lines_filtered_by_task_agent_and_time`, `test_verify_prints_the_head_and_fails_on_tampering_but_an_archive_still_verifies` |
+| briefing | 2 | deferred | A HTTP/filesystem in `briefing_cli.py`; `test_briefing.py::test_briefing_no_daemon_prints_nothing`, `test_hook_json_serves_the_session_start_core_not_the_bare_briefing`; internal fakes need process equivalents |
+| prompt-hook | 2 | deferred | A HTTP/private watermark in `briefing_cli.py`; `test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor`, `test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor`; internal fakes need process equivalents |
+| doctor | 2 | deferred | A offline/HTTP/MCP subprocess checks in `doctor_cli.py`; public `test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes`; `test_doctor_cli.py::test_doctor_hands_the_registration_credential_to_the_handshake` internal; adapter and corpus pending |
+| connect | 2 | deferred | B installed-shim handshake/config transaction (`connect_cli.py`); `test_connect.py::test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory`, `test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved`; process seam audit pending |
+| tunnel | 2 | deferred | B operator/runtime/bridge/network consent (`tunnel_cli.py`, `tunnel_profiles.py`, `tunnel_runtime.py`, `tunnel_bridge.py`); internal `test_tunnel_cli.py::test_setup_resumes_without_erasing_key_consent_or_local_config`, `test_handshake_failure_redacts_transport_output_and_does_not_write`; additive process fixtures pending |
+| update | 5 | deferred | Outside client leaves; release/install/runtime transactions in `update_cli.py`; `test_update_cli.py`/`test_client_install_ux.py` pools |
+| backup | 2 | deferred | C Phase 3/4; `backup_cli.py` imports embedded_pg, resolves direct DSN and runs pg_dump; `test_backup_cli.py::test_file_mode_backup_archives_state_only`, `test_dumpless_run_never_rotates_dumps`, `test_backup_roundtrip_embedded`; file-only coverage cannot accept whole mode |
+| export | 2 | deferred | C Phase 3; `transfer_cli.py` direct psycopg/schema/vector text, torch-free at CLI module; `test_transfer_cli.py::test_export_import_roundtrip_preserves_every_table`, `test_export_skips_transient_meta_and_telemetry` |
+| import | 2 | deferred | C Phase 4 direct psycopg durable writes; `test_transfer_cli.py::test_import_refuses_a_nonempty_bank`, `test_import_refuses_while_other_connections_hold_the_bank`, `test_import_refuses_embedding_dim_mismatch`, `test_import_leaves_the_curation_spelling_flag_to_the_export` |
+| episode-start | 2 | deferred | A HTTP POST `/api/episode/start` in `episode_cli.py`; `test_episode_cli.py::test_daemon_down_is_silent_exit_zero`, `test_parses_session_key_from_stdin`, `test_post_does_not_forward_the_bearer_across_a_redirect`; stdin/HTTP process fixtures pending |
+| episode-end | 2 | deferred | A HTTP POST `/api/episode/end` in `episode_cli.py`; same `test_episode_cli.py` nodes as episode-start; action-specific process fixtures pending |
+| wait-mail | 2 | deferred | A private digest/seen/WaitListener (`wait_mail_cli.py`); `test_wait_mail_cli.py::test_a_rung_marker_ends_the_wait_once`, `test_non_ascii_peer_text_reaches_stdout_byte_for_byte`, `test_missing_digest_file_exits_2_and_says_what_to_do`; bounded disposable process fixtures pending |
+| doorbell-prompt-seen | 1/2 | deferred | A receipt correlation/private filesystem lock (`codex_doorbell_state.py`); internal `test_codex_doorbell.py::test_prompt_hook_arrival_racing_queue_acceptance_does_not_restore_pending`, `test_a_linked_prompt_receipt_cannot_release_the_queue`; process equivalents pending |
+| lease | 2 | deferred | Requested A; check/list/run/hold filesystem+HTTP (`lease_cli.py`, `os_lock.py`), break/delegate direct CoordinationConnection/CoordinationStore deferred Phase 4; `test_lease_cli.py::test_check_says_free_and_exits_0_without_a_board`, `test_check_exits_1_while_the_local_lock_is_held`, `test_hold_keeps_the_lease_while_the_pid_lives_then_releases`; operator `test_lease_cli_board.py::test_the_operator_breaks_a_lease_and_the_next_waiter_gets_it`, `test_the_operator_grants_a_projects_delegate`; `--for 7d` and hold grammar retained in deferred scope |
+| invite | 2 | deferred | B direct operator SQL/psql/container (`invite_cli.py`); internal `test_invite_cli.py::test_an_invite_prints_the_code_once_and_stores_only_its_hash`, `test_a_malformed_name_is_a_usage_error`; direct-bank effect deferred Phase 4, process seam pending |
+| pair | 2 | deferred | B HTTP pairing/owner-only token/retry (`pair_cli.py`); `test_pair_cli.py::test_read_code_takes_the_code_from_stdin`, `test_an_unknown_outcome_keeps_the_file_and_names_it`; stdin and retry process fixtures pending |
+| expose | 2 | deferred | B Tailscale status/subprocess/HTTP (`expose_cli.py`); internal `test_expose_cli.py::test_success_runs_the_exact_command_and_prints_the_url`, `test_a_foreign_serve_on_the_port_is_never_replaced`; disposable executable equivalents pending |
+| move | 2 | deferred | B Docker/ssh pg_dump/restore/fence/operator transaction (`move_cli.py`); `test_move_cli.py::test_declining_exits_2_and_changes_nothing`; process seam and disposable operator state pending; no live-bank work |
 | maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
 | test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
 

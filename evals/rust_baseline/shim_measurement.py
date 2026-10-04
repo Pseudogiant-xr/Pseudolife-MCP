@@ -112,9 +112,9 @@ class PeakRss:
             raise RuntimeError("peak RSS sampler did not complete")
 
 
-def metric_cells(runs):
+def metric_cells(runs, metrics=("startup_ms", "first_frame_ms", "peak_rss_bytes", "executable_bytes")):
     cells = {}
-    for metric in ("startup_ms", "first_frame_ms", "peak_rss_bytes", "executable_bytes"):
+    for metric in metrics:
         blocks = [[row[metric] for row in runs if row["repeat"] == repeat]
                   for repeat in sorted({row["repeat"] for row in runs})]
         cells[metric] = {"distribution": distribution([value for block in blocks for value in block]),

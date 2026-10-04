@@ -343,6 +343,21 @@ Phase completion is governed by `PORT-STATE.md` and `PARITY.md`. No deferred row
 counts as complete. Maintainer decisions are required to retire behaviour,
 change a public wire format, merge, deploy or mutate a live bank.
 
+## Phase 2 CLI contract
+
+Phase 2 CLI dispatch reads only the first argument and keeps the binary named
+`pseudolife-stdio`; help bytes are the literal pinned `cli.py::_USAGE`, with
+Python's Windows text-stream CRLF translation preserved. Unknown Unicode scalar
+argv uses CPython 3.11/Unicode 14 category-C plus separator repr rules, sharing the
+existing pinned table. Non-UTF-8/surrogate argv remains deferred. Recognized modes
+without an implementation emit a candidate-only deferred diagnostic, never the
+Python unknown-mode contract. No runtime identity is invented for version:
+`runtimes.running_runtime` depends on Python `sys.prefix`, so its three named
+oracle nodes remain deferred pending an explicit candidate identity decision.
+The additive CLI corpus retains raw argv/exit/stdout/stderr and uses no output
+normalization; CLI cold-start-to-exit is a distinct metric from shim first-frame
+and initialize-return timing, using the same paired ordering and repeat floors.
+
 ## Disposable trial corrections
 
 The private trial covered deterministic HLC transitions, tool-tier normalization
