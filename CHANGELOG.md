@@ -6,6 +6,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
+- The maintainer could not reach a board session at all, and changing who
+  holds a project's delegate or coordinator role took a shell on the daemon
+  host. Both now work from the Console, each action proven by a passkey tap
+  (WebAuthn, user verification required); a bearer token alone can do
+  neither. Specs: `docs/superpowers/specs/2026-10-02-maintainer-wake-design.md`
+  and its addendum `2026-10-04-board-roles-passkey.md`.
+- Schema v54: `maintainer_passkeys`, `maintainer_bootstrap` and
+  `maintainer_nonces` tables (in the bench reset roster, out of logical
+  exports with the `maintainer_secret_v1` meta key), and
+  `coordination_messages.origin`, `.maintainer_proof` and `.repudiated_at`.
+- Routes `GET /api/maintainer`, `POST /api/maintainer/challenge|enrol|send|role|cancel|revoke|repudiate`,
+  `GET /api/maintainer/sent|inbox`, each calling one `MemoryService.maintainer_*`
+  method. Challenges are stateless (an HMAC'd payload carrying every input
+  that decides the outcome); assertions and registrations are verified
+  strictly (`cryptography` plus a minimal CBOR/COSE decoder: ES256, EdDSA,
+  RS256; exact origin and RP ID; UP and UV; no crossOrigin or topOrigin;
+  sign-count compare-and-set). Every failure answers `assertion_invalid`.
+- `coordination.maintainer.rp_id`, `.origin` (HTTPS, or `http://localhost`
+  for local use) and `.maintainer_per_recipient_per_hour` (30) are
+  config-file only: `POST /api/config` refuses them (`config_protected`).
+- `pseudolife-mcp maintainer enrol-code|confirm|revoke|reset|list` on the
+  daemon host manages the passkeys.
+- Maintainer mail carries `origin: "maintainer"` and `verified` in a
+  `receive` result (with `maintainer_note`), rings any session with a live
+  listener whatever its park, and can be repudiated. Agents reply with
+  `memory_message send reply_to=<id>` and no `to`. `maintainer` is reserved:
+  never a bearer principal, a target, or a label (nor `daemon`, `passkey`,
+  `verified`, in any spelling that normalizes to one).
+- Role changes: grant/revoke the delegate and assign/revoke the coordinator
+  per project, one role per session; the delegate's reopen authority now
+  accepts a grant recorded by the operator or the maintainer. The holder a
+  change replaces or evicts is part of the signed payload: if another
+  session took the role during the tap, the change answers `409
+  role_changed` and does nothing.
+- The Console's Board gains a pinned Roles band per project: the delegate
+  (time left, Message, Extend, Revoke) and the coordinator (Message, Revoke),
+  with Make/Revoke buttons for both roles on every session. Each slot has a
+  composer and the thread with that session. Every change and message shows
+  what will be signed, then asks for the passkey. Settings gains Your passkeys
+  (bootstrap with the host's one-time code, add a key, cancel a quarantined
+  one, revoke). Without HTTPS or an enrolled key, the band still shows who
+  holds each role and says how to set it up.
+- Every `/ui/` response carries a strict Content-Security-Policy,
+  `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`; the Console's
+  theme bootstrap moved out of an inline script into `/ui/theme.js`.
+- `pseudolife-mcp lease delegate` now also frees the grantee's
+  `coordinator:<project>` lease (one role per session; the answer names it in
+  `also_broken`).
+- Served MCP instructions now say a receive result's origin "maintainer"
+  can grant approval; the rest of the text was tightened to stay within
+  Codex's 512 characters.
+
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
 ### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
