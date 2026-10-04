@@ -374,7 +374,10 @@ mod tests {
     use super::*;
     use crate::board::{notice::PendingNotice, state};
     use serde_json::json;
-    use std::{io::Write, os::windows::process::CommandExt};
+    use std::{
+        io::{Read, Write},
+        os::windows::process::CommandExt,
+    };
 
     const THREAD: &str = "12345678-1234-1234-1234-123456789abc";
     const FIXTURE: &str = "board::doorbell::windows_process::tests::fixture_child";
@@ -553,7 +556,7 @@ mod tests {
             .args(["--exact", FIXTURE, "--nocapture"])
             .env("DOORBELL_WIN32_ROOT", &home.0)
             .env("DOORBELL_WIN32_ROLE", "leader")
-            .stdin(Stdio::null())
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         for (key, _) in std::env::vars_os() {
@@ -573,18 +576,17 @@ mod tests {
             .creation_flags(CREATE_NO_WINDOW).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
             .status().unwrap().success()
     }
-    async fn waiting(home: &Home) -> u32 {
+    async fn waiting(home: &Home) -> io::Result<u32> {
         tokio::time::timeout(Duration::from_secs(5), async {
             while !home.0.join("ticks").exists() {
                 tokio::time::sleep(Duration::from_millis(15)).await;
             }
         })
         .await
-        .unwrap();
-        std::fs::read_to_string(home.0.join("worker.pid"))
-            .unwrap()
+        .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error))?;
+        std::fs::read_to_string(home.0.join("worker.pid"))?
             .parse()
-            .unwrap()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
     fn evidence(value: serde_json::Value) {
         if let Some(path) = std::env::var_os("DOORBELL_CLEANUP_EVIDENCE") {
@@ -623,7 +625,7 @@ mod tests {
                     },
                 )
                 .creation_flags(CREATE_NO_WINDOW)
-                .stdin(Stdio::null())
+                .stdin(Stdio::inherit())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -631,11 +633,10 @@ mod tests {
             let _ = worker.wait();
         } else {
             std::fs::write(root.join("worker.pid"), std::process::id().to_string()).unwrap();
-            let end = std::time::Instant::now() + Duration::from_secs(10);
-            while !root.join("stop").exists() && std::time::Instant::now() < end {
-                std::fs::write(root.join("ticks"), "alive").unwrap();
-                std::thread::sleep(Duration::from_millis(30));
-            }
+            std::fs::write(root.join("ticks"), "alive").unwrap();
+            // The test owns the sole writer through cleanup assertions. EOF is
+            // an unwind signal, never a timer that can fake successful cleanup.
+            std::io::stdin().read_to_end(&mut Vec::new()).unwrap();
         }
     }
 
@@ -649,17 +650,29 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(process.job.is_some(), phase == Phase::Terminate);
+        let contained = process.job.is_some();
         let leader = process.child.id().unwrap();
+        // Child::wait closes its stdin. Keep the writer separately so a failed
+        // tree kill cannot pass by releasing the fixture worker through EOF.
+        let keepalive = process.child.stdin.take().unwrap();
         let worker = waiting(&home).await;
-        assert!(
-            !terminated(worker),
-            "fallback worker was not alive before cleanup"
-        );
+        let alive = worker
+            .as_ref()
+            .ok()
+            .map(|worker| std::panic::catch_unwind(|| !terminated(*worker)));
         process.kill().await;
+        let status = process.wait().await;
+        // Readiness errors and probe panics reach owned cleanup before failing.
+        assert_eq!(contained, phase == Phase::Terminate);
+        let worker = worker.expect("fallback worker readiness failed after cleanup");
+        let alive = alive
+            .unwrap()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        assert!(alive, "fallback worker was not alive before cleanup");
         assert!(terminated(leader), "fallback leader remained alive");
         assert!(terminated(worker), "fallback descendant remained alive");
-        assert!(!process.wait().await.unwrap().success());
+        assert!(!status.unwrap().success());
+        drop(keepalive);
         evidence(
             json!({"scenario":name,"platform":"windows","leader_pid":leader,"worker_pid":worker,"worker_alive_before_cleanup":true,"connected_grandchild":true,"leader_terminated":true,"worker_terminated":true,"native_taskkill_fallback":true}),
         );
@@ -675,6 +688,33 @@ mod tests {
     #[tokio::test]
     async fn terminate_job_refusal_falls_back_to_taskkill_tree() {
         fallback(Phase::Terminate, "terminate_job_refused").await;
+    }
+
+    #[tokio::test]
+    async fn fixture_pipe_release_on_unwind_reaps_the_connected_tree() {
+        let home = Home::new();
+        let mut child = command(&home).spawn().unwrap();
+        let worker = waiting(&home).await.unwrap();
+        assert!(!terminated(worker), "fixture worker exited before signal");
+        let keepalive = child.stdin.take().unwrap();
+        let panic = std::panic::catch_unwind(move || {
+            let _keepalive = keepalive;
+            panic!("injected fixture assertion failure");
+        })
+        .unwrap_err();
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"injected fixture assertion failure")
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap()
+                .success(),
+            "fixture tree did not finish after the owner unwound"
+        );
+        assert!(terminated(worker), "fixture worker survived pipe closure");
     }
 
     #[tokio::test]
