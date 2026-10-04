@@ -14,16 +14,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its next connection. It now also refuses, before any change and naming
   the `GRANT CONNECT` to run, when any role connected to a bank now
   (`pg_stat_activity`) would lose CONNECT, and says "daemon user not
-  checked" when that variable is absent. A daemon that is down and reaches
+  checked" when that variable is absent or names no user. A daemon that
+  is down and reaches
   the bank only through PUBLIC is still not seen: the guides now say so
   instead of claiming the check unconditionally.
-- `--role` naming the daemon's own database user is refused outright (the
-  check skipped exactly that case).
+- `--role` naming the daemon's own database user (from that variable) is
+  refused outright (the check skipped exactly that case).
 - The role changes run as one transaction: a statement failing part way
   (a bank dropped meanwhile) left the role with a new password no file held,
   since the staged file was removed.
 - A login file that cannot be written safely (`PrivateStateError`, or an
   OS error) ends with one `test-login:` line and exit 1, not a traceback.
+  When the file cannot be moved into place after the role change, the
+  message says the role already has the new password and names the staged
+  file that holds it.
 - `ops/restore.*` rehearsals close their scratch copy
   (`pseudolife_restore_rehearsal`, the whole bank) to PUBLIC before the
   replay, and stop if they cannot; the test login could read it meanwhile.

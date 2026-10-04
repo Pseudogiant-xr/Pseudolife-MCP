@@ -597,7 +597,9 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
                 "then run this again. Nothing was changed."))
     daemon_line = None
     if not daemon_user:
-        daemon_line = (f"  daemon user not checked: {DAEMON_DSN_ENV} is not set in this shell; "
+        why = ("names no user" if os.environ.get(DAEMON_DSN_ENV)
+               else "is not set in this shell")
+        daemon_line = (f"  daemon user not checked: {DAEMON_DSN_ENV} {why}; "
                        "only the roles connected to the bank now were")
     else:
         state = before.get("daemon") or {}
@@ -642,7 +644,13 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
-    os.replace(staged, path)  # the role now has this password: so does the file
+    try:
+        os.replace(staged, path)  # the role now has this password: so does the file
+    except OSError as exc:
+        return report.finish(EXIT_FAILED, (
+            f"role {args.role} now has the password in {_shown(staged)}, but {_shown(path)} "
+            f"could not be replaced ({exc}). Move that file to {_shown(path)}; nothing else "
+            "holds this password."))
     how = ("password re-applied from the file" if reuse
            else "password rotated" if role else "password set")
     report.say(f"  role {args.role}: {'reset' if role else 'created'}: LOGIN CREATEDB, not "

@@ -339,6 +339,31 @@ def test_without_the_daemons_dsn_the_daemon_user_is_named_as_not_checked(tmp_pat
     assert "PSEUDOLIFE_MCP_DATABASE_URL" in out
 
 
+def test_a_daemon_dsn_that_names_no_user_is_not_called_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql:///pseudolife_memory")
+    code, out = _run([], _FakeServer(), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "daemon user not checked" in out and "names no user" in out
+
+
+def test_a_login_file_that_cannot_be_replaced_after_the_change_names_the_staged_copy(
+        tmp_path, monkeypatch):
+    """The role already holds the new password when the file is moved into
+    place; a failed move must say where that password is (review,
+    2026-10-05)."""
+    def refuse(src, dst):
+        raise PermissionError("the file is open in another process")
+
+    monkeypatch.setattr(cli.os, "replace", refuse)
+    server = _FakeServer()
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_FAILED, out
+    assert server.applied
+    staged = [p for p in tmp_path.iterdir() if p.name.endswith(".new")]
+    assert len(staged) == 1, list(tmp_path.iterdir())
+    assert staged[0].name in out and "pseudolife_test" in out and "password" in out
+
+
 def test_the_role_change_is_one_transaction():
     """A failure part way through left the role holding a password no file
     holds, the staged file being removed (review, 2026-10-05)."""
