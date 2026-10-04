@@ -993,6 +993,43 @@ def test_a_failed_marketplace_update_never_reads_as_current(cli, tmp_path, answe
     assert not any(c[:2] == ["plugin", "update"] for c in _claude_calls(cli))
 
 
+def _declare_marketplace(home: Path, source: dict) -> Path:
+    settings = home / "settings.json"   # the fixture's CLAUDE_CONFIG_DIR is the fake home
+    settings.write_text(json.dumps({"env": {"X": "1"}, "extraKnownMarketplaces": {
+        "pseudolife-mcp": {"source": source}}}), encoding="utf-8")
+    return settings
+
+
+def test_a_declared_github_marketplace_is_changed_before_the_https_add(cli, tmp_path):
+    """2026-10-04 on the homelab box the HTTPS add was refused: settings.json
+    declared the marketplace's github source under extraKnownMarketplaces,
+    and Claude Code refuses an add from another source ("its source doesn't
+    match its extraKnownMarketplaces entry"; reproduced on 2.1.287, where
+    changing the entry's source first let the same add re-point it). The
+    remedy names that step only where the declaration exists, and never the
+    remove, which uninstalls the plugin."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    settings = _declare_marketplace(cli.home, {"source": "github", "repo": "Pseudogiant-xr/Pseudolife-MCP"})
+    cli.marketplace_update = (1, HOST_KEY_FAILURE)
+    detail = uc.update_plugin(ROOT)["detail"]
+    step = detail.index(f"{settings} declares")
+    assert '{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}' in detail[step:]
+    assert step < detail.index("claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git")
+    assert "marketplace remove" not in detail
+
+
+@pytest.mark.parametrize("declared", [None, {"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}],
+                         ids=["undeclared", "declared-https"])
+def test_the_settings_step_is_only_named_where_a_declaration_blocks_the_add(cli, tmp_path, declared):
+    _plugin_fixture(cli, tmp_path, differ=False)
+    if declared:
+        _declare_marketplace(cli.home, declared)
+    cli.marketplace_update = (1, HOST_KEY_FAILURE)
+    detail = uc.update_plugin(ROOT)["detail"]
+    assert "extraKnownMarketplaces" not in detail and "declares" not in detail
+    assert "claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in detail
+
+
 def test_a_marketplace_update_that_timed_out_is_named(cli, tmp_path):
     """A hung clone stopped at run_cli's timeout carries no CLI line; the
     reason run_cli gives is quoted instead, with the generic remedy."""

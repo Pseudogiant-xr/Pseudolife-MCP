@@ -87,7 +87,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fingerprint, or point the marketplace at HTTPS with `claude plugin
   marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
   which re-points the existing entry in place (measured on Claude Code
-  2.1.287). The step still installs a clone that differs from the cache,
+  2.1.287). Claude Code refuses that add while `settings.json` declares the
+  marketplace under `extraKnownMarketplaces` with another source, as the
+  box's did, so where such a declaration exists the detail names the file
+  and says to change the entry's source to the HTTPS git URL first; it
+  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  still installs a clone that differs from the cache,
   since that is progress, but it reports `failed` and says the clone may be
   behind, not `refreshed`. A successful marketplace update behaves as
   before.

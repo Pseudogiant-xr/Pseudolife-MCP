@@ -721,13 +721,41 @@ def _marketplace_remedy(out: str) -> str:
     marketplace is cloned over SSH, which fails where github.com's host key
     is not in known_hosts (root on the homelab box, 2026-10-04). Adding it
     again from its HTTPS URL re-points the existing entry, and the installed
-    plugin follows it (measured on Claude Code 2.1.287, 2026-10-04)."""
-    if "known_hosts" in out or "Host key verification failed" in out:
-        return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
-                "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
-                "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
-                f"claude plugin marketplace add {MARKETPLACE_HTTPS}")
-    return f"fix that and run claude plugin marketplace update {MARKETPLACE}"
+    plugin follows it (measured on Claude Code 2.1.287, 2026-10-04).
+
+    Claude Code refuses that add while settings.json declares the
+    marketplace under ``extraKnownMarketplaces`` with another source (the
+    box's settings did, 2026-10-04), so the entry is changed first; that
+    step is named only where such a declaration exists. Never ``marketplace
+    remove``: it uninstalls the plugin."""
+    if "known_hosts" not in out and "Host key verification failed" not in out:
+        return f"fix that and run claude plugin marketplace update {MARKETPLACE}"
+    settings, declared = _declared_marketplace()
+    https = {"source": "git", "url": MARKETPLACE_HTTPS}
+    first = ""
+    if declared is not None and declared != https:
+        first = (f"{settings} declares the marketplace under extraKnownMarketplaces with another source, which "
+                 f"refuses that add, so first change that entry's source to {json.dumps(https)}, then run ")
+    return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
+            "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
+            "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
+            f"{first}claude plugin marketplace add {MARKETPLACE_HTTPS}")
+
+
+def _declared_marketplace() -> tuple[Path, object]:
+    """Claude Code's user settings file (``$CLAUDE_CONFIG_DIR/settings.json``,
+    else ``~/.claude/settings.json``) and the source it declares for this
+    marketplace under ``extraKnownMarketplaces``; None when it declares
+    none or cannot be read."""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    settings = (Path(config_dir) if config_dir else home() / ".claude") / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return settings, None
+    declared = data.get("extraKnownMarketplaces") if isinstance(data, dict) else None
+    entry = declared.get(MARKETPLACE) if isinstance(declared, dict) else None
+    return settings, entry.get("source") if isinstance(entry, dict) else None
 
 
 def _plugin_retry(repo: Path | None) -> str:

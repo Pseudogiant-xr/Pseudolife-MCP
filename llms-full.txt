@@ -7365,7 +7365,12 @@ its own and an update never replaces a folder a session is using:
   marketplace at HTTPS with
   `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
   which replaces the existing entry's source (the installed plugin follows
-  it), then run the update again.
+  it), then run the update again. Claude Code refuses that add while
+  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
+  with another source: change that entry's source to
+  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  first (the step names the file when it finds one). Do not use
+  `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code
