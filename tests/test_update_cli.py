@@ -1263,6 +1263,7 @@ def passkeys(monkeypatch):
     monkeypatch.setattr(maintainer_setup, "passkeys_set_up", lambda: state["set_up"])
     monkeypatch.setattr(maintainer_setup, "main", lambda argv: state["ran"].append(argv) or 0)
     monkeypatch.setattr(up, "interactive", lambda: state["tty"])
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DAEMON_URL", raising=False)
     monkeypatch.setattr(up, "ask", lambda question: state["asked"].append(question) or state["answer"])
     return state
 
@@ -1335,3 +1336,35 @@ def test_the_passkey_offer_runs_after_the_update_lock_is_released(world, clients
     passkeys.update(tty=True, answer="y")
     assert _run([]) == 0
     assert held == [True]
+
+
+def test_a_failing_passkey_check_never_fails_a_finished_update(world, clients, passkeys, tmp_path, monkeypatch, capsys):
+    """Delegate review 2026-10-05: the deploy succeeded; a hint must not
+    turn it into exit 1 with a traceback."""
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    from pseudolife_memory import maintainer_setup
+    monkeypatch.setattr(maintainer_setup, "passkeys_set_up", lambda: {}["rp_id"])
+    assert _run([]) == 0
+    assert "maintainer setup" in capsys.readouterr().err
+
+
+def test_a_failing_test_login_step_never_fails_a_finished_deploy(world, clients, test_login, tmp_path, monkeypatch, capsys):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    scripts = _scripts(root)
+
+    def boom(argv):
+        raise OSError("disk full")
+    monkeypatch.setattr(up, "create_test_login", boom)
+    assert _run(["--checkout", str(root)]) == 0
+    assert "disk full" in capsys.readouterr().err
+    assert _script_calls(world, scripts["prune-build-cache"])        # the deploy still finished
+
+
+def test_the_offer_runs_setup_against_the_updates_daemon_port(world, clients, passkeys, tmp_path):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run(["--daemon-url", "http://127.0.0.1:9876"]) == 0
+    assert passkeys["ran"] == [["--yes", "--port", "9876"]]

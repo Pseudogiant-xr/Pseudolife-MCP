@@ -160,8 +160,13 @@ def run_tailscale(binary: str, args: list[str]) -> subprocess.CompletedProcess:
     try:
         return subprocess.run([binary, *args], capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, timeout=TAILSCALE_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess([binary, *args], 124, "",
+    except subprocess.TimeoutExpired as exc:
+        # What it printed before the timeout: a serve waiting for the admin
+        # to turn Serve on prints the link that does it, then waits.
+        out = exc.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return subprocess.CompletedProcess([binary, *args], 124, out,
                                            f"timed out after {TAILSCALE_TIMEOUT_S:g}s")
     except OSError as exc:
         return subprocess.CompletedProcess([binary, *args], 127, "", str(exc))

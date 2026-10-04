@@ -151,14 +151,23 @@ def bearer() -> str | None:
 
 # ── the helpers that run in the daemon's environment ─────────────────────────
 
-def _config_path() -> Path:
+def _config_path(*, for_write: bool = False) -> Path:
     """Where the daemon reads ``config.yaml``: ``PSEUDOLIFE_MCP_CONFIG``, else
-    its data dir's (``web.config_io.config_path_for``)."""
+    its data dir's (``web.config_io.config_path_for``). The data dir's last
+    fallback is the working directory's ``data``, which is the daemon's only
+    if it was started here: a write refuses to guess it."""
     env = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
     if env:
         return Path(env)
     from pseudolife_memory.backup_cli import _default_data_dir
-    return _default_data_dir(os.environ) / "config.yaml"
+    from pseudolife_memory.storage import embedded_pg
+    data_dir = _default_data_dir(os.environ)
+    if (for_write and not os.environ.get("PSEUDOLIFE_MCP_DATA_DIR")
+            and data_dir != embedded_pg.default_lite_data_dir()):
+        raise ValueError("cannot tell where this daemon reads its config: set "
+                         "PSEUDOLIFE_MCP_DATA_DIR (or PSEUDOLIFE_MCP_CONFIG) as the daemon has "
+                         f"it, then run `{SETUP}` again")
+    return data_dir / "config.yaml"
 
 
 def _read_config(path: Path) -> dict:
@@ -203,7 +212,7 @@ def _write(rp_id: str, origin: str) -> dict:
     """Set the two keys in the daemon's config file, keeping the rest; a
     backup beside it and an atomic replace, as ``web.config_io`` writes."""
     import yaml
-    path = _config_path()
+    path = _config_path(for_write=True)
     data = _read_config(path)
     coordination = data.setdefault("coordination", {})
     if not isinstance(coordination, dict):
@@ -243,7 +252,12 @@ def host_main(argv: list[str] | None = None) -> int:
         if problem is not None:
             print(f"refused: {problem}", file=sys.stderr)
             return EXIT_USAGE
-        print(json.dumps(_write(argv[1], argv[2])))
+        try:
+            written = _write(argv[1], argv[2])
+        except ValueError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+        print(json.dumps(written))
         return EXIT_OK
     print("usage: python -m pseudolife_memory.maintainer_setup state | write <rp_id> <origin>",
           file=sys.stderr)
@@ -362,7 +376,8 @@ def _origin_port(origin: str) -> int:
 def _choose(args, ts) -> tuple[str, str]:
     """The name for a host with none: the tailnet's HTTPS name, or localhost."""
     if args.local or ts is None:
-        return "localhost", f"http://localhost:{args.port}"
+        # As a browser serialises it: no scheme-default port (#573).
+        return "localhost", "http://localhost" + ("" if args.port == 80 else f":{args.port}")
     _binary, status = ts
     dns = _dns_name(status)
     if not dns:
@@ -460,8 +475,18 @@ def _check_key(tier: str, prefix: str, label: str, *, fresh: bool) -> int:
     """The host-side check: activate a pending key only once the maintainer
     has seen the same prefix and label in the Console."""
     no = "N revokes it" if fresh else "N leaves it pending"
-    reply = ask(f"Does the Console (Settings, Your passkeys) show {prefix} labelled "
-                f"{label!r}? Activate it [y/N] ({no}): ")
+    try:
+        reply = ask(f"Does the Console (Settings, Your passkeys) show {prefix} labelled "
+                    f"{label!r}? Activate it [y/N] ({no}): ")
+    except KeyboardInterrupt:
+        if fresh:     # unchecked: never left pending for someone else to confirm
+            revoked = run(_maintainer(tier, "revoke", "--", prefix)).returncode == 0
+            print(f"\nmaintainer setup: passkey {prefix} " + (
+                "revoked" if revoked else
+                f"NOT revoked: run `pseudolife-mcp maintainer revoke {prefix}`"), file=sys.stderr)
+        else:
+            print(f"\nmaintainer setup: passkey {prefix} is still pending", file=sys.stderr)
+        raise
     if reply in ("y", "yes"):
         proc = run(_maintainer(tier, "confirm", "--", prefix))
         if proc.returncode != 0:

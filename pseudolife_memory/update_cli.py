@@ -52,6 +52,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -501,7 +502,11 @@ class Update:
         # After the lock: the setup may wait minutes for the Console, and an
         # unattended run must not find the lock held all that time.
         if not self.o.clients_only:
-            self.maintainer_passkeys()
+            try:
+                self.maintainer_passkeys()
+            except Exception as exc:  # noqa: BLE001 - the update itself succeeded
+                self.warn(f"checking maintainer passkeys failed ({type(exc).__name__}); the update itself "
+                          f"succeeded. Run pseudolife-mcp maintainer setup to check them")
 
     # -- tier --------------------------------------------------------------
     def detect_tier(self) -> str:
@@ -963,7 +968,11 @@ class Update:
         else:
             self.hooks_changed_note(previous_digest, health)
         if not self.o.no_test_login:
-            self.ensure_test_login()
+            try:
+                self.ensure_test_login()
+            except Exception as exc:  # noqa: BLE001 - the deploy itself succeeded
+                self.warn(f"the test suite's login step failed ({type(exc).__name__}: {exc}); the deploy "
+                          f"itself succeeded. Later: pseudolife-mcp test-login create")
         self.prune_cache(repo)
 
     def ensure_test_login(self) -> None:
@@ -1014,7 +1023,15 @@ class Update:
         if ask("Set them up now? This serves the Console over HTTPS with tailscale serve when Tailscale "
                "runs, sets the daemon's config and restarts it [y/N] ") not in ("y", "yes"):
             return
-        code = maintainer_setup.main(["--yes"])
+        argv = ["--yes"]
+        try:
+            parts = urllib.parse.urlsplit(self.o.daemon_url)
+            port = parts.port if parts.hostname in ("127.0.0.1", "localhost", "::1") else None
+        except ValueError:
+            port = None
+        if port and port != maintainer_setup.DEFAULT_PORT:
+            argv += ["--port", str(port)]
+        code = maintainer_setup.main(argv)
         if code != 0:
             self.warn(f"pseudolife-mcp maintainer setup exited {code} (see above); the update itself succeeded")
 

@@ -543,3 +543,51 @@ def test_a_serve_waiting_for_the_tailnet_admin_names_the_enable_link(host, tailn
     monkeypatch.setattr(expose_cli, "run_tailscale", run)
     assert ms.main(["--yes"]) == ms.EXIT_UNDONE
     assert "https://login.tailscale.com/f/serve?node=x" in capsys.readouterr().err
+
+
+# ── the delegate's review of 8fc77131 (2026-10-05) ───────────────────────────
+
+def test_yes_never_answers_the_prefix_check_and_an_empty_answer_revokes(host, tailnet):
+    host.answers = [""]                       # Enter at the prefix question
+    assert ms.main(["--yes"]) == ms.EXIT_REFUSED
+    [question] = host.questions
+    assert PREFIX in question
+    assert host.named("revoke") and not host.named("confirm")
+
+
+def test_ctrl_c_at_the_prefix_question_revokes_the_fresh_key(host, tailnet, monkeypatch, capsys):
+    def interrupted(question):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(ms, "ask", interrupted)
+    assert ms.main(["--yes"]) == 130
+    assert host.named("revoke") and not host.named("confirm")
+    assert PREFIX in capsys.readouterr().err
+
+
+def test_a_local_origin_on_port_80_is_written_as_a_browser_sends_it(host, tailnet):
+    tailnet.present = False
+    host.answers = ["y", "y"]
+    assert ms.main(["--port", "80"]) == 0
+    [write] = [c for c in host.calls if "write" in c]
+    assert write[-2:] == ["localhost", "http://localhost"]
+
+
+def test_a_tailscale_timeout_keeps_what_it_printed(monkeypatch):
+    import subprocess
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 30, output=b"To enable, visit:\n https://login.tailscale.com/f/serve?node=y\n")
+    monkeypatch.setattr(subprocess, "run", timeout)
+    proc = expose_cli.run_tailscale("tailscale", ["serve", "--bg", "--https=8443", "http://127.0.0.1:8765"])
+    assert proc.returncode == 124 and "https://login.tailscale.com/f/serve?node=y" in proc.stdout
+
+
+def test_write_refuses_to_guess_where_a_plain_daemon_reads_its_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PSEUDOLIFE_MCP_CONFIG", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATA_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    from pseudolife_memory.storage import embedded_pg
+    monkeypatch.setattr(embedded_pg, "default_lite_data_dir", lambda: tmp_path / "no-lite-here")
+    assert ms.host_main(["write", "localhost", "http://localhost:8765"]) == ms.EXIT_USAGE
+    assert "PSEUDOLIFE_MCP_DATA_DIR" in capsys.readouterr().err
+    assert not (tmp_path / "data").exists()
