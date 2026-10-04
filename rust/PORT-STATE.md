@@ -11,7 +11,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 [PR #546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546).
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
-No production Rust surface has been accepted.
+Overall Phase 1 acceptance remains pending; named retirements and scoped substitutions are recorded in PARITY.md.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
@@ -23,8 +23,8 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | In progress; master-forward inventory and close-out b implemented; acceptance gates pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Historical 2e628b27 judges and measurements retained. Current mapping: 121 completed equivalents, 3 SDK cases retired-by-decision, 1 pending postframe substitution with Windows/Linux targeted evidence at a4ff3236. Current receipts, post-retirement measurements, full suites and final-head CI remain pending; no Rust acceptance claimed |
-| 2: Client CLI leaves | Implementation started; acceptance deferred | — | All 28 current modes classified in PARITY.md; 19 requested leaves plus carried help/version/channel accounted for. Windows watched red controls, 82 focused Python checks, 3 Rust process tests, all-target clippy/release build and private 15-case exact-byte debug proof passed. No committed final receipts, Linux/CI proof or measurements yet. Next: integrate final Phase 1 evidence, freeze source, capture both-OS pinned self-replay/candidate receipts and schedule help paired measurement |
+| 1: Stdio shim | Close-out a-f evidenced at 690bb8ac; final acceptance g pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Four current schema-2 judges/self-replays, separate Python dispatcher scope, both 3x10 paired measurements and executing green Rust/Parity CI below. Named SDK retirement and three substitutions are explicit; committed candidate-routed full suites, integrated final-head CI and fresh whole-change review remain pending |
+| 2: Client CLI leaves | Implementation started; acceptance deferred | — | All 28 current modes classified in PARITY.md; 19 requested leaves plus carried help/version/channel accounted for. Windows watched red controls, 82 focused Python checks, 3 Rust process tests, all-target clippy/release build and private 15-case exact-byte debug proof passed. No committed final receipts, Linux/CI proof or measurements yet. Final Phase 1 a-f evidence integrated; next: freeze source, capture both-OS pinned self-replay/candidate receipts and schedule help paired measurement |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
@@ -35,8 +35,9 @@ No production Rust surface has been accepted.
   PR #546 was still open at branch creation; its branch head `31f8475e`
   was merged into the phase 1 branch at `93012944`, as the phase 1 brief
   permits. PR #546 and its branch are unchanged. The maintainer owns its merge.
-- The phase 1 work window ends at 2026-10-04 12:30 AEDT (01:30 UTC).
-  Incomplete work will retain explicit pending evidence and a draft PR.
+- The historical phase 1 window ended at 2026-10-04 12:30 AEDT (01:30 UTC).
+  The close-out window ends at 2026-10-05 13:00 AEDT (02:00 UTC);
+  incomplete acceptance retains explicit pending evidence and a draft PR.
 - The phase 0b brief re-pins the oracle to master at phase start. The port makes
   no DDL changes, adds no tables and repurposes no columns. Upstream schema bumps
   follow CLAUDE.md's seven-place checklist and a new phase pin.
@@ -85,11 +86,11 @@ No production Rust surface has been accepted.
 - The legacy MCP negotiation evidence from #540 is about its original pin;
   current and earlier protocol revisions require separate current-pin evidence.
 
-## Resume
+## Historical phase 1 evidence
 
 Phase 1 close-out uses Python 0.16.1/schema 54 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`
 and the stacked phase 0b branch above. PR #546 remains open and unmerged;
-PR #560 remains a draft. All production behavior rows remain deferred.
+PR #560 remains a draft. Broader production behavior rows remain deferred; named close-out decisions are recorded below.
 
 Frozen candidate `2e628b27226ac28344d3218f679ff2c2de99422e`
 (tree `6ee4ecde802fefa88f5bc64f3aeebe4c41289f91`) passes Rust 1.94
@@ -154,7 +155,7 @@ selection passed three cases on each platform. Fresh review of the final
 fixture adjustment, committed full suites and final-head CI remain gates;
 no green hosted CI or Phase 1 acceptance is claimed.
 
-## Phase 1 paired measurement evidence
+## Historical phase 1 paired measurement evidence
 
 Paired measurements at `2e628b27` completed three repeats of ten samples per
 arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
@@ -173,9 +174,8 @@ startup; its descendants contribute to sampled process-tree RSS. Receipts are
 | Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,644,008 / 16,644,008 | 0 / 0 | 0 / 0 |
 
 Floors are observed ranges of three identical-input repeat-block quantiles,
-not confidence intervals. Windows Rust is slower and uses more sampled RSS.
-Linux pooled latency is modestly lower; the p95 difference is within observed
-floors, so it does not establish a p95 improvement. RSS is a sampled lower
+not confidence intervals. Each arm retains its own source, runtime and
+descriptive floors. RSS is a sampled lower
 bound and can miss peaks between 5 ms polls. Size covers only the selected
 executable, excluding Python runtime/dependencies; it is not deployment footprint.
 The pair uses warm filesystem caches and an empty loopback fixture, with no
@@ -199,8 +199,8 @@ Item a is complete: both inventory audits pass with no missing surfaces;
 the inventory/provenance selection passes 56 tests, including unknown-reference
 negative controls. Validation: `python rust/contract_inventory.py --phase1`,
 `python rust/contract_inventory.py` and the targeted inventory/provenance files.
-Item b is now implemented as recorded below; item c and the remaining final-head
-gates are next. No full suite or receipt replay is claimed for item a alone.
+Item b implementation evidence follows; current close-out status is recorded
+in the final section. Item a alone establishes no full suite or receipt replay.
 
 ## Phase 2 close-out item b
 
@@ -225,10 +225,100 @@ and `closeout-wire-linux.log`, each with a saved exit 0. These private logs bind
 to the frozen tree; they do not validate later changes. Both platforms reported
 zero owned candidates after cleanup.
 
-The two interim review findings are repaired in the interpreter bindings and
-current evidence descriptions; their follow-up independent review is pending.
-Items c through g remain open: fixture fixes and final nextest, executing Parity
-and green final-head CI, current per-node receipts and Python self-replay,
-post-retirement paired measurements, remaining small review items, committed
-candidate-routed full suites on both machines, and final independent review.
-No production acceptance row changes status on this component evidence.
+The two interim review findings were repaired in the interpreter bindings and
+evidence descriptions. This intermediate component validation did not close
+items c-g. The current final section records later CI, receipts, measurements
+and remaining acceptance gates; no acceptance follows from these logs alone.
+
+## Current close-out evidence at `690bb8ac`
+
+The candidate and committed instrument were frozen at `690bb8acd855250c29145d623a039ddcd4dee6cb`,
+tree `9116cc4c98e79e947322fe2772476e255b73f033`, over the Python
+0.16.1/schema-54 oracle `f709abb54f7912ae9cd767998d0926ca33df4bcd`.
+The Windows and native Linux Python self-replays and Rust judges each pass
+all eight actual stdio subprocess nodes with zero retained-wire differences.
+Actual JUnit per-node outcomes and its digest are recorded; exit zero alone
+is insufficient. Each replay binds 32 candidate cells: two real-bank, seven
+EOF, ten fault, seven startup and six concurrent non-EOF cells. All sections,
+controls, owned processes, disposable banks and outer PostgreSQL cleanup were
+checked. The executable/source hashes identify the actual bytes; they are
+not a build attestation. Windows and Linux retain their actual raw checkout
+hashes, including platform line endings.
+
+Current combined receipts are
+`evals/results/rust-port-phase1-python-windows-690bb8ac.json`,
+`evals/results/rust-port-phase1-python-linux-690bb8ac.json`,
+`evals/results/rust-port-phase1-rust-windows-690bb8ac.json` and
+`evals/results/rust-port-phase1-rust-linux-690bb8ac.json`.
+The separate five dispatcher nodes execute the Python public CLI on each OS,
+as recorded in `rust-port-phase1-cli-python-windows-690bb8ac.json` and
+`rust-port-phase1-cli-python-linux-690bb8ac.json` under `evals/results/`.
+Those five passes are not Rust CLI coverage and are not added to the eight
+stdio passes. Runtime metadata is CPython 3.11.9 on Windows and 3.11.15 on Linux,
+MCP 2.1.1, with actual package and distribution version 0.16.1.
+
+[The Rust workflow run](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056)
+completed successfully at `690bb8ac`; both Parity jobs executed.
+
+| Job | Platform | Wall time |
+| --- | --- | --- |
+| [Rust](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111528841770) | Ubuntu | 2m 11s |
+| [Rust](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111528841590) | Windows | 4m 34s |
+| [Parity](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111529715899) | Ubuntu | 6m 54s |
+| [Parity](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37233810056/job/111529715959) | Windows | 15m 12s |
+
+The brief's 2.1 close-out status is:
+
+| Item | Status | Evidence |
+| --- | --- | --- |
+| a: Master integration and inventory | Complete | Python oracle f709abb5/schema 54; both inventory audits; 419 test files, 189 function mappings, 13 routed nodes |
+| b: Named retirements and substitutions | Implemented and validated; scoped decisions recorded | SDK preflight retired; explicit daemon spawn, postframe update scheduling and Rust wake-reason predicates named in PARITY.md and PORTING.md; both-platform targeted checks and executing CI |
+| c: Executing Rust and Parity CI | Complete at 690bb8ac | Run 37233810056, all four jobs successful; wall times above |
+| d: Actual outcomes, source/binary bindings, self-replay and pruning | Complete at 690bb8ac | Four schema-2 combined receipts; eight actual nodes each, 32 bound cells each, all sections and cleanup checked; one current replay kind/platform; two named historical strict-judge receipts retained |
+| e: Post-retirement paired measurement | Complete at 690bb8ac | Both platform receipts below, three repeats of ten samples per arm; all normal and separate RSS launches clean; canonical historical LF artifact binding |
+| f: Small review items | Implemented and validated at 690bb8ac | Close-race built-empty assertion; doctor oracle subprocess classification; local unsafe allowances; lazy launcher scan; Python-first observed concurrent-order contract; seven exact startup stderr cells and executing CI |
+| g: Final acceptance | Pending | Candidate-routed committed full suites on WSL and box, local final-closeout judges as required, final-head CI after evidence integration, and fresh independent whole changed-since-2e review; PR #560 stays draft |
+
+## Current post-retirement paired measurements
+
+The two current receipts are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`.
+Each contains three identical-input repeats of ten samples per arm, with
+alternating Python/Rust timed launches and separate RSS launches: 60 timed
+and 60 RSS launches per platform. Every normal and RSS cleanup has exit zero,
+no forced termination and confirmed subtree cleanup. The source, instrument,
+executable and actual Python runtime bindings were checked for each platform.
+
+| Platform | Metric | Python p50 / p95 | Rust p50 / p95 | Python floor p50 / p95 | Rust floor p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| Windows | First stdout frame, ms | 812.083 / 860.987 | 25.992 / 27.217 | 16.399 / 38.308 | 0.755 / 1.414 |
+| Windows | Sampled peak tree RSS, bytes | 87,785,472 / 91,738,112 | 17,547,264 / 22,208,512 | 282,624 / 4,599,808 | 1,724,416 / 749,568 |
+| Windows | Executable file, bytes | 274,712 / 274,712 | 13,293,056 / 13,293,056 | 0 / 0 | 0 / 0 |
+| Linux | First stdout frame, ms | 668.437 / 695.709 | 5.888 / 6.548 | 12.771 / 16.679 | 0.132 / 0.456 |
+| Linux | Sampled peak tree RSS, bytes | 73,904,128 / 74,223,616 | 11,649,024 / 11,845,632 | 221,184 / 172,032 | 196,608 / 65,536 |
+| Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,742,560 / 16,742,560 | 0 / 0 | 0 / 0 |
+
+The reported quantiles pool 30 samples per arm and use nearest rank.
+Each arm's floor is the range of its three repeat-block quantiles, computed
+separately for p50 and p95; these are descriptive ranges, not confidence
+intervals. With ten samples, each repeat-block p95 is its maximum. First-frame
+latency observes the first complete stdout line before JSON parsing. RSS is a
+sampled lower bound from a separate launch at 5 ms polls; executable size
+excludes Python runtime and dependencies. The fixture uses warm filesystem
+cache, an empty authenticated loopback server, no daemon spawn and disabled
+coordination; ambient desktop activity and cache evolution are uncontrolled.
+
+The before-retirement numeric table above retains its original source/runtime
+bindings. The Python source/schema/runtime and other Rust close-out behavior
+changed between captures; their difference is not an isolated estimate of SDK
+retirement. Historical r5 remains noncomparable: its Windows Python
+initialize-return p50 is 644.687 ms, versus 811.841 ms in the earlier paired
+capture, whose first-frame p50 is 811.794 ms. Source pins, versions,
+dependencies, instrumentation and process ownership differ, and no matched
+crossover isolates the cause. The canonical LF r5 Git blob
+`a7ddf073f0e8102cecdc2947bffc0b2f546151cd` has SHA256
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
+The historical artifact is unchanged; checkout CRLF bytes do not replace this
+canonical reference. No general performance claim or completed Phase 1
+acceptance follows from these tables.

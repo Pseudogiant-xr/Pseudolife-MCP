@@ -1,7 +1,9 @@
 # Porting contract
 
-The phase 1 behavioural oracle is Python 0.16.0 at
-`0b015f9279a778f996e71ee78510695e5fee7196`, using PostgreSQL schema 53.
+The phase 1 close-out behavioural oracle is Python 0.16.1 at
+`f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
+Historical phase 1 evidence retains Python 0.16.0 at
+`0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
 Historical phase 0b evidence remains bound to Python 0.15.0 at
 `3691f5cb75487d3fda54a6bde6fab35dcf32c681` and its recorded runtime.
 This rulebook governs an incremental port at executable and daemon-subsystem
@@ -385,3 +387,15 @@ establishes no production parity.
 - Keep trial exclusions deferred. Pure HLC arithmetic establishes neither
   locking nor atomic updates; the trial also excludes object subclasses, byte
   text, deep recursion and tier warning logs. None is retired by implication.
+
+## Current close-out evidence
+
+Frozen candidate `690bb8ac` has current Windows/Linux schema-2 Python self-replay
+and Rust receipts, each with eight actual stdio outcomes and 32 executable-bound
+cells. Five dispatcher nodes per OS remain separately observed Python CLI tests.
+Public receipt exports use the committed allowlist; raw streams remain private.
+Source-tree and executable hashes establish source identity and executable
+identity, not a build attestation. The paired measurements use three repeats
+of ten samples per arm, with separately sampled RSS and per-arm quantile floors.
+Current numeric tables and remaining acceptance gates are in PORT-STATE.md;
+full suites, final integrated-head CI and whole-change review remain pending.
