@@ -170,7 +170,7 @@ def _userinfo_tokens(url: str | None) -> list[str]:
     return [value for value in dict.fromkeys(found) if value]
 
 
-def mask_secrets(text: str, url: str | None = None) -> str:
+def redacted(text: str, url: str | None = None) -> str:
     """``text`` with the admin URL's password, and anything shaped like a
     password, replaced by ``***``."""
     for token in sorted(_userinfo_tokens(url), key=len, reverse=True):
@@ -204,7 +204,7 @@ class AdminUrl:
                         result = "" if row is None or row[0] is None else str(row[0])
                 return result
         except psycopg.Error as exc:
-            raise DatabaseError(mask_secrets(f"{type(exc).__name__}: {str(exc).strip()}",
+            raise DatabaseError(redacted(f"{type(exc).__name__}: {str(exc).strip()}",
                                              self._url)) from None
 
 
@@ -415,7 +415,7 @@ class _Report:
             print(line, file=self.out, flush=True)
 
     def finish(self, code: int, error: str | None = None) -> int:
-        error = mask_secrets(error) if error else error
+        error = redacted(error) if error else error
         if error and not self.as_json:
             print(f"test-login: {error}", file=self.out, flush=True)
         if self.as_json:

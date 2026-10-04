@@ -432,9 +432,9 @@ def test_a_bad_admin_url_never_prints_its_password(tmp_path, as_json):
     "bad conninfo: host=h password='s3cr%zz' user=u",
 ])
 def test_error_text_is_masked_for_the_urls_password_and_any_password_shaped_token(text):
-    masked = cli.mask_secrets(text, "postgresql://admin:s3cr%zz@host/db")
+    masked = cli.redacted(text, "postgresql://admin:s3cr%zz@host/db")
     assert "s3cr" not in masked, masked
-    masked = cli.mask_secrets(text, None)  # no URL to learn the password from
+    masked = cli.redacted(text, None)  # no URL to learn the password from
     assert "s3cr" not in masked, masked
 
 
