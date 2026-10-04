@@ -317,7 +317,9 @@ took 143 CUDA OOMs.
 - **A park record does not keep a wake listener alive; the host does.**
   Claude Code's Stop-hook watcher is armed at every turn end and listens
   while the session stays open (14 days; it stopped after 59 minutes before
-  2026-10-05), so a plugin session needs no `wait-mail`. Without the
+  2026-10-05), so a plugin session needs no `wait-mail` once its clients
+  carry the 2026-10-05 plugin (`update --all` or `ops/update_clients.py`;
+  until a session restarts on it, the 59-minute hook still runs). Without the
   plugin's Stop hook, arm a main-session background `pseudolife-mcp
   wait-mail`, but Claude Code stops a background task at the Bash tool's
   `timeout` (30 minutes by default, 2 hours at most): pass the maximum and

@@ -513,12 +513,16 @@ case "${CLAUDE_PID:-}" in
     ''|*[!0123456789]*) ;;
     *)  case "${OSTYPE:-}" in
             msys*|cygwin*)
+                # No listing to judge by (2) is checked again each minute.
                 windows_pid_listed "$CLAUDE_PID"
-                [ $? -eq 0 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
+                [ $? -ne 1 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
                 ;;
             *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
         esac ;;
 esac
+# With no Claude Code process to watch, only the digest's removal would end
+# the watch: keep the hour the hook had before it listened for 14 days.
+[ -n "$PARENT" ] || [ "$WAIT" -le "$FAST_WAIT" ] || WAIT=$FAST_WAIT
 # True while the parent is (as far as this host can tell) still running.
 parent_alive() {
     if [ -z "$WINDOWS_PARENT" ]; then
@@ -590,8 +594,9 @@ wake_budget_ok() {
 # (a crash that takes the shim down with Claude Code leaves it, which the
 # parent check above catches), so the watch ends rather than fire
 # into a later session. `pseudolife-mcp wait-mail` (wait_mail_cli.py)
-# applies the same ring rule and fire-and-mark contract for waits longer
-# than this hook's; this loop keeps the lease, parent and cap checks.
+# applies the same ring rule and fire-and-mark contract where this hook does
+# not run (an install without the plugin's Stop hook); this loop keeps the
+# lease, parent and cap checks.
 wait_for_mail() {
     # SECONDS counts from the start of the script, spawns included.
     local deadline=$WAIT snapshot present=0

@@ -238,6 +238,17 @@ def test_a_long_idle_watcher_polls_slower_but_keeps_its_listener_lease():
     assert _constant("FAST_WAIT") == 3540
 
 
+def test_a_watcher_with_no_parent_to_check_keeps_the_one_hour_bound():
+    """Review of the 14-day watcher (2026-10-05): with no Claude Code process
+    to watch (no CLAUDE_PID), nothing but the digest's removal would end it,
+    so it keeps the bound it had before; and on Windows a ps -W that gives no
+    listing at arm time is retried each minute rather than dropped."""
+    script = HOOK.read_text(encoding="utf-8")
+    assert re.search(r'^\[ -n "\$PARENT" \] \|\| \[ "\$WAIT" -le "\$FAST_WAIT" \] \|\| WAIT=\$FAST_WAIT$',
+                     script, re.M)
+    assert re.search(r'^\s+\[ \$\? -ne 1 \] && PARENT=\$CLAUDE_PID && WINDOWS_PARENT=1$', script, re.M)
+
+
 @pytest.mark.parametrize("flag", ["", "1", "0"])
 def test_the_command_refuses_a_script_that_does_not_parse(tmp_path, flag):
     """Exit 2 is the wake, and bash also exits 2 on a syntax error. With the
