@@ -16,32 +16,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   create`, run once on the daemon host, provisions idempotently a role
   `pseudolife_test` (LOGIN CREATEDB; no superuser, CREATEROLE, REPLICATION
   or BYPASSRLS; every role membership revoked), revokes CONNECT on the
-  production database from PUBLIC (the owner keeps it), installs `vector`
-  in `template1` (pgvector's extension is not trusted, so the login could
-  not create it; `CREATE DATABASE` copies it), and writes the login to an
-  owner-only `~/.pseudolife-mcp/test-pg.env`. It runs `psql` in the
-  Postgres container as that container's superuser, sends the server only
-  the password's SCRAM verifier, refuses without a superuser connection,
-  prints what it changed and checks the result. A re-run re-applies the
-  file's password; `--rotate` draws a new one.
+  production database and on `template1` from PUBLIC (the owner keeps it;
+  a session in `template1` would fail every `CREATE DATABASE` that copies
+  it, which needs no CONNECT there), hands leftover per-run test databases
+  an owner run left (the names the suite's prune drops) to the role,
+  installs `vector` in `template1` (pgvector's extension is not trusted, so
+  the login could not create it; `CREATE DATABASE` copies it), and writes
+  the login to an owner-only `~/.pseudolife-mcp/test-pg.env`. It runs
+  `psql` in the Postgres container as that container's superuser (or uses
+  `--admin-url`, which needs no password in it: libpq reads `PGPASSWORD`
+  or `~/.pgpass`, and an error never prints one), sends the server only the
+  password's SCRAM verifier, refuses without a superuser connection or when
+  the daemon's database user (`PSEUDOLIFE_MCP_DATABASE_URL`) would lose
+  CONNECT, prints what it changed and checks the result. A re-run
+  re-applies the file's password; `--rotate` draws a new one, and is
+  required when the role exists but no file here holds its password.
 - The suite logs in with `PSEUDOLIFE_TEST_PG_PASSWORD` (as
   `PSEUDOLIFE_TEST_PG_USER`, else the owner), then the test login file
   (`PSEUDOLIFE_TEST_PG_LOGIN_FILE`, else `~/.pseudolife-mcp/test-pg.env`),
   then `ops/.env`, then the compose default. A run that still logs in as
-  the owner through `ops/.env` works and prints one line naming the fix;
-  the fresh-worktree refusal names `test-login create` instead of copying
-  `ops/.env`. `ops/wsl-suite.ps1` forwards the login file and stops copying
-  `ops/.env` into WSL when it exists. Both installers run the command once
-  the local stack is healthy (a failure only warns); `pseudolife-mcp update`
-  does not, so existing installs run it once by hand.
+  the owner, whatever the source, works and prints one line naming the
+  source and the fix; the fresh-worktree refusal names `test-login create`
+  instead of copying `ops/.env`, and a run whose per-run database another
+  role owns is refused in one line naming the `DROP DATABASE` to run.
+  `ops/wsl-suite.ps1` forwards the login file and stops copying `ops/.env`
+  into WSL when it exists. The installers run the command only on request
+  (`-TestLogin` / `--test-login`, for contributors who run the suite against
+  the bundled server; a failure only warns); `pseudolife-mcp update` never
+  does. `ops/restore.*` revoke CONNECT from PUBLIC again after recreating
+  the bank, since a plain dump carries no database grants.
 - Running the suite as such a login found one more privileged act: the
   per-test reset reaped autovacuum workers too, which PostgreSQL 18 allows
   only superusers. The bulk reaps in `tests/` and `evals/` now end client
   backends only.
-- CI's PostgreSQL job provisions the login on its service container
+- CI's PostgreSQL job provisions the login (as its own role,
+  `pseudolife_test_ci`) on its service container
   (`PSEUDOLIFE_TEST_LOGIN_ADMIN_URL`) and runs a slice of the PG-backed
   suite under it, checking it cannot connect to the production-named
-  database. New guide: [running agent sessions under a separate
+  database or `template1`. New guide: [running agent sessions under a separate
   account](docs/guide/agent-isolation.md).
 
 ### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)

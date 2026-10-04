@@ -65,10 +65,20 @@ other databases `PUBLIC` may still connect to: the test login holds no table
 privileges in a database it does not own, and `--bank DB` closes one. After
 upgrading the Postgres image, run it again to update `vector` in `template1`.
 
-A fresh install, and every installer re-run, runs it once the stack is
-healthy; a failure there only warns. `pseudolife-mcp update` does not: it is
-the deploy path, and changing roles and grants on the live server is a
-separate decision, so on an existing install run the command once by hand.
+A bank restore (`ops/restore.ps1 -Apply`, `ops/restore.sh --apply`)
+recreates the database, and a plain dump carries no database-level grants,
+so the restore scripts revoke `CONNECT` from `PUBLIC` again right after
+`CREATE DATABASE`, before the replay. Re-running `test-login create` after
+a restore is the check: it reports the bank as "already closed to PUBLIC".
+
+The installers run it only when asked: `ops/install.ps1 -TestLogin` or
+`ops/install.sh --test-login` runs it once the stack is healthy (a failure
+there only warns). Use that, or the command by hand, on a machine where
+someone runs the test suite against the bundled server, as a contributor
+or an agent account does; an install that only uses its bank has no need
+for a password login that can create databases. `pseudolife-mcp update`
+never runs it: it is the deploy path, and changing roles and grants on the
+live server is a separate decision.
 
 The suite logs in with the first of:
 
@@ -171,6 +181,10 @@ account's name and `<maintainer>` yours; paths are examples.
 - The Docker engine on Windows answers members of `docker-users` (and
   administrators). Anyone who can reach it can read the bank's volume, so the
   agent account stays out of that group.
+- Docker Desktop's setting *Expose daemon on tcp://localhost:2375 without
+  TLS* (Settings, General) must stay **off**. With it on, the engine answers
+  any local account on that port, `docker-users` or not, and the group
+  check above protects nothing.
 - Docker Desktop's WSL integration puts a working `docker` command into the
   WSL distributions it is enabled for. WSL distributions are registered per
   Windows account: the agent account installs its own (`wsl --install` as
@@ -223,6 +237,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | Check | Expected |
 |---|---|
 | `docker ps` | fails: the engine refuses an account outside `docker-users` |
+| `docker -H tcp://localhost:2375 ps` | fails: nothing listens there (Docker Desktop's "Expose daemon on tcp://localhost:2375 without TLS" is off) |
 | `Get-Content C:\Users\<maintainer>\<deployment checkout>\ops\.env` | access denied |
 | `net user <agent>` | local group memberships: `Users` only |
 | `pseudolife-mcp board-audit stats` (or any operator command that opens the bank) | fails: no database URL, and no owner password to make one |

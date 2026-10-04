@@ -62,9 +62,9 @@ exactly; they exist because each one was violated at least once.
    and cannot connect to the bank, and every checkout of that account
    reads it. **Do not copy `ops/.env` into worktrees**: it holds the bank
    owner's password and the operator bearer tokens (2026-10-04,
-   `docs/guide/agent-isolation.md`). A run that still logs in through
-   `ops/.env` prints one line saying so. Targeted runs print one line and
-   start.
+   `docs/guide/agent-isolation.md`). A run that still logs in as the bank
+   owner, through `ops/.env` or an exported password, prints one line
+   saying so. Targeted runs print one line and start.
 
    Every PR requires passing CI for its current head integrated with current
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
