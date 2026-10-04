@@ -28,6 +28,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-runs again. With no running container the old message stays, now
   naming the `docker exec` form. The configuration guide no longer tells
   operators to `docker exec` these commands by hand.
+
 ### Fixed (2026-10-05 — the Console shows the passkey prefix the host prints)
 - `pseudolife-mcp maintainer setup` asks the maintainer to check that the
   Console shows the passkey prefix the host printed. The host printed 12
