@@ -428,6 +428,9 @@ def test_the_command_is_dispatched_and_listed():
 # -- the server half: a disposable server only ----------------------------------
 
 ADMIN_ENV = "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL"
+# Not the default role: on a server where `test-login create` was run for
+# real, this module's teardown must not drop that login.
+CI_ROLE = "pseudolife_test_ci"
 
 
 @pytest.fixture(scope="module")
@@ -453,40 +456,66 @@ def scratch_admin():
     if tables:
         pytest.fail(f"{ADMIN_ENV} names a server whose pseudolife_memory holds "
                     f"{tables} tables: a real bank. Point it at a disposable server.")
+    with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
+        _drop_ci_role(conn)  # a run killed before its teardown
     yield url
     # Leave the server as found, but for vector in template1: the login and
     # the empty production-named database this module made.
     with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
-        try:
-            conn.execute(f"DROP ROLE IF EXISTS {cli.DEFAULT_ROLE}")
-        except psycopg.Error:
-            pass  # it still owns a database a failed slice leaked
+        _drop_ci_role(conn)
         if created:
             conn.execute('DROP DATABASE IF EXISTS "pseudolife_memory" WITH (FORCE)')
         if template1_open:
             conn.execute("GRANT CONNECT ON DATABASE template1 TO PUBLIC")
 
 
+def _drop_ci_role(conn) -> None:
+    """Drop this module's role, handing anything it owns (a database a failed
+    slice leaked) to the admin first."""
+    import psycopg
+
+    exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (CI_ROLE,)).fetchone()
+    if not exists:
+        return
+    try:
+        conn.execute(f"REASSIGN OWNED BY {CI_ROLE} TO CURRENT_USER")
+        conn.execute(f"DROP OWNED BY {CI_ROLE}")
+        conn.execute(f"DROP ROLE {CI_ROLE}")
+    except psycopg.Error:
+        pass  # objects in another database still name it; a disposable server
+
+
 @pytest.fixture(scope="module")
 def provisioned(scratch_admin, tmp_path_factory):
     login_file = tmp_path_factory.mktemp("test-login") / "test-pg.env"
+    args = ["create", "--role", CI_ROLE, "--file", str(login_file)]
     out = io.StringIO()
-    code = cli.main(["create", "--admin-url", scratch_admin, "--file", str(login_file)],
-                    out=out)
+    code = cli.main([*args, "--admin-url", scratch_admin], out=out)
     assert code == cli.EXIT_OK, out.getvalue()
-    # Idempotent: a second run re-applies the same password and changes nothing.
-    again = io.StringIO()
-    assert cli.main(["create", "--admin-url", scratch_admin, "--file", str(login_file)],
-                    out=again) == cli.EXIT_OK, again.getvalue()
+    # Idempotent: a second run re-applies the same password and changes
+    # nothing. It gives the admin URL without its password, as the runbook
+    # does: libpq reads PGPASSWORD.
+    from psycopg.conninfo import conninfo_to_dict
+
+    parts = conninfo_to_dict(scratch_admin)
+    host_port = f"{parts.get('host', '127.0.0.1')}:{parts.get('port', '5432')}"
+    bare = f"postgresql://{parts.get('user', 'postgres')}@{host_port}/postgres"
+    saved = os.environ.get("PGPASSWORD")
+    os.environ["PGPASSWORD"] = parts.get("password") or saved or ""
+    try:
+        again = io.StringIO()
+        assert cli.main([*args, "--admin-url", bare], out=again) == cli.EXIT_OK, again.getvalue()
+    finally:
+        if saved is None:
+            os.environ.pop("PGPASSWORD", None)
+        else:
+            os.environ["PGPASSWORD"] = saved
     assert "re-applied" in again.getvalue()
     assert "already closed to PUBLIC" in again.getvalue()
     from tests.pg_defaults import login_file_credentials
 
     user, password = login_file_credentials(login_file)
-    from psycopg.conninfo import conninfo_to_dict
-
-    parts = conninfo_to_dict(scratch_admin)
-    host_port = f"{parts.get('host', '127.0.0.1')}:{parts.get('port', '5432')}"
+    assert user == CI_ROLE
     return {"admin": scratch_admin, "file": login_file, "user": user,
             "password": password, "host_port": host_port}
 
