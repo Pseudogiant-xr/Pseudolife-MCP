@@ -463,10 +463,11 @@ function Invoke-MaintainerSetupOffer {
         Write-Host "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
         return
     }
-    # One question for the feature and its host changes; -Yes carries the
-    # answer, and setup still asks the passkey check itself.
-    $reply = Read-BankAnswer "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? This serves the Console over HTTPS with tailscale serve when Tailscale runs, sets the daemon's config and restarts it. [Y/n]"
-    if ((Get-BankReply $reply) -cin "n", "N", "no", "No", "NO") {
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    $reply = Read-BankAnswer "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]"
+    if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
         Write-Host "  Not now: run pseudolife-mcp maintainer setup when you want them."
         return
     }

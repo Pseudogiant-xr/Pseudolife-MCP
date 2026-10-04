@@ -502,12 +502,14 @@ offer_maintainer_setup() {
         echo "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
         return 0
     fi
-    # One question for the feature and its host changes; --yes carries the
-    # answer, and setup still asks the passkey check itself.
-    bank_read "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? This serves the Console over HTTPS with tailscale serve when Tailscale runs, sets the daemon's config and restarts it. [Y/n]: " ||
-        BANK_REPLY="n"
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    bank_read "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]: " ||
+        BANK_REPLY=""
     case "$(bank_trimmed "$BANK_REPLY")" in
-        n|N|no|No|NO) echo "  Not now: run pseudolife-mcp maintainer setup when you want them."; return 0 ;;
+        y|Y|yes|Yes|YES) ;;
+        *) echo "  Not now: run pseudolife-mcp maintainer setup when you want them."; return 0 ;;
     esac
     if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
         echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed." >&2

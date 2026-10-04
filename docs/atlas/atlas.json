@@ -1577,9 +1577,9 @@
    "p": "pseudolife_memory/update_cli.py",
    "d": [
     "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image → backup → rollback tag <current>-pre-update-<stamp> → prune → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
-    "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag → prune → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → test-suite login (test-login create, never --rotate) when this account has no test-pg.env and the bundled Postgres runs here (--no-test-login skips; release mode never) → BuildKit cache prune",
+    "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag → prune → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → test-suite login (test-login create, never --rotate) when this account has no test-pg.env, the bundled Postgres runs here and the suite's test server (PSEUDOLIFE_TEST_PG_HOST_PORT, else ~/.config/pseudolife-suite/env, else 127.0.0.1:5433) is its published port (--no-test-login skips; release mode never) → BuildKit cache prune",
     "Held under an OS update.lock in the data dir (busy = exit 2); backup is the checkout's backup script, else a built-in in-container pg_dump + /data tar; exit 1 daemon failure, 2 could not run, 3 current, 5 client step failed",
-    "Both Docker modes end (not with --clients-only) with one line naming pseudolife-mcp maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it, default no"
+    "Both Docker modes end (not with --clients-only) with one line naming pseudolife-mcp maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it (default no) after the update lock is released, passing --yes"
    ]
   },
   {

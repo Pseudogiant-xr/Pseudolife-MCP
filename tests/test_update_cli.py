@@ -1156,7 +1156,10 @@ def test_login(world, tmp_path, monkeypatch):
 
     monkeypatch.setattr(up, "create_test_login", create)
     monkeypatch.setenv(test_login_cli.FILE_ENV, str(tmp_path / "test-pg.env"))
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    monkeypatch.setattr(up, "home", lambda: tmp_path / "home")      # no suite env file
     world.pg_running = "true"
+    world.pg_published = "127.0.0.1:5433"
     return {"seen": seen, "answer": answer, "file": tmp_path / "test-pg.env"}
 
 
@@ -1168,6 +1171,9 @@ def _pg_aware(world: World) -> None:
         if a[:2] == ["inspect", "-f"] and a[3] == PG:
             state = getattr(world, "pg_running", None)
             return (0, state + "\n") if state else (1, "Error: No such object")
+        if a[:2] == ["port", PG]:
+            published = getattr(world, "pg_published", None)
+            return (0, published + "\n") if published else (1, "Error: no public port '5432/tcp'")
         return inner(a)
 
     world.docker = docker
@@ -1302,6 +1308,7 @@ def test_at_a_terminal_the_update_offers_to_run_it(world, clients, passkeys, tmp
     assert _run([]) == 0
     assert passkeys["ran"] == [["--yes"]]                      # the one question answered for it
     assert "tailscale serve" in passkeys["asked"][0] and "restart" in passkeys["asked"][0]
+    assert "tailnet" in passkeys["asked"][0] and ":8443" in passkeys["asked"][0]
     passkeys.update(answer="")
     assert _run([]) == 0
     assert passkeys["ran"] == [["--yes"]]                      # the default is no
@@ -1368,3 +1375,48 @@ def test_the_offer_runs_setup_against_the_updates_daemon_port(world, clients, pa
     passkeys.update(tty=True, answer="y")
     assert _run(["--daemon-url", "http://127.0.0.1:9876"]) == 0
     assert passkeys["ran"] == [["--yes", "--port", "9876"]]
+
+
+
+# The maintainer's decision (2026-10-05): create the test login only where the
+# suite actually connects to the bundled server; on the box the bundled
+# Postgres holds the live bank and the suites use a separate server (5434).
+
+def test_a_suite_pointed_at_another_server_gets_no_test_login(world, clients, test_login, tmp_path,
+                                                               monkeypatch, capsys):
+    _pg_aware(world)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5434")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+    [line] = [l for l in capsys.readouterr().out.splitlines() if "test login" in l]
+    assert "127.0.0.1:5434" in line and "5433" in line
+
+
+def test_the_box_suite_env_file_counts_as_where_the_suite_connects(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    env = tmp_path / "home" / ".config" / "pseudolife-suite" / "env"
+    env.parent.mkdir(parents=True)
+    env.write_text("# suite settings\nexport PSEUDOLIFE_TEST_PG_HOST_PORT='127.0.0.1:5434'\n"
+                   "PSEUDOLIFE_TEST_PG_PASSWORD=x\n", encoding="utf-8")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_bundled_postgres_the_suite_cannot_reach_gets_no_test_login(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    world.pg_published = None
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_the_suite_on_the_bundled_port_by_any_loopback_name_gets_it(world, clients, test_login, tmp_path,
+                                                                     monkeypatch):
+    _pg_aware(world)
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "localhost:5433")
+    world.pg_published = "0.0.0.0:5433\n[::]:5433"
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]]

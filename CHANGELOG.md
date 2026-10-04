@@ -23,8 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Tailscale stopped or without HTTPS certificates is refused rather than
   guessed. The command reads the daemon's config and the bank in the
   daemon's own environment, so it needs no bearer.
-- A daemon-host install with a token offers the setup at the end (default
-  yes); an install without a terminal prints one line naming the command,
+- A daemon-host install with a token offers the setup at the end, one
+  question, default no, that names the tailnet exposure (devices on the
+  tailnet can reach the daemon at `https://<this machine>:8443`); an install
+  without a terminal prints one line naming the command,
   and a re-run where passkeys are in place asks nothing (`maintainer setup
   --check`: exit 0 set up, 1 not, 2 unreadable).
 - A Docker-tier `pseudolife-mcp update` (release or checkout mode) ends with
@@ -34,9 +36,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's
   host) creates the test suite's own Postgres login (`test-login create`,
   never `--rotate`) when the account has no `~/.pseudolife-mcp/test-pg.env`
-  and the bundled Postgres container runs on the host. A refusal warns with
-  the fix and leaves the deploy standing; `-NoTestLogin` /
-  `--no-test-login` skips it. A release update never creates it.
+  and the bundled Postgres container runs on the host, and only when the
+  account's test suite connects to that container: its test server
+  (`PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
+  `~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`) must be the
+  container's published port. A host whose suites use another server, such
+  as a box whose bundled Postgres holds the live bank, is skipped with one
+  line. A refusal warns with the fix and leaves the deploy standing;
+  `-NoTestLogin` / `--no-test-login` skips it. A release update never
+  creates it.
 
 ### Fixed (2026-10-05 — board roles and maintainer messages: follow-ups to the #569 review)
 - A session that held both a project's delegate and coordinator leases from

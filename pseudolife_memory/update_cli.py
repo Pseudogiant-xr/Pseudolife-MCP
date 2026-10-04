@@ -143,6 +143,36 @@ def ask(question: str) -> str:
     return sys.stdin.readline().strip().lower()
 
 
+_LOOPBACK = ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::")
+# tests/pg_defaults.py's default when PSEUDOLIFE_TEST_PG_HOST_PORT is unset.
+SUITE_DEFAULT_HOST_PORT = "127.0.0.1:5433"
+
+
+def suite_env_file() -> Path:
+    """The suite settings a host's suite user sources (the box's, per the
+    repository's CLAUDE.md "Running tests")."""
+    return home() / ".config" / "pseudolife-suite" / "env"
+
+
+def suite_test_server() -> tuple[str, str]:
+    """``(host:port, where it came from)`` of the Postgres this account's
+    test suite connects to: ``PSEUDOLIFE_TEST_PG_HOST_PORT``, else that
+    variable in the suite env file, else the suite's default."""
+    value = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "").strip()
+    if value:
+        return value, "PSEUDOLIFE_TEST_PG_HOST_PORT"
+    path = suite_env_file()
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        match = re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_TEST_PG_HOST_PORT\s*=\s*(.*?)\s*$", line)
+        if match and match.group(1).strip("'\""):
+            return match.group(1).strip("'\""), str(path)
+    return SUITE_DEFAULT_HOST_PORT, "the suite's default"
+
+
 def create_test_login(argv: list[str]) -> dict:
     """``pseudolife-mcp test-login create`` in this process, its JSON report
     as a dict (``exit``, ``error``, ``changes``)."""
@@ -989,6 +1019,19 @@ class Update:
         code, out = run_cli([self.docker, "inspect", "-f", "{{.State.Running}}", PG_CONTAINER], timeout=60)
         if code != 0 or out.strip() != "true":
             return
+        # Only where the suite connects to the bundled server (the
+        # maintainer, 2026-10-05): on the box it holds the live bank and the
+        # suites use a separate server, named in the suite's env file.
+        suite, source = suite_test_server()
+        code, out = run_cli([self.docker, "port", PG_CONTAINER, "5432/tcp"], timeout=60)
+        published = sorted({line.strip().rpartition(":")[2] for line in out.splitlines() if ":" in line}
+                           if code == 0 else set())
+        host, _, port = suite.rpartition(":")
+        if port not in published or host.strip("[]") not in _LOOPBACK:
+            bundled = ", ".join(f"port {p}" for p in published) or "no published port"
+            self.step(f"test login not created: this account's test suite uses the Postgres at {suite} "
+                      f"({source}), not the bundled container ({bundled})")
+            return
         self.step(f"creating the test suite's own Postgres login ({path} is missing on this account; "
                   f"--no-test-login skips this)...")
         report = create_test_login(["create"])
@@ -1020,8 +1063,9 @@ class Update:
             return
         # One question for the feature and its host changes: --yes carries
         # the answer; setup still asks the passkey check itself.
-        if ask("Set them up now? This serves the Console over HTTPS with tailscale serve when Tailscale "
-               "runs, sets the daemon's config and restarts it [y/N] ") not in ("y", "yes"):
+        if ask("Set them up now? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve "
+               "(devices on your tailnet can reach it at https://<this machine>:8443), sets its config and "
+               "restarts it [y/N] ") not in ("y", "yes"):
             return
         argv = ["--yes"]
         try:

@@ -5151,8 +5151,9 @@ leaves the queue when it is made the delegate.
 pseudolife-mcp maintainer setup
 ```
 
-A daemon-host install offers it at the end, and `pseudolife-mcp update`
-names it until it is done. It shows what it will change and asks once
+A daemon-host install offers it at the end (default no, since it can put
+the daemon on your tailnet), and `pseudolife-mcp update` names it until it
+is done. It shows what it will change and asks once
 before changing anything (`--yes` answers for it), then:
 
 1. Names the Console at one fixed address. Browsers offer passkeys only
@@ -7664,9 +7665,13 @@ per-run test databases so the suite can prune them, installs `vector` in
 server, and is idempotent. The installers run it only with `-TestLogin` /
 `--test-login` (for contributors who run the suite against this server). A
 checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's host)
-runs it when this account has no login file and the bundled Postgres
-container runs here, never with `--rotate` (`-NoTestLogin` /
-`--no-test-login` skips it); a refusal only warns, with the fix. A release
+runs it when this account has no login file, the bundled Postgres
+container runs here, and this account's suite connects to it (its
+`PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
+`~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`, is the container's
+published port; a host whose suites use another server is skipped with one
+line). It never passes `--rotate` (`-NoTestLogin` / `--no-test-login` skips
+it); a refusal only warns, with the fix. A release
 update (`pseudolife-mcp update`) never does. A bank restore keeps the bank closed
 (`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it,
 and from a rehearsal's scratch copy; this runs on every restore, so a
@@ -11264,8 +11269,10 @@ someone runs the test suite against the bundled server, as a contributor
 or an agent account does; an install that only uses its bank has no need
 for a password login that can create databases. A checkout deploy
 (`ops/update.ps1` / `ops/update.sh`) runs it too, since only a contributor's
-host deploys from a checkout: when this account has no login file and the
-bundled Postgres container runs on the host, never with `--rotate`
+host deploys from a checkout: when this account has no login file, the
+bundled Postgres container runs on the host and this account's suite
+connects to it (a host whose suites use a separate test server, like one
+whose bundled Postgres holds the live bank, is skipped), never with `--rotate`
 (`-NoTestLogin` / `--no-test-login` skips it). A release update
 (`pseudolife-mcp update`) never runs it: an end user's server gets no
 password login that can create databases.

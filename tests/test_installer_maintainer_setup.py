@@ -1,7 +1,8 @@
 """The installers offer the maintainer's passkey setup at the end.
 
 A daemon-host install (not client-only) with a bearer token asks once,
-default yes, whether to run `pseudolife-mcp maintainer setup`, the guided
+default no (the maintainer, 2026-10-05: it can put the daemon on the
+tailnet), whether to run `pseudolife-mcp maintainer setup`, the guided
 command that names the Console over HTTPS, writes the daemon's config and
 enrols the first passkey (2026-10-05: the install should handle everything,
 or ask with simple instructions only where it must). An install without a
@@ -71,21 +72,23 @@ def _shim_calls(shell: _Shell) -> list[str]:
 
 
 @BASH
-@pytest.mark.parametrize("reply", ["", "y", "Yes"])
-def test_sh_enter_or_yes_runs_the_setup_with_the_board_token(bash, tmp_path, reply):
+@pytest.mark.parametrize("reply", ["y", "Yes"])
+def test_sh_yes_runs_the_setup_with_the_board_token(bash, tmp_path, reply):
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell, reply=reply)
     assert proc.returncode == 0, proc.stderr
     assert _shim_calls(shell) == ["shim|maintainer setup --yes|/fixture/claude-code.token"]
-    assert "[Y/n]" in proc.stdout and "DONE" in proc.stdout
+    assert "[y/N]" in proc.stdout and "DONE" in proc.stdout
     # the one question names the persistent changes the yes answers for
     assert "tailscale serve" in proc.stdout and "restart" in proc.stdout
+    assert "tailnet" in proc.stdout and ":8443" in proc.stdout
 
 
 @BASH
-def test_sh_no_skips_with_the_command_named(bash, tmp_path):
+@pytest.mark.parametrize("reply", ["", "n"])
+def test_sh_enter_or_no_skips_with_the_command_named(bash, tmp_path, reply):
     shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, reply="n")
+    proc = _sh(shell, reply=reply)
     assert proc.returncode == 0, proc.stderr
     assert _shim_calls(shell) == []
     assert COMMAND in proc.stdout
@@ -97,7 +100,7 @@ def test_sh_without_a_terminal_one_line_names_the_command(bash, tmp_path):
     proc = _sh(shell, tty=False)
     assert proc.returncode == 0, proc.stderr
     assert _shim_calls(shell) == []
-    assert [line for line in proc.stdout.splitlines() if COMMAND in line] and "[Y/n]" not in proc.stdout
+    assert [line for line in proc.stdout.splitlines() if COMMAND in line] and "[y/N]" not in proc.stdout
 
 
 @BASH
@@ -115,14 +118,14 @@ def test_sh_passkeys_in_place_are_not_asked_about_again(bash, tmp_path, tty):
     shell = _Shell(bash, tmp_path)
     proc = _sh(shell, tty=tty, check_exit=0)
     assert proc.returncode == 0, proc.stderr
-    assert _shim_calls(shell) == [] and "[Y/n]" not in proc.stdout
+    assert _shim_calls(shell) == [] and "[y/N]" not in proc.stdout
     assert "Maintainer passkeys: in place" in proc.stdout
 
 
 @BASH
 def test_sh_a_failed_setup_warns_and_the_install_completes(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, setup_exit=4)
+    proc = _sh(shell, reply="y", setup_exit=4)
     assert proc.returncode == 0, proc.stderr
     assert "WARNING" in proc.stderr and COMMAND in proc.stderr
     assert "DONE" in proc.stdout
@@ -131,7 +134,7 @@ def test_sh_a_failed_setup_warns_and_the_install_completes(bash, tmp_path):
 @BASH
 def test_sh_without_the_shim_it_says_so_and_goes_on(bash, tmp_path):
     shell = _Shell(bash, tmp_path)
-    proc = _sh(shell, shim=False)
+    proc = _sh(shell, reply="y", shim=False)
     assert proc.returncode == 0, proc.stderr
     assert "WARNING" in proc.stderr and COMMAND in proc.stderr
     assert "DONE" in proc.stdout
@@ -157,21 +160,23 @@ def _ps(ps: _PowerShell, *, tty: bool = True, reply: str = "", token: str = "min
         + "\nInvoke-MaintainerSetupOffer\nWrite-Output DONE\n")
 
 
-@pytest.mark.parametrize("reply", ["", "y"])
-def test_ps_enter_or_yes_runs_the_setup_with_the_board_token(tmp_path, reply):
+@pytest.mark.parametrize("reply", ["y", "Yes"])
+def test_ps_yes_runs_the_setup_with_the_board_token(tmp_path, reply):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps, reply=reply)
     assert proc.returncode == 0, _output(proc)
     assert [line for line in ps.logged() if line.startswith("fakeshim|")] == [
         "fakeshim|maintainer setup --yes"]
     assert "token|/fixture/claude-code.token" in ps.logged()
-    assert "[Y/n]" in _output(proc) and "DONE" in proc.stdout
+    assert "[y/N]" in _output(proc) and "DONE" in proc.stdout
     assert "tailscale serve" in _output(proc) and "restart" in _output(proc)
+    assert "tailnet" in _output(proc) and ":8443" in _output(proc)
 
 
-def test_ps_no_skips_with_the_command_named(tmp_path):
+@pytest.mark.parametrize("reply", ["", "n"])
+def test_ps_enter_or_no_skips_with_the_command_named(tmp_path, reply):
     ps = _PowerShell(tmp_path)
-    proc = _ps(ps, reply="n")
+    proc = _ps(ps, reply=reply)
     assert proc.returncode == 0, _output(proc)
     assert ps.logged() == []
     assert COMMAND in _output(proc)
@@ -182,7 +187,7 @@ def test_ps_without_a_terminal_one_line_names_the_command(tmp_path):
     proc = _ps(ps, tty=False)
     assert proc.returncode == 0, _output(proc)
     assert ps.logged() == []
-    assert COMMAND in _output(proc) and "[Y/n]" not in _output(proc)
+    assert COMMAND in _output(proc) and "[y/N]" not in _output(proc)
 
 
 @pytest.mark.parametrize("token", ["opted-out", "http", "no-shim", "failed"])
@@ -198,19 +203,19 @@ def test_ps_passkeys_in_place_are_not_asked_about_again(tmp_path, tty):
     ps = _PowerShell(tmp_path)
     proc = _ps(ps, tty=tty, check_exit=0)
     assert proc.returncode == 0, _output(proc)
-    assert ps.logged() == [] and "[Y/n]" not in _output(proc)
+    assert ps.logged() == [] and "[y/N]" not in _output(proc)
     assert "Maintainer passkeys: in place" in _output(proc)
 
 
 def test_ps_a_failed_setup_warns_and_the_install_completes(tmp_path):
-    proc = _ps(_PowerShell(tmp_path), setup_exit=4)
+    proc = _ps(_PowerShell(tmp_path), reply="y", setup_exit=4)
     assert proc.returncode == 0, _output(proc)
     assert "WARNING" in _output(proc) and COMMAND in _output(proc)
     assert "DONE" in proc.stdout
 
 
 def test_ps_without_the_shim_it_says_so_and_goes_on(tmp_path):
-    proc = _ps(_PowerShell(tmp_path), shim=False)
+    proc = _ps(_PowerShell(tmp_path), reply="y", shim=False)
     assert proc.returncode == 0, _output(proc)
     assert "WARNING" in _output(proc) and COMMAND in _output(proc)
     assert "DONE" in proc.stdout
