@@ -88,6 +88,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pending-mail cap on the maintainer row counts each sender's own replies.
 - `pseudolife-mcp maintainer confirm|revoke` accept an id prefix that starts
   with `-`.
+
 ### Added (2026-10-04 — the test suite gets its own Postgres login, so agent sessions stop holding the bank owner's password)
 - The bundled Postgres serves the production bank and the test suite's
   per-run databases under one role, `pseudolife`, the server's superuser,
