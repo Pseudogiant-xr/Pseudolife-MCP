@@ -161,11 +161,9 @@ class _FakeServer:
                 "owner_connect": True}}
             return json.dumps({"role": role, "member_of": [], "banks": banks,
                                "owns": self.owns, "others": ["pseudolife_memory_bench"]})
-        if "pg_extension" in sql and "CREATE EXTENSION" not in sql:
-            return self.vector
         if "CREATE EXTENSION" in sql:
-            self.vector = "vector 0.8.6"
-            return self.vector
+            before, self.vector = self.vector, "vector 0.8.6"
+            return f"{before}|{self.vector}"
         if "CREATE ROLE" in sql:
             self.applied = True
             return "ok"
@@ -247,6 +245,29 @@ def test_a_failed_role_change_leaves_no_file(tmp_path):
     code, out = _run([], server, tmp_path)
     assert code == cli.EXIT_FAILED
     assert not list(tmp_path.iterdir())
+
+
+class _GarbledServer(_FakeServer):
+    def query(self, database, statements):
+        self.calls.append((database, list(statements)))
+        return "psql: something that is not JSON"
+
+
+def test_an_answer_that_is_not_json_fails_cleanly(tmp_path):
+    code, out = _run([], _GarbledServer(), tmp_path)
+    assert code == cli.EXIT_FAILED
+    assert "test-login:" in out
+    assert not (tmp_path / "test-pg.env").exists()
+
+
+def test_template1_is_opened_once(tmp_path):
+    """CREATE DATABASE fails while another session is connected to its
+    template, so a concurrent test run's database creation can collide with
+    this command: it holds one short connection to template1, not two."""
+    server = _FakeServer()
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert [db for db, _ in server.calls].count("template1") == 1
 
 
 def test_template_banks_and_the_admin_database_cannot_be_named(tmp_path):

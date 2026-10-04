@@ -251,11 +251,15 @@ END $do$""",
 
 
 def extension_statements() -> list[str]:
-    statements = []
+    """For one connection to template1, which it should hold briefly: a
+    CREATE DATABASE fails while any other session is connected to its
+    template. The last statement answers ``<before>|<after>``."""
+    statements = [f"SELECT set_config('pseudolife.extensions_before', ({_extension_versions()}), false)"]
     for name in EXTENSIONS:
         statements += [f"CREATE EXTENSION IF NOT EXISTS {_ident(name)}",
                        f"ALTER EXTENSION {_ident(name)} UPDATE"]
-    statements.append(_extension_versions())
+    statements.append(f"SELECT current_setting('pseudolife.extensions_before') || '|' || "
+                      f"({_extension_versions()})")
     return statements
 
 
@@ -381,6 +385,9 @@ def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
         return _create(args, executor, path, banks, report)
     except DatabaseError as exc:
         return report.finish(EXIT_FAILED, f"the database refused: {exc}")
+    except ValueError:  # an answer that is not the JSON the query builds
+        return report.finish(EXIT_FAILED, f"{executor.description} gave an answer this "
+                                          "command does not understand")
 
 
 def _dsn_database(dsn: str | None) -> str | None:
@@ -448,8 +455,7 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
         if bank not in present:
             report.say(f"  database {bank}: not on this server")
 
-    old_ext = executor.query("template1", [_extension_versions()])
-    new_ext = executor.query("template1", extension_statements())
+    old_ext, _, new_ext = executor.query("template1", extension_statements()).partition("|")
     if not old_ext:
         report.say(f"  template1: installed {new_ext}, so every database the test login "
                    "creates has it")
