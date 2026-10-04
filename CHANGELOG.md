@@ -19,8 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the browser has no Console token yet (the Console stores one per
   address). It now says so up front: click "Set a bearer token" and paste
   the token the Console uses at its usual address (the daemon's
-  `PSEUDOLIFE_MCP_TOKEN`, also in the client's token file). It never prints
-  the token. The Console's own "did not accept this console's token" panel
+  `PSEUDOLIFE_MCP_TOKEN`, which a single-token install also keeps in the
+  client's token file). It never prints the token. The Console's own "did not accept this console's token" panel
   says the same.
 
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)

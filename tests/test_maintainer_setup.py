@@ -203,7 +203,9 @@ def test_a_tailnet_host_is_set_up_end_to_end_after_one_question(host, tailnet, c
     # a new address has no token stored in the browser: say where the token
     # lives, never the token itself
     assert "Set a bearer token" in out and "PSEUDOLIFE_MCP_TOKEN" in out
-    assert ".pseudolife-mcp/<principal>.token" in out
+    # a client's own token file holds the daemon's token only on a
+    # single-token install; a per-client token is refused by the passkey pages
+    assert "single-token install" in out and ".pseudolife-mcp/<principal>.token" in out
     assert "never-printed-token-value" not in out
     assert PREFIX in host.questions[1] and "laptop" in host.questions[1]
     # enrol-code's own "then run confirm" advice is not echoed: setup asks instead
