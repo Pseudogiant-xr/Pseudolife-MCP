@@ -271,6 +271,8 @@ a contradiction you only narrate is work left undone.
 A cortex fact carrying `contested: true` has competing values parked
 against it — settle it with `memory_fact_resolve(entity, attribute, ...)`,
 not by re-asserting `memory_fact_set`, which only contests the slot further.
+A stored entry (not a slot) that is now wrong: `memory_supersede` (full
+tier; expand via `memory_toolset`) keeps it as history beside the fix.
 
 CAPTURE — as durable things arise (one claim per call):
 - Before writing, choose: PERSIST what stays true; CONTEXT ONLY for

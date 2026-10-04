@@ -13,7 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `memory_set_add`, and says it errors on a set-valued slot;
   `memory_fact_get` sends open questions to `memory_search`;
   `memory_supersede` sends test junk or a never-true entry to
-  `memory_forget` and a canonical slot to `memory_fact_set`.
+  `memory_forget` and a canonical slot to `memory_fact_set`. The standing
+  instructions (`examples/CLAUDE.memory.md`, served as the session-start
+  block) teach `memory_supersede` for a stored entry that is now wrong,
+  marked full tier; the guard that kept full-tier tools out of those
+  instructions now admits one only when every mention says "(full tier".
 - A description that names a tool the reader's tier hides now says which
   tier shows it, in the form `memory_fact_resolve (core)` already used by
   `memory_search`: on `memory_fact_get` (`memory_fact_resolve`,

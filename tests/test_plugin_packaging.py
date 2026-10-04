@@ -401,6 +401,17 @@ def test_memory_loop_block_carries_recall_before_review_trigger():
     assert "compare what memory says against the files" in text
 
 
+def test_memory_loop_block_teaches_entry_correction():
+    """The block taught memory_fact_set for a stale slot but nothing for a
+    stale stored entry, so a model wanting to correct one had no taught
+    path (2026-10-04 review, M10: memory_supersede was called 4 times by
+    Claude and 3 by Codex in two months). memory_supersede is full tier,
+    which the block says where it names it."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "`memory_supersede` (full tier" in text
+
+
 def test_memory_loop_block_matches_examples():
     """The daemon serves the standing instructions the CLAUDE.md append used
     to provide; the two sources must stay byte-identical (modulo the
@@ -473,10 +484,19 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     unknown = referenced - set(_TOOL_TIERS)
     assert not unknown, f"instruction blocks name unregistered tools: {unknown}"
 
-    hidden_at_core = {t for t in referenced if _TOOL_TIERS[t] == "full"}
+    # A full-tier tool may appear only with "(full tier" beside every
+    # mention, so a core session is told the tool is hidden rather than
+    # sent to call it bare (2026-10-04 review, M10: the blocks never named
+    # memory_supersede, leaving a stale entry with no taught correction).
+    blocks = " ".join(" ".join((MEMORY_LOOP_BLOCK, ONBOARDING_BLOCK,
+                                STARTUP_MEMORY_CORE, note)).split())
+    hidden_at_core = {
+        t for t in referenced if _TOOL_TIERS[t] == "full"
+        and (t in ups or re.search(rf"`{t}\b(?![^`]*`\s*\(full tier)", blocks))}
     assert not hidden_at_core, (
         f"instruction blocks name full-tier tools hidden at core: "
-        f"{hidden_at_core} — promote them or drop the mention")
+        f"{hidden_at_core} — promote them, mark each mention (full tier), "
+        f"or drop the mention")
 
 
 def test_plugin_commands_reference_only_real_tools():
