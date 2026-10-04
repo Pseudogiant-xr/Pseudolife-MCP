@@ -22,7 +22,7 @@
     readiness,
     revokeOwnKey,
   } from "../../lib/maintainerFlow.svelte";
-  import { fmtDateTime, fmtRelative, shortId } from "../../lib/format";
+  import { fmtDateTime, fmtRelative, keyPrefix } from "../../lib/format";
   import { ui } from "../../lib/state.svelte";
 
   const uid = $props.id();
@@ -64,7 +64,7 @@
   function enrolledByText(k: Passkey): string {
     if (k.enrolled_by === "bootstrap") return "the one-time code from the host";
     const by = keys.find((x) => x.credential_id === k.enrolled_by);
-    return by ? `approval by ${by.label}` : `approval by key ${shortId(k.enrolled_by)}`;
+    return by ? `approval by ${by.label}` : `approval by key ${keyPrefix(k.enrolled_by)}`;
   }
 
   /** An older usable key exists, so this quarantined one can be cancelled. */
@@ -155,7 +155,7 @@
           <li class="key" class:revoked={k.state === "revoked"}>
             <div class="key-head">
               <span class="key-label">{k.label}</span>
-              <span class="mono meta" title={k.credential_id}>{shortId(k.credential_id)}</span>
+              <span class="mono meta" title={k.credential_id}>{keyPrefix(k.credential_id)}</span>
               <span class="chip chip-prose {st.tone}">{st.text}</span>
               {#if k.flagged_at}<span class="chip chip-prose danger">flagged for review</span>{/if}
             </div>
@@ -179,7 +179,7 @@
             {#if k.state === "pending"}
               <p class="caption">
                 Check that the prefix above matches what the host printed, then confirm it there:
-                <code class="mono">pseudolife-mcp maintainer confirm {shortId(k.credential_id)}</code>
+                <code class="mono">pseudolife-mcp maintainer confirm {keyPrefix(k.credential_id)}</code>
               </p>
             {/if}
             {#if cancellable(k)}

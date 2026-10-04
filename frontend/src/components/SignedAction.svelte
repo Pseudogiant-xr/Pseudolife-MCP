@@ -20,7 +20,7 @@
   } from "../lib/maintainer";
   import { loadMaintainer, settleSigning, sign, signing, type PendingSign } from "../lib/maintainerFlow.svelte";
   import { nameResolver } from "../lib/board";
-  import { fmtClock, fmtDuration, shortId } from "../lib/format";
+  import { fmtClock, fmtDuration, keyPrefix, shortId } from "../lib/format";
   import { loadBoard, store } from "../lib/state.svelte";
   import { toast } from "../lib/overlay.svelte";
   import { CeremonyError } from "../lib/webauthn";
@@ -216,7 +216,7 @@
       {/if}
       {#if credential}
         <dt>Key</dt>
-        <dd class="mono">{shortId(credential, 12)}</dd>
+        <dd class="mono">{keyPrefix(credential)}</dd>
       {/if}
       {#if fields.purpose === "send"}
         <dt>Wake</dt>
