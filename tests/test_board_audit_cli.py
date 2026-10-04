@@ -134,6 +134,8 @@ def test_without_a_database_url_or_a_lite_bank_it_says_what_is_missing(
     from pseudolife_memory.board_audit_cli import main
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    # Never a real daemon container on a test host (tests/test_daemon_exec.py).
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_EXEC", "1")
     assert main(["export"]) == 2
     assert "PSEUDOLIFE_MCP_DATABASE_URL" in capsys.readouterr().err
 
