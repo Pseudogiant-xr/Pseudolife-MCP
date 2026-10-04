@@ -86,7 +86,7 @@ class FakeTools:
             return self.pip_no_deps
         if argv[1:4] == ["-m", "pip", "install"]:
             return self.pip_deps
-        if argv[1] == "-c" and "importlib.metadata" in argv[2]:
+        if argv[1:3] == ["-I", "-c"] and "importlib.metadata" in argv[3]:
             return 0, self.version + "\n"
         if argv[1] == "-c" and "ScriptMaker" in argv[2]:
             if self.build[0] == 0:
@@ -240,6 +240,48 @@ def test_an_incomplete_directory_is_not_a_runtime(tmp_path, shape, tools):
     # the next install counts the incomplete directory's sequence
     third = _install(layout, tools, "0.15.2")
     assert third.name == "000003"
+
+
+def test_the_version_probe_reads_the_runtime_not_the_callers_directory(tmp_path, monkeypatch):
+    """Observed 2026-10-04: an update run from a checkout holding a stale
+    ``pseudolife_mcp.egg-info`` (an old in-tree build, 0.15.0) installed
+    0.16.1 and recorded 0.15.0, because ``python -c`` puts the working
+    directory first on sys.path. The probe runs for real here, in a real
+    virtualenv, from such a directory; pip is faked by writing the
+    release's dist-info into the venv."""
+    checkout = tmp_path / "checkout"
+    (checkout / "pseudolife_mcp.egg-info").mkdir(parents=True)
+    (checkout / "pseudolife_mcp.egg-info" / "PKG-INFO").write_text(
+        "Metadata-Version: 2.1\nName: pseudolife-mcp\nVersion: 0.15.0\n", encoding="utf-8")
+    monkeypatch.chdir(checkout)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    windows = os.name == "nt"
+    layout = _layout(tmp_path, "windows" if windows else "posix")
+
+    def run(argv, **kw):
+        argv = [str(a) for a in argv]
+        if argv[1:3] == ["-m", "venv"]:
+            return rt.run_cli([argv[0], "-m", "venv", "--without-pip", argv[3]], **kw)
+        if argv[1:4] == ["-m", "pip", "install"]:
+            if "--no-deps" in argv:
+                site = subprocess.run([argv[0], "-I", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                                      capture_output=True, text=True, check=True, timeout=120).stdout.strip()
+                dist = Path(site) / "pseudolife_mcp-0.16.1.dist-info"
+                dist.mkdir(parents=True)
+                (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: pseudolife-mcp\nVersion: 0.16.1\n",
+                                               encoding="utf-8")
+                (Path(argv[0]).parent / _console_name("windows" if windows else "posix")).write_text(
+                    "console", encoding="utf-8")
+            return 0, ""
+        if any("ScriptMaker" in a for a in argv):
+            target, executable = argv[-3], argv[-2]
+            (Path(target) / "pseudolife-mcp.exe").write_bytes(b"MZ-fake-launcher\n#!" + executable.encode())
+            return 0, ""
+        return rt.run_cli(argv, **kw)
+
+    runtime = rt.install("pseudolife-mcp==0.16.1", layout, python=sys.executable, run=run)
+    assert runtime.version == "0.16.1"
+    assert json.loads((runtime.path / rt.MARKER).read_text(encoding="utf-8"))["version"] == "0.16.1"
 
 
 def test_shim_requirements_match_pyproject():

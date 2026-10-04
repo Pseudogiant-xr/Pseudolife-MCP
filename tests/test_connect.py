@@ -649,6 +649,48 @@ def test_the_handshake_gets_the_new_url_and_file_and_the_board_check_in_off(mach
     assert seen["PSEUDOLIFE_AGENT_COORDINATION"] == "0" and seen[NO_SPAWN] == "1"
 
 
+def test_the_handshake_ignores_a_pseudolife_memory_package_in_the_working_directory(
+        tmp_path, monkeypatch):
+    # `python -c` and `-m` put the working directory first on sys.path, so
+    # a connect run from a source checkout would otherwise validate the
+    # checkout's package instead of the installed one: in the handshake
+    # child and in the shim it starts.
+    marker = tmp_path / "shadow-imported"
+    shadow = tmp_path / "checkout" / "pseudolife_memory"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text(
+        f"open({str(marker)!r}, 'a').write(__name__ + '\\n')\n", encoding="utf-8")
+    (shadow / "doctor_cli.py").write_text(
+        "async def _handshake():\n"
+        "    return {'instructions_present': True, 'tool_count': 999}\n", encoding="utf-8")
+    (shadow / "cli.py").write_text("", encoding="utf-8")
+    monkeypatch.chdir(shadow.parent)
+    # The tree under test, not whatever copy site-packages holds; the
+    # working directory still precedes PYTHONPATH on sys.path.
+    monkeypatch.setenv("PYTHONPATH", str(Path(connect_cli.__file__).resolve().parents[1]))
+    result = connect_cli.subprocess_handshake("http://127.0.0.1:9", ("literal", GOOD), timeout=10)
+    assert not marker.exists(), marker.read_text(encoding="utf-8")
+    assert result.get("tool_count") != 999
+
+
+def test_a_relative_token_file_reaches_the_neutral_directory_handshake_resolved(tmp_path,
+                                                                                monkeypatch):
+    # The checks before the handshake resolve a registration's relative
+    # token file against the caller's directory; the child, run elsewhere,
+    # must read that same file.
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, json.dumps(
+            {"instructions_present": True, "tool_count": 30}), "")
+
+    monkeypatch.setattr(connect_cli.subprocess, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    connect_cli.subprocess_handshake("http://127.0.0.1:9", ("file", os.path.join("tokens", "me.token")))
+    assert seen[FILE_KEY] == os.path.join(os.getcwd(), "tokens", "me.token")
+
+
 # -- confirmation, dry run ------------------------------------------------------------------------
 
 def test_dry_run_writes_nothing_and_sends_no_token(machine, daemon, capsys):

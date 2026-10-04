@@ -1308,7 +1308,10 @@ fi
 # and the daemon's session briefing says when it is behind.
 CLAUDE_PLUGIN_ID="pseudolife-memory@pseudolife-mcp"
 CLAUDE_PLUGIN_MARKETPLACE="pseudolife-mcp"
-CLAUDE_PLUGIN_MARKETPLACE_SOURCE="Pseudogiant-xr/Pseudolife-MCP"
+# The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
+# shorthand as a GitHub source and refreshes it over SSH, which fails on a
+# host with no GitHub key (seen 2026-10-04). The repository is public.
+CLAUDE_PLUGIN_MARKETPLACE_SOURCE="https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
 PLUGIN_CLAUDE=""
 PLUGIN_CLAUDE_RECOVERY=""
 claude_plugin_manual() {

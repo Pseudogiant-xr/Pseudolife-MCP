@@ -109,7 +109,7 @@ duplica sus herramientas. Para añadir el plugin a mano, dentro de Claude
 Code:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

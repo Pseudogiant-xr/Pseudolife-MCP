@@ -680,7 +680,7 @@ def update_plugin(repo: Path | None = None) -> dict:
     if not (clone / ".claude-plugin" / "plugin.json").is_file():
         return {"state": "failed", "marketplace_update": marketplace_update,
                 "detail": f"no marketplace clone at {clone}; run: claude plugin marketplace add "
-                          f"Pseudogiant-xr/Pseudolife-MCP"}
+                          f"https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}
     if cache.is_dir() and not tree_differs(clone, cache):
         return {"state": f"current:{version}", "marketplace_update": marketplace_update,
                 "detail": f"cache matches the marketplace clone (v{version})"}
