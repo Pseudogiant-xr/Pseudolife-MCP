@@ -67,6 +67,19 @@ export function shortId(id: string | null | undefined, len = 8): string {
   return id.length > len ? id.slice(0, len) : id;
 }
 
+/**
+ * Characters of a passkey's credential id the Console shows: the same as the
+ * host prints (KEY_PREFIX_LEN in pseudolife_memory/storage/maintainer.py,
+ * pinned equal by tests/test_console_build.py), because setup asks the
+ * maintainer to check that the two match.
+ */
+export const KEY_PREFIX_LEN = 12;
+
+/** A passkey's id as the host prints it. */
+export function keyPrefix(id: string | null | undefined): string {
+  return shortId(id, KEY_PREFIX_LEN);
+}
+
 /** "needs_approval" -> "needs approval". */
 export function words(code: string | null | undefined): string {
   return (code ?? "").replace(/_/g, " ").trim();

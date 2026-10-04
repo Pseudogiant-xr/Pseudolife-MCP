@@ -32,4 +32,13 @@ describe("explainError", () => {
     expect(bare.title).toBe("This view was refused");
     expect(bare.body).toContain("tokenless daemon");
   });
+
+  it("says a new address needs the token pasted once", () => {
+    // The Console keeps its token per address, so the passkey HTTPS address
+    // opens with none even where the usual address works.
+    const x = explainError(new ApiError(401, "unauthorized", { error: "unauthorized" }));
+    expect(x.title).toBe("The daemon did not accept this console's token");
+    expect(x.body).toMatch(/each address/i);
+    expect(x.token).toBe(true);
+  });
 });
