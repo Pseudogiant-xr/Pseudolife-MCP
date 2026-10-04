@@ -207,7 +207,10 @@ async fn board_retry_permanent_startup_forwarding_is_not_retried() {
     fixture.answer("context", Answer::json(401, json!({})));
     let home = Home::new();
     let runtime = runtime(&fixture, false);
-    let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "1")).await;
+    let mut timing = fast(&runtime, &home, "1");
+    // The permanent startup refusal uses the production client setup budget.
+    timing.timing.startup = pseudolife_stdio::board::Timing::default().startup;
+    let board = Board::attach_options(runtime.clone(), timing).await;
     tokio::time::sleep(Duration::from_millis(140)).await;
     let call = forward(&board, true).await;
     assert!(!call.operation.headers.contains_key("x-pl-agent"));
