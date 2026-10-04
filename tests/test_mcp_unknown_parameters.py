@@ -134,7 +134,9 @@ def test_the_refusal_never_echoes_the_value(tmp_path, monkeypatch):
     calls = _never_called(mod, monkeypatch, "store")
     result = _call(mod, "memory_store", {
         "text": "kept",
-        "api_key": "sk-ant-api03-SECRETSECRETSECRETSECRETSECRETTAIL"})
+        # Built at runtime so the tracked tree holds no credential-shaped
+        # literal (test_release_ux's identifier guard).
+        "api_key": "sk-" + "ant-api03-" + "SECRET" * 5 + "TAIL"})
     assert result.is_error, _text(result)
     text = _text(result)
     assert "unknown parameter 'api_key' for memory_store" in text
