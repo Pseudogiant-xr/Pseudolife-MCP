@@ -28,7 +28,7 @@ export function explainError(e: ApiError, what = "This view"): Explained {
     case "unauthorized":
       return {
         title: "The daemon did not accept this console's token",
-        body: "Store the bearer token the daemon was started with (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS).",
+        body: "Store the bearer token the daemon was started with (PSEUDOLIFE_MCP_TOKEN, or one from PSEUDOLIFE_MCP_TOKENS). A browser keeps it for each address separately, so a new address, such as the HTTPS one for passkeys, needs the same token pasted once.",
         token: true,
       };
     case "authentication_required":

@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — the Console shows the passkey prefix the host prints)
+- `pseudolife-mcp maintainer setup` asks the maintainer to check that the
+  Console shows the passkey prefix the host printed. The host printed 12
+  characters (`CqsQqbXRP_d5`) and the Console 8 (`CqsQqbXR`), so the check
+  read as a mismatch. The Console now shows 12 everywhere it names a
+  passkey (Settings, Your passkeys; the `maintainer confirm` command it
+  suggests; key-change notices and history; the signing preview). One
+  constant per side (`KEY_PREFIX_LEN` in `storage/maintainer.py` and in
+  `frontend/src/lib/format.ts`), pinned equal by `tests/test_console_build.py`.
+- Setup's browser step sends the maintainer to a new HTTPS address, where
+  the browser has no Console token yet (the Console stores one per
+  address). It now says so up front: click "Set a bearer token" and paste
+  the token the Console uses at its usual address (the daemon's
+  `PSEUDOLIFE_MCP_TOKEN`, also in the client's token file). It never prints
+  the token. The Console's own "did not accept this console's token" panel
+  says the same.
+
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
 - Turning on maintainer passkeys took four manual steps on the daemon host:
   a `tailscale serve` command, a hand edit of the daemon's config file, a
