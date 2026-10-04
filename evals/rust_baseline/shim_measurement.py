@@ -12,6 +12,7 @@ from .common import controls, distribution, memory_tree, percentile
 from .transport import Stdio
 
 ORACLE_HEAD = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+HISTORICAL_ARTIFACT = "evals/results/rust-rewrite-baseline-shim-20261003-r5.json"
 
 
 def artifact_identity(path, expected=None):
@@ -34,17 +35,27 @@ def require_pinned_source(root):
     return {"oracle_head": ORACLE_HEAD, "production_source_matches_pin": True}
 
 
+def historical_method(root):
+    """Bind the historical capture to canonical bytes, independent of checkout filters."""
+    try:
+        blob = subprocess.check_output(["git", "rev-parse", f"{ORACLE_HEAD}:{HISTORICAL_ARTIFACT}"],
+                                       cwd=root, stderr=subprocess.PIPE, timeout=10).decode("ascii").strip()
+        canonical = subprocess.check_output(["git", "cat-file", "blob", blob],
+                                            cwd=root, stderr=subprocess.PIPE, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("historical method binding requires the pinned artifact in native Git history") from None
+    return {"artifact": Path(HISTORICAL_ARTIFACT).name, "source_commit": ORACLE_HEAD,
+            "git_blob_oid": blob, "sha256": hashlib.sha256(canonical).hexdigest(),
+            "bytes_binding": "canonical Git blob; checkout line-ending filters do not apply",
+            "retained_metric": "startup_ms",
+            "boundary": "before owned CLI spawn through initialize return and initialized notification"}
+
+
 def candidate_source_identity(root):
-    root = Path(root).resolve()
-    paths = sorted(path for path in (root / "rust").rglob("*") if path.is_file()
-                   and "target" not in path.relative_to(root).parts
-                   and (path.suffix in (".rs", ".toml") or path.name == "Cargo.lock"))
-    if not paths:
-        raise RuntimeError("candidate Rust source is unavailable")
-    return {"source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
-                                                   text=True).strip(),
-            "files_sha256": {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-                              for path in paths}}
+    from evals.rust_port.phase1_receipts import rust_source_identity
+    identity = rust_source_identity(root)
+    identity["files_sha256"] = identity.pop("source_files_sha256")
+    return identity
 
 
 class FrameStdio(Stdio):
@@ -133,6 +144,7 @@ def measure_pair(args, resource):
 
     root = args.source_root.resolve()
     pin = require_pinned_source(root)
+    history = historical_method(root)
     binary = args.candidate.resolve()
     rust_identity = artifact_identity(binary, args.candidate_sha256)
     source_identity = candidate_source_identity(args.candidate_root)
@@ -157,8 +169,8 @@ def measure_pair(args, resource):
                             if probe.returncode:
                                 raise RuntimeError("shim runtime probe failed")
                             runtime = json.loads(output)
-                        if not runtime["source_origin_matches_selected_root"] or runtime["package_runtime_version"] != "0.16.0" \
-                                or runtime["distribution_versions"]["pseudolife-mcp"] != "0.16.0":
+                        if not runtime["source_origin_matches_selected_root"] or runtime["package_runtime_version"] != "0.16.1" \
+                                or runtime["distribution_versions"]["pseudolife-mcp"] != "0.16.1":
                             raise RuntimeError("pinned oracle runtime/version does not match")
                     else:
                         artifact_identity(binary, rust_identity["sha256"])
@@ -202,7 +214,6 @@ def measure_pair(args, resource):
     if candidate_source_identity(args.candidate_root) != source_identity:
         raise RuntimeError("candidate source changed during measurement; receipt not finalizable")
     artifact_identity(binary, rust_identity["sha256"])
-    historical = Path(__file__).resolve().parents[1] / "results/rust-rewrite-baseline-shim-20261003-r5.json"
     return {"schema": 2, "status": "contaminated-plumbing-smoke" if args.smoke else
             "quiet-fixture-pair-" + args.measurement_status, "bank_size": 0,
             "provenance": provenance(source_root=root), "python_oracle": pin,
@@ -211,10 +222,7 @@ def measure_pair(args, resource):
             "repeat_resource_checks": resource_checks,
             "repeats": args.repeats, "samples_per_repeat": args.samples, "runs": runs,
             "metrics": {arm: metric_cells(rows) for arm, rows in runs.items()},
-            "historical_method": {"artifact": historical.name,
-                                  "sha256": hashlib.sha256(historical.read_bytes()).hexdigest(),
-                                  "retained_metric": "startup_ms",
-                                  "boundary": "before owned CLI spawn through initialize return and initialized notification"},
+            "historical_method": history,
             "limitations": [
                 "Fresh public CLI; warm OS filesystem cache; empty loopback HTTP fixture; no PG, models or daemon spawn.",
                 "Coordination and Codex doorbell disabled; no live-bank access; private state removed after each cell.",

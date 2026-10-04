@@ -14,6 +14,7 @@ class StdioPolicy:
     source_text_paths: tuple = ("/body/result/tools/*/description", "/body/result/instructions")
     stderr_allowlist: tuple = ()
     eof_orders: tuple = ()
+    non_eof_orders: tuple = ()
 
 
 def normalized_frame(raw, policy):
@@ -59,6 +60,16 @@ def judge(expected, actual, policy):
             return [{"path": "/frames", "reason": "unobserved_eof_order"}]
         if len(left["frames"]) >= 2 and Counter(left["frames"][-2:]) == Counter(frames[-2:]):
             right["frames"] = [*frames[:-2], *left["frames"][-2:]]
+            right["json"] = [strict_json_loads(frame) for frame in right["frames"]]
+    if "boundary_error" not in right and policy.non_eof_orders:
+        # Only A/B's final call responses in this held non-EOF scenario can
+        # permute. Prefix bytes, payloads, spacing and multiplicity stay exact.
+        frames = right["frames"]
+        order = tuple(frame.get("id") for frame in right["json"])
+        if len(frames) != 3 or order not in policy.non_eof_orders:
+            return [{"path": "/frames", "reason": "unobserved_non_eof_order"}]
+        if len(left["frames"]) == 3 and Counter(left["frames"][-2:]) == Counter(frames[-2:]):
+            right["frames"] = [frames[0], *left["frames"][-2:]]
             right["json"] = [strict_json_loads(frame) for frame in right["frames"]]
     return compare(left, right, Policy(ignored_values=(), source_text_paths=()))
 
@@ -110,3 +121,15 @@ def graded_controls(transcript, policy):
         if not rejected:
             raise RuntimeError("stdio graded control was accepted: " + name)
     return controls
+
+
+def concurrent_policy(evidence, platform, era, release_order):
+    groups = [group for group in evidence["groups"] if
+              (group["platform"], group["era"], group["release_order"]) ==
+              (platform, era, release_order)]
+    if len(groups) != 1:
+        raise ValueError("missing or ambiguous observed non-EOF order evidence")
+    orders = tuple(("open", *order) for order in groups[0]["orders"])
+    if not orders or any(order not in (("open", "A", "B"), ("open", "B", "A")) for order in orders):
+        raise ValueError("non-EOF evidence contains an unrelated response")
+    return StdioPolicy(name="non-eof-observed-final-call-pair-orders", non_eof_orders=orders)

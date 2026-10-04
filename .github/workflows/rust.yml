@@ -138,14 +138,16 @@ jobs:
           }
           $env:PSEUDOLIFE_MCP_PYTHON = $oraclePython
           $env:PATH = (Split-Path $oraclePython) + [IO.Path]::PathSeparator + $env:PATH
-          Push-Location (Join-Path $oracleRoot 'source')
-          try {
-            & $oraclePython -m evals.rust_port.phase1_ci --oracle-root . --candidate-json $candidateCommand --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
-            $judgeExitCode = $LASTEXITCODE
-          } finally {
-            Pop-Location
-          }
-          exit $judgeExitCode
+          $oracleSource = Join-Path $oracleRoot 'source'
+          $judgeBootstrap = @'
+          import pathlib, subprocess, sys
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          command = module_command("evals.rust_port.phase1_ci", root, sys.argv[2:])
+          raise SystemExit(subprocess.run(command, cwd=root).returncode)
+          '@
+          & $oraclePython -c $judgeBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $privateReceipt --public-out $publicReceipt --offline-resource-checked-at $resourceCheckedAt
+          exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()
         uses: actions/upload-artifact@v4

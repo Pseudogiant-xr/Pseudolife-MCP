@@ -1,0 +1,488 @@
+{
+  "schema": 1,
+  "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+  "policy": "non-eof-observed-final-call-pair-orders",
+  "limitation": "Order evidence only; each judge captures exact same-platform byte oracle. Simultaneous completion is not deterministic.",
+  "groups": [
+    {
+      "platform": "windows",
+      "era": "2025-11-25",
+      "release_order": "AB",
+      "orders": [
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "9fd01a54ecd35b941f7df57913ffca4da910a09c5f22b986ad8a707de369efd7",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:35:23.484525+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "era": "2025-11-25",
+      "release_order": "BA",
+      "orders": [
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "4584a7e880d7963a0862080af50f0a1b47d821f5e4b473c90b8691f32706d6f9",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:35:22.563213+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "era": "2025-11-25",
+      "release_order": "together",
+      "orders": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "e2167934511292f89789b4c63fd4404baa616330a77e679561914a684dfbf860",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:31.329768+00:00"
+        },
+        {
+          "raw_proof_sha256": "e98577e03a3d06ffb74a86f6b500633884a5bd2f0b4d664998052489f496c2ad",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:32.258112+00:00"
+        },
+        {
+          "raw_proof_sha256": "fbcfddc430868a3e0ff2329fae419d3e53a93cb7374f725183e81017f5302782",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:33.203992+00:00"
+        },
+        {
+          "raw_proof_sha256": "57b8da6b372e4e22127e7342873b05ead54ed5655d528ec4ac589d0cdb56f5d7",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:34.137639+00:00"
+        },
+        {
+          "raw_proof_sha256": "92535b8559c0018bf712db3fc06f596ed491ba224e54ace65ed489051a801e95",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:35.113946+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "era": "2026-07-28",
+      "release_order": "AB",
+      "orders": [
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "bc5f5bf5c57e67ce054367d9a567559914b329e6345ee777c5588dd21f8447b5",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:35:29.940646+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "era": "2026-07-28",
+      "release_order": "BA",
+      "orders": [
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "ca84e9635b504ed349c52e21c885b2d52f2cc0237298ec95dc1a668fa8fe56d2",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:35:29.026579+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "era": "2026-07-28",
+      "release_order": "together",
+      "orders": [
+        [
+          "B",
+          "A"
+        ],
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "ced966f94002e9efdcab78583e1dd34066450eb742ed558ecf7ed21c6a2714f2",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:36.028602+00:00"
+        },
+        {
+          "raw_proof_sha256": "d2a8655e195d3801c1159ee4e613530a09ec5b1aad9411a57ca2cfd7fbe3f507",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:36.932785+00:00"
+        },
+        {
+          "raw_proof_sha256": "b3cf2ec438075fc40b7ff460e21d0839aafd0bfb0530a3a69025916f35b287a6",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:37.910810+00:00"
+        },
+        {
+          "raw_proof_sha256": "ee4aee4d126114251ea9929644b54393c0ff484eae9e46fb4b4f75590500dfdf",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:38.795366+00:00"
+        },
+        {
+          "raw_proof_sha256": "9c70b0fd8c99e903e5207d0971bee43d682563c42a92c3e5f7f121641707c5f6",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:37:39.710380+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2025-11-25",
+      "release_order": "AB",
+      "orders": [
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "1eaafd8beea54a44fb1051d57db564f48b229d5561369df621c3c6bbdb7c5a35",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:40:56.168311+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2025-11-25",
+      "release_order": "BA",
+      "orders": [
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "9906e7030e959fc1e876a656f15d5afa4f053ea23f39103003a41bf9f0f1217e",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:40:55.200116+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2025-11-25",
+      "release_order": "together",
+      "orders": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "b8aa08910d936eb868b17dc796c90a6c567ffa1f1b91d6337f1899aa7305f58b",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:40:57.091734+00:00"
+        },
+        {
+          "raw_proof_sha256": "a50e5a1c9676b752f74487b77d53b89cadcf1f8f0eef54729a90ac267e3e2b5c",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:40:57.990364+00:00"
+        },
+        {
+          "raw_proof_sha256": "dc4eae75e1ae56197fd952e64eb6d7eed1a43a95a794243df5dccddfc718745e",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:40:58.905572+00:00"
+        },
+        {
+          "raw_proof_sha256": "3ed03ecbd737065e39e9192154334e22cf38f5939834f239987c0eb78aac5ce3",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:40:59.849920+00:00"
+        },
+        {
+          "raw_proof_sha256": "57e9a50c701550905154b0d6f7281b363d88f65862a55a1c753303bd9618cbb5",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:00.771767+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2026-07-28",
+      "release_order": "AB",
+      "orders": [
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "7151b58eadc56e9077d635c02b3a29a52f5e2013c3a8ad885607b98feadf65c5",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:41:02.699718+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2026-07-28",
+      "release_order": "BA",
+      "orders": [
+        [
+          "B",
+          "A"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "4be6a8f9faaf2d082d0dc452e58c8b632acc55acaad8b07052d63b5525458904",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": false,
+          "captured_at_utc": "2026-10-04T18:41:01.720094+00:00"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "era": "2026-07-28",
+      "release_order": "together",
+      "orders": [
+        [
+          "B",
+          "A"
+        ],
+        [
+          "A",
+          "B"
+        ]
+      ],
+      "observations": [
+        {
+          "raw_proof_sha256": "2f4d19b3aef6cf0f6d246909adc904ab1720eb02b8103b2480dbde67a0667ce7",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:03.574623+00:00"
+        },
+        {
+          "raw_proof_sha256": "e17073149eb831ac68b0386046a3f7ff1e7332f4a89c59bcb2516cd8548ecb16",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:04.453655+00:00"
+        },
+        {
+          "raw_proof_sha256": "da530348d085fb3c825c8cc7190b502a4e6eed1372e5833cedec2faff49f740e",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:05.403463+00:00"
+        },
+        {
+          "raw_proof_sha256": "89562472f77e5c2107e283a7b73d2e41e4e4cdf29902a1113d3efe809fb27848",
+          "order": [
+            "A",
+            "B"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:06.335977+00:00"
+        },
+        {
+          "raw_proof_sha256": "3fee445227fe746b873728e756dbf20d2a02bb031b8ad1dfe84fedb79cf24f41",
+          "order": [
+            "B",
+            "A"
+          ],
+          "both_requests_arrived_before_release": true,
+          "responses_before_stdin_close": true,
+          "shared_response_release_event": true,
+          "captured_at_utc": "2026-10-04T18:41:07.271317+00:00"
+        }
+      ]
+    }
+  ]
+}

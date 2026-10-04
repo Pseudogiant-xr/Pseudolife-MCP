@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 use process_wrap::tokio::{CommandWrap, CommandWrapper};
 use std::{collections::BTreeMap, ffi::CString, io, os::unix::ffi::OsStrExt, ptr};
 use tokio::process::Command;
@@ -9,6 +7,7 @@ use tokio::process::Command;
 pub(super) struct ExecveOnly;
 
 impl CommandWrapper for ExecveOnly {
+    #[allow(unsafe_code)]
     fn pre_spawn(&mut self, command: &mut Command, _core: &CommandWrap) -> io::Result<()> {
         // Doorbell inherits the environment and applies removals; it never uses env_clear or arg0.
         let native = command.as_std();
@@ -53,8 +52,10 @@ struct PreparedExec {
 
 // SAFETY: Pointer tables refer only to this value's owned CString allocations. Moving the value
 // never moves those allocations. No member is mutated or exposed after construction.
+#[allow(unsafe_code)]
 unsafe impl Send for PreparedExec {}
 // SAFETY: Shared access only reads immutable tables/strings; execve never writes to this storage.
+#[allow(unsafe_code)]
 unsafe impl Sync for PreparedExec {}
 
 impl PreparedExec {
@@ -78,6 +79,7 @@ impl PreparedExec {
         }
     }
 
+    #[allow(unsafe_code)]
     fn exec(&self) -> io::Result<()> {
         // SAFETY: Program and entries are live NUL-terminated strings, both pointer tables end
         // in NULL, and all allocations outlive this synchronous read-only call. On success

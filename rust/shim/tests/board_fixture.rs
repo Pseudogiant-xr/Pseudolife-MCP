@@ -4,7 +4,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -44,6 +44,33 @@ pub struct Answer {
     pub status: u16,
     pub bytes: Vec<u8>,
     pub delay: Duration,
+    gate: Option<Arc<GateState>>,
+}
+struct GateState {
+    entered: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+pub struct ResponseGate {
+    entered: tokio::sync::oneshot::Receiver<()>,
+    state: Arc<GateState>,
+}
+impl ResponseGate {
+    pub async fn wait(&mut self) {
+        tokio::time::timeout(Duration::from_secs(2), &mut self.entered)
+            .await
+            .expect("fixture did not receive the gated request")
+            .expect("fixture stopped before the gated request");
+    }
+    pub fn release(&self) {
+        *self.state.released.lock().unwrap() = true;
+        self.state.changed.notify_all();
+    }
+}
+impl Drop for ResponseGate {
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 impl Answer {
     pub fn json(status: u16, value: Value) -> Self {
@@ -51,6 +78,7 @@ impl Answer {
             status,
             bytes: value.to_string().into_bytes(),
             delay: Duration::ZERO,
+            gate: None,
         }
     }
     pub fn text(status: u16, value: &[u8]) -> Self {
@@ -58,7 +86,18 @@ impl Answer {
             status,
             bytes: value.to_vec(),
             delay: Duration::ZERO,
+            gate: None,
         }
+    }
+    pub fn gated(mut self) -> (Self, ResponseGate) {
+        let (sender, entered) = tokio::sync::oneshot::channel();
+        let state = Arc::new(GateState {
+            entered: Mutex::new(Some(sender)),
+            released: Mutex::new(false),
+            changed: Condvar::new(),
+        });
+        self.gate = Some(state.clone());
+        (self, ResponseGate { entered, state })
     }
     pub fn delayed(mut self, delay: Duration) -> Self {
         self.delay = delay;
@@ -184,6 +223,19 @@ impl Fixture {
                     .get_mut(path.rsplit('/').next().unwrap())
                     .and_then(|answers| answers.pop_front())
                     .unwrap_or(ordinary);
+                if let Some(gate) = &answer.gate {
+                    if let Some(entered) = gate.entered.lock().unwrap().take() {
+                        let _ = entered.send(());
+                    }
+                    let mut released = gate.released.lock().unwrap();
+                    while !*released && !stopping.load(Ordering::Acquire) {
+                        released = gate
+                            .changed
+                            .wait_timeout(released, Duration::from_millis(10))
+                            .unwrap()
+                            .0;
+                    }
+                }
                 let until = std::time::Instant::now() + answer.delay;
                 while std::time::Instant::now() < until && !stopping.load(Ordering::Acquire) {
                     thread::sleep(Duration::from_millis(2));

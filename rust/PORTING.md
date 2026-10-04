@@ -106,7 +106,9 @@ presence does not establish parity. Each requires targeted platform evidence
 and independent review before acceptance.
 
 `shim/src/board/doorbell_windows.rs` is a further local exception for Windows
-subprocess handling. The Windows module exposes safe `QueueProcess::spawn`,
+subprocess handling. Unsafe allowances are confined to `spawn_phases`,
+`adopt`, `kill`, `QueueProcess::drop`, `create_job` and `resume_threads`;
+other functions inherit the crate denial. The Windows module exposes safe `QueueProcess::spawn`,
 `wait`, and `kill` methods around job assignment, suspended-child adoption and
 thread resumption. Successful native handles transfer into `OwnedHandle`; a
 separate process-handle clone pins the leader identity through cleanup, and
@@ -125,7 +127,9 @@ system failure on a later thread resume remain outside fixture coverage.
 
 `shim/src/board/doorbell_posix.rs` is a local exception for an execve-only
 Doorbell command wrapper, registered after `ProcessSession` installs its
-`setsid` callback. Before fork, the parent prepares owned NUL-terminated
+`setsid` callback. Unsafe allowances are confined to `ExecveOnly::pre_spawn`,
+`PreparedExec::exec` and its necessary Send/Sync impl items; other functions
+inherit the crate denial. Before fork, the parent prepares owned NUL-terminated
 program, argument and environment strings and their NULL-terminated pointer
 tables. The private `PreparedExec` Send/Sync implementations rely on immutable
 tables pointing into those owned allocations for the closure's full lifetime.
@@ -226,6 +230,24 @@ bytes and frame multiplicity remain exact. A pending modern subscription
 produced exactly one acknowledgement before its final `-32000` error in all
 five repeats. The rule is not a general frame sorter and does not permit extra
 acknowledgements. Evidence remains platform-specific.
+
+The named `non-eof-observed-final-call-pair-orders` rule covers two public
+calls whose upstream requests both arrive before any held response releases.
+Their complete response frames must arrive while stdin remains open. Separate
+A-then-B and B-then-A releases require those exact orders; one shared release
+admits only the two final call-frame orders observed in the platform-specific
+Python captures. Earlier frames, exact response bytes, IDs and multiplicity
+remain fixed. `stdio_concurrent_orders.json` records the capture bindings; this
+rule does not change EOF ordering or permit arbitrary frame sorting.
+
+`stdio_startup_contract.json` records seven startup stderr contracts from the
+pinned Python source and raw platform captures. Expected bytes substitute only
+the exact fixture URL and credential-file path and generate the platform text
+newline; captured streams are never rewritten. Refusals require exit 1, empty
+stdout and no MCP POST traffic. The manual version note uses a fixture without
+unattended-update capability and is separate from the approved post-first-frame
+updater behavior. `phase1.py` invokes `stdio_scenarios.py` in every final judge;
+its seven startup and six concurrent candidate cells require executable bindings.
 
 ## Measurement and acceptance
 

@@ -22,7 +22,7 @@ fn now() -> f64 {
 }
 
 #[tokio::test]
-async fn native_doorbell_ledger_uses_pinned_python_unicode_reason() {
+async fn native_doorbell_ledger_uses_rust_character_reason_substitution() {
     let fixture = Fixture::new(0);
     let home = Home::new();
     let adapter = Adapter::enter(adapter_config(&fixture, &home))
@@ -49,7 +49,7 @@ async fn native_doorbell_ledger_uses_pinned_python_unicode_reason() {
     assert_eq!(rows.len(), 1);
     assert_eq!(
         rows[0].split('\t').nth(5),
-        Some("rung alpha beta  queue_accepted pending recipient_state_unknown")
+        Some("rung alphabeta\u{345}  queue_accepted pending recipient_state_unknown")
     );
     adapter.close().await;
 }

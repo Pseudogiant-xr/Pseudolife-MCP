@@ -17,6 +17,7 @@ use std::{
 #[derive(Clone)]
 pub enum Reply {
     Hang,
+    Gated(Arc<ResponseGate>, Box<Reply>),
     Result(Value),
     Http(u16, String),
     HttpType(u16, &'static str, String),
@@ -25,6 +26,32 @@ pub enum Reply {
     Cut,
     Redirect(String),
     AfterCommit(Box<Reply>),
+}
+#[derive(Default)]
+pub struct ResponseGate {
+    released: Mutex<bool>,
+    changed: Condvar,
+}
+impl ResponseGate {
+    pub fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+    fn wait(&self, stopped: &AtomicBool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut released = self.released.lock().unwrap();
+        while !*released && !stopped.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "held response was not released");
+            // This bounded wake observes fixture shutdown after a test panic;
+            // response ordering is controlled only by the explicit release.
+            released = self
+                .changed
+                .wait_timeout(released, Duration::from_millis(20))
+                .unwrap()
+                .0;
+        }
+        *released
+    }
 }
 #[derive(Default)]
 pub struct Setup {
@@ -261,7 +288,16 @@ fn respond(
     } else {
         Reply::Http(405, "{}".to_owned())
     };
+    let reply = if let Reply::Gated(gate, reply) = reply {
+        if !gate.wait(&stopped) {
+            return;
+        }
+        *reply
+    } else {
+        reply
+    };
     let (status,content_type,body,extra) = match reply {
+        Reply::Gated(_, _) => unreachable!("gate wrapper is handled before response writing"),
         Reply::AfterCommit(_) => unreachable!("commit wrapper is handled during tool dispatch"),
         Reply::HttpType(status,content_type,body) => (status,content_type,body,String::new()),
         Reply::Hang => {

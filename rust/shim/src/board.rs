@@ -196,6 +196,18 @@ fn credential_error() -> ErrorData {
         ),
     )
 }
+async fn probe_before_registry<P, F, T>(closing: &AtomicBool, probe: P, build: F) -> Option<T>
+where
+    P: std::future::Future<Output = Option<bool>>,
+    F: FnOnce(Option<bool>) -> T,
+{
+    let answer = probe.await;
+    if closing.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(build(answer))
+}
+
 impl Board {
     pub async fn attach(runtime: Arc<Runtime>, channel: bool) -> Arc<Self> {
         let options = Options::from_lookup(&runtime, channel, |key| std::env::var(key).ok());
@@ -488,12 +500,28 @@ impl Board {
                 tokio::select! { _ = board.cancel.cancelled() => return, _ = tokio::time::sleep(board.options.timing.retry_delays[attempt.min(5)]) => {} }
                 if board.closing.load(Ordering::Acquire) { return; }
                 if ask_board {
-                    let answer = tokio::select! { _ = board.cancel.cancelled() => return, value = board.probe() => value };
-                    if board.closing.load(Ordering::Acquire) { return; }
+                    let probed = tokio::select! {
+                        _ = board.cancel.cancelled() => return,
+                        value = probe_before_registry(&board.closing, board.probe(), |answer| {
+                            let registry = (answer == Some(true) && board.options.codex)
+                                .then(|| board.configure_registry());
+                            (answer, registry)
+                        }) => value,
+                    };
+                    let Some((answer, registry)) = probed else { return; };
                     match answer {
                         None => continue,
                         Some(false) => { board.status.lock().await.mode = Mode::Off;board.report_doorbell_off(true); return; }
-                        Some(true) if board.options.codex => {board.configure_registry().await;let mut status = board.status.lock().await; status.mode = Mode::Registry; status.note = Some(policy::REGISTERED);crate::stderrln!("pseudolife-mcp: the daemon serves the board after a startup delay; Codex threads register on their next call."); return; }
+                        Some(true) if board.options.codex => {
+                            if let Some(registry) = registry {
+                                registry.await;
+                            }
+                            let mut status = board.status.lock().await;
+                            status.mode = Mode::Registry;
+                            status.note = Some(policy::REGISTERED);
+                            crate::stderrln!("pseudolife-mcp: the daemon serves the board after a startup delay; Codex threads register on their next call.");
+                            return;
+                        }
                         Some(true) => {ask_board = false;}
                     }
                 }
@@ -920,5 +948,43 @@ impl Board {
                 adapter.close().await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod registry_probe_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn probe_answered_as_close_begins_builds_no_registry() {
+        let closing = AtomicBool::new(false);
+        let mut built = Vec::new();
+        let result = probe_before_registry(
+            &closing,
+            async {
+                closing.store(true, Ordering::Release);
+                Some(true)
+            },
+            |answer| {
+                assert_eq!(answer, Some(true));
+                built.push(1);
+            },
+        )
+        .await;
+        assert_eq!(built, Vec::<i32>::new());
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn open_probe_answer_constructs_the_registry() {
+        let closing = AtomicBool::new(false);
+        let mut built = Vec::new();
+        let result = probe_before_registry(&closing, async { Some(true) }, |answer| {
+            assert_eq!(answer, Some(true));
+            built.push(1);
+        })
+        .await;
+        assert!(result.is_some());
+        assert_eq!(built, vec![1]);
     }
 }

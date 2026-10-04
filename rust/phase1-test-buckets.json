@@ -2491,9 +2491,9 @@
     {
       "nodeid": "tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes",
       "line": 135,
-      "bucket": "internal",
-      "scope": "oracle-tooling-or-other-python-surface",
-      "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
+      "bucket": "oracle",
+      "scope": "phase2",
+      "reason": "Public Python CLI doctor subprocess checks the registered runtime handshake without bank writes; Phase 2 doctor routing remains deferred.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
@@ -6274,6 +6274,7 @@
   ],
   "phase1_function_counts": {
     "candidate": 8,
-    "internal": 181
+    "oracle": 1,
+    "internal": 180
   }
 }

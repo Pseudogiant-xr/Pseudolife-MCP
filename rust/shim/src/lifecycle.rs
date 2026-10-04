@@ -625,24 +625,30 @@ impl Runtime {
         let health = ensure_daemon(&url, &mut control, &options).await?;
         let mut instructions_note = String::new();
         if let Some(health) = &health {
-            let command = launcher_command();
-            let updates = ClientUpdates::new(
-                crate::credentials::expand_user(Path::new("~"))
-                    .ok()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".pseudolife-mcp"),
-                Path::new(""),
-                PACKAGE_VERSION,
-                &command,
-                no_spawn,
-            );
-            instructions_note = updates.version_note(&url, health);
-            if !instructions_note.is_empty() {
-                eprintln!(
-                    "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon ({command} update); then start a new session.",
-                    health["version"].as_str().unwrap_or(""),
-                    health["version"].as_str().unwrap_or("")
+            if health
+                .get("version")
+                .and_then(Value::as_str)
+                .is_some_and(|version| version != PACKAGE_VERSION && version_shaped(version))
+            {
+                let command = launcher_command();
+                let updates = ClientUpdates::new(
+                    crate::credentials::expand_user(Path::new("~"))
+                        .ok()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join(".pseudolife-mcp"),
+                    Path::new(""),
+                    PACKAGE_VERSION,
+                    &command,
+                    no_spawn,
                 );
+                instructions_note = updates.version_note(&url, health);
+                if !instructions_note.is_empty() {
+                    eprintln!(
+                        "[shim] this shim is pseudolife-mcp {PACKAGE_VERSION} but the daemon at {url} is {} — run {command} update --clients-only --tag {} (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon ({command} update); then start a new session.",
+                        health["version"].as_str().unwrap_or(""),
+                        health["version"].as_str().unwrap_or("")
+                    );
+                }
             }
             notice_inert(health);
         }
@@ -675,6 +681,21 @@ impl Runtime {
         else {
             return String::new();
         };
+        let no_spawn = spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref());
+        if !no_spawn
+            || health
+                .get("updates")
+                .and_then(|updates| updates.get("unattended_clients"))
+                != Some(&Value::Bool(true))
+            || !health
+                .get("version")
+                .and_then(Value::as_str)
+                .is_some_and(|version| {
+                    version_shaped(version) && version_is_newer(version, PACKAGE_VERSION)
+                })
+        {
+            return String::new();
+        }
         let mut updates = ClientUpdates::new(
             crate::credentials::expand_user(Path::new("~"))
                 .ok()
@@ -683,7 +704,7 @@ impl Runtime {
             PathBuf::from(python),
             PACKAGE_VERSION,
             &launcher_command(),
-            spawn_disabled(std::env::var("PSEUDOLIFE_MCP_NO_SPAWN").ok().as_deref()),
+            no_spawn,
         );
         updates.unattended(&self.url, health)
     }
@@ -1080,6 +1101,9 @@ pub fn launcher_command() -> String {
             .join("bin")
             .join("pseudolife-mcp")
     };
+    if !launcher.is_file() {
+        return "pseudolife-mcp".into();
+    }
     launcher_command_for(&launcher, which::which("pseudolife-mcp").ok().as_deref())
 }
 pub fn launcher_command_for(launcher: &Path, found: Option<&Path>) -> String {

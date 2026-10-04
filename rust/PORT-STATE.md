@@ -80,7 +80,7 @@ No production Rust surface has been accepted.
 - Historically, `2e628b27` named targeted Rust equivalents for all 125 scoped
   internal cases. The current mapping has 121 completed equivalents, 3 SDK
   retirements and 1 pending postframe substitution with targeted evidence on
-  both platforms; 56 other internal cases remain outside Phase 1's scope.
+  both platforms; 55 other internal cases remain outside Phase 1's scope.
   Inventory and component coverage alone do not close production behavior rows.
 - The legacy MCP negotiation evidence from #540 is about its original pin;
   current and earlier protocol revisions require separate current-pin evidence.

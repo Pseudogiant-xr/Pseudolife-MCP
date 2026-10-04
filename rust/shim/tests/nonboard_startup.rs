@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::{
     io::{self, Read, Write},
     net::TcpListener,
-    sync::mpsc,
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 
@@ -170,7 +170,7 @@ fn auth_startup(degraded: bool, missing_file: bool) {
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", socket.local_addr().unwrap());
     let (cancel, cancelled) = mpsc::channel();
-    let worker = std::thread::spawn(move || auth_health(socket, degraded, cancelled));
+    let worker = std::thread::spawn(move || auth_health(Arc::new(socket), degraded, cancelled));
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_pseudolife-stdio"));
     command
         .env_clear()
@@ -214,10 +214,10 @@ fn auth_startup(degraded: bool, missing_file: bool) {
 }
 
 fn auth_health(
-    socket: TcpListener,
+    socket: Arc<TcpListener>,
     degraded: bool,
     cancelled: mpsc::Receiver<()>,
-) -> io::Result<TcpListener> {
+) -> io::Result<Arc<TcpListener>> {
     socket.set_nonblocking(true)?;
     // This bounds only fixture failure; the required health request still fails
     // the test when absent, instead of hanging nextest until its job timeout.
@@ -264,11 +264,14 @@ fn auth_health(
 #[test]
 fn auth_fixture_cancels_when_a_child_exits_before_health() {
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = socket.local_addr().unwrap();
+    let socket = Arc::new(socket);
+    let released = Arc::downgrade(&socket);
     let (cancel, cancelled) = mpsc::channel();
     let worker = std::thread::spawn(move || auth_health(socket, false, cancelled));
     cancel.send(()).unwrap();
     let error = worker.join().unwrap().unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::Interrupted);
-    assert!(TcpListener::bind(address).is_ok());
+    // Completion must release the final listener owner; immediate port reuse
+    // also depends on the host network stack and other ephemeral listeners.
+    assert!(released.upgrade().is_none());
 }

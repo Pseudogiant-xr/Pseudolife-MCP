@@ -162,7 +162,7 @@ that falls back to an older revision does not establish modern support.
 Run the bounded shim judge from a checkout installed with `[dev,lite]`:
 
 ```sh
-python -m evals.rust_port.phase1 --candidate-json '["/absolute/path/pseudolife-stdio"]' --out /private/phase1.json --public-out evals/results/phase1.json --offline-resource-checked-at VERIFIED_UTC_TIME
+python -m evals.rust_port.phase1 --candidate-json '["/absolute/path/pseudolife-stdio"]' --candidate-root /absolute/candidate-checkout --out /private/phase1.json --public-out evals/results/phase1.json --offline-resource-checked-at VERIFIED_UTC_TIME
 ```
 
 Omit `--candidate-json` for Python self-replay. The command selects eight public
@@ -173,6 +173,28 @@ already be available through the existing `tests.pg_defaults` resolver or
 `PSEUDOLIFE_BENCH_ADMIN_URL`. The clearance timestamp is the lead's independent
 resource check; the runner also checks the local full-suite lease. No full test
 suite runs.
+
+Receipt schema 2 records each selected node's outcome from pytest's private
+JUnit report. Exit zero alone is insufficient: skipped, errored, failed,
+missing, duplicate or unexpected nodes cannot produce a passing receipt.
+The public summary retains node identities/outcomes and the XML hash; raw test
+output, error messages and XML stay beside the private receipt.
+
+`--candidate-root` names the native Git checkout that holds the committed Rust
+source, independently of `--oracle-root`. It must resolve on the OS running the
+judge; a Windows checkout path with unavailable Git metadata is not a Linux
+source identity. Receipts record its commit/tree, clean source hashes and binary
+SHA-256, and bind the process tests and every candidate real-bank, EOF, fault,
+startup and concurrent-call cell to that executable. The source/binary pairing
+is not a build attestation: retain the build evidence separately. Python
+self-replays bind the interpreter and
+the checked production oracle source instead.
+
+All judge sections must run for a complete passing receipt. The `--skip-*`
+switches produce incomplete evidence. Process-test reuse refuses legacy
+receipts, differing platform/oracle/instrument fingerprints, missing per-node
+passes or a different executable. Final Python self-replays run fresh without
+reuse or skip switches, once per platform after the instrument is frozen.
 
 For a CI runner with `[lite]` installed and no prestarted PostgreSQL, use
 `python -m evals.rust_port.phase1_ci` with the same arguments. It provisions a
@@ -219,9 +241,16 @@ retired-by-decision, and 1 pending postframe update-scheduling substitution.
 The pending row now records targeted Windows/Linux evidence at frozen tree
 `a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
 and successful reruns, and Linux passed all four checks (66 integration and
-5 wire cases). The 56 other internal functions remain outside this phase.
+5 wire cases). The 55 other internal functions remain outside this phase.
 Substitution acceptance, final-head CI, receipts, measurements and full suites
 remain pending.
+
+The final judge always executes the seven startup scenarios and six concurrent
+call cells in addition to the original nineteen candidate cells. Both scenario
+JSON contracts are included in the instrument fingerprint; public bindings
+retain the executable identity of all thirty-two cells, while their raw streams
+remain private. Startup stderr still has no allowlist. Concurrent call order is
+authorized only by the separately captured per-platform final-pair contract.
 
 After merging newer Python source, keep the oracle at its recorded pin. Prepare
 an isolated oracle from the current checkout-installed dependency runtime:
@@ -230,7 +259,7 @@ an isolated oracle from the current checkout-installed dependency runtime:
 python -m evals.rust_port.phase1_oracle --destination /private/new-phase1-oracle
 cd /private/new-phase1-oracle/source
 export PATH="$PWD/../runtime/bin:$PATH"
-../runtime/bin/python -m evals.rust_port.phase1_ci --oracle-root . --candidate-json '["/absolute/current/rust/target/release/pseudolife-stdio"]' --out /private/new-result.json --public-out /absolute/current/evals/results/new-result.json --offline-resource-checked-at VERIFIED_UTC_TIME
+../runtime/bin/python -m evals.rust_port.phase1_ci --oracle-root . --candidate-json '["/absolute/current/rust/target/release/pseudolife-stdio"]' --candidate-root /absolute/current --out /private/new-result.json --public-out /absolute/current/evals/results/new-result.json --offline-resource-checked-at VERIFIED_UTC_TIME
 ```
 
 On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
@@ -243,18 +272,24 @@ the immutable test functions execute from the pinned source. Dependency paths
 come from the caller's installed `[dev,lite]` runtime. The destination must be new.
 
 
-Frozen Phase 1 candidate `2e628b27` has passing Windows/Linux strict judge
-receipts at `evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
-`evals/results/rust-port-phase1-rust-linux-2e628b27.json`: eight public stdio
-nodes each, zero differences and verified process cleanup. Real identity,
-wrong-protocol and duplicate-key subprocess controls are checked for their
-named outcomes; generic Python controls verify comparison policy rather than
-Rust daemon parity. Rust checks pass 280 Windows / 262 Linux tests; the combined
-harness/audit selection passes 214 tests. Existing files under `tests/`,
-including `tests/conftest.py`, retain their assertions. The first hosted attempt
-failed in new fixtures and skipped parity; fixture repairs, final-head CI,
-required committed full suites and the open #546 dependency
-remain pending. All Phase 1 acceptance rows remain deferred.
+Historical candidate `2e628b27` receipts are retained at
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json` to reconstruct the
+strict-judge evidence associated with the original paired measurements below.
+They record zero differences and process cleanup, but lack actual pytest node
+outcomes; their binary bindings were added outside the committed instrument.
+They are explicitly historical and cannot satisfy final close-out acceptance
+or be reused by schema 2. Their recorded source identities remain unchanged.
+
+Keep one current complete combined receipt per replay kind (`python-self` or
+`rust-candidate`) and platform (Windows or Linux). Promote four fresh receipts
+only after checking their final instrument fingerprints, source/executable
+bindings, all eight actual node passes, zero differences and cleanup. Until
+those captures run, current close-out receipts and final acceptance are pending.
+Prune the eleven other superseded or failed Phase 1 receipts after promotion;
+they have no retained-history exception. The two named `2e628b27` files above
+are the sole historical exception. The contaminated Windows measurement smoke
+is removed; it is not measurement evidence.
 
 Paired measurements of `2e628b27` completed three ten-sample repeats per arm
 on each platform, with SDK preflight included and all 120 launches clean.

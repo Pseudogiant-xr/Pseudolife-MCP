@@ -264,6 +264,16 @@ recorded raw hash. Other bytes remain unchanged; the baseline instrument files
 used LF bytes. Do not normalize all files or treat a different digest as equivalent.
 Historical captures remain unchanged.
 
+Paired shim receipts bind the historical R5 artifact to its pinned Git blob and
+canonical SHA256, so Windows checkout line-ending filters cannot change that
+reference. R5 is a historical, noncomparable capture: its Windows Python
+initialize-return p50 was 644.687 ms, versus 811.841 ms in the later paired
+capture. The later first-frame p50 was 811.794 ms, so the timing boundary does
+not explain the difference. Source pins, schema/version, dependencies,
+instrumentation and process ownership changed; ambient load and cache state
+were uncontrolled. No matched crossover isolates the cause. Retain R5 unchanged
+and compare each new pair using its own recorded runtime, source and noise floors.
+
 The same recipe applies to capture bytes: `receipts` covers the eight execution
 receipts, and `referenced_artifacts` covers the eight full-bank/selfcheck corpus
 and oracle artifacts. Reconstruct each from its Git blob before checking its

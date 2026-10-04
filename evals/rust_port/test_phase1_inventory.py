@@ -86,7 +86,7 @@ def test_phase1_scoped_equivalents_preserve_complete_ownership(inventory):
     manifest = json.loads(inventory.source("rust/phase1-test-buckets.json"))
     functions = manifest["phase1_functions"]
     assert len(functions) == 189
-    assert manifest["phase1_function_counts"] == {"candidate": 8, "internal": 181}
+    assert manifest["phase1_function_counts"] == {"candidate": 8, "oracle": 1, "internal": 180}
     scoped = [item for item in functions if item["bucket"] == "internal" and item["scope"] == "phase1"]
     assert len(scoped) == 125
     assert all(item["required_equivalent"] or item.get("equivalence_evidence") for item in scoped)

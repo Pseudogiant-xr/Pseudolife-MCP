@@ -74,6 +74,26 @@ async fn registered(board: &Board) -> pseudolife_stdio::board::PreparedCall {
     .await
     .unwrap()
 }
+async fn unregistered(board: &Board) -> pseudolife_stdio::board::PreparedCall {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(Preparation::Forward(call)) = board
+                .prepare_call(
+                    "memory_agents",
+                    Some(json!({"action":"update"}).as_object().unwrap().clone()),
+                    &json!({"threadId":BANK}),
+                )
+                .await
+            {
+                assert!(!call.operation.headers.contains_key("x-pl-agent"));
+                return call;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("refused probe did not leave pending coordination")
+}
 fn outage(mode: &str) -> Answer {
     match mode {
         "refused" => Answer::text(0, b""),
@@ -271,13 +291,12 @@ async fn board_retry_cancelled_attach_waits_out_attachment_busy() {
 async fn late_probe(codex: bool, ready: bool) {
     let fixture = Fixture::new(0);
     fixture.answer("coordination-start", outage("refused"));
-    fixture.answer(
-        "coordination-start",
-        Answer::text(
-            if ready { 200 } else { 401 },
-            if ready { b"ready" } else { b"" },
-        ),
-    );
+    let (answer, mut gate) = Answer::text(
+        if ready { 200 } else { 401 },
+        if ready { b"ready" } else { b"" },
+    )
+    .gated();
+    fixture.answer("coordination-start", answer);
     let home = Home::new();
     let runtime = runtime(&fixture, codex);
     let mut timing = fast(&runtime, &home, "");
@@ -287,7 +306,9 @@ async fn late_probe(codex: bool, ready: bool) {
     }
     let board = Board::attach_options(runtime.clone(), timing).await;
     assert!(!board.board_checkin().await);
-    fixture.wait("coordination-start", 2).await;
+    gate.wait().await;
+    assert_eq!(fixture.count("coordination-start"), 2);
+    gate.release();
     if ready {
         let call = registered(&board).await;
         assert_eq!(call.operation.headers["x-pl-agent"], "fixture-agent");
@@ -300,9 +321,8 @@ async fn late_probe(codex: bool, ready: bool) {
                 .starts_with(policy::REGISTERED)
         );
     } else {
-        tokio::time::sleep(Duration::from_millis(80)).await;
+        let call = unregistered(&board).await;
         assert_eq!(fixture.count("/register"), 0);
-        let call = forward(&board, true).await;
         assert!(!call.operation.headers.contains_key("x-pl-agent"));
     }
     board.close().await;
@@ -363,16 +383,14 @@ async fn board_retry_close_while_probe_answers_registers_nothing() {
     for codex in [false, true] {
         let fixture = Fixture::new(0);
         fixture.answer("coordination-start", outage("refused"));
-        fixture.answer(
-            "coordination-start",
-            Answer::text(200, b"ready").delayed(Duration::from_millis(35)),
-        );
+        let (answer, mut gate) = Answer::text(200, b"ready").gated();
+        fixture.answer("coordination-start", answer);
         let home = Home::new();
         let runtime = runtime(&fixture, codex);
         let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "")).await;
-        fixture.wait("coordination-start", 2).await;
+        gate.wait().await;
         board.close().await;
-        tokio::time::sleep(Duration::from_millis(80)).await;
+        gate.release();
         assert_eq!(fixture.count("/register"), 0);
         assert_eq!(fixture.count("coordination-start"), 2);
     }

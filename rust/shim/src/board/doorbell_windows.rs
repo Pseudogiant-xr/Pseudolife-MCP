@@ -1,5 +1,4 @@
 //! Windows queue containment and fallback; all public entry points are safe.
-#![allow(unsafe_code)]
 
 use std::{
     io,
@@ -102,6 +101,7 @@ impl QueueProcess {
         Self::spawn_phases(command, Phases::default()).await
     }
 
+    #[allow(unsafe_code)]
     async fn spawn_phases(command: &mut Command, phases: Phases) -> Result<Self, SpawnFailure> {
         #[cfg(test)]
         let fixture_root = command.as_std().get_envs().find_map(|(key, value)| {
@@ -177,6 +177,7 @@ impl QueueProcess {
         Ok(process)
     }
 
+    #[allow(unsafe_code)]
     fn adopt(&mut self) -> Result<bool, AdoptionFailure> {
         if self.phases.refuses(Phase::Handle) {
             return Err(io::Error::other("no process handle").into());
@@ -218,6 +219,7 @@ impl QueueProcess {
     }
 
     /// Terminate the job, else taskkill the still-live leader tree; always reap.
+    #[allow(unsafe_code)]
     pub async fn kill(&mut self) {
         let killed = !self.phases.refuses(Phase::Terminate)
             && self.job.as_ref().is_some_and(|job| {
@@ -247,6 +249,7 @@ impl QueueProcess {
 }
 
 impl Drop for QueueProcess {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // A cancelled spawn future may be awaiting failed-adoption cleanup.
         // Partial resume can create descendants before failed-adoption cleanup.
@@ -260,6 +263,7 @@ impl Drop for QueueProcess {
     }
 }
 
+#[allow(unsafe_code)]
 fn create_job() -> Option<OwnedHandle> {
     // Null attributes/name create a fresh, non-inheritable job; no kill-on-close
     // or breakaway limits are enabled. Transfer each successful handle once.
@@ -267,6 +271,7 @@ fn create_job() -> Option<OwnedHandle> {
     (!handle.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
+#[allow(unsafe_code)]
 fn resume_threads(
     pid: u32,
     phases: &Phases,

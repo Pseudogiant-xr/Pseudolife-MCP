@@ -8,11 +8,13 @@ import hashlib
 import time
 
 from .harness import capture_platform, write_new
-from .provenance import ROOT, runtime_metadata
+from .provenance import ROOT, runtime_metadata, module_command
 from .stdio_capture import require_phase1_source
 from .stdio_corpus import ERAS, observe
 from .stdio_judge import StdioPolicy, judge, eof_policy, graded_controls
 from .processes import owned_process
+from .phase1_receipts import command_identity, pytest_outcomes, candidate_identity, candidate_bindings
+from .phase1_receipts import reusable_python_process_receipt
 
 
 def selected_nodes():
@@ -21,16 +23,28 @@ def selected_nodes():
 
 
 def process_tests(command, root, output):
-    argv = [sys.executable, "-m", "pytest", "-p", "evals.rust_port.pytest_plugin", "-q",
-            "--port-stdio-json", json.dumps(command), *selected_nodes()]
+    nodes = selected_nodes()
+    identity = command_identity(command, root)
+    report = output.with_suffix(".junit.xml")
+    if output.exists() or report.exists():
+        raise FileExistsError("process-test evidence paths must be new")
+    argv = module_command("pytest", root, ["-p", "evals.rust_port.pytest_plugin", "-q",
+            "--junitxml", str(report.resolve()), "-o", "junit_logging=no",
+            "--port-stdio-json", json.dumps(command), *nodes])
     import os
     with owned_process(argv, cwd=root, env=dict(os.environ), stdin=subprocess.DEVNULL) as process:
         stdout, stderr = process.communicate(timeout=240)
     # Keep raw test output private. The public receipt includes only command
-    # identity, selected nodes, return code and a bounded assertion count.
+    # identity, selected nodes and pytest's per-node outcomes. JUnit messages
+    # and captured streams stay private: they can include local paths or URLs.
     output.write_bytes(stdout + stderr)
-    return {"nodes": selected_nodes(), "exit_code": process.returncode,
-            "passed": process.returncode == 0, "cleanup": dict(process.owned_cleanup)}
+    if command_identity(command, root) != identity:
+        raise RuntimeError("process-test executable changed during pytest")
+    outcomes = pytest_outcomes(report, nodes)
+    return {"nodes": nodes, "exit_code": process.returncode, **outcomes,
+            "command_identity": identity,
+            "passed": process.returncode == 0 and outcomes["all_nodes_passed"],
+            "cleanup": dict(process.owned_cleanup)}
 
 
 def corpus(root, command, clearance):
@@ -90,6 +104,8 @@ def eof(root, command):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-json", help="JSON argv prefix; defaults to installed checkout Python CLI")
+    parser.add_argument("--candidate-root", type=Path,
+                        help="native Git checkout of the committed Rust candidate source (required for Rust)")
     parser.add_argument("--out", type=Path, required=True, help="private raw receipt path")
     parser.add_argument("--public-out", type=Path, help="sanitized public summary path")
     parser.add_argument("--offline-resource-checked-at")
@@ -105,18 +121,29 @@ def main():
     command = json.loads(args.candidate_json) if args.candidate_json else [sys.executable, "-m", "pseudolife_memory.cli"]
     if not isinstance(command, list) or not command or not all(isinstance(part, str) and part for part in command):
         parser.error("--candidate-json requires nonempty string argv")
-    receipt = {"schema": 1, **source, "capture_platform": capture_platform(),
+    python_replay = command == [sys.executable, "-m", "pseudolife_memory.cli"]
+    if not python_replay and args.candidate_root is None:
+        parser.error("Rust candidate requires --candidate-root naming its native Git checkout")
+    if not python_replay and not Path(command[0]).is_absolute():
+        parser.error("Rust candidate executable requires a native absolute path")
+    candidate_root = root if python_replay else args.candidate_root.resolve()
+    identity = candidate_identity(command, candidate_root)
+    receipt = {"schema": 2, **source, "capture_platform": capture_platform(),
+               "replay_kind": "python-self" if python_replay else "rust-candidate",
+               "candidate_identity": identity,
                "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                "capture_runtime": runtime_metadata(root),
                "instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                                     for path in Path(__file__).parent.glob("*.py")}}
+                                     for path in sorted([*Path(__file__).parent.glob("*.py"),
+                                                        *Path(__file__).parent.glob("*.json")])},
+               "baseline_instrument_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in sorted([*(ROOT / "evals/rust_baseline").glob("*.py"),
+                                        *(ROOT / "evals/rust_baseline").glob("*.json")])}}
     if args.reuse_python_process_receipt:
         old = json.loads(args.reuse_python_process_receipt.read_text())
-        if args.candidate_json or old["oracle_head"] != source["oracle_head"] or \
-                old["capture_platform"] != capture_platform() or not old["process_tests"]["passed"] or \
-                old["process_tests"]["nodes"] != selected_nodes() or \
-                not all(arm["command_identity"]["public_cli_module"] for arm in old["arms"]):
-            parser.error("process-test reuse requires successful same-platform Python default evidence")
+        if args.candidate_json or not reusable_python_process_receipt(
+                old, receipt, selected_nodes(), command_identity(command, root)):
+            parser.error("process-test reuse requires complete same-instrument same-platform Python evidence")
         receipt["process_tests"] = {**old["process_tests"],
             "reused_receipt_sha256": hashlib.sha256(args.reuse_python_process_receipt.read_bytes()).hexdigest()}
     elif not args.skip_process_tests:
@@ -129,6 +156,9 @@ def main():
         from .stdio_faults import run as fault_run
         receipt["faults"] = fault_run(root, command)
         receipt["differences"].extend(receipt["faults"]["differences"])
+    from .stdio_scenarios import run as scenario_run
+    receipt["scenarios"] = scenario_run(root, command)
+    receipt["differences"].extend(receipt["scenarios"]["differences"])
     from .stdio_process_controls import run as process_controls
     receipt["process_controls"] = process_controls(root)
     if not args.skip_generic_controls:
@@ -138,14 +168,23 @@ def main():
             validate_controls=True, phase1_protocol_fixture=True)
         receipt["generic_controls"] = generic
         receipt["differences"].extend({"surface": "generic", **difference} for difference in generic["differences"])
-    receipt["status"] = "passed" if not receipt["differences"] and receipt.get("process_tests", {"passed": True})["passed"] else "failed"
+    if candidate_identity(command, candidate_root) != identity:
+        raise RuntimeError("candidate source or executable changed during the judge")
+    receipt["candidate_bindings"] = candidate_bindings(receipt, identity)
+    receipt["coverage_complete"] = all(key in receipt for key in ("process_tests", "faults", "scenarios", "generic_controls"))
+    receipt["status"] = ("failed" if receipt["differences"] or not receipt.get("process_tests", {"passed": True})["passed"]
+                         else "passed" if receipt["coverage_complete"] else "incomplete")
     write_new(args.out, receipt)
     if args.public_out:
         safe = {key: value for key, value in receipt.items() if key not in {
-            "arms", "eof", "faults", "capture_runtime", "process_controls", "generic_controls"}}
+            "arms", "eof", "faults", "scenarios", "capture_runtime", "process_controls", "generic_controls"}}
         safe["eof"] = {key: value for key, value in receipt["eof"].items() if key != "cells"}
         if "faults" in receipt:
             safe["faults"] = {key: value for key, value in receipt["faults"].items() if key != "cells"}
+        safe["scenarios"] = {key: value for key, value in receipt["scenarios"].items()
+                             if key not in {"startup", "concurrent"}}
+        safe["scenarios"]["startup"] = {key: value for key, value in receipt["scenarios"]["startup"].items()
+                                        if key != "cells"}
         safe["process_controls"] = {name: {key: value for key, value in result.items() if key != "observed"}
                                     for name, result in receipt["process_controls"]["controls"].items()}
         if "generic_controls" in receipt:
