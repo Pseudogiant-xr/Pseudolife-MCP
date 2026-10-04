@@ -102,6 +102,9 @@ EXCLUDED_TABLES = (
     # v53: invited machines' credentials (token and code hashes). Like the
     # board's instance credentials they stay in full backups only.
     "principals",
+    # v54: the maintainer's passkeys, bootstrap codes and spent challenge
+    # nonces are credentials of this deployment (its RP ID): full backups only.
+    "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
 )
 
 # Columns of an exported table that are serving telemetry under the same
@@ -126,6 +129,8 @@ _META_SKIP_KEYS = {
     # imported value could move it backwards under a writer that
     # remembers a higher one, hiding a handover.
     "writer_lease_epoch",
+    # v54: the key that MACs maintainer challenges belongs to this bank.
+    "maintainer_secret_v1",
 }
 
 

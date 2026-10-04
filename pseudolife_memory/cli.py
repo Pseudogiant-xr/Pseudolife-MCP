@@ -93,6 +93,11 @@ modes:
                  `lease list` shows them; operator only: `lease break NAME`
                  frees a stuck one, `lease delegate PROJECT AGENT` makes
                  one session the maintainer's delegate for a project
+  maintainer    on the daemon host, the maintainer's passkeys (operator
+                 only; reads PSEUDOLIFE_MCP_DATABASE_URL): `maintainer
+                 enrol-code` admits the first passkey from the Console,
+                 `confirm PREFIX` activates it, `revoke PREFIX`, `reset
+                 --yes` revokes all and reopens enrolment, `list`
   version       print the package version, and the shim runtime it runs
                 from with that runtime's source commit (also --version)
   help          show this message (also -h / --help)
@@ -199,6 +204,9 @@ def main() -> None:
     elif mode == "lease":
         from pseudolife_memory.lease_cli import main as lease_main
         sys.exit(lease_main(sys.argv[2:]))
+    elif mode == "maintainer":
+        from pseudolife_memory.maintainer_cli import main as maintainer_main
+        sys.exit(maintainer_main(sys.argv[2:]))
     else:
         print(
             f"unknown mode {mode!r}; see: pseudolife-mcp --help",

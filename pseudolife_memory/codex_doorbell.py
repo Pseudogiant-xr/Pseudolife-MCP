@@ -333,9 +333,12 @@ class CodexDoorbell:
         if decision[0] == "attention" and (context.get("queue_allowed") is not True
                                            or context.get("recipient_state") != "unknown"):
             return
+        maintainer = getattr(adapter, "maintainer_pending", 0)
         notice = bell.pending_notice.reserve(count,
                     expires_at=context.get("message_expires_at"),
-                    recipient_state="unknown" if decision[0] == "attention" else None)
+                    recipient_state="unknown" if decision[0] == "attention" else None,
+                    maintainer=(maintainer if type(maintainer) is int
+                                and 0 <= maintainer <= count else 0))
         if bell.pending_notice.reservation_expiry_basis is not None:
             self._note_expiry(adapter, bell.pending_notice.reservation_expiry_basis)
             bell.pending_notice.reservation_expiry_basis = None

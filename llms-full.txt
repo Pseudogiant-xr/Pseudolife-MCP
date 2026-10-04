@@ -1333,7 +1333,7 @@ mistaken for a real bank.
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — load-only, and auto-selected when installed and the configured model's artifact is already on disk, ~3x faster CPU encode on MiniLM. The configured artifact must already exist locally: the daemon image provisions MiniLM's while building, while a pip install stays on torch until you provision it yourself. Models whose Transformer module loads from a subfolder use torch on native Windows, and the default Qwen3-Embedding-0.6B has no ONNX export at all); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, 3D graph and review queue, search/trace, coordination board, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v53 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v54 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -4338,7 +4338,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v53). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v54). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). Use an HTTP(S) origin: scheme, host and optional port, without a path, user information, query or fragment. |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits up to 5 s for an external daemon instead, then starts the session without it (the last handshake it cached for that URL, retried until the daemon answers; see [the remote bank guide](remote-bank.md#when-the-daemon-is-unreachable)). The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -5021,9 +5021,13 @@ docker exec <daemon container> pseudolife-mcp lease delegate PROJECT AGENT --for
 ```
 
 The delegate is not the coordinator: `coordinator:<project>` is the open role
-any session may claim to say it is coordinating, and it grants nothing.
-`pseudolife-mcp lease designate`, the command's name in 0.16.0, still works
-and prints one line naming `lease delegate`.
+any session may claim to say it is coordinating, and it grants nothing. A
+session holds at most one of the two: granting the delegate to the current
+coordinator also frees its `coordinator:<project>` lease (the answer names it
+in `also_broken`). `pseudolife-mcp lease designate`, the command's name in
+0.16.0, still works and prints one line naming `lease delegate`. Both roles
+can also be given and taken from the Console, signed with your passkey: see
+[Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console).
 
 **Upgrading from 0.16.0**, where the grant was the lease
 `designated:coordinator:<project>` and its rings were `reason: coordinator`:
@@ -5110,6 +5114,109 @@ Filesystem validation is a snapshot, and later edits can change the path's
 type or target. Claims remain advisory: no edit, commit or push guard consumes
 the fence. Existing literal `claim:<text>` and generic resource leases keep
 their semantics and do not overlap repository file claims.
+
+### Maintainer messages and roles from the Console
+
+The Console's Board can send a session a message that carries your authority,
+and give or take the project's delegate and coordinator roles. Each of these
+is signed by your passkey (Windows Hello, Touch ID, a phone passkey through
+the browser's QR flow, or a FIDO2 security key): one fresh tap per action, and
+the confirm dialog shows exactly what you are signing before the prompt. A
+bearer token alone can do none of it.
+
+**What a signed message does.** It arrives with `origin: "maintainer"` and a
+`verified` field in the recipient's `memory_message` receive result, which the
+served instructions tell the agent to treat as if you typed it in its own
+chat. It rings the session when it has a live wake listener, including one
+parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
+there is no separate urgent setting, and the payload's `urgent` field changes
+nothing.
+The agent replies with `reply_to` and no `to`; replies appear in the Console's
+thread. The Sent log can withdraw a message: the recipient's next receive shows
+it as withdrawn, and an already-acknowledged one gets a follow-up.
+
+**Roles.** The Roles band on the Board shows, per project, the delegate (the
+session whose urgent mail reopens done parks there, see
+[Leases](#leases-pseudolife-mcp-lease)) and the coordinator. Make delegate asks
+how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
+the lease. Coordinator changes are signed too, although the role grants no
+authority: otherwise any session could evict another's coordinator. A session
+holds one of the two roles at most: the delegate's own claim of the
+coordinator lease is refused `already_delegate`, and a session queued for it
+leaves the queue when it is made the delegate.
+
+**Setup.**
+
+1. Serve the Console over HTTPS at one fixed name, because browsers only
+   offer passkeys there (or on `localhost`), and a passkey is bound to that
+   name. On a Tailscale host:
+
+   ```sh
+   tailscale serve --https=8443 http://127.0.0.1:8765
+   ```
+
+2. Set the name in the daemon's config file (these keys are refused through
+   `POST /api/config`, which any principal can call):
+
+   ```yaml
+   coordination:
+     maintainer:
+       rp_id: <machine>.<tailnet>.ts.net
+       origin: https://<machine>.<tailnet>.ts.net:8443
+   ```
+
+   For a daemon used only on this machine, `rp_id: localhost` with
+   `origin: http://localhost:8765` also works. Any other plain-HTTP origin is
+   refused (`409 maintainer_https_required`).
+
+3. Enrol your first passkey. On the daemon host run
+   `pseudolife-mcp maintainer enrol-code` (in the Docker tier, inside the
+   daemon container). It prints a one-time code, valid for 10 minutes. In the
+   Console, open Settings, Your passkeys, enter the code and a label, and
+   create the passkey. The command then prints the new key's id prefix; check
+   it matches the Console and run `pseudolife-mcp maintainer confirm <prefix>`
+   on the host. Only then is the key active.
+
+4. Add more keys from Settings: an active key approves the new one, which waits
+   24 hours before it can sign anything, and any older key can cancel it in
+   that time. A key can revoke itself; only the host revokes an older key:
+   `pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes
+   every key and reopens enrolment. `pseudolife-mcp maintainer list` shows
+   them all.
+
+**What a passkey does not prove.**
+
+- The passkey prompt shows only the site, not the action. Tap only for a
+  prompt you started yourself in the Console. A session that can drive your
+  browser (browser automation), or the platform passkey API as your user,
+  can start one with a payload it prepared.
+- Check afterwards. Every signed message is listed in the Console's Sent log,
+  and a surprise one can be withdrawn there. A signed role change shows only
+  as the current holder in the Roles band; its record is in the board's
+  [audit log](#audit-log) (`pseudolife-mcp board-audit export`, actor
+  `maintainer`). Key changes show in Settings, Your passkeys: every
+  enrolment, confirmation, added key, cancel, revoke and reset, with the
+  path it came by (Console or host). A change from the last 7 days that
+  this browser did not make is a banner there and on the Roles band; if you
+  did not make it, run `pseudolife-mcp maintainer list` on the host.
+- Anyone who can run `pseudolife-mcp maintainer ...` on the daemon host, or
+  who holds the database owner's credentials, can reset the keys and enrol
+  their own. Root and the docker group on the host can run that command too.
+  So the daemon host and the database password are part of your trust
+  boundary. Keep the database password where agent sessions cannot read it.
+  Agent sessions that run as your own OS user can read what you can and
+  use Docker if you can, so on such a host the passkey makes a takeover
+  visible (above) rather than impossible. To close that gap, give the tests
+  their own [Postgres login](#the-test-suites-postgres-login-pseudolife-mcp-test-login) and run agent sessions
+  under a [separate account](agent-isolation.md).
+- A one-time enrolment code burns after 5 wrong attempts; run
+  `pseudolife-mcp maintainer enrol-code` again for a new one.
+- Moving the bank to another host changes the name, so every passkey stops
+  working: run `pseudolife-mcp maintainer reset` on the new host and enrol
+  again.
+- The board proves who sent a message. It does not change what an agent's
+  harness lets the model do: an agent that reserves purchases or destructive
+  actions for its own chat still asks there.
 
 ### Codex CLI and desktop
 
@@ -8023,7 +8130,7 @@ session's note points at them.
 
 ## Schema version history
 
-The current Postgres meta version is **v53**; migrations are additive
+The current Postgres meta version is **v54**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -8082,6 +8189,7 @@ The milestones:
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
+| v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry and which credential redeemed it) and `maintainer_nonces` (spent challenge nonces, kept until their payload expires). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 

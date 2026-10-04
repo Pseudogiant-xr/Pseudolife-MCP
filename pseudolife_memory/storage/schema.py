@@ -17,7 +17,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 53
+SCHEMA_META_VERSION = 54
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -747,6 +747,22 @@ BEGIN
             ADD COLUMN IF NOT EXISTS parent_thread TEXT;
     END IF;
 END $$;
+-- v54: maintainer messages (spec 2026-10-02-maintainer-wake-design.md and
+-- its 2026-10-04 addendum). A message's origin ('agent', or 'maintainer'
+-- for one the daemon verified from a passkey signature in the Console), the
+-- proof kept so a stored message can be re-verified, and when the
+-- maintainer withdrew it. Guarded like the v49 and v50 columns.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'coordination_messages'::regclass
+                     AND attname = 'repudiated_at' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE coordination_messages
+            ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'agent',
+            ADD COLUMN IF NOT EXISTS maintainer_proof JSONB,
+            ADD COLUMN IF NOT EXISTS repudiated_at DOUBLE PRECISION;
+    END IF;
+END $$;
 """
 
 # v40: operational identities and addressed mail never enter the memory tables.
@@ -777,6 +793,56 @@ CREATE TABLE IF NOT EXISTS principals (
 );
 """
 SCHEMA_SQL += PRINCIPALS_SCHEMA_SQL
+
+# v54: the maintainer's passkeys, the one-time host codes that admit the
+# first one, and the spent challenge nonces, kept until their payload
+# expires (spec 2026-10-02-maintainer-wake-design.md). None holds a secret:
+# COSE public keys, a code's SHA-256, nonces. The challenge MAC key is the
+# meta row ``maintainer_secret_v1``, never config. ``flagged_at`` marks a
+# key whose sign count went backwards, for review in the Console.
+# Credentials of this deployment (bound to its RP ID): never in a logical
+# export (transfer_cli.EXCLUDED_TABLES); a physical backup carries them.
+MAINTAINER_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS maintainer_passkeys (
+    credential_id TEXT PRIMARY KEY,
+    public_key    BYTEA NOT NULL,
+    alg           INTEGER NOT NULL,
+    sign_count    BIGINT NOT NULL DEFAULT 0,
+    label         TEXT NOT NULL,
+    enrolled_by   TEXT NOT NULL,
+    state         TEXT NOT NULL,
+    active_from   DOUBLE PRECISION,
+    created_at    DOUBLE PRECISION NOT NULL,
+    last_used_at  DOUBLE PRECISION,
+    revoked_at    DOUBLE PRECISION,
+    revoked_by    TEXT,
+    flagged_at    DOUBLE PRECISION
+);
+CREATE TABLE IF NOT EXISTS maintainer_bootstrap (
+    code_hash       TEXT PRIMARY KEY,
+    expires_at      DOUBLE PRECISION NOT NULL,
+    used_at         DOUBLE PRECISION,
+    credential_id   TEXT,
+    failed_attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS maintainer_nonces (
+    nonce      TEXT PRIMARY KEY,
+    expires_at DOUBLE PRECISION NOT NULL
+);
+-- Wrong-code guesses against the live code, which burn it at the limit;
+-- added during v54 development, so a bank created before it gains the
+-- column here (guarded like the v49 and v50 columns).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'maintainer_bootstrap'::regclass
+                     AND attname = 'failed_attempts' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE maintainer_bootstrap
+            ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;
+"""
+SCHEMA_SQL += MAINTAINER_SCHEMA_SQL
 
 # Every table this schema declares — the ONE list a bench/test reset
 # truncates. It lives here, beside the DDL, because it has to grow in the
@@ -814,6 +880,7 @@ BENCH_RESET_TABLES = (
     "coordination_agents", "coordination_messages", "coordination_events",
     "coordination_leases", "coordination_lease_waiters", "coordination_wakes",
     "principals",
+    "maintainer_passkeys", "maintainer_bootstrap", "maintainer_nonces",
 )
 
 # A test or bench reset reaps every other backend on its database, applies
