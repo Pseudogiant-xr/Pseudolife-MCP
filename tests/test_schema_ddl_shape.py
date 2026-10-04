@@ -114,6 +114,14 @@ _REQUIRED_COLUMNS = [
     ("coordination_wakes", {"wake_id", "recipient_agent_id", "sender_agent_id", "message_id",
                             "decision", "reason", "urgent", "ring_at", "created_at",
                             "served_at"}),
+    # v54 — maintainer passkeys, the host's bootstrap codes, spent challenge
+    # nonces, and a message's origin, proof and withdrawal.
+    ("maintainer_passkeys", {"credential_id", "public_key", "alg", "sign_count", "label",
+                             "enrolled_by", "state", "active_from", "created_at",
+                             "last_used_at", "revoked_at", "revoked_by", "flagged_at"}),
+    ("maintainer_bootstrap", {"code_hash", "expires_at", "used_at", "credential_id"}),
+    ("maintainer_nonces", {"nonce", "expires_at"}),
+    ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
 ]
 
 
@@ -147,6 +155,10 @@ _COLUMN_TYPES = [
     ("entries", "dream_state", "text"),           # v38
     ("outcome_signals", "used_ids", "jsonb"),     # v44: read back as a dict
     ("lesson_search_events", "served", "jsonb"),  # v44
+    ("coordination_messages", "maintainer_proof", "jsonb"),  # v54: read back as a dict
+    ("coordination_messages", "origin", "text"),             # v54
+    ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
+    ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
 ]
 
 _NULLABLE_COLUMNS = [
@@ -177,6 +189,9 @@ _NULLABLE_COLUMNS = [
     ("facts", "distortion_tolerance"),
     ("entries", "dream_state"),                   # v38: NULL = pre-bump row
     ("outcome_signals", "used_ids"),              # v44: NULL = named no ids
+    ("coordination_messages", "maintainer_proof"),  # v54: NULL = agent mail
+    ("coordination_messages", "repudiated_at"),     # v54: NULL = stands
+    ("maintainer_passkeys", "active_from"),         # v54: NULL while pending
 ]
 
 
@@ -231,6 +246,38 @@ def test_a_v49_bank_gains_the_v50_parent_columns_through_the_guarded_pass(pg_con
                            "WHERE agent_id='v49-row'").fetchone() == (None, None)
     pg_conn.execute(COORDINATION_SCHEMA_SQL)
     assert {"parent_agent_id", "parent_thread"} <= _columns(pg_conn, "coordination_agents")
+
+
+def test_a_v53_bank_gains_the_v54_message_columns_through_the_guarded_pass(pg_conn):
+    """The upgrade path: a bank at v53 (no origin columns) gets all three
+    from the schema pass, every existing message reading origin ``agent``
+    with no proof and no withdrawal; a second pass adds nothing."""
+    from pseudolife_memory.storage.schema import COORDINATION_SCHEMA_SQL
+    pg_conn.autocommit = True
+    for agent in ("a", "b"):
+        pg_conn.execute("INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
+                        "created_at,last_activity) VALUES (%s,'alice','h',1,1)", (agent,))
+    pg_conn.execute("INSERT INTO coordination_messages (message_id,sender_agent_id,"
+                    "recipient_agent_id,sender_principal,text,request_id,fingerprint,"
+                    "recipient_sequence,created_at,expires_at) VALUES "
+                    "('v53-mail','a','b','alice','hi','r','f',1,1,2)")
+    pg_conn.execute("ALTER TABLE coordination_messages DROP COLUMN origin, "
+                    "DROP COLUMN maintainer_proof, DROP COLUMN repudiated_at")
+    columns = {"origin", "maintainer_proof", "repudiated_at"}
+    assert not columns & _columns(pg_conn, "coordination_messages")
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert columns <= _columns(pg_conn, "coordination_messages")
+    assert pg_conn.execute("SELECT origin, maintainer_proof, repudiated_at FROM "
+                           "coordination_messages WHERE message_id='v53-mail'"
+                           ).fetchone() == ("agent", None, None)
+    pg_conn.execute(COORDINATION_SCHEMA_SQL)
+    assert columns <= _columns(pg_conn, "coordination_messages")
+
+
+def test_maintainer_origin_defaults_to_agent_mail(pg_conn):
+    default = _column_attr(pg_conn, "coordination_messages", "origin", "column_default")
+    assert "agent" in (default or "")
+    assert _column_attr(pg_conn, "coordination_messages", "origin", "is_nullable") == "NO"
 
 
 # ── structural one-offs ───────────────────────────────────────────────────

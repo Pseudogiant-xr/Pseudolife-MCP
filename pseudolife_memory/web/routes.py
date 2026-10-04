@@ -259,6 +259,21 @@ class ConsoleRoutes:
         # ---- the daemon's own board notice (the unattended updater) ----
         p("/api/daemon-notice", lambda q, b: self._daemon_notice(b))
 
+        # ---- maintainer messages and Board roles, proven by a passkey ----
+        # (v54; spec 2026-10-02-maintainer-wake-design.md and its 2026-10-04
+        # addendum). One service method each; the service gates them and
+        # raises MaintainerError, whose status the ASGI layer answers.
+        g("/api/maintainer", lambda q, b: svc.maintainer_status())
+        p("/api/maintainer/challenge", lambda q, b: svc.maintainer_challenge(b))
+        p("/api/maintainer/enrol", lambda q, b: svc.maintainer_enrol(b))
+        p("/api/maintainer/send", lambda q, b: svc.maintainer_send(b))
+        p("/api/maintainer/role", lambda q, b: svc.maintainer_role(b))
+        p("/api/maintainer/cancel", lambda q, b: svc.maintainer_cancel(b))
+        p("/api/maintainer/revoke", lambda q, b: svc.maintainer_revoke(b))
+        p("/api/maintainer/repudiate", lambda q, b: svc.maintainer_repudiate(b))
+        g("/api/maintainer/sent", lambda q, b: svc.maintainer_sent(_i(q, "limit", 50)))
+        g("/api/maintainer/inbox", lambda q, b: svc.maintainer_inbox(_i(q, "limit", 50)))
+
         # ---- config ----
         g("/api/config", lambda q, b: config_io.read_config(svc))
         p("/api/config", lambda q, b: config_io.write_config(
