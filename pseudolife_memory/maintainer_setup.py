@@ -65,6 +65,7 @@ import time
 from urllib.parse import urlsplit
 
 from pseudolife_memory import expose_cli
+from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -72,7 +73,6 @@ EXIT_REFUSED = 4
 EXIT_UNDONE = 5
 
 MODULE = "pseudolife_memory.maintainer_setup"
-DAEMON_CONTAINER = "pseudolife-mcp-daemon"
 DEFAULT_PORT = 8765
 DEFAULT_HTTPS_PORT = 8443
 # Design bounds, not measurements: a restarted daemon loads its embedder
@@ -109,10 +109,6 @@ def stream(argv, on_line) -> int:
         for line in proc.stdout:
             on_line(line.rstrip("\r\n"))
     return proc.returncode
-
-
-def docker_cmd() -> str:
-    return os.environ.get("PSEUDOLIFE_DOCKER") or "docker"
 
 
 def which(name: str) -> str | None:

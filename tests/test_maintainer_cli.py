@@ -165,6 +165,8 @@ def test_list_prints_the_keys_and_flags(bank):
 def test_no_bank_is_an_error_without_a_dsn(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    # Never a real daemon container on a test host (tests/test_daemon_exec.py).
+    monkeypatch.setenv("PSEUDOLIFE_DAEMON_EXEC", "1")
     assert run("list")[0] == 2
     assert "no bank found" in capsys.readouterr().err
 
