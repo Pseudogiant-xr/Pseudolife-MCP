@@ -392,7 +392,8 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Codex measures serde_json's compact encoding of the normalized schema
     # (UTF-8, no whitespace); this approximates what Codex counts, and the
     # 1,000-byte margin covers normalization. Largest on 2026-10-04:
-    # memory_search, 1,956 bytes.
+    # memory_search, 1,956 bytes; later that day, once the board tools
+    # described their parameters, memory_agents at 3,459.
     schema_bytes = {t.name: len(json.dumps(t.input_schema or {}, separators=(",", ":"),
                                            ensure_ascii=False).encode("utf-8"))
                     for t in tools}
@@ -467,6 +468,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # the real constraints. After the delegate rename (memory_message names
     # the maintainer's delegate): minimal 5,232, core 11,728, full 18,247.
     # Caps 5,750 / 12,750 / 19,250 leave 518 / 1,022 / 1,003.
+    # 2026-10-04, later (cross-model review): memory_agents, memory_message,
+    # memory_search and memory_toolset rewritten to lead with purpose and
+    # sibling routing; minimal 5,502, core 12,075, full 18,594 — caps
+    # unchanged, 248 / 675 / 656 to spare.
     budgets = {"minimal": 5750, "core": 12750, "full": 19250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
@@ -517,7 +522,13 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 2026-10-04, re-based with the description caps (same reason, about a
     # tenth of headroom each): minimal 2,494, core 5,248, full 8,909 under
     # 2,750 / 5,750 / 9,750.
-    param_budgets = {"minimal": 2750, "core": 5750, "full": 9750}
+    # 2026-10-04, later: the cross-model review (Claude + Codex) gave the
+    # two board tools their first parameter descriptions (26 parameters,
+    # +2,540, carrying the caps Codex strips from the schema) and
+    # memory_search its filter-scope wording: minimal 2,679, core 7,973,
+    # full 11,634. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
+    # headroom, measured on the text that landed rather than assumed.
+    param_budgets = {"minimal": 3000, "core": 8750, "full": 12500}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (
@@ -669,6 +680,43 @@ def test_message_description_names_the_maintainers_delegate(
     lease conferred the authority (maintainer decision 2026-10-04: the
     authority is the maintainer's delegate)."""
     d = _descriptions(tmp_path, monkeypatch)
-    assert "Claim coordinator:<project>" in d["memory_agents"]
+    assert "coordinator:<project>" in d["memory_agents"]
     assert "maintainer's delegate" in d["memory_message"]
     assert "coordinator" not in d["memory_message"]
+
+
+def test_board_tools_describe_every_parameter_with_its_cap(
+        tmp_path: Path, monkeypatch) -> None:
+    """The 2026-10-04 cross-model review (Claude + Codex, both reading the
+    served surface) found the two most-called tools shipping 26 parameters
+    with no description at all, and Codex strips ``maxLength`` / ``minimum``
+    / ``maximum`` from MCP schemas, so a cap that is not in the description
+    text never reaches an OpenAI model: 63 of its 110 model-caused errors in
+    five weeks were ``string_too_long`` on these fields. Every parameter of
+    both board tools carries a description, and the capped ones say the cap
+    in words."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
+    for name in ("memory_agents", "memory_message"):
+        props = tools[name].input_schema["properties"]
+        bare = [p for p, v in props.items() if len(v.get("description") or "") < 20]
+        assert bare == [], f"{name} parameters without a description: {bare}"
+    agents = tools["memory_agents"].input_schema["properties"]
+    assert "240" in agents["status"]["description"]
+    assert "120" in agents["task"]["description"]
+    assert "40" in agents["children"]["description"]
+    assert "epoch" in agents["park_expires"]["description"]
+    message = tools["memory_message"].input_schema["properties"]
+    assert "8192" in message["text"]["description"]
+    assert "1..50" in message["limit"]["description"]
+    assert "required" in message["request_id"]["description"]
+    d = _descriptions(tmp_path, monkeypatch)
+    # Both families sent ``limit`` to memory_search (140 calls, silently
+    # ignored) and read a withheld wake receipt as a failed send.
+    assert "not limit" in tools["memory_search"].input_schema["properties"]["top_k"]["description"]
+    assert "send needs to, text and request_id" in d["memory_message"]
+    assert "not delivery failure" in d["memory_message"]
+    # Expanding the server tier does not refresh a client's callable list
+    # (observed from Codex 2026-10-04: status said full, catalog stayed 24).
+    assert "not client refresh" in d["memory_toolset"]

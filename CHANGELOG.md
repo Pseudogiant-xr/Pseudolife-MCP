@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
+- `memory_agents` and `memory_message` served 26 parameters with no
+  description and docstrings in compressed shorthand ("Bearer required;
+  list before shared work/resume."). Two reviews of the served surface, one
+  reading it from Claude Code's transcripts and one from inside Codex,
+  converged on the same findings: a model cannot see a cap Codex strips
+  from the schema (`maxLength`, `minimum`, `maximum`), so 63 of Codex's 110
+  model-caused errors in five weeks were `string_too_long` on these fields;
+  a send without `request_id` fails with a bare `missing_parameter` that
+  models retried three or four times; and the wording `""/plain status
+  clears` sent models after the empty-string route (89 malformed calls in
+  17 Claude sessions) when a status update with no park fields already
+  clears a park. Every parameter of both tools now carries a description
+  that names its action, whether it is required there, and its cap; the
+  docstrings lead with purpose, say that a wake receipt describes
+  notification rather than delivery (a `withheld` send is queued, not
+  failed, and must not be resent with `clears` or `urgent` just to ring),
+  and that reusing a `request_id` with changed inputs is a
+  `request_conflict`.
+- `memory_search` opens with what it searches (including ingested
+  documents) and which sibling to call instead (`memory_fact_get`,
+  `memory_recall`, `memory_lesson_search`, `memory_world_search`,
+  `document_search`, with their tier), and says what its filters reach:
+  `sources` / `bands` / `episodes` / `tags` narrow direct neural hits only,
+  not cortex facts, reference documents or contiguity neighbours, and `[]`
+  means no filter. `top_k` says "use top_k, not limit" — both model
+  families sent `limit`, which the server ignored silently (140 calls).
+  The "~4 in 10" figure on `verified: false` moves out of the served text
+  (a ratio without its population or date is not a runtime contract; the
+  measurement stays in the 2026-09-23 review's test comment).
+- `memory_toolset` says what expanding does and does not do: one tier per
+  call, `list_changed_sent` means the notification was sent, not that the
+  client refreshed its tool list (observed from Codex: `status` said
+  `full` while the callable catalog stayed at 24), so rediscover tools
+  after expanding and report a mismatch rather than expanding again. Its
+  `status` ladder now lists the board tools under core and
+  `memory_episode_summary` / `memory_graph_unrelate` under full.
+- The MCP initialization text is 498 characters composed (was 508): the
+  base says "pass episode where accepted" (only six write tools take one),
+  and the shim's check-in suffix says "Subagents never send; only those
+  with own board IDs update/receive/ack" instead of "only read the board",
+  which was wrong for a Codex subagent. Codex prefixes this text to every
+  tool declaration it shows the model, so it is paid 24 times per session.
+  The bench-pinned `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json`
+  is unchanged, so Codex users approve nothing again.
+- The parameter-description budgets move to the measured totals plus a
+  tenth of headroom (3,000 / 8,750 / 12,500); the description budgets and
+  the per-tool client limits (1,600 characters, 4,000 schema bytes) are
+  unchanged and every tool stays under them (largest schema
+  `memory_agents`, 3,459 bytes).
+
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
 ### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
