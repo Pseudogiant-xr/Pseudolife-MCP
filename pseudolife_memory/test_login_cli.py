@@ -1,0 +1,503 @@
+"""``pseudolife-mcp test-login``: a Postgres login for the test suite that
+cannot open the bank.
+
+    pseudolife-mcp test-login create [--rotate] [--file PATH] [--role NAME]
+                                     [--admin-url URL] [--container NAME]
+                                     [--bank DB]... [--json]
+
+The bundled Postgres serves the production bank and the test suite's per-run
+databases under one owning role, ``pseudolife``, the server's superuser. Until
+this command the suite logged in as that role with ``ops/.env``'s
+``POSTGRES_PASSWORD``, so every agent session that ran tests held the bank
+owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
+
+* the role (default ``pseudolife_test``): LOGIN and CREATEDB; not superuser,
+  CREATEROLE, REPLICATION or BYPASSRLS; any role membership it held is
+  revoked. It can create, reset and drop the databases it creates, which is
+  everything the suite does on the server.
+* ``REVOKE CONNECT ... FROM PUBLIC`` on each production database (default
+  ``pseudolife_memory``, the container's ``POSTGRES_DB`` and any ``--bank``),
+  and from the role. The bank's owner keeps CONNECT as owner, and is the
+  superuser the daemon connects as on the Docker tier.
+* ``vector`` installed (and updated) in ``template1``. pgvector does not mark
+  its extension trusted, so ``CREATE EXTENSION vector`` needs a superuser;
+  ``CREATE DATABASE`` copies template1, so every database the login creates
+  already has it, and the schema's ``CREATE EXTENSION IF NOT EXISTS`` skips.
+* the credentials in a test-only file, owner-only (default
+  ``~/.pseudolife-mcp/test-pg.env``, which ``tests/pg_defaults.py`` reads
+  before ``ops/.env``): ``PSEUDOLIFE_TEST_PG_USER`` and
+  ``PSEUDOLIFE_TEST_PG_PASSWORD``. A second run re-applies the file's
+  password, so running suites keep working; ``--rotate`` draws a new one.
+
+The password is drawn here and never sent: the server gets its SCRAM-SHA-256
+verifier, so it is in no statement, log line or process argument.
+
+Where it runs: with ``--admin-url`` (a superuser URL), through psycopg.
+Otherwise on the Docker host, through ``psql`` in the ``pseudolife-mcp-postgres``
+container over its local socket as the container's ``POSTGRES_USER``, as
+``ops/restore.sh`` and ``invite --revoke`` do: the host never handles the
+owner's password. Without a superuser connection it refuses before any change.
+
+Exit codes: 0 done; 1 the database failed; 2 usage; 4 refused before any change.
+
+Standard library only on the Docker path: on a Docker host ``pseudolife-mcp``
+is a shim runtime without the storage layer.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import hmac
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_USAGE = 2
+EXIT_REFUSED = 4
+
+POSTGRES_CONTAINER = "pseudolife-mcp-postgres"
+DEFAULT_ROLE = "pseudolife_test"
+# Read by tests/pg_defaults.py (pinned equal by tests/test_test_login_cli.py).
+FILE_ENV = "PSEUDOLIFE_TEST_PG_LOGIN_FILE"
+DEFAULT_FILE = Path.home() / ".pseudolife-mcp" / "test-pg.env"
+USER_KEY = "PSEUDOLIFE_TEST_PG_USER"
+PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"
+# storage/schema.py's PRODUCTION_DATABASES, repeated: the Docker path imports
+# no storage code (pinned equal by the tests).
+DEFAULT_BANKS = ("pseudolife_memory",)
+# Every extension ensure_schema creates; none is trusted, so all come from
+# template1 (pinned against schema.py by the tests).
+EXTENSIONS = ("vector",)
+# Never a bank: the admin database and the templates.
+_NOT_BANKS = frozenset({"postgres", "template0", "template1"})
+# Lower-case, unquoted-identifier shape: no quoting needed in any statement.
+_ROLE_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
+DOCKER_TIMEOUT_S = 60
+_FILE_HEADER = """\
+# Pseudolife-MCP test login, written by `pseudolife-mcp test-login create`.
+# The PostgreSQL role the test suite logs in as: it creates and drops its own
+# databases and cannot connect to the bank. Not the bank owner's password.
+# Rotate with `pseudolife-mcp test-login create --rotate`.
+"""
+
+
+class DatabaseError(RuntimeError):
+    """A statement failed; the message carries no password."""
+
+
+# ── seams (the tests replace these) ──────────────────────────────────────────
+
+def run(cmd: list[str], input: str | None = None) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=DOCKER_TIMEOUT_S,
+                              input=input, errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(cmd, 127, "", type(exc).__name__)
+
+
+class ContainerPsql:
+    """``psql`` inside the Postgres container: its local socket, its own
+    superuser, no password. SQL goes on stdin, never on a command line."""
+
+    def __init__(self, container: str):
+        self.container = container
+        self.description = f"the Postgres in container {container}"
+
+    def query(self, database: str | None, statements: list[str]) -> str:
+        script = "SET client_min_messages = warning;\n" + "".join(
+            f"{statement};\n" for statement in statements)
+        # "$1" is the database; empty means the container's POSTGRES_DB.
+        cmd = ["docker", "exec", "-i", self.container, "sh", "-c",
+               'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "${1:-$POSTGRES_DB}"',
+               "sh", database or ""]
+        proc = run(cmd, input=script)
+        if proc.returncode != 0:
+            raise DatabaseError((proc.stderr or proc.stdout or f"exit {proc.returncode}").strip())
+        lines = [line for line in proc.stdout.splitlines() if line.strip()]
+        return lines[-1].strip() if lines else ""
+
+
+class AdminUrl:
+    """psycopg to a superuser URL (``--admin-url``)."""
+
+    def __init__(self, url: str):
+        self._url = url
+        self.description = "the Postgres at the admin URL"
+
+    def query(self, database: str | None, statements: list[str]) -> str:
+        import psycopg
+        from psycopg.conninfo import make_conninfo
+
+        try:
+            conninfo = self._url if database is None else make_conninfo(self._url, dbname=database)
+            with psycopg.connect(conninfo, autocommit=True, connect_timeout=10) as conn:
+                conn.execute("SET client_min_messages = warning")
+                result = ""
+                for statement in statements:
+                    cur = conn.execute(statement)
+                    if cur.description:
+                        row = cur.fetchone()
+                        result = "" if row is None or row[0] is None else str(row[0])
+                return result
+        except psycopg.Error as exc:
+            raise DatabaseError(f"{type(exc).__name__}: {str(exc).strip()}") from None
+
+
+# ── SQL ───────────────────────────────────────────────────────────────────────
+
+def scram_verifier(password: str, *, salt: bytes | None = None, iterations: int = 4096) -> str:
+    """The SCRAM-SHA-256 verifier PostgreSQL stores for ``password`` (the
+    ``PQencryptPasswordConn`` form, RFC 7677). ``ALTER ROLE ... PASSWORD`` takes
+    it as is. The password is ASCII, which SASLprep leaves unchanged."""
+    salt = os.urandom(16) if salt is None else salt
+    salted = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    client_key = hmac.new(salted, b"Client Key", "sha256").digest()
+    stored_key = hashlib.sha256(client_key).digest()
+    server_key = hmac.new(salted, b"Server Key", "sha256").digest()
+
+    def b64(data: bytes) -> str:
+        return base64.b64encode(data).decode("ascii")
+
+    return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
+
+
+def _literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _ident(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _names(values) -> str:
+    return ", ".join(_literal(value) for value in values) or "NULL"
+
+
+def whoami_statement() -> str:
+    return ("SELECT json_build_object('who', current_user, 'super', rolsuper, "
+            "'db', current_database())::text FROM pg_roles WHERE rolname = current_user")
+
+
+def state_statement(role: str, banks: list[str]) -> str:
+    """One JSON row: the role's attributes and memberships, each bank's
+    CONNECT for PUBLIC, the role and the owner, the databases the role owns,
+    and the others PUBLIC may still connect to."""
+    r = _literal(role)
+    role_oid = f"(SELECT oid FROM pg_roles WHERE rolname = {r})"
+    return f"""SELECT json_build_object(
+  'role', (SELECT json_build_object('super', rolsuper, 'login', rolcanlogin,
+            'createdb', rolcreatedb, 'createrole', rolcreaterole,
+            'replication', rolreplication, 'bypassrls', rolbypassrls)
+           FROM pg_roles WHERE rolname = {r}),
+  'member_of', (SELECT coalesce(json_agg(g.rolname ORDER BY g.rolname), '[]'::json)
+                FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                WHERE m.member = {role_oid}),
+  'banks', (SELECT coalesce(json_object_agg(d.datname, json_build_object(
+              'owner', pg_get_userbyid(d.datdba),
+              'public_connect', has_database_privilege('public', d.oid, 'CONNECT'),
+              'role_connect', CASE WHEN {role_oid} IS NULL THEN NULL
+                              ELSE has_database_privilege({role_oid}, d.oid, 'CONNECT') END,
+              'owner_connect', has_database_privilege(d.datdba, d.oid, 'CONNECT'))), '{{}}'::json)
+            FROM pg_database d WHERE d.datname IN ({_names(banks)})),
+  'owns', (SELECT coalesce(json_agg(datname ORDER BY datname), '[]'::json)
+           FROM pg_database WHERE datdba = {role_oid}),
+  'others', (SELECT coalesce(json_agg(d.datname ORDER BY d.datname), '[]'::json)
+             FROM pg_database d
+             WHERE d.datallowconn AND NOT d.datistemplate AND d.datname <> 'postgres'
+               AND d.datname NOT IN ({_names(banks)})
+               AND d.datdba IS DISTINCT FROM {role_oid}
+               AND has_database_privilege('public', d.oid, 'CONNECT'))
+)::text"""
+
+
+def role_statements(role: str, verifier: str, banks: list[str]) -> list[str]:
+    """Create or reset the role with the verifier as its password, drop every
+    role membership it holds, and close each bank to PUBLIC and to it."""
+    attributes = ("LOGIN CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS "
+                  f"INHERIT CONNECTION LIMIT -1 VALID UNTIL 'infinity' PASSWORD {_literal(verifier)}")
+    statements = [
+        f"""DO $do$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {_literal(role)}) THEN
+    ALTER ROLE {_ident(role)} WITH {attributes};
+  ELSE
+    CREATE ROLE {_ident(role)} WITH {attributes};
+  END IF;
+END $do$""",
+        f"""DO $do$ DECLARE grant_row record; BEGIN
+  FOR grant_row IN
+    SELECT g.rolname AS granted, gr.rolname AS grantor
+    FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+    JOIN pg_roles gr ON gr.oid = m.grantor
+    WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = {_literal(role)})
+  LOOP
+    EXECUTE format('REVOKE %I FROM %I GRANTED BY %I', grant_row.granted,
+                   {_literal(role)}, grant_row.grantor);
+  END LOOP;
+END $do$""",
+    ]
+    for bank in banks:
+        statements.append(f"REVOKE CONNECT ON DATABASE {_ident(bank)} FROM PUBLIC")
+        statements.append(f"REVOKE ALL ON DATABASE {_ident(bank)} FROM {_ident(role)}")
+    statements.append("SELECT 'ok'")
+    return statements
+
+
+def extension_statements() -> list[str]:
+    statements = []
+    for name in EXTENSIONS:
+        statements += [f"CREATE EXTENSION IF NOT EXISTS {_ident(name)}",
+                       f"ALTER EXTENSION {_ident(name)} UPDATE"]
+    statements.append(_extension_versions())
+    return statements
+
+
+def _extension_versions() -> str:
+    return ("SELECT coalesce(string_agg(extname || ' ' || extversion, ', ' ORDER BY extname), '') "
+            f"FROM pg_extension WHERE extname IN ({_names(EXTENSIONS)})")
+
+
+# ── the file ──────────────────────────────────────────────────────────────────
+
+def read_file(path: Path) -> dict[str, str]:
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return {}
+    values = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def _write_private(path: Path, text: str) -> Path:
+    """Write ``text`` to a new owner-only file beside ``path``; returns it."""
+    from pseudolife_memory.private_state import open_private
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(f".{path.name}.{os.getpid()}.new")
+    staged.unlink(missing_ok=True)
+    fd = open_private(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    return staged
+
+
+def _shown(path: Path) -> str:
+    try:
+        return "~/" + path.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+# ── the command ───────────────────────────────────────────────────────────────
+
+class _Report:
+    def __init__(self, out, as_json: bool):
+        self.out, self.as_json = out, as_json
+        self.lines: list[str] = []
+        self.data: dict = {}
+
+    def say(self, line: str) -> None:
+        self.lines.append(line)
+        if not self.as_json:
+            print(line, file=self.out, flush=True)
+
+    def finish(self, code: int, error: str | None = None) -> int:
+        if error and not self.as_json:
+            print(f"test-login: {error}", file=self.out, flush=True)
+        if self.as_json:
+            print(json.dumps({"exit": code, "error": error, "changes": self.lines, **self.data}),
+                  file=self.out, flush=True)
+        return code
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="pseudolife-mcp test-login",
+        description=("Give the test suite its own Postgres login, which can create and drop "
+                     "its own databases and cannot connect to the bank."))
+    sub = parser.add_subparsers(dest="action", required=True)
+    create = sub.add_parser(
+        "create", help="create the test login, or re-apply it; idempotent",
+        description=("Create or reset the test login, close the bank to it (REVOKE CONNECT "
+                     "FROM PUBLIC), install vector in template1, and write the login to a "
+                     "test-only file. Run on the daemon host, once; again any time."))
+    create.add_argument("--role", default=DEFAULT_ROLE, help=f"role name (default {DEFAULT_ROLE})")
+    create.add_argument("--file", type=Path, default=None,
+                        help=f"where to write the login (default ${FILE_ENV}, else "
+                             f"~/.pseudolife-mcp/test-pg.env)")
+    create.add_argument("--rotate", action="store_true",
+                        help="draw a new password instead of re-applying the file's")
+    create.add_argument("--bank", action="append", default=[], metavar="DB",
+                        help="another production database to close (repeatable)")
+    create.add_argument("--admin-url", default=None,
+                        help="a superuser URL; without it, psql in the Postgres container")
+    create.add_argument("--container", default=POSTGRES_CONTAINER,
+                        help=f"the Postgres container (default {POSTGRES_CONTAINER})")
+    create.add_argument("--json", action="store_true", help="print one JSON report")
+    return parser
+
+
+def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
+    out = sys.stdout if out is None else out
+    try:
+        args = _parser().parse_args(argv)
+    except SystemExit as exc:
+        return EXIT_OK if exc.code == 0 else EXIT_USAGE
+    report = _Report(out, args.json)
+    if not _ROLE_NAME.fullmatch(args.role):
+        return report.finish(EXIT_USAGE, f"role name {args.role!r} must match "
+                                         f"{_ROLE_NAME.pattern}")
+    named = [bank for bank in args.bank if bank in _NOT_BANKS]
+    if named:
+        return report.finish(EXIT_USAGE, f"{named[0]} is not a bank and stays open")
+    path = args.file or Path(os.environ.get(FILE_ENV) or DEFAULT_FILE)
+    banks = list(dict.fromkeys([*DEFAULT_BANKS, *args.bank]))
+    if executor is None:
+        if args.admin_url:
+            executor = AdminUrl(args.admin_url)
+            daemon_db = _dsn_database(os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL"))
+            if daemon_db:
+                banks.append(daemon_db)
+        elif shutil.which("docker"):
+            executor = ContainerPsql(args.container)
+        else:
+            return report.finish(EXIT_REFUSED, (
+                "no superuser connection: run this on the Docker host, where the "
+                f"{args.container} container runs, or give --admin-url with a superuser URL"))
+    try:
+        return _create(args, executor, path, banks, report)
+    except DatabaseError as exc:
+        return report.finish(EXIT_FAILED, f"the database refused: {exc}")
+
+
+def _dsn_database(dsn: str | None) -> str | None:
+    if not dsn:
+        return None
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        return conninfo_to_dict(dsn).get("dbname") or None
+    except Exception:  # noqa: BLE001 - only a hint; --bank names it explicitly
+        return None
+
+
+def _create(args, executor, path: Path, banks: list[str], report: _Report) -> int:
+    who = json.loads(executor.query(None, [whoami_statement()]))
+    if not who.get("super"):
+        return report.finish(EXIT_REFUSED, (
+            f"{executor.description} logs in as {who.get('who')!r}, which is not a superuser. "
+            "Installing vector into template1 needs one (it is not a trusted extension); on "
+            "the Docker tier that is the bank owner, POSTGRES_USER. Nothing was changed."))
+    if args.role == who.get("who"):
+        return report.finish(EXIT_REFUSED, f"{args.role} is the role this runs as; "
+                                           "the test login must be a different one")
+    if who.get("db") and who["db"] not in _NOT_BANKS and isinstance(executor, ContainerPsql):
+        banks.append(who["db"])  # the container's POSTGRES_DB is the bank
+    banks = [bank for bank in dict.fromkeys(banks) if bank not in _NOT_BANKS]
+    before = json.loads(executor.query("postgres", [state_statement(args.role, banks)]))
+    role = before.get("role")
+    if role and role.get("super"):
+        return report.finish(EXIT_REFUSED, f"role {args.role} exists and is a superuser: not "
+                                           "a test login, and this will not demote it")
+    owned = [bank for bank in before.get("owns") or () if bank in banks]
+    owners = [bank for bank, info in (before.get("banks") or {}).items()
+              if info.get("owner") == args.role]
+    if owned or owners:
+        return report.finish(EXIT_REFUSED, f"role {args.role} owns the bank "
+                                           f"{(owned or owners)[0]}: not a test login")
+    present = sorted((before.get("banks") or {}).keys())
+    old = read_file(path)
+    reuse = (not args.rotate and old.get(USER_KEY, DEFAULT_ROLE) == args.role
+             and bool(old.get(PASSWORD_KEY)))
+    password = old[PASSWORD_KEY] if reuse else secrets.token_urlsafe(32)
+    report.say(f"test-login: on {executor.description}, as {who.get('who')} (superuser)")
+
+    staged = _write_private(path, f"{_FILE_HEADER}{USER_KEY}={args.role}\n"
+                                  f"{PASSWORD_KEY}={password}\n")
+    try:
+        executor.query("postgres", role_statements(args.role, scram_verifier(password), present))
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    os.replace(staged, path)  # the role now has this password: so does the file
+    how = ("password re-applied from the file" if reuse
+           else "password rotated" if role and old.get(PASSWORD_KEY) else "password set")
+    report.say(f"  role {args.role}: {'reset' if role else 'created'}: LOGIN CREATEDB, not "
+               f"superuser, no CREATEROLE, REPLICATION or BYPASSRLS; {how}")
+    for granted in before.get("member_of") or ():
+        report.say(f"  role {args.role}: membership in {granted} revoked")
+    for bank in present:
+        info = before["banks"][bank]
+        state = ("CONNECT revoked from PUBLIC" if info.get("public_connect")
+                 else "already closed to PUBLIC")
+        report.say(f"  database {bank}: {state}; its owner {info.get('owner')} keeps CONNECT")
+    for bank in banks:
+        if bank not in present:
+            report.say(f"  database {bank}: not on this server")
+
+    old_ext = executor.query("template1", [_extension_versions()])
+    new_ext = executor.query("template1", extension_statements())
+    if not old_ext:
+        report.say(f"  template1: installed {new_ext}, so every database the test login "
+                   "creates has it")
+    elif old_ext != new_ext:
+        report.say(f"  template1: updated {old_ext} to {new_ext}")
+    else:
+        report.say(f"  template1: already has {new_ext}")
+
+    after = json.loads(executor.query("postgres", [state_statement(args.role, banks)]))
+    problems = _verify(after, args.role, present)
+    report.say(f"  wrote {_shown(path)} (owner-only): {USER_KEY}, {PASSWORD_KEY}")
+    others = after.get("others") or []
+    if others:
+        report.say("  other databases PUBLIC may connect to (the test login holds no table "
+                   f"privileges there; close them with --bank): {', '.join(others)}")
+    report.data = {"role": args.role, "file": str(path), "banks": present,
+                   "template1": new_ext, "others": others, "password_reused": reuse}
+    if problems:
+        return report.finish(EXIT_FAILED, "after the change: " + "; ".join(problems))
+    closed = ", ".join(present) or "no production database (none on this server)"
+    report.say(f"done: the test suite on this account logs in as {args.role}, which cannot "
+               f"connect to {closed}. Copy the file to another account's "
+               "~/.pseudolife-mcp/ to give its sessions the same login.")
+    return report.finish(EXIT_OK)
+
+
+def _verify(state: dict, role: str, banks: list[str]) -> list[str]:
+    problems = []
+    attributes = state.get("role") or {}
+    expected = {"super": False, "login": True, "createdb": True, "createrole": False,
+                "replication": False, "bypassrls": False}
+    wrong = [key for key, value in expected.items() if attributes.get(key) is not value]
+    if not attributes:
+        problems.append(f"role {role} does not exist")
+    elif wrong:
+        problems.append(f"role {role} has the wrong {', '.join(wrong)}")
+    if state.get("member_of"):
+        problems.append(f"role {role} is still a member of {', '.join(state['member_of'])}")
+    for bank in banks:
+        info = (state.get("banks") or {}).get(bank) or {}
+        if info.get("public_connect"):
+            problems.append(f"PUBLIC can still connect to {bank}")
+        if info.get("role_connect"):
+            problems.append(f"{role} can still connect to {bank}")
+        if not info.get("owner_connect"):
+            problems.append(f"the owner of {bank} lost CONNECT")
+    return problems
+
+
+if __name__ == "__main__":  # pragma: no cover - `python -m` entry
+    sys.exit(main())
