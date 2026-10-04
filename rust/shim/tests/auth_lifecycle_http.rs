@@ -39,6 +39,8 @@ fn server(
                 Err(_) => panic!("disposable endpoint received no request"),
             }
         };
+        // Accepted sockets can inherit the listener's nonblocking mode on Windows.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();

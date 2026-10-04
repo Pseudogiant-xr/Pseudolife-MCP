@@ -280,7 +280,12 @@ async fn late_probe(codex: bool, ready: bool) {
     );
     let home = Home::new();
     let runtime = runtime(&fixture, codex);
-    let board = Board::attach_options(runtime.clone(), fast(&runtime, &home, "")).await;
+    let mut timing = fast(&runtime, &home, "");
+    if codex && ready {
+        // This probe-recovery case uses the production per-thread setup budget.
+        timing.timing.startup = pseudolife_stdio::board::Timing::default().startup;
+    }
+    let board = Board::attach_options(runtime.clone(), timing).await;
     assert!(!board.board_checkin().await);
     fixture.wait("coordination-start", 2).await;
     if ready {
