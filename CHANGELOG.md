@@ -35,6 +35,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without this fix still mislabels the runtime it installs, the fixed
   release's included. Run `pseudolife-mcp update` from outside a
   checkout to avoid that.
+### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
+- `connect`'s MCP handshake ran its child Python, and the shim that child
+  starts, in the current directory. `python -c` and `-m` put that directory
+  first on `sys.path`, so `connect` run from inside a source checkout
+  validated the checkout's `pseudolife_memory` instead of the installed one.
+  The handshake child now runs from the system temporary directory, and the
+  shim it starts inherits that directory, and a relative token-file path
+  in a registration is resolved against the directory `connect` ran from
+  before the child gets it, as the checks before the handshake already
+  resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
+  which `-I` would ignore.
 
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
