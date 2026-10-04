@@ -374,6 +374,7 @@ def test_maintainer_passkeys_unset_is_information_not_failure():
     with _MaintainerDaemon(409, body) as daemon:
         out = doctor_cli.maintainer_probe(daemon.url, "fixture-token", timeout=2)
     assert out["state"] == "off" and "recovery" not in out
+    assert "pseudolife-mcp maintainer setup" in out["line"]      # the way to turn it on
 
 
 def test_a_maintainer_config_the_daemon_refuses_is_a_failure_with_the_fix():
@@ -384,6 +385,7 @@ def test_a_maintainer_config_the_daemon_refuses_is_a_failure_with_the_fix():
     assert out["state"] == "invalid" and "plain http" in out["line"]
     assert out["recovery"] == doctor_cli.MAINTAINER_FIX
     assert "coordination.maintainer.origin" in doctor_cli.MAINTAINER_FIX
+    assert doctor_cli.MAINTAINER_FIX.startswith("Run `pseudolife-mcp maintainer setup`")
 
 
 @pytest.mark.parametrize("status,body,state", [

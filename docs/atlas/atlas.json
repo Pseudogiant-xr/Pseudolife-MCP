@@ -1577,8 +1577,9 @@
    "p": "pseudolife_memory/update_cli.py",
    "d": [
     "Release mode: newest PyPI version → refuse a downgrade → docker pull the GHCR daemon image → backup → rollback tag <current>-pre-update-<stamp> → prune → compose up -d --no-deps pseudolife-daemon (GHCR overlay) → health expecting that version → clients (not with --daemon-only)",
-    "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag → prune → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → BuildKit cache prune",
-    "Held under an OS update.lock in the data dir (busy = exit 2); backup is the checkout's backup script, else a built-in in-container pg_dump + /data tar; exit 1 daemon failure, 2 could not run, 3 current, 5 client step failed"
+    "Checkout mode (--checkout; what ops/update.* run): clean-tree guard (--allow-dirty) → backup → rollback tag → prune → HEAD re-checked → up -d --no-deps --build with git sha / dirty / build time stamped → health → clients only with --all → test-suite login (test-login create, never --rotate) when this account has no test-pg.env and the bundled Postgres runs here (--no-test-login skips; release mode never) → BuildKit cache prune",
+    "Held under an OS update.lock in the data dir (busy = exit 2); backup is the checkout's backup script, else a built-in in-container pg_dump + /data tar; exit 1 daemon failure, 2 could not run, 3 current, 5 client step failed",
+    "Both Docker modes end (not with --clients-only) with one line naming pseudolife-mcp maintainer setup while a bearer-gated daemon has no valid coordination.maintainer name or no active passkey (maintainer_setup.passkeys_set_up); at a terminal it offers to run it, default no"
    ]
   },
   {
@@ -1622,7 +1623,8 @@
    "p": "pseudolife_memory/maintainer_cli.py",
    "d": [
     "enrol-code prints a one-time 10-character base32 code (10 min, stored hashed, refused while any key is pending or active) and waits to print the redeeming key's prefix and label; confirm <prefix> activates it; revoke <prefix>; reset --yes; list",
-    "Opens the bank directly (PSEUDOLIFE_MCP_DATABASE_URL or the lite tier's instance), never through a bearer: what keeps an agent holding only a bearer from enrolling, confirming or revoking a key"
+    "Opens the bank directly (PSEUDOLIFE_MCP_DATABASE_URL or the lite tier's instance), never through a bearer: what keeps an agent holding only a bearer from enrolling, confirming or revoking a key",
+    "setup (maintainer_setup.py) is the guided first setup: health with auth → tier (the daemon container, else this install) → the daemon's own config and keys read in its environment (docker exec / this interpreter, python -m pseudolife_memory.maintainer_setup state; MaintainerConfig.problem()) → a valid name is kept, else the tailnet HTTPS name (tailscale serve --bg --https=8443, verified, undone if it does not take; Tailscale stopped or without HTTPS certificates is refused) or http://localhost:<port> → one confirmation (--yes) → config write with a backup → docker restart → enrol-code, then one y/N after the prefix check (N revokes)"
    ]
   }
  ],

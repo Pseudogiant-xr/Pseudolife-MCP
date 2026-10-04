@@ -815,44 +815,68 @@ holds one of the two roles at most: the delegate's own claim of the
 coordinator lease is refused `already_delegate`, and a session queued for it
 leaves the queue when it is made the delegate.
 
-**Setup.**
+**Setup.** On the daemon host, run:
 
-1. Serve the Console over HTTPS at one fixed name, because browsers only
-   offer passkeys there (or on `localhost`), and a passkey is bound to that
-   name. On a Tailscale host:
+```sh
+pseudolife-mcp maintainer setup
+```
 
-   ```sh
-   tailscale serve --https=8443 http://127.0.0.1:8765
-   ```
+A daemon-host install offers it at the end, and `pseudolife-mcp update`
+names it until it is done. It shows what it will change and asks once
+before changing anything (`--yes` answers for it), then:
 
-2. Set the name in the daemon's config file (these keys are refused through
-   `POST /api/config`, which any principal can call):
+1. Names the Console at one fixed address. Browsers offer passkeys only
+   over HTTPS (or on `localhost`), and a passkey is bound to that name. With
+   Tailscale running and the tailnet's HTTPS certificates on, the name is
+   `https://<machine>.<tailnet>.ts.net:8443`, served by `tailscale serve --bg
+   --https=8443 http://127.0.0.1:8765` (verified, and taken back off if it
+   does not take). Without Tailscale, or with `--local`, it is
+   `http://localhost:8765`, for a browser on this machine only. Tailscale
+   installed but stopped, or without HTTPS certificates, is refused, and the
+   message names both ways out. `--port` and `--https-port` pick other
+   ports.
+2. Writes `coordination.maintainer.rp_id` and `origin` into the daemon's
+   config file, with a backup beside it, and restarts the daemon container
+   (`docker restart`: the same container and volumes). A lite daemon is not
+   restarted for you: stop `pseudolife-mcp serve` and run the command again.
+3. Prints a one-time enrolment code, valid for 10 minutes. In the Console,
+   open Settings, Your passkeys, enter the code and a label, and create the
+   passkey. The command prints the new key's id prefix and label and asks
+   whether the Console shows the same: `y` activates the key, anything else
+   revokes it (someone else may have redeemed the code); run the command
+   again to retry.
 
-   ```yaml
-   coordination:
-     maintainer:
-       rp_id: <machine>.<tailnet>.ts.net
-       origin: https://<machine>.<tailnet>.ts.net:8443
-   ```
+Run again, it reports what is in place and changes nothing (`--check`
+only answers: exit 0 set up, 1 not), and an installer re-run asks nothing
+once passkeys are in place. It never renames a valid name, since every
+passkey bound to it would stop working.
+It reads and writes the daemon's config and the bank from the daemon's own
+environment (inside the container on the Docker tier), so it needs no
+bearer token.
 
-   For a daemon used only on this machine, `rp_id: localhost` with
-   `origin: http://localhost:8765` also works. Any other plain-HTTP origin is
-   refused (`409 maintainer_https_required`).
+By hand, the same steps: serve the Console over HTTPS as above; set the
+name in the daemon's config file (these keys are refused through `POST
+/api/config`, which any principal can call), then restart the daemon:
 
-3. Enrol your first passkey. On the daemon host run
-   `pseudolife-mcp maintainer enrol-code` (in the Docker tier, inside the
-   daemon container). It prints a one-time code, valid for 10 minutes. In the
-   Console, open Settings, Your passkeys, enter the code and a label, and
-   create the passkey. The command then prints the new key's id prefix; check
-   it matches the Console and run `pseudolife-mcp maintainer confirm <prefix>`
-   on the host. Only then is the key active.
+```yaml
+coordination:
+  maintainer:
+    rp_id: <machine>.<tailnet>.ts.net
+    origin: https://<machine>.<tailnet>.ts.net:8443
+```
 
-4. Add more keys from Settings: an active key approves the new one, which waits
-   24 hours before it can sign anything, and any older key can cancel it in
-   that time. A key can revoke itself; only the host revokes an older key:
-   `pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes
-   every key and reopens enrolment. `pseudolife-mcp maintainer list` shows
-   them all.
+(`rp_id: localhost` with `origin: http://localhost:8765` for local use;
+any other plain-HTTP origin is refused, `409 maintainer_https_required`);
+then run `pseudolife-mcp maintainer enrol-code` (on the Docker tier, inside
+the daemon container), redeem the code in the Console, check the printed
+prefix against it, and run `pseudolife-mcp maintainer confirm <prefix>`.
+Only then is the key active.
+
+Add more keys from Settings: an active key approves the new one, which waits
+24 hours before it can sign anything, and any older key can cancel it in
+that time. A key can revoke itself; only the host revokes an older key:
+`pseudolife-mcp maintainer revoke <prefix>`, or `reset`, which revokes every
+key and reopens enrolment. `pseudolife-mcp maintainer list` shows them all.
 
 **What a passkey does not prove.**
 
@@ -3304,8 +3328,12 @@ per-run test databases so the suite can prune them, installs `vector` in
 (`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it). It runs `psql` inside the
 `pseudolife-mcp-postgres` container, or uses `--admin-url` for another
 server, and is idempotent. The installers run it only with `-TestLogin` /
-`--test-login` (for contributors who run the suite against this server);
-`pseudolife-mcp update` never does. A bank restore keeps the bank closed
+`--test-login` (for contributors who run the suite against this server). A
+checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's host)
+runs it when this account has no login file and the bundled Postgres
+container runs here, never with `--rotate` (`-NoTestLogin` /
+`--no-test-login` skips it); a refusal only warns, with the fix. A release
+update (`pseudolife-mcp update`) never does. A bank restore keeps the bank closed
 (`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it);
 re-running `test-login create` checks it. Details, and running agent
 sessions under a separate account: [agent isolation](agent-isolation.md).
@@ -3493,6 +3521,16 @@ installer and the session notices print.
 | `--allow-downgrade` | with `--tag`, allow a release older than the one the daemon runs (refused otherwise: the bank's schema may be newer than that release knows) |
 | `--env-file <path>` | the compose env file, when the one the container was created with is gone (without it the recreate would reset the Postgres password, the volume names and the bearer, so it stops instead) |
 | `--no-backup`, `--rollback-tag`, `--keep-rollbacks`, `--force-rollback-tag`, `--health-retries`, `--health-delay-ms`, `--no-cache-prune`, `--json` | the checkout deploy's knobs, same meaning |
+
+Until maintainer passkeys are set up on a daemon that requires a bearer, a
+Docker-tier update (release or checkout, not `--clients-only`) ends with
+one line naming `pseudolife-mcp maintainer setup`; at a terminal it offers
+to run it, default no (see
+[Maintainer messages and roles from the Console](#maintainer-messages-and-roles-from-the-console)).
+A checkout deploy also creates the test suite's own Postgres login when it
+is missing (see
+[The test suite's Postgres login](#the-test-suites-postgres-login-pseudolife-mcp-test-login));
+a release update never does.
 
 What it refuses: a target it cannot read (PyPI unreachable and no
 `--tag`: nothing is guessed), a downgrade without `--allow-downgrade`,

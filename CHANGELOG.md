@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
+- Turning on maintainer passkeys took four manual steps on the daemon host:
+  a `tailscale serve` command, a hand edit of the daemon's config file, a
+  restart, and two `pseudolife-mcp maintainer` commands (inside the daemon
+  container on the Docker tier). `pseudolife-mcp maintainer setup` now does
+  all of it, guided. It picks the Console's name: this host's tailnet HTTPS
+  name when Tailscale runs with HTTPS certificates on (and serves it with
+  `tailscale serve --bg --https=8443`), else `http://localhost:<port>`. It
+  writes `coordination.maintainer` into the daemon's config with a backup,
+  restarts the daemon container (`docker restart`), and runs the enrolment.
+  It asks once before any host change (`--yes` for scripts). Only the
+  passkey tap and one y/N question remain for the maintainer: does the
+  Console show the printed prefix and label? N revokes the key. A re-run on
+  a configured host changes nothing, and a valid name is never replaced.
+  Tailscale stopped or without HTTPS certificates is refused rather than
+  guessed. The command reads the daemon's config and the bank in the
+  daemon's own environment, so it needs no bearer.
+- A daemon-host install with a token offers the setup at the end (default
+  yes); an install without a terminal prints one line naming the command,
+  and a re-run where passkeys are in place asks nothing (`maintainer setup
+  --check`: exit 0 set up, 1 not, 2 unreadable).
+- A Docker-tier `pseudolife-mcp update` (release or checkout mode) ends with
+  one line naming `pseudolife-mcp maintainer setup` until passkeys are set
+  up on a bearer-gated daemon. At a terminal it offers to run it (default
+  no). `pseudolife-mcp doctor`'s passkey line and fix name the command too.
+- A checkout deploy (`ops/update.ps1` / `ops/update.sh`, a contributor's
+  host) creates the test suite's own Postgres login (`test-login create`,
+  never `--rotate`) when the account has no `~/.pseudolife-mcp/test-pg.env`
+  and the bundled Postgres container runs on the host. A refusal warns with
+  the fix and leaves the deploy standing; `-NoTestLogin` /
+  `--no-test-login` skips it. A release update never creates it.
+
 ### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
 - The maintainer could not reach a board session at all, and changing who
   holds a project's delegate or coordinator role took a shell on the daemon

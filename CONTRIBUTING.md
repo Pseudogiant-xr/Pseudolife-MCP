@@ -29,7 +29,9 @@ owner); the **test login file** `~/.pseudolife-mcp/test-pg.env`
 (`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it); `POSTGRES_PASSWORD` from
 `ops/.env`, as the bank owner; the compose default. Create the test login
 once with `pseudolife-mcp test-login create` on the daemon host (or install
-with `ops/install.ps1 -TestLogin` / `ops/install.sh --test-login`): it is a
+with `ops/install.ps1 -TestLogin` / `ops/install.sh --test-login`; a
+checkout deploy, `ops/update.ps1` / `ops/update.sh`, creates it when it is
+missing): it is a
 role that creates and drops
 its own databases and cannot connect to the bank, so no checkout needs
 `ops/.env`, which holds the bank owner's password. A run that still logs in

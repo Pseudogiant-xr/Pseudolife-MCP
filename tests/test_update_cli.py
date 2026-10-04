@@ -1137,3 +1137,201 @@ def test_step_lines_and_streamed_children_land_in_the_order_they_happened(tmp_pa
 
     order = [first(m) for m in markers]
     assert order == sorted(order), "\n".join(lines)
+
+
+# ── contributor hosts: the test suite's own Postgres login ─────────────────
+
+@pytest.fixture
+def test_login(world, tmp_path, monkeypatch):
+    """The test-login command, recorded not run, with its file in tmp_path
+    and the bundled Postgres container local and running."""
+    from pseudolife_memory import test_login_cli
+    seen: list[list[str]] = []
+    answer = {"exit": 0, "error": None,
+              "changes": ["  role pseudolife_test: created: LOGIN CREATEDB, not superuser"]}
+
+    def create(argv):
+        seen.append(list(argv))
+        return dict(answer)
+
+    monkeypatch.setattr(up, "create_test_login", create)
+    monkeypatch.setenv(test_login_cli.FILE_ENV, str(tmp_path / "test-pg.env"))
+    world.pg_running = "true"
+    return {"seen": seen, "answer": answer, "file": tmp_path / "test-pg.env"}
+
+
+def _pg_aware(world: World) -> None:
+    """``docker inspect`` of the Postgres container answers the table's state."""
+    inner = world.docker
+
+    def docker(a):
+        if a[:2] == ["inspect", "-f"] and a[3] == PG:
+            state = getattr(world, "pg_running", None)
+            return (0, state + "\n") if state else (1, "Error: No such object")
+        return inner(a)
+
+    world.docker = docker
+
+
+def test_a_checkout_deploy_creates_the_missing_test_login(world, clients, test_login, tmp_path, capsys):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]]                 # never --rotate
+    out = capsys.readouterr().out
+    assert "role pseudolife_test: created" in out and "test login" in out
+    compose = next(i for i, c in enumerate(world.calls) if c[1:2] == ["compose"])
+    inspect = next(i for i, c in enumerate(world.calls) if c[-1] == PG)
+    assert compose < inspect                                  # after the daemon is back
+
+
+def test_a_present_test_login_file_is_left_alone(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    test_login["file"].write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n", encoding="utf-8")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_no_local_bundled_postgres_no_test_login(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    world.pg_running = None
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+    world.pg_running = "false"
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_refused_test_login_warns_with_the_fix_and_the_deploy_stands(world, clients, test_login,
+                                                                       tmp_path, capsys):
+    _pg_aware(world)
+    test_login["answer"].update(exit=4, changes=[], error=(
+        "role pseudolife_test already exists and ~/.pseudolife-mcp/test-pg.env holds no "
+        "password for it"))
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    captured = capsys.readouterr()
+    assert "already exists" in captured.err
+    fix = [line for line in (captured.out + captured.err).splitlines() if "--rotate" in line]
+    assert len(fix) == 1 and "test-login create" in fix[0]
+
+
+def test_no_test_login_skips_it(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune", "--no-test-login"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_a_release_update_never_creates_a_test_login(world, clients, test_login, tmp_path):
+    """End users' bank servers get no CREATEDB password login (review,
+    2026-10-04): only checkout mode, a contributor's host, makes one."""
+    _pg_aware(world)
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    assert _run(["--health-delay-ms", "1"]) == 0
+    assert _run(["--reinstall", "--health-delay-ms", "1"]) == 0
+    assert test_login["seen"] == []
+
+
+def test_no_test_login_is_a_checkout_option(world, clients, tmp_path, capsys):
+    _project(world, tmp_path)
+    assert _run(["--no-test-login"]) == 2
+    assert "--no-test-login" in capsys.readouterr().err
+
+
+def test_create_test_login_runs_the_command_and_reads_its_report(monkeypatch):
+    from pseudolife_memory import test_login_cli
+
+    def fake_main(argv, *, out=None, executor=None):
+        assert argv == ["create", "--json"]
+        print(json.dumps({"exit": 0, "error": None, "changes": ["x"]}), file=out)
+        return 0
+
+    monkeypatch.setattr(test_login_cli, "main", fake_main)
+    assert up.create_test_login(["create"]) == {"exit": 0, "error": None, "changes": ["x"]}
+
+
+# ── maintainer passkeys: a reminder, and an offer at a terminal ─────────────
+
+@pytest.fixture
+def passkeys(monkeypatch):
+    from pseudolife_memory import maintainer_setup
+    state = {"set_up": False, "ran": [], "tty": False, "answer": "n", "asked": []}
+    monkeypatch.setattr(maintainer_setup, "passkeys_set_up", lambda: state["set_up"])
+    monkeypatch.setattr(maintainer_setup, "main", lambda argv: state["ran"].append(argv) or 0)
+    monkeypatch.setattr(up, "interactive", lambda: state["tty"])
+    monkeypatch.setattr(up, "ask", lambda question: state["asked"].append(question) or state["answer"])
+    return state
+
+
+def _auth(world: World) -> None:
+    for answer in world.health:
+        if isinstance(answer, dict):
+            answer["auth"] = True
+
+
+def test_an_update_points_at_the_setup_until_passkeys_are_set_up(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path)
+    world.health = [{"status": "ok", "version": "0.15.0"}, {"status": "ok", "version": "0.15.1"}]
+    _auth(world)
+    assert _run(["--health-delay-ms", "1"]) == 0
+    out = capsys.readouterr().out
+    [line] = [line for line in out.splitlines() if "maintainer setup" in line]
+    assert "pseudolife-mcp maintainer setup" in line
+    assert passkeys["ran"] == []                               # no terminal: no offer
+    passkeys["set_up"] = True
+    assert _run(["--health-delay-ms", "1"]) == 0               # already current: still checked
+    assert "maintainer setup" not in capsys.readouterr().out
+
+
+def test_a_checkout_deploy_reminds_too(world, clients, passkeys, tmp_path, capsys):
+    root, _ = _checkout(world, tmp_path)
+    _auth(world)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert "pseudolife-mcp maintainer setup" in capsys.readouterr().out
+
+
+def test_at_a_terminal_the_update_offers_to_run_it(world, clients, passkeys, tmp_path):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run([]) == 0
+    assert passkeys["ran"] == [["--yes"]]                      # the one question answered for it
+    assert "tailscale serve" in passkeys["asked"][0] and "restart" in passkeys["asked"][0]
+    passkeys.update(answer="")
+    assert _run([]) == 0
+    assert passkeys["ran"] == [["--yes"]]                      # the default is no
+
+
+def test_a_tokenless_or_unreadable_daemon_gets_no_reminder(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path, version="0.15.1")
+    assert _run([]) == 0                                       # /health without "auth": true
+    passkeys["set_up"] = None
+    _auth(world)
+    assert _run([]) == 0                                       # state unknown
+    assert "maintainer setup" not in capsys.readouterr().out
+
+
+def test_json_and_clients_only_runs_never_ask(world, clients, passkeys, tmp_path, capsys):
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    passkeys.update(tty=True, answer="y")
+    assert _run(["--json"]) == 0
+    assert _run(["--clients-only"]) == 0
+    assert passkeys["ran"] == []
+
+
+def test_the_passkey_offer_runs_after_the_update_lock_is_released(world, clients, passkeys, tmp_path, monkeypatch):
+    """Review 2026-10-05: enrolment waits minutes for the Console; an
+    unattended update must not find the lock held all that time."""
+    _project(world, tmp_path, version="0.15.1")
+    _auth(world)
+    held = []
+    from pseudolife_memory import maintainer_setup
+    monkeypatch.setattr(maintainer_setup, "main", lambda argv: held.append(up.UpdateLock()._lock.acquire()) or 0)
+    passkeys.update(tty=True, answer="y")
+    assert _run([]) == 0
+    assert held == [True]

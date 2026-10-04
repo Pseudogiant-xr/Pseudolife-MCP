@@ -76,9 +76,13 @@ The installers run it only when asked: `ops/install.ps1 -TestLogin` or
 there only warns). Use that, or the command by hand, on a machine where
 someone runs the test suite against the bundled server, as a contributor
 or an agent account does; an install that only uses its bank has no need
-for a password login that can create databases. `pseudolife-mcp update`
-never runs it: it is the deploy path, and changing roles and grants on the
-live server is a separate decision.
+for a password login that can create databases. A checkout deploy
+(`ops/update.ps1` / `ops/update.sh`) runs it too, since only a contributor's
+host deploys from a checkout: when this account has no login file and the
+bundled Postgres container runs on the host, never with `--rotate`
+(`-NoTestLogin` / `--no-test-login` skips it). A release update
+(`pseudolife-mcp update`) never runs it: an end user's server gets no
+password login that can create databases.
 
 The suite logs in with the first of:
 
