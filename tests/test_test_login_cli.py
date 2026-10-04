@@ -133,10 +133,10 @@ class _FakeServer:
     """Answers the command's queries the way a server would, and records them."""
 
     def __init__(self, *, superuser=True, user="pseudolife", database="pseudolife_memory",
-                 role=None, owns=(), fail_on=None, daemon=None):
+                 role=None, owns=(), fail_on=None, daemon=None, leftovers=()):
         self.superuser, self.user, self.database = superuser, user, database
         self.role, self.owns, self.fail_on = role, list(owns), fail_on
-        self.daemon = daemon
+        self.daemon, self.leftovers = daemon, list(leftovers)
         self.calls: list[tuple[str | None, list[str]]] = []
         self.applied = False
         self.vector = ""
@@ -163,7 +163,8 @@ class _FakeServer:
             return json.dumps({"role": role, "member_of": [], "banks": banks,
                                "owns": self.owns, "others": ["pseudolife_memory_bench"],
                                "daemon": self.daemon,
-                               "template1_public_connect": not self.applied})
+                               "template1_public_connect": not self.applied,
+                               "leftovers": [] if self.applied else self.leftovers})
         if "CREATE EXTENSION" in sql:
             before, self.vector = self.vector, "vector 0.8.6"
             return f"{before}|{self.vector}"
@@ -312,6 +313,45 @@ def test_an_answer_that_is_not_json_fails_cleanly(tmp_path):
     assert code == cli.EXIT_FAILED
     assert "test-login:" in out
     assert not (tmp_path / "test-pg.env").exists()
+
+
+LEFTOVERS = ["pseudolife_memory_test_4242", "pseudolife_memory_bench_wsl77",
+             "pseudolife_memory_bench_audit_913"]
+
+
+def test_leftover_test_databases_are_handed_to_the_login(tmp_path):
+    """A hard-killed run as the bank owner leaves its per-run database; the
+    test login's prune cannot drop a database it does not own."""
+    server = _FakeServer(leftovers=[*LEFTOVERS, "pseudolife_memory", "pseudolife_memory_bench",
+                                    "pseudolife_memory_test_x", "mydb_test_1"])
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_OK, out
+    sql = "\n".join(s for _, statements in server.calls for s in statements)
+    for name in LEFTOVERS:
+        assert f'ALTER DATABASE "{name}" OWNER TO "pseudolife_test"' in sql
+        assert f"database {name}: a leftover test database, handed to pseudolife_test" in out
+    for name in ("pseudolife_memory", "pseudolife_memory_bench", "pseudolife_memory_test_x",
+                 "mydb_test_1"):
+        assert f'ALTER DATABASE "{name}"' not in sql
+
+
+@pytest.mark.parametrize("name,matches", [
+    ("pseudolife_memory_test_4242", True), ("pseudolife_memory_bench_wsl77", True),
+    ("pseudolife_memory_bench_audit_913", True), ("pseudolife_memory_test_proof_12", True),
+    ("pseudolife_memory", False), ("pseudolife_memory_bench", False),
+    ("pseudolife_memory_test", False), ("pseudolife_memory_test_gw0", False),
+    ("pseudolife_memory_test_x", False), ("xpseudolife_memory_test_1", False),
+])
+def test_the_leftover_pattern_is_the_pruners(name, matches):
+    """tests/pg_fixtures.py prunes `pseudolife_memory_test_*` and
+    `pseudolife_memory_bench_*` whose last segment is a run's pid."""
+    from tests.pg_defaults import own_run_pid
+
+    assert bool(cli.LEFTOVER_DATABASE.fullmatch(name)) is matches
+    pruner = (name.startswith(("pseudolife_memory_test_", "pseudolife_memory_bench_"))
+              and any(own_run_pid(name.rsplit("_", 1)[1], namespace=ns) is not None
+                      for ns in ("", "wsl")))
+    assert pruner is matches
 
 
 def test_template1_is_closed_to_public(tmp_path):
@@ -517,7 +557,8 @@ def provisioned(scratch_admin, tmp_path_factory):
     user, password = login_file_credentials(login_file)
     assert user == CI_ROLE
     return {"admin": scratch_admin, "file": login_file, "user": user,
-            "password": password, "host_port": host_port}
+            "password": password, "host_port": host_port,
+            "admin_user": parts.get("user", "postgres")}
 
 
 def _login_url(provisioned, database):
@@ -583,6 +624,59 @@ def test_the_login_runs_the_suites_database_lifecycle(provisioned):
     finally:
         with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+def test_leftovers_of_an_owner_run_are_handed_over_and_refused_meanwhile(provisioned,
+                                                                         monkeypatch):
+    """A hard-killed run as the admin leaves `pseudolife_memory_test_<pid>`.
+    Until `create` hands it over, a run of the login that reuses the name is
+    refused with the fix; after it, the login can drop it. Nothing outside
+    the pruner's pattern changes owner."""
+    import psycopg
+    from tests import pg_fixtures
+    from tests.pg_defaults import PostgresSetupError, RedactedUrl
+
+    stamp = os.getpid()
+    leftover = f"pseudolife_memory_test_{stamp}"
+    names = [leftover, f"pseudolife_memory_bench_audit_wsl{stamp}",
+             f"pseudolife_memory_testx_{stamp}", "pseudolife_memory_bench"]
+    admin = RedactedUrl(provisioned["admin"])
+    with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+        bench_existed = conn.execute(
+            "SELECT 1 FROM pg_database WHERE datname = 'pseudolife_memory_bench'").fetchone()
+        for name in names:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            if name != "pseudolife_memory_bench" or not bench_existed:
+                conn.execute(f'CREATE DATABASE "{name}"')
+    try:
+        monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
+        monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", _login_url(provisioned, leftover))
+        monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+        with pytest.raises(PostgresSetupError, match=f"belongs to {provisioned['admin_user']}"):
+            pg_fixtures.ensure_test_db()
+
+        out = io.StringIO()
+        code = cli.main(["create", "--role", CI_ROLE, "--file", str(provisioned["file"]),
+                         "--admin-url", provisioned["admin"]], out=out)
+        assert code == cli.EXIT_OK, out.getvalue()
+        with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+            owners = dict(conn.execute(
+                "SELECT datname, pg_get_userbyid(datdba) FROM pg_database "
+                "WHERE datname = ANY(%s)", (names,)).fetchall())
+        assert owners[leftover] == CI_ROLE
+        assert owners[names[1]] == CI_ROLE
+        assert owners[names[2]] != CI_ROLE and owners[names[3]] != CI_ROLE
+        for name in names[:2]:
+            assert f"database {name}: a leftover test database" in out.getvalue()
+        with psycopg.connect(RedactedUrl(_login_url(provisioned, "postgres")),
+                             autocommit=True, connect_timeout=5) as conn:
+            for name in names[:2]:
+                conn.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+    finally:
+        with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+            for name in names:
+                if name != "pseudolife_memory_bench" or not bench_existed:
+                    conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 
 # A slice of the real suite under the login: the per-run database fixtures

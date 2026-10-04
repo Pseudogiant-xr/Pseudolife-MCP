@@ -21,6 +21,9 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
   superuser the daemon connects as on the Docker tier. When
   ``PSEUDOLIFE_MCP_DATABASE_URL`` names a user that would lose CONNECT with
   PUBLIC (not owner, superuser or explicitly granted), it refuses first.
+* leftover run databases (``LEFTOVER_DATABASE``: the names
+  ``tests/pg_fixtures.py`` prunes) handed to the role, so the suite's prune
+  can drop what a hard-killed run as the owner left; nothing else.
 * ``REVOKE CONNECT ON DATABASE template1 FROM PUBLIC``: a session there
   fails every ``CREATE DATABASE`` that copies it (a restore's, after its
   DROP); copying a template needs no CONNECT on it.
@@ -89,6 +92,10 @@ DEFAULT_BANKS = ("pseudolife_memory",)
 EXTENSIONS = ("vector",)
 # Never a bank: the admin database and the templates.
 _NOT_BANKS = frozenset({"postgres", "template0", "template1"})
+# A run's database, as tests/pg_fixtures.py's pruner sees one: the per-run
+# test and bench prefixes, the last segment a pid (WSL's carry "wsl"). A
+# hard-killed run as the bank owner leaves one the test login cannot drop.
+LEFTOVER_DATABASE = re.compile(r"pseudolife_memory_(?:test|bench)_(?:[a-z0-9_]*_)?(?:wsl)?[0-9]+")
 # Lower-case, unquoted-identifier shape: no quoting needed in any statement.
 _ROLE_NAME = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 DOCKER_TIMEOUT_S = 60
@@ -282,6 +289,11 @@ def state_statement(role: str, banks: list[str], daemon_user: str | None = None)
             FROM pg_database d WHERE d.datname IN ({_names(banks)})),
   'owns', (SELECT coalesce(json_agg(datname ORDER BY datname), '[]'::json)
            FROM pg_database WHERE datdba = {role_oid}),
+  'leftovers', (SELECT coalesce(json_agg(d.datname ORDER BY d.datname), '[]'::json)
+                FROM pg_database d
+                WHERE d.datname ~ '^{LEFTOVER_DATABASE.pattern}$' AND NOT d.datistemplate
+                  AND d.datname NOT IN ({_names(banks)})
+                  AND d.datdba IS DISTINCT FROM {role_oid}),
   'others', (SELECT coalesce(json_agg(d.datname ORDER BY d.datname), '[]'::json)
              FROM pg_database d
              WHERE d.datallowconn AND NOT d.datistemplate AND d.datname <> 'postgres'
@@ -291,9 +303,11 @@ def state_statement(role: str, banks: list[str], daemon_user: str | None = None)
 )::text"""
 
 
-def role_statements(role: str, verifier: str, banks: list[str]) -> list[str]:
+def role_statements(role: str, verifier: str, banks: list[str],
+                    leftovers: list[str] = ()) -> list[str]:
     """Create or reset the role with the verifier as its password, drop every
-    role membership it holds, and close each bank to PUBLIC and to it."""
+    role membership it holds, hand it the leftover run databases (so the
+    suite's prune can drop them), and close each bank to PUBLIC and to it."""
     attributes = ("LOGIN CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS "
                   f"INHERIT CONNECTION LIMIT -1 VALID UNTIL 'infinity' PASSWORD {_literal(verifier)}")
     statements = [
@@ -316,6 +330,12 @@ END $do$""",
   END LOOP;
 END $do$""",
     ]
+    for name in leftovers:  # a pruner may drop one meanwhile
+        statements.append(f"""DO $do$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_database WHERE datname = {_literal(name)}) THEN
+    ALTER DATABASE {_ident(name)} OWNER TO {_ident(role)};
+  END IF;
+END $do$""")
     for bank in banks:
         statements.append(f"REVOKE CONNECT ON DATABASE {_ident(bank)} FROM PUBLIC")
         statements.append(f"REVOKE ALL ON DATABASE {_ident(bank)} FROM {_ident(role)}")
@@ -556,13 +576,17 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
             "or pass --rotate to draw a new password and copy the file again everywhere. "
             "Nothing was changed."))
     reuse = reusable and not args.rotate
+    leftovers = [name for name in before.get("leftovers") or ()
+                 if LEFTOVER_DATABASE.fullmatch(name) and name not in banks
+                 and name not in _NOT_BANKS]
     password = old[PASSWORD_KEY] if reuse else secrets.token_urlsafe(32)
     report.say(f"test-login: on {executor.description}, as {who.get('who')} (superuser)")
 
     staged = _write_private(path, f"{_FILE_HEADER}{USER_KEY}={args.role}\n"
                                   f"{PASSWORD_KEY}={password}\n")
     try:
-        executor.query("postgres", role_statements(args.role, scram_verifier(password), present))
+        executor.query("postgres", role_statements(args.role, scram_verifier(password), present,
+                                                   leftovers))
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
@@ -573,6 +597,9 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
                f"superuser, no CREATEROLE, REPLICATION or BYPASSRLS; {how}")
     for granted in before.get("member_of") or ():
         report.say(f"  role {args.role}: membership in {granted} revoked")
+    for name in leftovers:
+        report.say(f"  database {name}: a leftover test database, handed to {args.role} so "
+                   "the suite's prune can drop it")
     for bank in present:
         info = before["banks"][bank]
         state = ("CONNECT revoked from PUBLIC" if info.get("public_connect")

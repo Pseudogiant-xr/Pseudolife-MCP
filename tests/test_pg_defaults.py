@@ -488,6 +488,58 @@ def test_ensure_test_db_errors_on_reachable_setup_failure(monkeypatch):
     assert first.value is not cached.value
 
 
+class _CatalogConn:
+    """A connection whose run database exists and belongs to ``owner``."""
+
+    def __init__(self, owner, user, executed):
+        self.owner, self.user, self.executed = owner, user, executed
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, sql, params=None):
+        self.executed.append(sql)
+        result = []
+        if "SELECT 1 FROM pg_database" in sql:
+            result = [(1,)]
+        elif "datdba" in sql:
+            result = [(self.owner == self.user, self.owner, self.user)]
+
+        class _Cursor:
+            def fetchone(self):
+                return result[0] if result else None
+
+            def fetchall(self):
+                return result
+        return _Cursor()
+
+
+@pytest.mark.parametrize("owner,refused", [("pseudolife", True), ("pseudolife_test", False)],
+                         ids=["the-owners-leftover", "its-own"])
+def test_ensure_test_db_refuses_a_run_database_another_role_owns(monkeypatch, owner, refused):
+    """A database the bank owner made under this run's name (a hard-killed
+    owner run whose pid this run reuses) holds the owner's tables: the test
+    login would fail on every reset there. Say so once, with the fix."""
+    executed = []
+    monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
+    monkeypatch.setattr(pg_fixtures.psycopg, "connect",
+                        lambda *a, **k: _CatalogConn(owner, "pseudolife_test", executed))
+    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL",
+                       "postgresql://u:p@owner-check.invalid:1/pseudolife_memory_test_owned")
+    if not refused:
+        pg_fixtures.ensure_test_db()
+        return
+    with pytest.raises(pg_defaults.PostgresSetupError) as exc:
+        pg_fixtures.ensure_test_db()
+    message = str(exc.value)
+    assert "belongs to pseudolife" in message and "pseudolife_test" in message
+    assert 'DROP DATABASE "pseudolife_memory_test_owned"' in message
+    assert "\n" not in message.strip()
+
+
 def test_pg_url_outcome_skips_only_for_an_absent_server(monkeypatch):
     """The fixture's branch, isolated: auth failure propagates (ERROR),
     anything else becomes a skip."""
