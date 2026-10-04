@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
+
+### Security (2026-10-04 — urllib3 2.8.0 in the daemon image)
+- The daemon image's pinned dependencies (`ops/requirements.lock.txt`) move
+  urllib3 from 2.7.0 to 2.8.0 (#557), which fixes two high-severity issues
+  (an HTTPS proxy's TLS configuration could be ignored or overridden,
+  GHSA-8988-9cw3-xx77; a chunk-size line could be buffered without bound,
+  GHSA-vxq7-64xx-v4gw) and one medium (chunked Deflate streaming could loop
+  forever, GHSA-gh4c-6fx4-qh6g). A deployment that sends the daemon's
+  outbound HTTPS through a forwarding proxy with its own TLS settings
+  should read urllib3 2.8.0's release note on proxy TLS configuration.
+
 ### Changed (2026-10-04 — the authority to reopen a done session is the maintainer's delegate, not a coordinator)
 - Two things were both called "coordinator": the open `coordinator:<project>`
   lease, which any session may claim and which grants nothing, and the
