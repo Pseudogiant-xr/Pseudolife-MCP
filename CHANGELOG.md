@@ -15,9 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ai-title`; formats re-checked on Claude Code 2.1.287) and Codex's thread
   name (`session_index.jsonl`; Codex 0.160.0). The shim reads it with
   bounded reads on its heartbeat and sends it only when it changed, so a
-  rename reaches the board within a heartbeat, with no restart. Below that:
-  a name the agent sets (`memory_agents(action="update", name=...)`, `""`
-  clears it), then the session's `memory_session_title`. An unnamed row
+  rename reaches the board within a heartbeat, with no restart. A name the
+  agent sets (`memory_agents(action="update", name=...)`) outranks it, so a
+  session can correct a stale title (after `/clear` the shim still reads the
+  old transcript); `""` clears it and brings the harness title back. Below
+  both: the session's `memory_session_title`, for the caller's own
+  principal only. An unnamed row
   reads as its label and the first 8 characters of its id, in
   `memory_agents` list, the Console, lease holders and lease waiters.
   Names follow the label rule: one that reads as `maintainer`, `daemon`,

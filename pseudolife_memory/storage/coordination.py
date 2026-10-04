@@ -125,10 +125,12 @@ MAX_LABEL = 120
 MAX_SCOPE = 120
 # v55: the name a row shows on the board, bounded like the label. Sources in
 # ascending precedence: a lower one never replaces a name a higher one set,
-# an equal or higher one always does. Clients may claim only 'agent' and
-# 'harness'; 'title' is the daemon's, from a session retitle.
+# an equal or higher one always does. 'agent' is highest so a session can
+# correct a stale harness title (after /clear the shim still reads the old
+# transcript; delegate review of #582, 2026-10-05). Clients may claim only
+# 'agent' and 'harness'; 'title' is the daemon's, from a session retitle.
 MAX_NAME = MAX_LABEL
-NAME_SOURCES = ("", "title", "agent", "harness")
+NAME_SOURCES = ("", "title", "harness", "agent")
 _NAME_RANK = {source: rank for rank, source in enumerate(NAME_SOURCES)}
 CLIENT_NAME_SOURCES = frozenset({"agent", "harness"})
 # v47: the subagents a session names under its own address. Room for a
@@ -1396,13 +1398,17 @@ class CoordinationStore:
     def _name_change(row, name, source, now):
         """The columns that apply ``name`` from ``source`` to ``row`` under
         the v55 precedence, or ``{}`` when nothing changes: a lower source
-        never replaces a higher one's name, an equal or higher one does, and
-        an empty name clears a name no higher source set."""
+        never replaces a higher one's name, an equal or higher one does. An
+        empty name clears only the caller's own source's name; an agent's
+        cleared name gives way to the newest harness title (``harness_name``)."""
         current = row.get("name_source") or ""
         if _NAME_RANK[source] < _NAME_RANK.get(current, 0):
             return {}
         if not name:
-            return {"name": "", "name_source": "", "name_set_at": now} if current else {}
+            if current != source:
+                return {}
+            kept = (row.get("harness_name") or "") if source == "agent" else ""
+            return {"name": kept, "name_source": "harness" if kept else "", "name_set_at": now}
         if (row.get("name") or "") == name and current == source:
             return {}
         return {"name": name, "name_source": source, "name_set_at": now}
@@ -1463,13 +1469,14 @@ class CoordinationStore:
             self.storage.conn.execute(
                 "INSERT INTO coordination_agents (agent_id,principal,credential_hash,"
                 "label,project,task,episode,status,capabilities,wake_enabled,created_at,last_activity,"
-                "parent_thread,parent_agent_id,name,name_source,name_set_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "parent_thread,parent_agent_id,name,name_source,name_set_at,harness_name) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (agent_id, principal, _hash(credential), fields["label"], fields["project"],
                  fields["task"], fields["episode"], fields["status"], Jsonb(fields["capabilities"]),
                  fields["wake_enabled"], now, now, parent_thread, parent,
                  fields.get("name", ""), fields.get("name_source", ""),
-                 now if fields.get("name") else None))
+                 now if fields.get("name") else None,
+                 fields["name"] if fields.get("name_source") == "harness" else ""))
             events = [self._event("register", fields, principal=principal, agent_id=agent_id,
                                   project=fields["project"], task=fields["task"])]
             if thread is not None:
@@ -1580,7 +1587,8 @@ class CoordinationStore:
         ``status_overdue``. A new status without one clears the old
         expectation; ``expect`` alone re-times the current status.
         ``name`` (v55) is the agent naming its row (source ``agent``): it
-        does not replace a name the harness set, and ``""`` clears its own."""
+        outranks the harness title, and ``""`` clears its own, bringing the
+        newest harness title back."""
         fields = self._fields(**fields)
         if name is not None:
             name = self._check_name(name)
@@ -2549,6 +2557,13 @@ class CoordinationStore:
                 "UPDATE coordination_agents SET lease_until=%s,"
                 "last_activity=CASE WHEN %s THEN %s ELSE last_activity END WHERE agent_id=%s",
                 (until, active, now, agent_id))
+            if name is not None and name != (row.get("harness_name") or ""):
+                # Kept even while an agent name outranks it, so clearing that
+                # name restores the harness title. Heartbeat state, unlogged;
+                # only a change of the shown name is an audit event.
+                self.storage.conn.execute(
+                    "UPDATE coordination_agents SET harness_name=%s WHERE agent_id=%s",
+                    (name, agent_id))
             naming = {} if name is None else self._name_change(row, name, "harness", now)
             if naming:
                 self.storage.conn.execute(
@@ -2566,18 +2581,17 @@ class CoordinationStore:
         """Name the rows registered under any of ``episodes`` (the session
         keys a ``memory_session_title`` rename resolved) after ``title``,
         with source ``title`` (v55): only rows no agent or harness named,
-        only those of ``principal`` when one is given, one ``update`` event
-        per row that changed, by the daemon. Returns how many changed."""
+        only those of ``principal``, one ``update`` event per row that
+        changed, by the daemon. Returns how many changed. Without a
+        principal it names nothing: fail closed, never every principal's
+        rows (delegate review of #582, 2026-10-05)."""
         name = self._title_name(title)
         episodes = sorted({e for e in episodes if isinstance(e, str) and e})
-        if name is None or not episodes:
+        if name is None or not episodes or principal is None:
             return 0
         now = self.clock()
-        params = [name, now, episodes, name]
-        scope = ""
-        if principal is not None:
-            scope = " AND a.principal=%s"
-            params.append(principal)
+        params = [name, now, episodes, name, principal]
+        scope = " AND a.principal=%s"
         with self.storage._txn():
             rows = self._all(
                 "UPDATE coordination_agents a SET name=%s,name_source='title',name_set_at=%s "

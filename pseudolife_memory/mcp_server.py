@@ -367,7 +367,7 @@ def memory_agents(
     name: Annotated[str | None, Field(
         max_length=120,
         description="update: the name the board shows for you, up to 120 "
-                    "chars; a title your harness shows wins. \"\" clears "
+                    "chars; it overrides your harness's title. \"\" clears "
                     "yours.")] = None,
 ) -> dict[str, Any]:
     """Coordinate agent sessions on the shared board: list peers and

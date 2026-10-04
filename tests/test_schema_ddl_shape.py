@@ -124,7 +124,7 @@ _REQUIRED_COLUMNS = [
     ("maintainer_nonces", {"nonce", "expires_at"}),
     ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
     # v55 — the board name and who set it ('' = unnamed).
-    ("coordination_agents", {"name", "name_source", "name_set_at"}),
+    ("coordination_agents", {"name", "name_source", "name_set_at", "harness_name"}),
 ]
 
 

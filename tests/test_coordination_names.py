@@ -7,7 +7,8 @@ could change it. A row now carries ``name`` and ``name_source``. The harness
 sends it with a heartbeat; an agent can name itself with
 ``memory_agents(update, name=...)``; and a ``memory_session_title`` rename
 names rows of that session when nothing better is set. Precedence is
-harness > agent > title.
+agent > harness > title: an agent's own name lets a session correct a
+stale harness title (delegate review of #582, 2026-10-05).
 """
 from __future__ import annotations
 
@@ -80,21 +81,25 @@ def test_a_heartbeat_name_is_stored_once_and_logged_only_when_it_changes(store):
     assert events[1]["before"] == {"name": "Session one", "name_source": "harness"}
 
 
-def test_precedence_is_harness_then_agent_then_title(store):
+def test_precedence_is_agent_then_harness_then_title(store):
     agent = store.register("alice", episode="sess-1")
     beat = _attached(store, agent)
     assert store.title_names(["sess-1"], "From the title", principal="alice") == 1
     assert _row(store, agent)[:2] == ("From the title", "title")
-    store.update(*creds(agent), name="Chosen by the agent")
-    assert _row(store, agent)[:2] == ("Chosen by the agent", "agent")
-    assert store.title_names(["sess-1"], "A later title", principal="alice") == 0
-    assert _row(store, agent)[:2] == ("Chosen by the agent", "agent")
     store.heartbeat(*creds(agent), **beat, name="Harness title")
     assert _row(store, agent)[:2] == ("Harness title", "harness")
-    out = store.update(*creds(agent), name="Agent again")
-    assert (out["name"], out["name_source"]) == ("Harness title", "harness")
+    assert store.title_names(["sess-1"], "A later title", principal="alice") == 0
+    assert _row(store, agent)[:2] == ("Harness title", "harness")
+    # An agent's own name overrides the harness one: after /clear the shim
+    # still reads the old transcript, and the session must be able to
+    # correct its row (delegate review of #582, 2026-10-05).
+    out = store.update(*creds(agent), name="Chosen by the agent")
+    assert (out["name"], out["name_source"]) == ("Chosen by the agent", "agent")
     store.heartbeat(*creds(agent), **beat, name="Harness renamed")
-    assert _row(store, agent)[:2] == ("Harness renamed", "harness")
+    assert _row(store, agent)[:2] == ("Chosen by the agent", "agent")
+    # Clearing it brings back the newest harness name, kept meanwhile.
+    out = store.update(*creds(agent), name="")
+    assert (out["name"], out["name_source"]) == ("Harness renamed", "harness")
 
 
 def test_an_agent_clears_its_own_name_but_not_the_harness_one(store):
@@ -188,8 +193,11 @@ def test_title_names_only_the_matching_session_rows_of_the_principal(store):
     for row in (other_session, other_principal, blank):
         assert _row(store, row)[:2] == ("", "")
     assert store.title_names(["sess-a"], "Titled", principal="alice") == 0   # unchanged
-    assert store.title_names(["sess-a"], "  Re\ntitled  ", principal=None) == 2
-    assert _row(store, other_principal)[:2] == ("Re titled", "title")
+    # No principal names nothing: a retitle with no authenticated caller
+    # must not reach every principal's rows (delegate review, 2026-10-05).
+    assert store.title_names(["sess-a"], "Unscoped", principal=None) == 0
+    assert _row(store, other_principal)[:2] == ("", "")
+    assert store.title_names(["sess-a"], "  Re\ntitled  ", principal="alice") == 1
     events = _name_events(store, mine)
     assert [e["fields"]["name"] for e in events] == ["Titled", "Re titled"]
 
@@ -232,6 +240,8 @@ def test_dispatch_carries_the_name_on_register_update_and_heartbeat(coordinating
              principal=PRINCIPAL)
     out = dispatch(coordinating, "update", {"name": "Agent name"}, headers=headers,
                    principal=PRINCIPAL)
+    assert (out["name"], out["name_source"]) == ("Agent name", "agent")
+    out = dispatch(coordinating, "update", {"name": ""}, headers=headers, principal=PRINCIPAL)
     assert (out["name"], out["name_source"]) == ("Beat name", "harness")
     with pytest.raises(ValueError, match="invalid_name"):
         dispatch(coordinating, "heartbeat", {**beat, "name": "maintainer"}, headers=headers,
@@ -252,26 +262,39 @@ def test_memory_agents_update_forwards_the_name(monkeypatch):
         coordination.agents(object(), action="list", name="Named")
 
 
-def test_a_session_title_names_its_board_rows(coordinating):
+def test_a_session_title_names_its_board_rows(coordinating, monkeypatch):
     from pseudolife_memory.writer_context import (
         bind_request_headers, reset_writer_context, set_writer_context,
         unbind_request_headers)
+    # The daemon resolves the retitling caller from its bearer, as a shim's
+    # forwarded call presents it.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKENS", f"tok-board-names:{PRINCIPAL}")
     mine = dispatch(coordinating, "register", {"episode": "SESS-T"}, headers={},
                     principal=PRINCIPAL)
     agent_named = dispatch(coordinating, "register", {"episode": "SESS-T", "name": "Own"},
                            headers={}, principal=PRINCIPAL)
     other = dispatch(coordinating, "register", {"episode": "SESS-U"}, headers={},
                      principal=PRINCIPAL)
-    writer = set_writer_context("w", "SESS-T")
-    request = bind_request_headers({}, principal=PRINCIPAL)
-    try:
-        assert coordinating.set_session_title("Board names work")["ok"] is True
-    finally:
-        unbind_request_headers(request)
-        reset_writer_context(writer)
     store = CoordinationStore(coordinating._coordination_storage)
-    names = {row["agent_id"]: (row["name"], row["name_source"]) for row in store._all(
-        "SELECT agent_id,name,name_source FROM coordination_agents")}
+
+    def names():
+        return {row["agent_id"]: (row["name"], row["name_source"]) for row in store._all(
+            "SELECT agent_id,name,name_source FROM coordination_agents")}
+
+    def retitle(title, headers):
+        writer = set_writer_context("w", "SESS-T")
+        request = bind_request_headers(headers)
+        try:
+            assert coordinating.set_session_title(title)["ok"] is True
+        finally:
+            unbind_request_headers(request)
+            reset_writer_context(writer)
+
+    # Without a bearer the retitle still succeeds but names no board row.
+    retitle("Unauthenticated", {})
+    assert names()[mine["agent_id"]] == ("", "")
+    retitle("Board names work", {"authorization": "Bearer tok-board-names"})
+    names = names()
     assert names[mine["agent_id"]] == ("Board names work", "title")
     assert names[agent_named["agent_id"]] == ("Own", "agent")
     assert names[other["agent_id"]] == ("", "")
