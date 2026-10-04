@@ -565,13 +565,12 @@ def test_ensure_test_db_refuses_a_run_database_another_role_owns(monkeypatch, ow
     login would fail on every reset there. Say so once, with the fix."""
     executed = []
     monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
-    # Under xdist the run name gains the worker suffix; the message names
-    # exactly the database it checked.
-    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    monkeypatch.setattr(pg_fixtures.atexit, "register", lambda *a, **k: None)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setattr(pg_fixtures, "_admin_url",
+                        lambda: "postgresql://u:p@owner-check.invalid:1/postgres")
     monkeypatch.setattr(pg_fixtures.psycopg, "connect",
                         lambda *a, **k: _CatalogConn(owner, "pseudolife_test", executed))
-    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL",
-                       "postgresql://u:p@owner-check.invalid:1/pseudolife_memory_test_owned")
     if not refused:
         pg_fixtures.ensure_test_db()
         return
@@ -579,8 +578,24 @@ def test_ensure_test_db_refuses_a_run_database_another_role_owns(monkeypatch, ow
         pg_fixtures.ensure_test_db()
     message = str(exc.value)
     assert "belongs to pseudolife" in message and "pseudolife_test" in message
-    assert 'DROP DATABASE "pseudolife_memory_test_owned"' in message
+    assert f'DROP DATABASE "{pg_fixtures._TEST_DB}"' in message
     assert "\n" not in message.strip()
+
+
+def test_ensure_test_db_leaves_an_overridden_database_to_its_caller(monkeypatch):
+    """PSEUDOLIFE_TEST_DATABASE_URL leaves the database's lifecycle to the
+    caller, who may grant a login that does not own it: the foreign-owner
+    refusal is for the per-run name a dead owner run left (review,
+    2026-10-05)."""
+    executed = []
+    monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    monkeypatch.setattr(pg_fixtures.psycopg, "connect",
+                        lambda *a, **k: _CatalogConn("pseudolife", "pseudolife_test", executed))
+    monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL",
+                       "postgresql://u:p@owner-check.invalid:1/pseudolife_memory_test_granted")
+    pg_fixtures.ensure_test_db()
+    assert not [sql for sql in executed if "datdba" in sql]
 
 
 def test_pg_url_outcome_skips_only_for_an_absent_server(monkeypatch):
@@ -996,18 +1011,25 @@ def test_preflight_never_probes_outside_a_gated_local_run(tmp_path, kind, env):
     assert out.getvalue() == ""
 
 
-def test_probe_never_raises_on_an_env_file_the_parser_refuses(tmp_path, monkeypatch):
+def test_probe_never_raises_on_an_env_file_the_parser_refuses(tmp_path, monkeypatch,
+                                                            no_login_file):
     # Reached with PSEUDOLIFE_BENCH_ADMIN_URL exported, when conftest's own
     # import-time resolve is skipped: a raise here would escape
     # pytest_configure as an INTERNALERROR whose --fulltrace frames list
     # os.environ.
+    attempted = []
+
     def connect(*args, **kwargs):
+        attempted.append(args)
         raise AssertionError("no connect is attempted without a URL")
 
     monkeypatch.setattr(psycopg, "connect", connect)
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=$UNSUPPORTED_SECRET_VALUE\n", encoding="utf-8")
     assert pg_defaults.probe_dev_server({}, env_file) == "other"
+    # The probe catches the AssertionError too: count the attempts, or a
+    # machine's login file (read before ops/.env) passes this vacuously.
+    assert attempted == []
 
 
 def test_a_quick_probe_finds_no_listener_without_waiting_on_libpq(monkeypatch):
@@ -1028,7 +1050,7 @@ def test_a_quick_probe_finds_no_listener_without_waiting_on_libpq(monkeypatch):
     assert pg_defaults.probe_dev_server({}, Path("absent"), quick=True) == "absent"
 
 
-def test_a_targeted_run_probes_quickly_and_a_full_run_does_not(tmp_path):
+def test_a_targeted_run_probes_quickly_and_a_full_run_does_not(tmp_path, no_login_file):
     calls: list[dict] = []
 
     def probe(env, path, **kwargs):

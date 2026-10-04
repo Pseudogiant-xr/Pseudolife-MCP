@@ -3300,7 +3300,9 @@ pseudolife-mcp test-login create            # --rotate for a new password
 
 It creates the role `pseudolife_test` (`LOGIN CREATEDB`, nothing more),
 revokes `CONNECT` on the bank and on `template1` from `PUBLIC` (refusing
-first if the daemon's database user would lose it), hands it leftover
+first if a role connected to the bank now would lose it, or the daemon's
+database user when `PSEUDOLIFE_MCP_DATABASE_URL` is set in that shell;
+without it the daemon user is reported as not checked), hands it leftover
 per-run test databases so the suite can prune them, installs `vector` in
 `template1`, and writes the login to an owner-only
 `~/.pseudolife-mcp/test-pg.env`, which the suite reads before `ops/.env`
@@ -3309,8 +3311,10 @@ per-run test databases so the suite can prune them, installs `vector` in
 server, and is idempotent. The installers run it only with `-TestLogin` /
 `--test-login` (for contributors who run the suite against this server);
 `pseudolife-mcp update` never does. A bank restore keeps the bank closed
-(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it);
-re-running `test-login create` checks it. Details, and running agent
+(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it,
+and from a rehearsal's scratch copy; this runs on every restore, so a
+custom role that reached the bank only through `PUBLIC` needs its own
+`GRANT CONNECT` again afterwards); re-running `test-login create` checks it. Details, and running agent
 sessions under a separate account: [agent isolation](agent-isolation.md).
 
 ## Windows / WSL2 memory (Docker tier)

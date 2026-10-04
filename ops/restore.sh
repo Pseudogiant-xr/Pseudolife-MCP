@@ -110,6 +110,15 @@ if [ "$APPLY" -eq 0 ]; then
     echo "==> Rehearsal: restoring into scratch db '$scratch' (live bank untouched)"
     docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $scratch"
     docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "CREATE DATABASE $scratch"
+    # The scratch copy holds the whole bank and a plain CREATE DATABASE is
+    # open to PUBLIC: close it before the replay, as a real restore closes
+    # the bank, or the test login (`pseudolife-mcp test-login create`) could
+    # read it while the rehearsal runs.
+    if ! docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "REVOKE CONNECT ON DATABASE $scratch FROM PUBLIC"; then
+        echo "could not revoke CONNECT on the scratch db from PUBLIC; not restoring the bank into a database any login could open" >&2
+        docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $scratch" >/dev/null 2>&1 || true
+        exit 1
+    fi
     if ! docker exec "$CONTAINER" sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $DB_USER -d $scratch > /dev/null"; then
         echo "restore into scratch db FAILED - the backup may be unusable" >&2
         exit 1

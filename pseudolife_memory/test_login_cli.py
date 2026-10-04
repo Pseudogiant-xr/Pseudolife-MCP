@@ -18,9 +18,12 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
 * ``REVOKE CONNECT ... FROM PUBLIC`` on each production database (default
   ``pseudolife_memory``, the container's ``POSTGRES_DB`` and any ``--bank``),
   and from the role. The bank's owner keeps CONNECT as owner, and is the
-  superuser the daemon connects as on the Docker tier. When
-  ``PSEUDOLIFE_MCP_DATABASE_URL`` names a user that would lose CONNECT with
-  PUBLIC (not owner, superuser or explicitly granted), it refuses first.
+  superuser the daemon connects as on the Docker tier. It refuses first
+  when a role would lose CONNECT with PUBLIC (not owner, superuser or
+  explicitly granted): the user ``PSEUDOLIFE_MCP_DATABASE_URL`` names, when
+  this shell has it (else it says the daemon user was not checked), and any
+  role connected to a bank now. ``--role`` naming that user is refused.
+  The role changes run as one transaction.
 * leftover run databases (``LEFTOVER_DATABASE``: the names
   ``tests/pg_fixtures.py`` prunes) handed to the role, so the suite's prune
   can drop what a hard-killed run as the owner left; nothing else.
@@ -243,34 +246,56 @@ def whoami_statement() -> str:
             "'db', current_database())::text FROM pg_roles WHERE rolname = current_user")
 
 
+def _keeps_connect(role_oid: str) -> str:
+    """Whether the role row ``r`` keeps CONNECT on the database row ``db``
+    once PUBLIC loses it: as a superuser, through the owner role, or through
+    an explicit grant to a role it inherits (not PUBLIC, not the test login)."""
+    return f"""(r.rolsuper OR pg_has_role(r.oid, db.datdba, 'USAGE') OR EXISTS (
+                  SELECT 1 FROM aclexplode(coalesce(db.datacl, acldefault('d', db.datdba))) a
+                  WHERE a.privilege_type = 'CONNECT' AND a.grantee <> 0
+                    AND a.grantee IS DISTINCT FROM {role_oid}
+                    AND pg_has_role(r.oid, a.grantee, 'USAGE')))"""
+
+
 def _daemon_state(daemon_user: str | None, role_oid: str, banks: list[str]) -> str:
     """Whether the daemon's database user keeps CONNECT on each bank once
-    PUBLIC loses it: as a superuser, through the owner role, or through an
-    explicit grant to a role it inherits (not PUBLIC, not the test login)."""
+    PUBLIC loses it."""
     if not daemon_user:
         return "NULL::json"
     d = _literal(daemon_user)
     return f"""json_build_object(
     'exists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {d}),
-    'keeps', (SELECT coalesce(json_object_agg(db.datname, (
-                r.rolsuper OR pg_has_role(r.oid, db.datdba, 'USAGE') OR EXISTS (
-                  SELECT 1 FROM aclexplode(coalesce(db.datacl, acldefault('d', db.datdba))) a
-                  WHERE a.privilege_type = 'CONNECT' AND a.grantee <> 0
-                    AND a.grantee IS DISTINCT FROM {role_oid}
-                    AND pg_has_role(r.oid, a.grantee, 'USAGE')))), '{{}}'::json)
+    'keeps', (SELECT coalesce(json_object_agg(db.datname, {_keeps_connect(role_oid)}), '{{}}'::json)
               FROM pg_database db JOIN pg_roles r ON r.rolname = {d}
               WHERE db.datname IN ({_names(banks)})))"""
+
+
+def _connected_state(role: str, role_oid: str, banks: list[str]) -> str:
+    """Each other role with a client session on a bank now, and whether it
+    keeps CONNECT once PUBLIC loses it. A daemon whose database URL is not in
+    this shell is usually one of them (review, 2026-10-05)."""
+    return f"""(SELECT coalesce(json_agg(json_build_object(
+                  'user', r.rolname, 'db', db.datname, 'keeps', {_keeps_connect(role_oid)})
+                  ORDER BY db.datname, r.rolname), '[]'::json)
+               FROM (SELECT DISTINCT usename, datname FROM pg_stat_activity
+                     WHERE backend_type = 'client backend'
+                       AND datname IN ({_names(banks)})) s
+               JOIN pg_roles r ON r.rolname = s.usename
+               JOIN pg_database db ON db.datname = s.datname
+               WHERE r.rolname <> {_literal(role)})"""
 
 
 def state_statement(role: str, banks: list[str], daemon_user: str | None = None) -> str:
     """One JSON row: the role's attributes and memberships, each bank's
     CONNECT for PUBLIC, the role and the owner, the databases the role owns,
     the others PUBLIC may still connect to, and whether the daemon's
-    database user keeps CONNECT without PUBLIC."""
+    database user, and each role connected to a bank now, keeps CONNECT
+    without PUBLIC."""
     r = _literal(role)
     role_oid = f"(SELECT oid FROM pg_roles WHERE rolname = {r})"
     return f"""SELECT json_build_object(
   'daemon', {_daemon_state(daemon_user, role_oid, banks)},
+  'connected', {_connected_state(role, role_oid, banks)},
   'template1_public_connect', (SELECT has_database_privilege('public', oid, 'CONNECT')
                                FROM pg_database WHERE datname = 'template1'),
   'role', (SELECT json_build_object('super', rolsuper, 'login', rolcanlogin,
@@ -307,10 +332,13 @@ def role_statements(role: str, verifier: str, banks: list[str],
                     leftovers: list[str] = ()) -> list[str]:
     """Create or reset the role with the verifier as its password, drop every
     role membership it holds, hand it the leftover run databases (so the
-    suite's prune can drop them), and close each bank to PUBLIC and to it."""
+    suite's prune can drop them), and close each bank to PUBLIC and to it.
+    One transaction: a statement that fails part way leaves the role's old
+    password, which the file being replaced still holds."""
     attributes = ("LOGIN CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS "
                   f"INHERIT CONNECTION LIMIT -1 VALID UNTIL 'infinity' PASSWORD {_literal(verifier)}")
     statements = [
+        "BEGIN",
         f"""DO $do$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {_literal(role)}) THEN
     ALTER ROLE {_ident(role)} WITH {attributes};
@@ -343,6 +371,7 @@ END $do$""")
     # owner's after a restore's DROP included; copying needs no CONNECT.
     statements.append(f"REVOKE CONNECT ON DATABASE {_ident('template1')} FROM PUBLIC")
     statements.append("SELECT 'ok'")
+    statements.append("COMMIT")
     return statements
 
 
@@ -480,8 +509,12 @@ def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
             return report.finish(EXIT_REFUSED, (
                 "no superuser connection: run this on the Docker host, where the "
                 f"{args.container} container runs, or give --admin-url with a superuser URL"))
+    from pseudolife_memory.private_state import PrivateStateError
+
     try:
         return _create(args, executor, path, banks, report, daemon)
+    except (PrivateStateError, OSError) as exc:
+        return report.finish(EXIT_FAILED, f"could not write {_shown(path)}: {exc}")
     except DatabaseError as exc:
         return report.finish(EXIT_FAILED, f"the database refused: {exc}")
     except ValueError:  # an answer that is not the JSON the query builds
@@ -546,8 +579,29 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
         return report.finish(EXIT_REFUSED, f"role {args.role} owns the bank "
                                            f"{(owned or owners)[0]}: not a test login")
     present = sorted((before.get("banks") or {}).keys())
+    if daemon_user == args.role:
+        return report.finish(EXIT_REFUSED, (
+            f"{args.role} is the daemon's database user ({DAEMON_DSN_ENV}): this would close "
+            "the bank to the daemon. The test login must be a different role. "
+            "Nothing was changed."))
+    connected = [entry for entry in before.get("connected") or ()
+                 if entry.get("db") in present and entry.get("user") != args.role]
+    for entry in connected:
+        if not entry.get("keeps"):
+            return report.finish(EXIT_REFUSED, (
+                f"role {entry['user']} is connected to {entry['db']} now and can connect to it "
+                "only through PUBLIC's CONNECT, which this revokes: it would be locked out at "
+                "its next connection (a daemon whose database URL is not in this shell, "
+                "perhaps). Grant it first, as a superuser: "
+                f'GRANT CONNECT ON DATABASE {_ident(entry["db"])} TO {_ident(entry["user"])}; '
+                "then run this again. Nothing was changed."))
     daemon_line = None
-    if daemon_user and daemon_user != args.role:
+    if not daemon_user:
+        why = ("names no user" if os.environ.get(DAEMON_DSN_ENV)
+               else "is not set in this shell")
+        daemon_line = (f"  daemon user not checked: {DAEMON_DSN_ENV} {why}; "
+                       "only the roles connected to the bank now were")
+    else:
         state = before.get("daemon") or {}
         if not state.get("exists"):
             daemon_line = (f"  {DAEMON_DSN_ENV}'s user {daemon_user} is not a role on this "
@@ -590,7 +644,13 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
-    os.replace(staged, path)  # the role now has this password: so does the file
+    try:
+        os.replace(staged, path)  # the role now has this password: so does the file
+    except OSError as exc:
+        return report.finish(EXIT_FAILED, (
+            f"role {args.role} now has the password in {_shown(staged)}, but {_shown(path)} "
+            f"could not be replaced ({exc}). Move that file to {_shown(path)}; nothing else "
+            "holds this password."))
     how = ("password re-applied from the file" if reuse
            else "password rotated" if role else "password set")
     report.say(f"  role {args.role}: {'reset' if role else 'created'}: LOGIN CREATEDB, not "
@@ -610,6 +670,9 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
             report.say(f"  database {bank}: not on this server")
     if daemon_line:
         report.say(daemon_line)
+    for entry in connected:
+        report.say(f"  role {entry['user']}, connected to {entry['db']} now, keeps CONNECT as "
+                   "owner, superuser or by grant")
     report.say("  template1: " + ("CONNECT revoked from PUBLIC"
                                   if before.get("template1_public_connect")
                                   else "already closed to PUBLIC")
