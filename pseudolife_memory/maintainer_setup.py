@@ -65,6 +65,7 @@ import time
 from urllib.parse import urlsplit
 
 from pseudolife_memory import expose_cli
+from pseudolife_memory.daemon_exec import CONTAINER as DAEMON_CONTAINER, docker_cmd
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -72,7 +73,6 @@ EXIT_REFUSED = 4
 EXIT_UNDONE = 5
 
 MODULE = "pseudolife_memory.maintainer_setup"
-DAEMON_CONTAINER = "pseudolife-mcp-daemon"
 DEFAULT_PORT = 8765
 DEFAULT_HTTPS_PORT = 8443
 # Design bounds, not measurements: a restarted daemon loads its embedder
@@ -109,10 +109,6 @@ def stream(argv, on_line) -> int:
         for line in proc.stdout:
             on_line(line.rstrip("\r\n"))
     return proc.returncode
-
-
-def docker_cmd() -> str:
-    return os.environ.get("PSEUDOLIFE_DOCKER") or "docker"
 
 
 def which(name: str) -> str | None:
@@ -190,7 +186,8 @@ def _bank_keys() -> tuple[list | None, str | None]:
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001 - never a DSN
         return None, type(exc).__name__
-    return [{"prefix": k["credential_id"][:12], "label": k["label"], "state": k["state"]}
+    from pseudolife_memory.storage.maintainer import key_prefix
+    return [{"prefix": key_prefix(k["credential_id"]), "label": k["label"], "state": k["state"]}
             for k in keys], None
 
 
@@ -507,9 +504,16 @@ def _check_key(tier: str, prefix: str, label: str, *, fresh: bool) -> int:
 
 
 def _enrol(tier: str, origin: str) -> int:
-    print(f"\nNext, in your browser: open {origin}/ui/, then Settings, Your passkeys. Enter the "
-          "code below with a label for this passkey, and create the passkey when the browser "
-          "asks.", flush=True)
+    # The Console stores its bearer per address, so a first visit to this
+    # origin has none (2026-10-05, the first live run). Name where the token
+    # lives, never the token itself.
+    print(f"\nNext, in your browser: open {origin}/ui/. A browser keeps the Console's token per "
+          "address: if this one says it did not accept the console's token, click \"Set a "
+          "bearer token\" and paste the token your Console uses at its usual address: the "
+          "daemon's PSEUDOLIFE_MCP_TOKEN, which a single-token install also keeps in your "
+          "client's token file, ~/.pseudolife-mcp/<principal>.token. Then open Settings, Your "
+          "passkeys, enter the code below with a label for this passkey, and create the "
+          "passkey when the browser asks.", flush=True)
     seen: dict = {}
 
     def on_line(line: str) -> None:
