@@ -44,6 +44,7 @@ Configuration
 
 from __future__ import annotations
 
+import difflib
 import functools
 import logging
 import os
@@ -74,7 +75,8 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # lands in ``inputSchema.properties[arg].description``. Defaults stay plain
 # signature defaults — Field carries description ONLY, so coercion and
 # optionality are untouched.
-from pydantic import Field, StrictInt  # noqa: E402
+from pydantic import ConfigDict, Field, StrictInt, ValidationError  # noqa: E402
+from pydantic_core import PydanticCustomError  # noqa: E402
 
 from pseudolife_memory.service import (  # noqa: E402
     _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
@@ -258,7 +260,51 @@ def _annotations(name: str) -> ToolAnnotations:
     )
 
 
+# Wrong names models actually sent, measured in the 2026-10-04 transcript
+# review (Claude 11,049 calls, Codex 9,626): limit on memory_search (68 +
+# 72) and memory_lesson_search (56), content on memory_store (13 + 1),
+# note/notes/text on memory_outcome (7). Consulted only when the name is not
+# a parameter of the tool and the target is; difflib covers the rest.
+_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "limit": ("top_k", "n"),
+    "content": ("text",),
+    "note": ("detail",), "notes": ("detail",), "text": ("detail",),
+}
+
+
 class _StringSafeMetadata(FuncMetadata):
+    tool_name: str = ""
+
+    def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        """Refuse an argument name the tool does not have.
+
+        Pydantic's default (``extra="ignore"``) dropped it without a word, so
+        ``memory_search(limit=3)`` answered with the default 8 hits and the
+        model never learned. A ``ValidationError`` raised here reaches the
+        client as an ``isError`` result, like any other argument mismatch.
+        """
+        accepted = [field.alias or name
+                    for name, field in self.arg_model.model_fields.items()]
+        unknown = [key for key in arguments_to_validate if key not in accepted]
+        if unknown:
+            raise ValidationError.from_exception_data(self.tool_name or "arguments", [
+                {"type": PydanticCustomError(
+                    "unknown_parameter", "{detail}",
+                    {"detail": self._unknown_message(key, accepted)}),
+                 "loc": (key,), "input": arguments_to_validate[key]}
+                for key in unknown])
+        return super().validate_arguments(arguments_to_validate)
+
+    def _unknown_message(self, key: str, accepted: list[str]) -> str:
+        guess = next((a for a in _PARAM_ALIASES.get(key, ()) if a in accepted),
+                     None)
+        if guess is None:
+            close = difflib.get_close_matches(key, accepted, n=1)
+            guess = close[0] if close else None
+        hint = f"; did you mean '{guess}'?" if guess else "."
+        return (f"unknown parameter '{key}' for {self.tool_name}{hint} "
+                f"Accepted: {', '.join(accepted)}")
+
     def pre_parse_json(self, data: dict[str, Any]) -> dict[str, Any]:
         """Keep text literal while retaining the SDK's list/dict compatibility.
 
@@ -279,14 +325,24 @@ class _StringSafeMetadata(FuncMetadata):
         return {**parsed, **literal}
 
 
+def _bind_arguments(name: str) -> None:
+    """Give a registered tool the string-safe, strict argument binding; its
+    schema then says ``additionalProperties: false``, matching the refusal."""
+    tool = mcp._tool_manager.get_tool(name)
+    meta = tool.fn_metadata.model_dump()
+    meta["arg_model"] = type(meta["arg_model"].__name__, (meta["arg_model"],),
+                             {"model_config": ConfigDict(extra="forbid")})
+    tool.fn_metadata = _StringSafeMetadata(**meta, tool_name=name)
+    tool.parameters = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
+
+
 def _tool(*, tier: str = "full"):
     """Record the tool's tier and register it (always — tiers gate
     visibility in tools/list, not existence)."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = tier
         mcp.tool(annotations=_annotations(fn.__name__))(_async_offload(fn))
-        tool = mcp._tool_manager.get_tool(fn.__name__)
-        tool.fn_metadata = _StringSafeMetadata(**tool.fn_metadata.model_dump())
+        _bind_arguments(fn.__name__)
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
@@ -1174,6 +1230,7 @@ async def memory_toolset(
 # body is dict ops only and cannot block the event loop.
 _TOOL_TIERS["memory_toolset"] = "minimal"
 mcp.tool(annotations=_annotations("memory_toolset"))(memory_toolset)
+_bind_arguments("memory_toolset")
 
 
 # core memory_fact_get returns source_entries ids —

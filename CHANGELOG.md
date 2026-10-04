@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — a tool argument with the wrong name is refused instead of silently dropped)
+- A memory tool called with an argument name it does not have used to
+  succeed with that argument thrown away: `memory_search(limit=3)` returned
+  the default 8 hits, `memory_outcome(note=...)` recorded no detail, and
+  `episode=` on `memory_world_set` vanished. Transcripts from 2026-10-04
+  showed both Claude and Codex models doing this hundreds of times (`limit`
+  on `memory_search` 140 calls and on `memory_lesson_search` 56). Such a
+  call is now an error result (`isError`) that names the parameter, offers
+  the likely one and lists what the tool accepts, for example
+  `unknown parameter 'limit' for memory_search; did you mean 'top_k'?
+  Accepted: query, top_k, ...`. Suggestions come from a small map of the
+  measured confusions (`limit` to `top_k` or `n`, `content` to `text`,
+  `note`/`notes`/`text` to `detail`) and from close spelling matches.
+  Every tool's input schema now says `additionalProperties: false`
+  (29 bytes per tool; the largest schema, `memory_agents`, is 3,488 of its
+  4,000-byte cap). MCP request `_meta` is not an argument and is unaffected,
+  and stringified list arguments are still decoded.
+- The session-start episode line, the startup memory core and the resumed
+  or compacted session note now say to pass the episode to every memory
+  tool that accepts it, instead of "on every memory write": world, set,
+  resolve and graph writes take no `episode` parameter, so a model
+  following the old wording now gets a refusal there. Those writes are
+  still attributed to the session wherever the service stamps one (the
+  shim's per-session header).
+
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
 - Turning on maintainer passkeys took four manual steps on the daemon host:
   a `tailscale serve` command, a hand edit of the daemon's config file, a
