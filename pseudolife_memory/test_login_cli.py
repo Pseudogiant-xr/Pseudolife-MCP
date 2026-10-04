@@ -28,6 +28,8 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
   before ``ops/.env``): ``PSEUDOLIFE_TEST_PG_USER`` and
   ``PSEUDOLIFE_TEST_PG_PASSWORD``. A second run re-applies the file's
   password, so running suites keep working; ``--rotate`` draws a new one.
+  With the role present and no file here holding its password it refuses
+  unless ``--rotate``: a new password stops every other copy of the file.
 
 The password is drawn here and never sent: the server gets its SCRAM-SHA-256
 verifier, so it is in no statement, log line or process argument.
@@ -471,8 +473,15 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
                                            f"{(owned or owners)[0]}: not a test login")
     present = sorted((before.get("banks") or {}).keys())
     old = read_file(path)
-    reuse = (not args.rotate and old.get(USER_KEY, DEFAULT_ROLE) == args.role
-             and bool(old.get(PASSWORD_KEY)))
+    reusable = old.get(USER_KEY, DEFAULT_ROLE) == args.role and bool(old.get(PASSWORD_KEY))
+    if role and not reusable and not args.rotate:
+        return report.finish(EXIT_REFUSED, (
+            f"role {args.role} already exists and {_shown(path)} holds no password for it, "
+            "so this would draw a new one, and every other copy of the login file (another "
+            "account's, another machine's) would stop working. Copy the current file here, "
+            "or pass --rotate to draw a new password and copy the file again everywhere. "
+            "Nothing was changed."))
+    reuse = reusable and not args.rotate
     password = old[PASSWORD_KEY] if reuse else secrets.token_urlsafe(32)
     report.say(f"test-login: on {executor.description}, as {who.get('who')} (superuser)")
 
@@ -485,7 +494,7 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
         raise
     os.replace(staged, path)  # the role now has this password: so does the file
     how = ("password re-applied from the file" if reuse
-           else "password rotated" if role and old.get(PASSWORD_KEY) else "password set")
+           else "password rotated" if role else "password set")
     report.say(f"  role {args.role}: {'reset' if role else 'created'}: LOGIN CREATEDB, not "
                f"superuser, no CREATEROLE, REPLICATION or BYPASSRLS; {how}")
     for granted in before.get("member_of") or ():

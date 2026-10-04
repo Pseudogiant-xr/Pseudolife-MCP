@@ -208,6 +208,26 @@ def test_a_second_run_reapplies_the_files_password_and_rotate_replaces_it(tmp_pa
     assert "rotated" in out
 
 
+@pytest.mark.parametrize("file_text", [None, "PSEUDOLIFE_TEST_PG_USER=other_role\n"
+                                              "PSEUDOLIFE_TEST_PG_PASSWORD=x\n"],
+                         ids=["no-file", "another-roles-file"])
+def test_an_existing_role_without_its_file_is_not_silently_given_a_new_password(
+        tmp_path, file_text):
+    """A first run on another account (or after the file was lost) would
+    draw a new password and break every other copy of the file."""
+    if file_text is not None:
+        (tmp_path / "test-pg.env").write_text(file_text, encoding="utf-8")
+    server = _FakeServer(role={"super": False})
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_REFUSED, out
+    assert "--rotate" in out and "stop working" in out
+    assert not server.applied
+    assert (tmp_path / "test-pg.env").exists() == (file_text is not None)
+    code, out = _run(["--rotate"], _FakeServer(role={"super": False}), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "rotated" in out
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_the_file_is_owner_only(tmp_path):
     _run([], _FakeServer(), tmp_path)

@@ -11081,7 +11081,10 @@ anything when that connection is not a superuser. Idempotently, it:
 | Writes `~/.pseudolife-mcp/test-pg.env`, owner-only: `PSEUDOLIFE_TEST_PG_USER`, `PSEUDOLIFE_TEST_PG_PASSWORD` | The suite reads it before `ops/.env`, so no checkout needs `ops/.env` |
 
 It prints each change. A second run re-applies the file's password (running
-suites keep working); `--rotate` draws a new one. The server is sent only
+suites keep working); `--rotate` draws a new one. When the role already
+exists and the file is missing (another account, or a lost file), it
+refuses unless `--rotate`, since a new password stops every other copy of
+the file: copy the current file instead. The server is sent only
 the password's SCRAM-SHA-256 verifier, never the password. It also lists
 other databases `PUBLIC` may still connect to: the test login holds no table
 privileges in a database it does not own, and `--bank DB` closes one. After
