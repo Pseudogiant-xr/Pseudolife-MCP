@@ -45,6 +45,11 @@
 #   --tunnel                         enter optional guided ChatGPT Secure MCP
 #                                    Tunnel setup after local installation
 #                                    token, so the agent board stays off
+#   --test-login                     also give the test suite its own Postgres
+#                                    login, which cannot open the bank
+#                                    (`pseudolife-mcp test-login create`): for
+#                                    contributors who run the suite against
+#                                    this server; off by default
 #   --model <name>                   the dreamer model: one the CLI shim modes
 #                                    list (docs/guide/dreaming.md), or any
 #                                    name an endpoint mode's server serves
@@ -123,6 +128,7 @@ TRANSPORT=shim
 NO_ART=""
 NO_TOKEN=""
 TUNNEL=""
+TEST_LOGIN=""
 DAEMON_URL=""
 TOKEN_FILE=""
 CLIENT_ONLY=""
@@ -153,6 +159,7 @@ while [ $# -gt 0 ]; do
         --no-art) NO_ART=1; shift ;;
         --no-token) NO_TOKEN=1; shift ;;
         --tunnel) TUNNEL=1; shift ;;
+        --test-login) TEST_LOGIN=1; shift ;;
         --daemon-url) DAEMON_URL="$2"; shift 2 ;;
         --token-file) TOKEN_FILE="$2"; shift 2 ;;
         --client-only) CLIENT_ONLY=1; shift ;;
@@ -716,6 +723,7 @@ if [ -n "$CLIENT_ONLY" ]; then
     [ -z "$MODEL" ] || local_flags="$local_flags --model"
     [ "$SHIM_PORT" = 0 ] || local_flags="$local_flags --shim-port"
     [ -z "$NO_TOKEN" ] || local_flags="$local_flags --no-token"
+    [ -z "${TEST_LOGIN:-}" ] || local_flags="$local_flags --test-login"
     [ "$TRANSPORT" = shim ] || local_flags="$local_flags --transport http"
     if [ -n "$local_flags" ]; then
         echo "client-only install: the daemon runs elsewhere, so these flags do not apply:$local_flags (a local daemon's settings, or an HTTP registration, which cannot carry the token file)$CLIENT_ONLY_VIA" >&2
@@ -2871,6 +2879,33 @@ describe_endpoint_container() {
     esac
 }
 # <<< endpoint container probe <<<
+
+# >>> test login >>>
+# The test suite's own Postgres login (`pseudolife-mcp test-login create`,
+# pseudolife_memory/test_login_cli.py): a role that creates and drops its own
+# databases and cannot connect to the bank, written to
+# ~/.pseudolife-mcp/test-pg.env, which this checkout's tests read before
+# ops/.env. So no checkout or agent session needs ops/.env, which holds the
+# bank owner's password (2026-10-04). Only with --test-login: an end user's
+# server has no use for a CREATEDB password login (review, 2026-10-04).
+# Idempotent: a re-run re-applies the same password. It runs psql in the
+# Postgres container as its own superuser; a failure leaves the install
+# working.
+setup_test_login() {
+    local py
+    py="$(installer_python)"
+    if [ -z "$py" ]; then
+        echo "WARNING: no Python 3.10+ found, so the test suite's Postgres login was not set up. Later, from $repo: python3 -m pseudolife_memory.cli test-login create" >&2
+        return 0
+    fi
+    step "Setting up the test suite's Postgres login (it cannot open the bank)..."
+    if ! (cd "$repo" && PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$py" -m pseudolife_memory.test_login_cli create); then
+        echo "WARNING: the test suite's Postgres login was not set up (see above); the install is unaffected. Re-run later from $repo: $py -m pseudolife_memory.test_login_cli create" >&2
+    fi
+    return 0
+}
+# <<< test login <<<
+
 # ── 12a. CLI shim autostart (Claude / Codex modes) ──────────────────────────
 # Placed here, at the top of stage 12, for three reasons: after stage 11's
 # shim install (below); before the health wait, so a daemon that is not yet
@@ -2936,6 +2971,9 @@ if [ -z "$CLIENT_ONLY" ]; then
     }
     step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
     endpoint_container_probe
+    if [ -n "${TEST_LOGIN:-}" ]; then
+        setup_test_login
+    fi
 fi
 
 # >>> client-only claude hook >>>

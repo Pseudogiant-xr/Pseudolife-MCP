@@ -15,6 +15,11 @@
 #   ssh=<ssh destination, e.g. an ~/.ssh/config alias>   (required)
 #   repo=<path of a clone there>      (default ~/projects/Pseudolife-MCP)
 #   env=<file of KEY=VALUE lines to source there, e.g. the test database URL>
+#       The run there logs in as env= says (PSEUDOLIFE_TEST_PG_USER and
+#       PSEUDOLIFE_TEST_PG_PASSWORD, or PSEUDOLIFE_TEST_PG_LOGIN_FILE), else
+#       as the test login in that user's ~/.pseudolife-mcp/test-pg.env
+#       (`pseudolife-mcp test-login create` against its test server).
+#       Nothing from this machine's ops/.env is sent.
 #   memory=<systemd MemoryMax for the run>             (default 16G)
 #   daemon_url=<board daemon URL as seen from there>   (optional)
 # PSEUDOLIFE_SUITE_REMOTE overrides ssh=. Without either, only local runs.

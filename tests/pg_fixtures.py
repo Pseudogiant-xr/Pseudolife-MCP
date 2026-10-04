@@ -231,6 +231,7 @@ def ensure_test_db() -> None:
             cls, message = memo
             raise cls(message)
         return
+    refusal = None
     try:
         with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
             if not overridden:
@@ -240,7 +241,9 @@ def ensure_test_db() -> None:
             ).fetchone()
             if row is None:
                 conn.execute(f'CREATE DATABASE "{db_name}"')
-            if not overridden:
+            else:
+                refusal = _foreign_owner_refusal(conn, db_name)
+            if not overridden and refusal is None:
                 atexit.register(_drop_run_db)
     except Exception as exc:  # noqa: BLE001
         if is_auth_failure(exc):
@@ -263,7 +266,30 @@ def ensure_test_db() -> None:
         # `from None`: psycopg's frames carry the full conninfo (password
         # included) as a rendered argument; the FATAL text is in the message.
         raise memo[0](memo[1]) from None
+    if refusal is not None:
+        _ensure_state[key] = (PostgresSetupError, refusal)
+        raise PostgresSetupError(refusal)
     _ensure_state[key] = None
+
+
+def _foreign_owner_refusal(conn, db_name: str) -> str | None:
+    """The one-line refusal when the run's existing database belongs to a
+    role this login does not hold, else ``None``. A hard-killed run as the
+    bank owner leaves ``pseudolife_memory_test_<pid>``; the test login
+    cannot drop it (the pruner's DROP fails), and a run that reuses the pid
+    would reuse it and fail on every reset, as its tables are the owner's
+    (review, 2026-10-04)."""
+    row = conn.execute(
+        "SELECT pg_has_role(current_user, datdba, 'USAGE'), "
+        "pg_get_userbyid(datdba), current_user "
+        "FROM pg_database WHERE datname = %s", (db_name,)).fetchone()
+    if row is None or row[0]:
+        return None
+    _, owner, user = row
+    return (f"the test database {db_name} already exists and belongs to {owner}, "
+            f"not {user}: a leftover of an earlier run as {owner} whose name this "
+            f"run reuses. Fix: drop it as {owner} "
+            f'(DROP DATABASE "{db_name}" WITH (FORCE)), then run again.')
 
 
 # Join budget for a live dream thread. A hang detector, not a wait: with no
@@ -412,7 +438,8 @@ def _pg_conn_session(pg_url):
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                "AND backend_type = 'client backend'"
             )
         conn.commit()
         ensure_schema(conn)

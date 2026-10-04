@@ -383,7 +383,8 @@ def reset_bench() -> str:
         with conn.cursor() as cur:  # reap any leaked backends holding locks
             cur.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                "AND backend_type = 'client backend'"
             )
         conn.commit()
         ensure_schema(conn)

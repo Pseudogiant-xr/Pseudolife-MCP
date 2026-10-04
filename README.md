@@ -408,6 +408,7 @@ deep material lives in the user guide:
 | [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 | [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
+| [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -1451,11 +1452,13 @@ model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
 suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
 database on the bundled dev container (never your real bank; concurrent
 runs can't collide), dropped on exit, and skip cleanly without Postgres.
-The container's password is read from `ops/.env` (override with
-`PSEUDOLIFE_TEST_DATABASE_URL` or `PSEUDOLIFE_TEST_PG_PASSWORD`); a
-server that is reachable but rejects the credentials *errors* the PG-backed
-tests rather than skipping them, so a rotated password can never produce a
-green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
+The suite logs in with its own test login, which cannot open the bank
+(`pseudolife-mcp test-login create` writes `~/.pseudolife-mcp/test-pg.env`;
+see [agent isolation](docs/guide/agent-isolation.md)), else the password in
+`ops/.env` (override with `PSEUDOLIFE_TEST_DATABASE_URL` or
+`PSEUDOLIFE_TEST_PG_PASSWORD`); a server that is reachable but rejects the
+credentials *errors* the PG-backed tests rather than skipping them, so a
+rotated password can never produce a green run by accident. Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet
 

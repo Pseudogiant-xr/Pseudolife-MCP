@@ -202,6 +202,14 @@ else
         echo "CREATE DATABASE $DB failed after the drop - the bank no longer exists in Postgres. Re-run this restore (the dump is still at $BACKUP_FILE) before starting the daemon." >&2
         exit 1
     fi
+    # A plain dump carries no database ACL, so the new database is open to
+    # PUBLIC again: close it before the replay, as `pseudolife-mcp test-login
+    # create` does, so the test login cannot open it. The daemon connects as
+    # the owner, who keeps CONNECT. A failure only warns: the replay matters
+    # more, and re-running `test-login create` closes it.
+    if ! docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "REVOKE CONNECT ON DATABASE $DB FROM PUBLIC"; then
+        echo "WARNING: could not revoke CONNECT on $DB from PUBLIC; after the restore, run 'pseudolife-mcp test-login create' to close it again." >&2
+    fi
     if ! docker exec "$CONTAINER" sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $DB_USER -d $DB > /dev/null"; then
         echo "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data/backups." >&2
         exit 1

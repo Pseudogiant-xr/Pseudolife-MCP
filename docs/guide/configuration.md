@@ -3284,6 +3284,32 @@ just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
+## The test suite's Postgres login: `pseudolife-mcp test-login`
+
+The bundled Postgres serves the bank and the test suite's databases under
+one superuser role, `pseudolife`, whose password is `POSTGRES_PASSWORD` in
+`ops/.env`. So that test runs (and the agent sessions that start them) do
+not need that password, run once on the daemon host:
+
+```bash
+pseudolife-mcp test-login create            # --rotate for a new password
+```
+
+It creates the role `pseudolife_test` (`LOGIN CREATEDB`, nothing more),
+revokes `CONNECT` on the bank and on `template1` from `PUBLIC` (refusing
+first if the daemon's database user would lose it), hands it leftover
+per-run test databases so the suite can prune them, installs `vector` in
+`template1`, and writes the login to an owner-only
+`~/.pseudolife-mcp/test-pg.env`, which the suite reads before `ops/.env`
+(`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it). It runs `psql` inside the
+`pseudolife-mcp-postgres` container, or uses `--admin-url` for another
+server, and is idempotent. The installers run it only with `-TestLogin` /
+`--test-login` (for contributors who run the suite against this server);
+`pseudolife-mcp update` never does. A bank restore keeps the bank closed
+(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it);
+re-running `test-login create` checks it. Details, and running agent
+sessions under a separate account: [agent isolation](agent-isolation.md).
+
 ## Windows / WSL2 memory (Docker tier)
 
 Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by

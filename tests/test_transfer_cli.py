@@ -69,7 +69,8 @@ def _bank(pg_url):
         conn.execute("SET search_path TO public")
         conn.execute(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND backend_type = 'client backend'"
         )
         conn.commit()
         ensure_schema(conn)

@@ -421,3 +421,24 @@ def test_the_safety_dump_backs_up_the_database_being_replaced(applied):
     words = backup[0].split()
     pairs = {words[i].lstrip("-").replace("-", "").lower(): words[i + 1] for i in range(1, len(words) - 1, 2)}
     assert pairs == {"container": "pgc", "db": "mydb", "user": "myuser", "daemoncontainer": "dmn"}, res.detail()
+
+
+@pytest.mark.parametrize("scenario,db", [("apply_no_start", "mydb"),
+                                         ("apply_start", "pseudolife_memory")])
+def test_a_real_restore_closes_the_bank_to_public_before_the_replay(applied, scenario, db):
+    """DROP + plain CREATE DATABASE + a plain pg_dump replay carries no
+    database ACL, so PUBLIC regained CONNECT and a restore reopened the bank
+    to `pseudolife-mcp test-login create`'s login (review, 2026-10-04). The
+    revoke runs as the owner right after CREATE DATABASE, before the replay.
+    Harmless without a test login: on the Docker tier the daemon connects as
+    the owner, who keeps CONNECT."""
+    res = applied(scenario)
+    calls = _docker_calls(res)
+    assert res.returncode == 0, res.detail()
+    created = [i for i, c in enumerate(calls) if f'CREATE DATABASE {db}' in c]
+    revoked = [i for i, c in enumerate(calls)
+               if f"REVOKE CONNECT ON DATABASE {db} FROM PUBLIC" in c]
+    replayed = [i for i, c in enumerate(calls) if "ON_ERROR_STOP=1" in c]
+    assert len(created) == 1 and len(revoked) == 1 and len(replayed) == 1, res.detail()
+    assert created[0] < revoked[0] < replayed[0], res.detail()
+    assert " -d postgres " in calls[revoked[0]] + " ", res.detail()

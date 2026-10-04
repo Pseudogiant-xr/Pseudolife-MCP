@@ -48,6 +48,10 @@ modes:
   invite         on the daemon host: give another machine its own principal
                  (`invite <machine>`): prints a short-lived, single-use
                  pairing code, no daemon restart; --list, --revoke NAME
+  test-login     on the daemon host: give the test suite its own Postgres
+                 login (`test-login create`): it creates and drops its own
+                 databases and cannot connect to the bank; writes
+                 ~/.pseudolife-mcp/test-pg.env, never the owner's password
   pair           join a bank with a pairing code from `invite` on the daemon
                  host (`pair <url> <code>`, or --read-code): mints the token
                  here, writes it owner-only and sends the daemon only its
@@ -167,6 +171,9 @@ def main() -> None:
     elif mode == "invite":
         from pseudolife_memory.invite_cli import main as invite_main
         sys.exit(invite_main(sys.argv[2:]))
+    elif mode == "test-login":
+        from pseudolife_memory.test_login_cli import main as test_login_main
+        sys.exit(test_login_main(sys.argv[2:]))
     elif mode == "pair":
         from pseudolife_memory.pair_cli import main as pair_main
         sys.exit(pair_main(sys.argv[2:]))

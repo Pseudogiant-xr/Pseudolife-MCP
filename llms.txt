@@ -17,6 +17,7 @@
 - [Security posture — memory poisoning (ASI06)](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/security-posture.md): Memory poisoning (ASI06): the threat model, every shipped mitigation mapped to it, and what is not defended
 - [Sharing one bank across machines](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/remote-bank.md): One daemon, many machines: exposing the daemon over a tailnet, a LAN or a proxy; per-machine principals; board admission; client-only installs
 - [Secure MCP Tunnel access from ChatGPT](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/tunnels.md): Guided ChatGPT Secure MCP Tunnel setup: private keys, resumable account steps, read-only cloud verification, updates and optional autostart
+- [Running agent sessions under a separate account](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/guide/agent-isolation.md): The test suite's own Postgres login that cannot open the bank, and running agent sessions under a separate account
 
 ## Optional
 
