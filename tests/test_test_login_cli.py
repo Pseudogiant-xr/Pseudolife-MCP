@@ -133,9 +133,10 @@ class _FakeServer:
     """Answers the command's queries the way a server would, and records them."""
 
     def __init__(self, *, superuser=True, user="pseudolife", database="pseudolife_memory",
-                 role=None, owns=(), fail_on=None):
+                 role=None, owns=(), fail_on=None, daemon=None):
         self.superuser, self.user, self.database = superuser, user, database
         self.role, self.owns, self.fail_on = role, list(owns), fail_on
+        self.daemon = daemon
         self.calls: list[tuple[str | None, list[str]]] = []
         self.applied = False
         self.vector = ""
@@ -160,7 +161,8 @@ class _FakeServer:
                 "role_connect": False if self.applied else role is not None,
                 "owner_connect": True}}
             return json.dumps({"role": role, "member_of": [], "banks": banks,
-                               "owns": self.owns, "others": ["pseudolife_memory_bench"]})
+                               "owns": self.owns, "others": ["pseudolife_memory_bench"],
+                               "daemon": self.daemon})
         if "CREATE EXTENSION" in sql:
             before, self.vector = self.vector, "vector 0.8.6"
             return f"{before}|{self.vector}"
@@ -226,6 +228,37 @@ def test_an_existing_role_without_its_file_is_not_silently_given_a_new_password(
     code, out = _run(["--rotate"], _FakeServer(role={"super": False}), tmp_path)
     assert code == cli.EXIT_OK, out
     assert "rotated" in out
+
+
+DAEMON_DSN = "postgresql://memapp:daemon-secret-xyz@db.example.com:5432/pseudolife_memory"
+
+
+def test_a_daemon_user_that_would_lose_connect_is_refused_before_any_change(
+        tmp_path, monkeypatch):
+    """A daemon that logs in as a non-owner, non-superuser role reaches the
+    bank only through PUBLIC's CONNECT: the revoke would lock it out."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", DAEMON_DSN)
+    server = _FakeServer(daemon={"exists": True, "keeps": {"pseudolife_memory": False}})
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_REFUSED, out
+    assert 'GRANT CONNECT ON DATABASE "pseudolife_memory" TO "memapp"' in out
+    assert "daemon-secret-xyz" not in out
+    assert not server.applied
+    assert not (tmp_path / "test-pg.env").exists()
+    state = [s for _, statements in server.calls for s in statements if "'banks'" in s]
+    assert state and "'memapp'" in state[0]
+
+
+@pytest.mark.parametrize("daemon,said", [
+    ({"exists": True, "keeps": {"pseudolife_memory": True}}, "memapp"),
+    ({"exists": False, "keeps": {}}, "not a role on this server"),
+], ids=["keeps-connect", "not-on-this-server"])
+def test_a_daemon_user_that_keeps_connect_goes_ahead(tmp_path, monkeypatch, daemon, said):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", DAEMON_DSN)
+    code, out = _run([], _FakeServer(daemon=daemon), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert said in out
+    assert "daemon-secret-xyz" not in out
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")

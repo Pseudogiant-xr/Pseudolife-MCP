@@ -11076,7 +11076,7 @@ anything when that connection is not a superuser. Idempotently, it:
 | What | Why |
 |---|---|
 | Creates or resets the role `pseudolife_test`: `LOGIN CREATEDB`, not superuser, no `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, every role membership revoked | It can create, reset and drop the databases it creates, which is everything the suite does on the server, and nothing else |
-| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner |
+| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner. When `PSEUDOLIFE_MCP_DATABASE_URL` names another user that reaches the bank only through `PUBLIC`, it refuses before any change and names the `GRANT CONNECT` to run first |
 | Installs (and updates) `vector` in `template1` | pgvector does not mark its extension trusted, so `CREATE EXTENSION vector` needs a superuser. `CREATE DATABASE` copies `template1`, so the login's databases already have it and the schema's `CREATE EXTENSION IF NOT EXISTS` skips |
 | Writes `~/.pseudolife-mcp/test-pg.env`, owner-only: `PSEUDOLIFE_TEST_PG_USER`, `PSEUDOLIFE_TEST_PG_PASSWORD` | The suite reads it before `ops/.env`, so no checkout needs `ops/.env` |
 

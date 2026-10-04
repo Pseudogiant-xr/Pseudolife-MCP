@@ -18,7 +18,9 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
 * ``REVOKE CONNECT ... FROM PUBLIC`` on each production database (default
   ``pseudolife_memory``, the container's ``POSTGRES_DB`` and any ``--bank``),
   and from the role. The bank's owner keeps CONNECT as owner, and is the
-  superuser the daemon connects as on the Docker tier.
+  superuser the daemon connects as on the Docker tier. When
+  ``PSEUDOLIFE_MCP_DATABASE_URL`` names a user that would lose CONNECT with
+  PUBLIC (not owner, superuser or explicitly granted), it refuses first.
 * ``vector`` installed (and updated) in ``template1``. pgvector does not mark
   its extension trusted, so ``CREATE EXTENSION vector`` needs a superuser;
   ``CREATE DATABASE`` copies template1, so every database the login creates
@@ -74,6 +76,8 @@ FILE_ENV = "PSEUDOLIFE_TEST_PG_LOGIN_FILE"
 DEFAULT_FILE = Path.home() / ".pseudolife-mcp" / "test-pg.env"
 USER_KEY = "PSEUDOLIFE_TEST_PG_USER"
 PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"
+# The daemon's DSN: its user must keep CONNECT once PUBLIC loses it.
+DAEMON_DSN_ENV = "PSEUDOLIFE_MCP_DATABASE_URL"
 # storage/schema.py's PRODUCTION_DATABASES, repeated: the Docker path imports
 # no storage code (pinned equal by the tests).
 DEFAULT_BANKS = ("pseudolife_memory",)
@@ -229,13 +233,34 @@ def whoami_statement() -> str:
             "'db', current_database())::text FROM pg_roles WHERE rolname = current_user")
 
 
-def state_statement(role: str, banks: list[str]) -> str:
+def _daemon_state(daemon_user: str | None, role_oid: str, banks: list[str]) -> str:
+    """Whether the daemon's database user keeps CONNECT on each bank once
+    PUBLIC loses it: as a superuser, through the owner role, or through an
+    explicit grant to a role it inherits (not PUBLIC, not the test login)."""
+    if not daemon_user:
+        return "NULL::json"
+    d = _literal(daemon_user)
+    return f"""json_build_object(
+    'exists', EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {d}),
+    'keeps', (SELECT coalesce(json_object_agg(db.datname, (
+                r.rolsuper OR pg_has_role(r.oid, db.datdba, 'USAGE') OR EXISTS (
+                  SELECT 1 FROM aclexplode(coalesce(db.datacl, acldefault('d', db.datdba))) a
+                  WHERE a.privilege_type = 'CONNECT' AND a.grantee <> 0
+                    AND a.grantee IS DISTINCT FROM {role_oid}
+                    AND pg_has_role(r.oid, a.grantee, 'USAGE')))), '{{}}'::json)
+              FROM pg_database db JOIN pg_roles r ON r.rolname = {d}
+              WHERE db.datname IN ({_names(banks)})))"""
+
+
+def state_statement(role: str, banks: list[str], daemon_user: str | None = None) -> str:
     """One JSON row: the role's attributes and memberships, each bank's
     CONNECT for PUBLIC, the role and the owner, the databases the role owns,
-    and the others PUBLIC may still connect to."""
+    the others PUBLIC may still connect to, and whether the daemon's
+    database user keeps CONNECT without PUBLIC."""
     r = _literal(role)
     role_oid = f"(SELECT oid FROM pg_roles WHERE rolname = {r})"
     return f"""SELECT json_build_object(
+  'daemon', {_daemon_state(daemon_user, role_oid, banks)},
   'role', (SELECT json_build_object('super', rolsuper, 'login', rolcanlogin,
             'createdb', rolcreatedb, 'createrole', rolcreaterole,
             'replication', rolreplication, 'bypassrls', rolbypassrls)
@@ -415,12 +440,12 @@ def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
         return report.finish(EXIT_USAGE, f"{named[0]} is not a bank and stays open")
     path = args.file or Path(os.environ.get(FILE_ENV) or DEFAULT_FILE)
     banks = list(dict.fromkeys([*DEFAULT_BANKS, *args.bank]))
+    daemon = _dsn_parts(os.environ.get(DAEMON_DSN_ENV))
     if executor is None:
         if args.admin_url:
             executor = AdminUrl(args.admin_url)
-            daemon_db = _dsn_database(os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL"))
-            if daemon_db:
-                banks.append(daemon_db)
+            if daemon.get("dbname"):
+                banks.append(daemon["dbname"])
         elif shutil.which("docker"):
             executor = ContainerPsql(args.container)
         else:
@@ -428,7 +453,7 @@ def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
                 "no superuser connection: run this on the Docker host, where the "
                 f"{args.container} container runs, or give --admin-url with a superuser URL"))
     try:
-        return _create(args, executor, path, banks, report)
+        return _create(args, executor, path, banks, report, daemon)
     except DatabaseError as exc:
         return report.finish(EXIT_FAILED, f"the database refused: {exc}")
     except ValueError:  # an answer that is not the JSON the query builds
@@ -436,18 +461,37 @@ def main(argv: list[str] | None = None, *, out=None, executor=None) -> int:
                                           "command does not understand")
 
 
-def _dsn_database(dsn: str | None) -> str | None:
+def _dsn_parts(dsn: str | None) -> dict[str, str]:
+    """``user`` and ``dbname`` of the daemon's DSN, when it names them; the
+    password is never kept. psycopg parses it when installed; on a Docker
+    host's shim runtime, the standard library (URL or keyword form)."""
     if not dsn:
-        return None
+        return {}
     try:
-        from psycopg.conninfo import conninfo_to_dict
+        try:
+            from psycopg.conninfo import conninfo_to_dict
+        except ImportError:
+            parts = _dsn_parts_stdlib(dsn)
+        else:
+            parts = conninfo_to_dict(dsn)
+    except Exception:  # noqa: BLE001 - only a hint; --bank names a bank explicitly
+        return {}
+    return {key: str(parts[key]) for key in ("user", "dbname") if parts.get(key)}
 
-        return conninfo_to_dict(dsn).get("dbname") or None
-    except Exception:  # noqa: BLE001 - only a hint; --bank names it explicitly
-        return None
+
+def _dsn_parts_stdlib(dsn: str) -> dict[str, str]:
+    from urllib.parse import unquote, urlsplit
+
+    if re.match(r"\s*postgres(?:ql)?://", dsn, re.IGNORECASE):
+        url = urlsplit(dsn.strip())
+        return {"user": unquote(url.username or ""), "dbname": unquote(url.path.lstrip("/"))}
+    return {key: value.strip("'") for key, value in
+            re.findall(r"(user|dbname)\s*=\s*('(?:[^'\\]|\\.)*'|\S+)", dsn)}
 
 
-def _create(args, executor, path: Path, banks: list[str], report: _Report) -> int:
+def _create(args, executor, path: Path, banks: list[str], report: _Report,
+            daemon: dict[str, str] | None = None) -> int:
+    daemon = daemon or {}
     who = json.loads(executor.query(None, [whoami_statement()]))
     if not who.get("super"):
         return report.finish(EXIT_REFUSED, (
@@ -460,7 +504,9 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
     if who.get("db") and who["db"] not in _NOT_BANKS and isinstance(executor, ContainerPsql):
         banks.append(who["db"])  # the container's POSTGRES_DB is the bank
     banks = [bank for bank in dict.fromkeys(banks) if bank not in _NOT_BANKS]
-    before = json.loads(executor.query("postgres", [state_statement(args.role, banks)]))
+    daemon_user = daemon.get("user")
+    before = json.loads(executor.query("postgres", [state_statement(args.role, banks,
+                                                                    daemon_user)]))
     role = before.get("role")
     if role and role.get("super"):
         return report.finish(EXIT_REFUSED, f"role {args.role} exists and is a superuser: not "
@@ -472,6 +518,26 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
         return report.finish(EXIT_REFUSED, f"role {args.role} owns the bank "
                                            f"{(owned or owners)[0]}: not a test login")
     present = sorted((before.get("banks") or {}).keys())
+    daemon_line = None
+    if daemon_user and daemon_user != args.role:
+        state = before.get("daemon") or {}
+        if not state.get("exists"):
+            daemon_line = (f"  {DAEMON_DSN_ENV}'s user {daemon_user} is not a role on this "
+                           "server: not checked")
+        else:
+            checked = [bank for bank in present
+                       if bank == daemon.get("dbname") or not daemon.get("dbname")]
+            locked = [bank for bank in checked if not (state.get("keeps") or {}).get(bank)]
+            if locked:
+                return report.finish(EXIT_REFUSED, (
+                    f"the daemon's database user {daemon_user} ({DAEMON_DSN_ENV}) can connect "
+                    f"to {locked[0]} only through PUBLIC's CONNECT, which this revokes: the "
+                    "daemon would be locked out of the bank. Grant it first, as a superuser: "
+                    f'GRANT CONNECT ON DATABASE {_ident(locked[0])} TO {_ident(daemon_user)}; '
+                    "then run this again. Nothing was changed."))
+            if checked:
+                daemon_line = (f"  daemon user {daemon_user} ({DAEMON_DSN_ENV}): keeps CONNECT "
+                               f"on {', '.join(checked)} as owner, superuser or by grant")
     old = read_file(path)
     reusable = old.get(USER_KEY, DEFAULT_ROLE) == args.role and bool(old.get(PASSWORD_KEY))
     if role and not reusable and not args.rotate:
@@ -507,6 +573,8 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report) -> in
     for bank in banks:
         if bank not in present:
             report.say(f"  database {bank}: not on this server")
+    if daemon_line:
+        report.say(daemon_line)
 
     old_ext, _, new_ext = executor.query("template1", extension_statements()).partition("|")
     if not old_ext:
