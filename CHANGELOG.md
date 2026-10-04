@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — a refused tool call is a tool error that says what to fix)
+- When a tool refused a call, the model got a success-shaped result such as
+  `{"error": "CoordinationRefused", "message": "missing_parameter"}`: a
+  Python class name and no word on which parameter was wrong. Transcripts
+  from 2026-10-04 show every `missing_parameter` retry by Claude and Codex
+  sessions was a guess. A refusal raised in a tool body is now an MCP tool
+  error (`isError: true`) whose text and structured content are one JSON
+  object: `error` (a stable snake_case code, never a class name), `message`
+  (one sentence naming the fix), and, where the refusal knows them,
+  `param`, `accepted`, `action`, and `mutation: "unknown"` when a write
+  tool failed in a way that leaves a write in doubt. A coded `ValueError`
+  keeps its code (`missing_parameter`, `invalid_park`, ...); one in prose is
+  `invalid_argument` with that prose; a missing file is `file_not_found`;
+  anything else is `internal_error`, whose class and text stay in the
+  daemon log. No-ops (a dropped near-duplicate, an empty read, queued mail,
+  a `withheld` or `no_path` wake receipt) stay successes, and success
+  payloads are unchanged. Refusals tools return as `{"error": ...}` dicts
+  (`unknown_action`, `bulk_confirm_required`, ...) are unchanged.
+- The board names what was wrong: `missing_parameter` says what the action
+  needs (`send needs request_id`), `unexpected_parameter` names the
+  parameter, what the action takes and which action takes it instead, and
+  `unknown_coordination_action` lists the actions. `invalid_park` says which
+  of its five causes applied (an unknown `park_reason`, with the six
+  accepted ones; a park field over its length; a bad or more than 7 days
+  ahead `park_expires`; park fields with no park to refine), `invalid_text`
+  which rule the body broke (blank, NUL, over 8,192 UTF-8 bytes with its
+  size, not UTF-8), and `secret_like_body` which field looked like a
+  credential, never its text. The codes are unchanged, so callers keyed on
+  them keep working; the REST API carries the new sentences in its existing
+  `detail` field.
+
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
 - Turning on maintainer passkeys took four manual steps on the daemon host:
   a `tailscale serve` command, a hand edit of the daemon's config file, a

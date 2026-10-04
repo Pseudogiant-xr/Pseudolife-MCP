@@ -8,8 +8,9 @@ Pins the fixes from the pre-release UI/UX pass:
 * verb-dispatch and enum-shaped params expose ``enum`` values in the JSON
   schema (``typing.Literal``), so dispatch is discoverable from the manifest
   alone, not just the docstring prose;
-* tool bodies that raise map to the same structured ``{"error": ...}`` shape
-  the dispatch tools already return, instead of leaking raw exceptions;
+* tool bodies that raise map to a structured MCP tool error (``isError``,
+  ``{"error": <code>, "message": ...}``) instead of leaking raw exceptions or
+  Python class names;
 * the Console's list endpoints report ``total``/``truncated`` so big banks
   don't silently cap at the fetch limit;
 * README version claims are mechanically guarded against drift (the schema
@@ -94,17 +95,78 @@ def test_enum_params_are_enums_in_the_input_schema(tmp_path: Path, monkeypatch) 
 # ── uniform failure contract ──────────────────────────────────────────────
 
 
+def _tool_error(mod, name: str, args: dict) -> dict:
+    """Call a tool through FastMCP and return its refusal payload, asserting
+    the refusal reached the client as an MCP tool error (``isError``)."""
+    result = asyncio.run(mod.mcp.call_tool(name, args))
+    text = "".join(item.text for item in result.content if hasattr(item, "text"))
+    assert result.is_error, f"{name} refusal came back success-shaped: {text}"
+    payload = json.loads(text)
+    assert result.structured_content in (None, payload)
+    return payload
+
+
 def test_tool_exceptions_become_structured_errors(tmp_path: Path, monkeypatch) -> None:
-    """A service-level raise must surface as the same ``{"error": ...}``
-    shape the dispatch tools return — not a raw exception string."""
+    """A service-level raise must surface as a structured MCP tool error
+    (``isError``) with a stable code, not a raw exception string or a Python
+    class name. A missing file names its path, which the caller gave."""
     mod = _reload(tmp_path, monkeypatch)
     monkeypatch.setattr(
         mod.service, "ingest_document",
         lambda path, source=None: (_ for _ in ()).throw(
             FileNotFoundError(f"Not found: {path}")))
-    out = _invoke("document_ingest", {"path": "Z:/missing.pdf"})
-    assert out["error"] == "FileNotFoundError"
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/missing.pdf"})
+    assert out["error"] == "file_not_found"
     assert "Z:/missing.pdf" in out["message"]
+    assert "server" in out["message"]
+
+
+def test_prose_value_errors_become_invalid_argument(tmp_path: Path, monkeypatch) -> None:
+    """A ValueError whose text is a sentence keeps the sentence as the
+    message under the stable code ``invalid_argument``."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    out = _tool_error(mod, "memory_history",
+                      {"entity": "a", "attribute": "b", "as_of": "yesterday"})
+    assert out["error"] == "invalid_argument"
+    assert "yesterday" in out["message"]
+    assert "ValueError" not in json.dumps(out)
+
+
+def test_coded_value_errors_keep_their_code(tmp_path: Path, monkeypatch) -> None:
+    """A ValueError raised with a snake_case code keeps that code as
+    ``error``: other callers already key on it."""
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        mod.service, "ingest_document",
+        lambda path, source=None: (_ for _ in ()).throw(
+            ValueError("coordination_requires_postgres")))
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/x.pdf"})
+    assert out["error"] == "coordination_requires_postgres"
+    assert "coordination_requires_postgres" in out["message"]
+
+
+def test_unexpected_exceptions_become_internal_error(tmp_path: Path, monkeypatch) -> None:
+    """An unexpected exception names neither its class nor its text (both
+    are internals) and tells the model not to retry blindly; a write tool
+    says it cannot tell whether anything was written."""
+    mod = _reload(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        mod.service, "ingest_document",
+        lambda path, source=None: (_ for _ in ()).throw(
+            RuntimeError("row 42 holds private text")))
+    out = _tool_error(mod, "document_ingest", {"path": "Z:/x.pdf"})
+    assert out["error"] == "internal_error"
+    assert "RuntimeError" not in json.dumps(out)
+    assert "private text" not in json.dumps(out)
+    assert "retry" in out["message"]
+    assert out["mutation"] == "unknown"
+    # A read-only tool's failure wrote nothing, so it says nothing about it.
+    monkeypatch.setattr(
+        mod.service, "search_documents",
+        lambda query, top_k=5: (_ for _ in ()).throw(RuntimeError("boom")))
+    read = _tool_error(mod, "document_search", {"query": "x"})
+    assert read["error"] == "internal_error" and "mutation" not in read
 
 
 def test_search_always_returns_cortex_key(tmp_path: Path, monkeypatch) -> None:

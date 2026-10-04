@@ -123,3 +123,110 @@ def test_sessions_are_asked_to_park_where_the_text_is_not_benched():
         for field in ("park_reason", "park_needs", "park_clear_by", "park_resume"):
             assert field in text, (field, text[:40])
     assert PARK_CHECKIN_SENTENCE not in CHECKIN_TEXT
+
+
+# ── refusals name what was wrong (review 2026-10-04, M1) ──────────────────
+
+
+_HEADERS = {"authorization": "Bearer fixture-secret", "x-pl-agent": "own",
+            "x-pl-agent-key": "private-fixture"}
+
+
+def _board_service():
+    from contextlib import nullcontext
+    return SimpleNamespace(config=SimpleNamespace(coordination=SimpleNamespace(
+        enabled=True, allowed_principals=["default"], audit_retention_days=90)),
+        _lock=nullcontext(), _storage=object(), _ensure_init=lambda: None,
+        _hlc=SimpleNamespace(tick=lambda: (100, 1)))
+
+
+def _refusal(name, args):
+    """A board tool called through FastMCP: its refusal must reach the
+    client as an MCP tool error whose JSON names the code."""
+    import asyncio
+    import json
+    from pseudolife_memory import mcp_server as mod
+    result = asyncio.run(mod.mcp.call_tool(name, args))
+    text = "".join(item.text for item in result.content if hasattr(item, "text"))
+    assert result.is_error, text
+    assert "CoordinationRefused" not in text and "ValueError" not in text
+    return json.loads(text)
+
+
+def test_send_without_request_id_names_the_missing_parameter(monkeypatch):
+    """Every send without request_id in the 2026-10-04 transcripts was
+    retried by guessing; the refusal now says which parameter is missing."""
+    from pseudolife_memory import coordination
+    real = coordination.dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, params: real(
+        _board_service(), action, params, headers=_HEADERS))
+    out = _refusal("memory_message", {"action": "send", "to": "peer", "text": "hi"})
+    assert out["error"] == "missing_parameter"
+    assert (out["param"], out["action"]) == ("request_id", "send")
+    assert "request_id" in out["message"] and "send" in out["message"]
+
+
+def test_dispatch_unexpected_parameter_names_it_and_the_accepted_ones(monkeypatch):
+    from pseudolife_memory.coordination import CoordinationRefused, dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(CoordinationRefused) as caught:
+        dispatch(_board_service(), "ack", {"message_id": "m1", "text": "hi"},
+                 headers=_HEADERS)
+    refused = caught.value
+    assert refused.code == "unexpected_parameter"
+    assert refused.param == "text" and refused.accepted == ["message_id"]
+    assert "ack" in refused.detail and "text" in refused.detail
+    assert "message_id" in refused.detail
+
+
+def test_dispatch_unknown_action_lists_the_accepted_actions(monkeypatch):
+    from pseudolife_memory.coordination import CoordinationRefused, dispatch
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    with pytest.raises(CoordinationRefused) as caught:
+        dispatch(_board_service(), "shout", {}, headers=_HEADERS)
+    refused = caught.value
+    assert refused.code == "unknown_coordination_action"
+    assert "send" in refused.accepted and "receive" in refused.accepted
+    assert "shout" not in refused.detail and "send" in refused.detail
+
+
+def test_agents_refusals_name_the_parameter():
+    """memory_agents' own argument checks name the parameter and, where
+    one action takes a fixed set, the accepted ones."""
+    missing = _refusal("memory_agents", {"action": "claim"})
+    assert missing["error"] == "missing_parameter"
+    assert (missing["param"], missing["action"]) == ("lease", "claim")
+    assert "lease" in missing["message"]
+    extra = _refusal("memory_agents", {"action": "list", "status": "busy"})
+    assert extra["error"] == "unexpected_parameter"
+    assert (extra["param"], extra["action"]) == ("status", "list")
+    assert "status" in extra["message"] and "update" in extra["message"]
+    park = _refusal("memory_agents", {"action": "claim", "lease": "claim:x",
+                                      "park_reason": "done"})
+    assert park["error"] == "unexpected_parameter" and park["param"] == "park_reason"
+
+
+def test_an_unknown_park_reason_reaches_the_model_with_the_accepted_ones(monkeypatch):
+    """The storage refusal's detail, param and accepted list survive the
+    dispatch boundary into the MCP tool error."""
+    from pseudolife_memory import coordination
+    from pseudolife_memory.storage.coordination import PARK_REASONS, CoordinationStore
+    real = coordination.dispatch
+
+    class Store:
+        def update(self, principal, agent_id, credential, **fields):
+            return CoordinationStore._fields(**fields)
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", "fixture-secret")
+    monkeypatch.delenv("PSEUDOLIFE_MCP_TOKENS", raising=False)
+    monkeypatch.setattr(coordination, "_store", lambda svc: Store())
+    monkeypatch.setattr(coordination, "dispatch", lambda svc, action, params: real(
+        _board_service(), action, params, headers=_HEADERS))
+    out = _refusal("memory_agents", {"action": "update", "park_reason": "sleeping"})
+    assert out["error"] == "invalid_park" and out["param"] == "park_reason"
+    assert out["accepted"] == list(PARK_REASONS)
+    assert all(reason in out["message"] for reason in PARK_REASONS)

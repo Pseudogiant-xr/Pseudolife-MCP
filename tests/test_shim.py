@@ -433,6 +433,41 @@ def test_shim_surfaces_the_daemons_real_error_message(shared_daemon):
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
+def test_shim_passes_a_tool_refusal_through_unchanged(shared_daemon):
+    """A refusal raised inside a tool body reaches the client through the
+    shim as the daemon's MCP tool error: ``isError`` with the JSON
+    ``{error, message}`` contract, not a success-shaped dict carrying a
+    Python class name (review 2026-10-04, M1)."""
+    import asyncio
+
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                # Valid arguments by the schema; the body refuses the date.
+                res = await s.call_tool("memory_history", {
+                    "entity": "shim-error-probe", "attribute": "x",
+                    "as_of": "yesterday"})
+                text = res.content[0].text
+                assert res.is_error, f"refusal came back success-shaped: {text}"
+                payload = json.loads(text)
+                assert payload["error"] == "invalid_argument", payload
+                assert "yesterday" in payload["message"]
+                assert "ValueError" not in text
+
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+
+
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
 
 

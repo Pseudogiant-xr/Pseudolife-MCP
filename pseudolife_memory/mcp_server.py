@@ -45,8 +45,10 @@ Configuration
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import os
+import re
 import sys
 import atexit
 import signal
@@ -66,7 +68,7 @@ from anyio import to_thread  # noqa: E402
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.mcpserver.utilities.func_metadata import FuncMetadata  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
-from mcp.types import ToolAnnotations  # noqa: E402
+from mcp.types import CallToolResult, TextContent, ToolAnnotations  # noqa: E402
 # ``Annotated[T, Field(description=...)]`` on a tool signature is how a
 # per-argument contract reaches the client: FastMCP builds each tool's
 # inputSchema from a pydantic model derived from the signature
@@ -213,9 +215,8 @@ def _async_offload(fn):
     parameter list, and AnyIO copies the calling context into the worker
     thread so the per-request writer/session contextvars still resolve.
 
-    Also the surface's uniform failure contract: a service-level raise is
-    mapped to the same ``{"error", "message"}`` shape the dispatch tools
-    return, instead of leaking a raw exception string to the agent.
+    Also the surface's failure contract: a raise becomes an MCP tool error
+    (``_tool_error``), never a raw exception string or a class name.
     """
     @functools.wraps(fn)
     async def _run(*args: Any, **kwargs: Any) -> Any:
@@ -223,8 +224,62 @@ def _async_offload(fn):
             return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
         except Exception as exc:  # noqa: BLE001
             logger.exception("tool %s failed", fn.__name__)
-            return {"error": type(exc).__name__, "message": str(exc)}
+            return _tool_error(fn.__name__, exc)
     return _run
+
+
+_ERROR_CODE = re.compile(r"([a-z][a-z0-9_]*)(?::\s*(.+))?", re.DOTALL)
+
+
+def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
+    """The JSON a refused call returns: ``{error, message}`` plus ``param``,
+    ``accepted`` and ``action`` where the refusal names them, and
+    ``mutation`` where a failure leaves a write in doubt.
+
+    A refusal keeps the code its raiser chose (other callers key on it),
+    from a ``code`` attribute or a ``code`` / ``code: detail`` message; a
+    ValueError or TypeError in prose is ``invalid_argument`` with that
+    prose; a missing file is ``file_not_found`` (the caller named the path).
+    Anything else is ``internal_error``, whose class and text stay in the
+    daemon log: the model learned nothing from them and retried blindly
+    (review 2026-10-04, M1)."""
+    if isinstance(exc, FileNotFoundError):
+        return {"error": "file_not_found",
+                "message": f"{exc}: paths are resolved on the server's filesystem"}
+    if not isinstance(exc, (ValueError, TypeError)):
+        payload = {"error": "internal_error",
+                   "message": "The server failed while running this call (the cause is in "
+                              "its log); retry once at most, then tell the user."}
+        if tool not in _READ_ONLY_TOOLS:
+            payload["mutation"] = "unknown"
+        return payload
+    code, detail = getattr(exc, "code", None), getattr(exc, "detail", None)
+    if not (isinstance(code, str) and _ERROR_CODE.fullmatch(code) and ":" not in code):
+        text = str(exc).strip()
+        match = _ERROR_CODE.fullmatch(text)
+        if match is None:
+            return {"error": "invalid_argument",
+                    "message": text or "The arguments were refused."}
+        code, detail = match.groups()
+    payload = {"error": code,
+               "message": f"{code}: {detail}" if detail else f"{code}: the call was refused."}
+    for key in ("param", "accepted", "action"):
+        value = getattr(exc, key, None)
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def _tool_error(tool: str, exc: Exception) -> CallToolResult:
+    """A refused call as an MCP tool error (``isError: true``) whose text
+    and structured content are the same JSON object, so Claude Code (text)
+    and Codex (structured) read one shape. No-ops are not refusals and stay
+    successes with their own fields."""
+    payload = _error_payload(tool, exc)
+    return CallToolResult(
+        content=[TextContent(type="text",
+                             text=json.dumps(payload, indent=2, ensure_ascii=False))],
+        structured_content=payload, is_error=True)
 
 
 # Hints describe user-visible bank operations. Retrieval may update access
