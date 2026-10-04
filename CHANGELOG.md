@@ -32,7 +32,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed (2026-10-05 — the Console shows the passkey prefix the host prints)
 - `pseudolife-mcp maintainer setup` asks the maintainer to check that the
   Console shows the passkey prefix the host printed. The host printed 12
-  characters (`CqsQqbXRP_d5`) and the Console 8 (`CqsQqbXR`), so the check
+  characters (`Ab3dEf6hIj_k`) and the Console 8 (`Ab3dEf6h`), so the check
   read as a mismatch. The Console now shows 12 everywhere it names a
   passkey (Settings, Your passkeys; the `maintainer confirm` command it
   suggests; key-change notices and history; the signing preview). One
