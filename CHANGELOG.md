@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — board roles and maintainer messages: follow-ups to the #569 review)
+- A session that held both a project's delegate and coordinator leases from
+  before v54 could no longer renew its coordinator lease (`already_delegate`),
+  so the lease lapsed under it. The live holder now renews it; a delegate
+  still cannot newly claim or queue for `coordinator:<project>`, so once that
+  old hold lapses or is released the session keeps one role. The upgrade
+  leaves such a pair in place until then; the maintainer can revoke either
+  role from the Console.
+- `memory_message history` returned the full text of a message the
+  maintainer withdrew, without `repudiated_at`, where `receive` shows the
+  withdrawal sentence. History now shows it the same way. A withdrawal also
+  appends a `maintainer_repudiate` event to the board's audit log, so history
+  keeps withholding the text after the live message row is pruned (history
+  keeps bodies for the audit retention, longer than the live row).
+- A grant or assignment signed while the recipient held neither role still
+  broke the other role if the recipient took it before the tap, although the
+  signed preview said `also_breaks: null`. The other role's holder is now
+  signed too (`other_holder`), so such a change answers `409 role_changed`.
+- `coordination.maintainer.origin` with an explicit default port
+  (`https://host:443`, `http://localhost:80`) passed validation, but browsers
+  serialise the origin without it, so every assertion failed while doctor
+  reported passkeys on. That origin is now refused with
+  `409 maintainer_https_required`, naming the default port.
+- Docs: the v54 schema comment and version-history row said spent nonces
+  are kept until their payload expires; they are kept 7 days past it. The
+  row also names `maintainer_bootstrap.failed_attempts`.
+
 ### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
 - The maintainer could not reach a board session at all, and changing who
   holds a project's delegate or coordinator role took a shell on the daemon

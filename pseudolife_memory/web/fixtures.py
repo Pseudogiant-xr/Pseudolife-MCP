@@ -1011,6 +1011,7 @@ class FixtureService:
                 preview["replaces"] = holder if holder != agent_id else None
                 preview["also_breaks"] = (f"{other}:{project}"
                                           if self._mx_holder(other, project) == agent_id else None)
+                fields["other_holder"] = self._mx_holder(other, project)
             # The holder the change displaces is signed too, as the real route does.
             fields["holder"] = holder
         elif purpose in ("cancel", "revoke-self"):
@@ -1099,6 +1100,10 @@ class FixtureService:
         name = f"{role}:{project}"
         if self._mx_holder(role, project) != fields.get("holder"):
             raise ValueError("role_changed")
+        other = "coordinator" if role == "delegate" else "delegate"
+        if (not purpose.startswith("revoke")
+                and self._mx_holder(other, project) != fields.get("other_holder")):
+            raise ValueError("role_changed")
         held = slots.get(role)
         if held and held["expires_at"] <= now:
             held = None
@@ -1108,7 +1113,6 @@ class FixtureService:
                     "was_held_by": held["agent_id"] if held else None}
         agent_id = fields["agent_id"]
         self._mx_session(agent_id)
-        other = "coordinator" if role == "delegate" else "delegate"
         also_broken = None
         if (slots.get(other) or {}).get("agent_id") == agent_id:
             # One role per session: the other role's lease breaks too.

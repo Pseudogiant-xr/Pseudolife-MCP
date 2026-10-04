@@ -17,7 +17,8 @@ from pseudolife_memory import coordination
 from pseudolife_memory.coordination import daemon_notice, dispatch
 from pseudolife_memory.storage import maintainer as maintainer_storage
 from pseudolife_memory.storage.coordination import (
-    MAINTAINER_PRINCIPAL, WITHDRAWN_TEXT, CoordinationError,
+    MAINTAINER_PRINCIPAL, REPUDIATE_EVENT, WITHDRAWN_TEXT, CoordinationError, audit_events,
+    verify_audit_chain,
 )
 from pseudolife_memory.storage.maintainer import MaintainerError, MaintainerStore, challenge_bytes
 from tests.maintainer_authenticator import ORIGIN, RP_ID, SoftAuthenticator
@@ -895,6 +896,15 @@ def test_repudiating_an_acknowledged_message_sends_a_maintainer_follow_up(svc):
     (follow,) = receive(svc, agent)["messages"]
     assert follow["origin"] == "maintainer" and "verified" in follow
     assert out["message_id"] in follow["text"] and "do not act on it" in follow["text"]
+    # The withdrawal is logged once, after the follow-up's own audit row, and
+    # the chain still verifies; withdrawing it again logs nothing more.
+    signed(svc, auth, "repudiate", "repudiate", message_id=out["message_id"])
+    assert sql(svc, "SELECT actor,recipient_agent_id FROM coordination_events WHERE event=%s "
+                    "AND message_id=%s", (REPUDIATE_EVENT, out["message_id"])) == [
+        ("maintainer", agent["agent_id"])]
+    with svc._coordination_lock:
+        rows = list(audit_events(coordination._mailbox(svc).conn))
+    assert verify_audit_chain(rows)["ok"]
 
 
 def test_a_repudiate_challenge_names_a_maintainer_message_only(svc):
@@ -936,6 +946,48 @@ def test_history_names_the_maintainer_origin_without_verification(svc):
     assert message["origin"] == "maintainer" and "verified" not in message
 
 
+def test_history_shows_a_repudiated_message_as_withdrawn_like_receive(svc):
+    """Review of #569, 2026-10-05: history returned a withdrawn message's
+    full text, without ``repudiated_at``, where receive substitutes the
+    withdrawal sentence. It does too now, also once the live row is pruned
+    and only the retained audit copy is left."""
+    auth = bootstrap(svc)
+    agent = peer(svc)
+    out, _ = maintainer_send(svc, auth, agent["agent_id"], text="drop the table")
+    done, _ = signed(svc, auth, "repudiate", "repudiate", message_id=out["message_id"])
+
+    def history():
+        result = dispatch(svc, "history", {}, headers=headers_of(agent), principal=PRINCIPAL)
+        (message,) = [m for m in result["messages"] if m["message_id"] == out["message_id"]]
+        assert "drop the table" not in json.dumps(result)
+        return message
+
+    message = history()
+    assert message["origin"] == "maintainer" and message["text"] == WITHDRAWN_TEXT
+    assert message["repudiated_at"] == done["repudiated_at"]
+    sql(svc, "DELETE FROM coordination_messages WHERE message_id=%s", (out["message_id"],))
+    message = history()
+    assert message["text"] == WITHDRAWN_TEXT
+    assert message["repudiated_at"] == done["repudiated_at"]
+    # Only the maintainer's own withdrawal counts, as only the operator's
+    # redact does in the chain check.
+    sql(svc, "UPDATE coordination_events SET actor='agent' WHERE event=%s",
+        (REPUDIATE_EVENT,))
+    result = dispatch(svc, "history", {}, headers=headers_of(agent), principal=PRINCIPAL)
+    (message,) = [m for m in result["messages"] if m["message_id"] == out["message_id"]]
+    assert message["text"] == "drop the table" and "repudiated_at" not in message
+
+
+def test_history_leaves_a_standing_maintainer_message_and_agent_mail_alone(svc):
+    auth = bootstrap(svc)
+    sender, agent = peer(svc), peer(svc)
+    maintainer_send(svc, auth, agent["agent_id"], text="please merge")
+    send_as(svc, sender, to=agent["agent_id"], text="peer note")
+    result = dispatch(svc, "history", {}, headers=headers_of(agent), principal=PRINCIPAL)
+    assert sorted(m["text"] for m in result["messages"]) == ["peer note", "please merge"]
+    assert all("repudiated_at" not in m for m in result["messages"])
+
+
 # ── gates ──────────────────────────────────────────────────────────────────
 
 def test_unset_config_answers_https_required(coordinating, monkeypatch):
@@ -952,6 +1004,10 @@ def test_unset_config_answers_https_required(coordinating, monkeypatch):
     ("box.example", "https://box.example:8443/ui/"),     # a path is not an origin
     ("localhost", "http://127.0.0.1:8765"),              # only the name localhost
     ("Box.Example", "https://Box.Example"),              # not lower-case
+    # A browser serialises the origin without its scheme's default port, so
+    # these never matched an assertion (review of #569, 2026-10-05).
+    ("box.example", "https://box.example:443"),
+    ("localhost", "http://localhost:80"),
 ])
 def test_a_misconfigured_origin_answers_https_required(coordinating, monkeypatch, rp_id,
                                                        origin):
@@ -1014,6 +1070,26 @@ def test_a_nonce_cannot_be_respent_once_its_payload_expired(svc):
     with store.storage._txn():
         store._spend({"nonce": "other", "expires_at": 1200.0})
     assert sql(svc, "SELECT 1 FROM maintainer_nonces WHERE nonce='replayed-nonce'")
+
+
+def test_the_docs_say_how_long_spent_nonces_are_kept():
+    """Review of #569, 2026-10-05: the schema comment and the v54 history row
+    said spent nonces are kept until their payload expires, while the code
+    keeps them SPENT_NONCE_RETENTION past it; the row also left out
+    ``maintainer_bootstrap.failed_attempts``."""
+    from pathlib import Path
+    from pseudolife_memory.storage import schema
+    root = Path(__file__).resolve().parent.parent
+    days = maintainer_storage.SPENT_NONCE_RETENTION // 86400
+    assert maintainer_storage.SPENT_NONCE_RETENTION == days * 86400
+    (row,) = [line for line in (root / "docs/guide/configuration.md").read_text(
+        encoding="utf-8").splitlines() if line.startswith("| v54 |")]
+    source = Path(schema.__file__).read_text(encoding="utf-8")
+    for text in (row, source):
+        assert "kept until their payload expires" not in text
+    assert f"{days} days past their payload's expiry" in row
+    assert f"{days} days past their payload's" in source
+    assert "`failed_attempts`" in row
 
 
 def test_a_spent_payload_stays_spent_across_a_clock_step_back(svc):
