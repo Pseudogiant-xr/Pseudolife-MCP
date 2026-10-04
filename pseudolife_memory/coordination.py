@@ -87,6 +87,8 @@ PUBLIC_ERROR_CODES = frozenset({
     "lease_not_held", "lease_queue_full",
     # An agent's acquire of an operator-only (``delegate:``) lease.
     "reserved_lease",
+    # v54: the project's delegate claiming its coordinator lease (one role).
+    "already_delegate",
     "invalid_repository", "invalid_repository_id", "invalid_claim_path",
     "file_claim_requires_local_client",
     # v46: a body, status or lease purpose shaped like a credential (a 400).

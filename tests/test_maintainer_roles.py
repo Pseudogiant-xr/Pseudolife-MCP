@@ -183,6 +183,50 @@ def test_the_operator_cli_grant_keeps_the_one_role_rule(svc):
     assert events(svc, "lease_break")[-1][0] == "operator"
 
 
+def test_the_delegate_cannot_claim_or_queue_for_the_coordinator_lease(svc):
+    """Security review 2026-10-04: the one-role rule held only on the signed
+    routes, so a delegate took ``coordinator:<project>`` with an ordinary
+    claim and held both roles."""
+    auth = bootstrap(svc)
+    agent, other = peer(svc), peer(svc, label="other")
+    role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"], hold=HOUR)
+    with pytest.raises(coordination.CoordinationRefused, match="already_delegate"):
+        dispatch(svc, "lease", {"name": "coordinator:p", "ttl": HOUR},
+                 headers=headers_of(agent), principal=PRINCIPAL)
+    assert holder(svc, "coordinator:p") is None
+    # Held by another session, the delegate cannot queue for it either.
+    board(svc).acquire_lease(PRINCIPAL, other["agent_id"], other["credential"],
+                             name="coordinator:p", ttl=HOUR)
+    with pytest.raises(coordination.CoordinationRefused, match="already_delegate"):
+        dispatch(svc, "lease", {"name": "coordinator:p", "ttl": HOUR},
+                 headers=headers_of(agent), principal=PRINCIPAL)
+    assert sql(svc, "SELECT agent_id FROM coordination_lease_waiters") == []
+    assert holder(svc, "delegate:p") == agent["agent_id"]
+    # Another project's coordinator lease is not a second role here.
+    dispatch(svc, "lease", {"name": "coordinator:q", "ttl": HOUR},
+             headers=headers_of(agent), principal=PRINCIPAL)
+    assert holder(svc, "coordinator:q") == agent["agent_id"]
+
+
+def test_a_coordinator_waiter_made_delegate_leaves_the_queue(svc):
+    """A session queued for ``coordinator:<project>`` when it is made the
+    delegate leaves that queue, so the lease never passes to the delegate."""
+    auth = bootstrap(svc)
+    agent, other = peer(svc), peer(svc, label="other")
+    store = board(svc)
+    store.acquire_lease(PRINCIPAL, other["agent_id"], other["credential"],
+                        name="coordinator:p", ttl=HOUR)
+    store.acquire_lease(PRINCIPAL, agent["agent_id"], agent["credential"],
+                        name="coordinator:p", ttl=HOUR)
+    role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"], hold=HOUR)
+    (actor, payload, agent_id) = events(svc, "lease_dequeue")[-1]
+    assert (actor, agent_id, payload) == ("daemon", agent["agent_id"],
+                                          {"name": "coordinator:p", "reason": "one_role"})
+    store.release_lease(PRINCIPAL, other["agent_id"], other["credential"], name="coordinator:p")
+    assert holder(svc, "coordinator:p") is None
+    assert holder(svc, "delegate:p") == agent["agent_id"]
+
+
 # ── refusals ───────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("purpose", ["grant-delegate", "revoke-delegate", "assign-coordinator",

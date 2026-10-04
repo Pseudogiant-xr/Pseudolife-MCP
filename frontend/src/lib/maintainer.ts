@@ -479,6 +479,15 @@ export function normalizeInbox(raw: unknown): InboxMessage[] {
     .filter((m) => m.message_id && m.from);
 }
 
+/**
+ * What a maintainer message does about waking, for the confirm step. The
+ * daemon rings every one whose recipient has a live listener, whatever its
+ * park record (spec 2026-10-02, "Wake decision"); the signed ``urgent``
+ * field changes nothing, so the Console neither offers nor shows it.
+ */
+export const SEND_WAKE =
+  "It rings the session now if its wake listener is live, even one parked as done; otherwise the session reads it on its next turn.";
+
 /** The wake receipt in words. */
 export function wakeText(wake: unknown): string {
   const w =
@@ -530,7 +539,7 @@ export function threadFor(agentId: string, sent: SentMessage[], inbox: InboxMess
         text: m.text ?? "",
         note: m.repudiated_at
           ? "withdrawn"
-          : [m.urgent ? "urgent" : "", wakeText(m.wake), m.read_at ? "read" : ""].filter(Boolean).join(", "),
+          : [wakeText(m.wake), m.read_at ? "read" : ""].filter(Boolean).join(", "),
         withdrawn: !!m.repudiated_at,
       })),
     ...inbox

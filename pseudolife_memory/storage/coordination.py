@@ -1893,6 +1893,17 @@ class CoordinationStore:
         with self.storage._txn():
             agent = self._auth(principal, agent_id, credential)
             now = self.clock()
+            if name.startswith(COORDINATOR_PREFIX):
+                # A session holds one role per project: the delegate neither
+                # claims nor queues for the coordinator lease (security
+                # review, 2026-10-04: only the signed routes kept the rule).
+                # Both role leases lock in the order the role changes take.
+                project = name[len(COORDINATOR_PREFIX):]
+                self._lock_role_leases(project)
+                if self._one("SELECT 1 AS d FROM coordination_leases WHERE name=%s "
+                             "AND holder_agent_id=%s AND expires_at>%s",
+                             (DELEGATE_PREFIX + project, agent_id, now)) is not None:
+                    raise CoordinationError("already_delegate")
             self.storage.conn.execute(
                 "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                 (name,))
@@ -2125,6 +2136,13 @@ class CoordinationStore:
             agent = self._role_agent(agent_id)
             agent_id = agent["agent_id"]
             events = []
+            # Queued for the coordinator lease, the new delegate leaves that
+            # queue rather than be handed the second role later.
+            if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                         "RETURNING ticket", (COORDINATOR_PREFIX + project, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": COORDINATOR_PREFIX + project,
+                                                            "reason": "one_role"},
+                                          actor="daemon", agent_id=agent_id))
             also = self._break_held(COORDINATOR_PREFIX + project, agent_id, now, events,
                                     actor=actor)
             # A waiter queued before the namespace was reserved never takes

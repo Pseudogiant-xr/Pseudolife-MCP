@@ -15,6 +15,7 @@ import {
   normalizeSent,
   payloadMismatch,
   projectsOf,
+  SEND_WAKE,
   roleEligible,
   roleOf,
   rolesFor,
@@ -397,10 +398,18 @@ describe("messages", () => {
     const inbox = normalizeInbox([{ message_id: "r1", from: "d1", text: "second", created_at: NOW - 200 }]);
     const t = threadFor("d1", sent, inbox);
     expect(t.map((m) => m.text)).toEqual(["first", "second", "third"]);
-    expect(t[0]).toMatchObject({ mine: true, note: "urgent, rang its session" });
+    // ``urgent`` changes nothing for a maintainer message, so it is not shown.
+    expect(t[0]).toMatchObject({ mine: true, note: "rang its session" });
     expect(t[1].mine).toBe(false);
     expect(t[2]).toMatchObject({ withdrawn: true, note: "withdrawn" });
     expect(threadFor("d1", sent, inbox, 2).map((m) => m.text)).toEqual(["second", "third"]);
+  });
+
+  it("says every maintainer message rings a live listener, parked or not", () => {
+    // Spec 2026-10-02 "Wake decision": it rings whenever the recipient has a
+    // live listener, whatever its park record, done included.
+    expect(SEND_WAKE).toMatch(/parked as done/);
+    expect(SEND_WAKE).not.toMatch(/urgent/i);
   });
 
   it("puts the wake receipt in words", () => {

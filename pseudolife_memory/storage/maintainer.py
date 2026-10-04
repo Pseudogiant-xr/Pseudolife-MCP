@@ -54,6 +54,12 @@ CHALLENGE_TTL = 120
 # A key added by another key cannot sign for this long, and any older key
 # can cancel it meanwhile (spec "Enrolment" 2). The spec's value.
 QUARANTINE_SECONDS = 24 * 3600
+# How long a spent nonce is kept past its payload's expiry. Pruned one TTL
+# past it, a spend after the clock ran ahead, then a wall-clock step back
+# (NTP correction, VM restore) reopened a spent payload for a replay
+# (security review, 2026-10-04). A week covers any plausible step; the rows
+# are one per signed action.
+SPENT_NONCE_RETENTION = 7 * 24 * 3600
 # The host's one-time bootstrap code: 10 base32 characters, 10 minutes.
 BOOTSTRAP_TTL = 600
 BOOTSTRAP_CODE_LENGTH = 10
@@ -206,14 +212,15 @@ class MaintainerStore:
     def _spend(self, fields: dict) -> None:
         """Step 5, in the action's transaction: a duplicate is spent. The
         expiry is checked again here, on the same clock reading as the
-        insert, and spent rows are kept a full TTL past their expiry: a
-        replay that passed ``open`` just before expiry and reached here
-        just after must not find its old row pruned (review, 2026-10-04)."""
+        insert, and spent rows are kept SPENT_NONCE_RETENTION past their
+        expiry: a replay that passed ``open`` just before expiry and reached
+        here just after, or one after the clock stepped back, must not find
+        its old row pruned (review, 2026-10-04)."""
         now = self.clock()
         if now > fields["expires_at"]:
             raise MaintainerError("challenge_expired")
         self.storage.conn.execute("DELETE FROM maintainer_nonces WHERE expires_at<%s",
-                                  (now - CHALLENGE_TTL,))
+                                  (now - SPENT_NONCE_RETENTION,))
         inserted = self.storage.conn.execute(
             "INSERT INTO maintainer_nonces (nonce,expires_at) VALUES (%s,%s) "
             "ON CONFLICT (nonce) DO NOTHING", (fields["nonce"], fields["expires_at"])).rowcount

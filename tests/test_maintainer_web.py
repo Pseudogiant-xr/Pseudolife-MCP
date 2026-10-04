@@ -77,6 +77,21 @@ def test_console_responses_carry_the_csp_and_frame_headers(path):
     assert headers[b"content-security-policy"] == EXACT_CSP.encode()
     assert headers[b"x-frame-options"] == b"DENY"
     assert headers[b"referrer-policy"] == b"no-referrer"
+    assert headers[b"x-content-type-options"] == b"nosniff"
+
+
+@pytest.mark.parametrize("path,headers,want", [
+    ("/api/maintainer", AUTH, 200),
+    ("/api/maintainer", [], 401),
+    ("/api/no-such-route", AUTH, 404),
+])
+def test_json_api_responses_forbid_content_sniffing(path, headers, want):
+    """Security review 2026-10-04: a JSON answer that echoes request text
+    must never be read as HTML or script."""
+    status, got, _ = call_with_headers(_app(FixtureService()), "GET", path, headers=headers)
+    assert status == want
+    assert got[b"content-type"] == b"application/json; charset=utf-8"
+    assert got[b"x-content-type-options"] == b"nosniff"
 
 
 # ── the route contract ─────────────────────────────────────────────────────

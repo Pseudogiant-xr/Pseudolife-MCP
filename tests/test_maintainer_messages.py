@@ -861,3 +861,28 @@ def test_a_nonce_cannot_be_respent_once_its_payload_expired(svc):
     with store.storage._txn():
         store._spend({"nonce": "other", "expires_at": 1200.0})
     assert sql(svc, "SELECT 1 FROM maintainer_nonces WHERE nonce='replayed-nonce'")
+
+
+def test_a_spent_payload_stays_spent_across_a_clock_step_back(svc):
+    """Security review 2026-10-04: spent nonces were pruned one TTL past
+    their expiry, so a later spend after the clock ran ahead, then a wall
+    clock stepped back (NTP correction, VM restore), reopened a spent
+    payload. Spent nonces now outlive their payload by days."""
+    auth = bootstrap(svc)                  # sign count 0, like synced passkeys
+    now = [1_900_000_000.0]
+    ran = []
+    with svc._coordination_lock:
+        store = MaintainerStore(coordination._mailbox(svc), rp_id=RP_ID, origin=ORIGIN,
+                                clock=lambda: now[0])
+        payload, mac = store.issue("send", {"to": "x", "text": "hi", "urgent": False})
+        assertion = auth.assertion(challenge_bytes(payload))
+        store.complete(payload, mac, "send", assertion, lambda f, k: ran.append(1) or {})
+        now[0] += 3 * maintainer_storage.CHALLENGE_TTL   # past the old prune horizon
+        later, later_mac = store.issue("send", {"to": "x", "text": "other", "urgent": False})
+        store.complete(later, later_mac, "send", auth.assertion(challenge_bytes(later)),
+                       lambda f, k: ran.append(2) or {})
+        now[0] -= 3 * maintainer_storage.CHALLENGE_TTL   # the wall clock steps back
+        with pytest.raises(MaintainerError) as caught:
+            store.complete(payload, mac, "send", assertion, lambda f, k: ran.append(3) or {})
+    assert caught.value.code == "challenge_spent"
+    assert ran == [1, 2]

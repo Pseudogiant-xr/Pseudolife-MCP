@@ -15,6 +15,7 @@
     maintainerReason,
     payloadFields,
     payloadMismatch,
+    SEND_WAKE,
     signAndComplete,
   } from "../lib/maintainer";
   import { loadMaintainer, settleSigning, sign, signing, type PendingSign } from "../lib/maintainerFlow.svelte";
@@ -219,7 +220,7 @@
       {/if}
       {#if fields.purpose === "send"}
         <dt>Wake</dt>
-        <dd>{fields.urgent ? "Wake it if it is parked" : "Deliver on its next turn"}</dd>
+        <dd>{SEND_WAKE}</dd>
       {/if}
       {#if until}
         <dt>Valid until</dt>

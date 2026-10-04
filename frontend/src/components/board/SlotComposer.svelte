@@ -27,7 +27,6 @@
   const uid = $props.id();
   const roleName = $derived(kind === "delegate" ? "your delegate" : "the coordinator");
   let text = $state("");
-  let urgent = $state(true);
   let sending = $state(false);
 
   // Read on open, then with every board refresh while open, for new replies.
@@ -46,7 +45,7 @@
     if (!canSend) return;
     sending = true;
     try {
-      const r = await sendMessage({ agent_id: agentId, name, roleName }, text, urgent);
+      const r = await sendMessage({ agent_id: agentId, name, roleName }, text);
       if (r) text = "";
     } finally {
       sending = false;
@@ -97,10 +96,6 @@
     aria-invalid={tooLong}
   ></textarea>
   <div class="composer-foot">
-    <label class="wake">
-      <input type="checkbox" bind:checked={urgent} />
-      Wake it if it is parked
-    </label>
     {#if tooLong}
       <span class="too-long" role="status">{fmtNum(bytes)} of {fmtNum(MAX_TEXT_BYTES)} bytes: shorten it</span>
     {/if}
@@ -216,22 +211,6 @@
     align-items: center;
     gap: 8px 12px;
   }
-  .wake {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12.5px;
-    color: var(--ink-2);
-    cursor: pointer;
-  }
-  .wake input {
-    width: 16px;
-    height: 16px;
-    accent-color: var(--canon);
-  }
-  .coordinator .wake input {
-    accent-color: var(--assoc);
-  }
   .too-long {
     font-size: 12px;
     color: var(--danger-ink);
@@ -259,9 +238,6 @@
   @media (pointer: coarse) {
     .send {
       height: 44px;
-    }
-    .wake {
-      min-height: 44px;
     }
     .withdraw {
       min-height: 44px;

@@ -798,7 +798,9 @@ bearer token alone can do none of it.
 `verified` field in the recipient's `memory_message` receive result, which the
 served instructions tell the agent to treat as if you typed it in its own
 chat. It rings the session when it has a live wake listener, including one
-parked as done (capped at `maintainer_per_recipient_per_hour`, default 30).
+parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
+there is no separate urgent setting, and the payload's `urgent` field changes
+nothing.
 The agent replies with `reply_to` and no `to`; replies appear in the Console's
 thread. The Sent log can withdraw a message: the recipient's next receive shows
 it as withdrawn, and an already-acknowledged one gets a follow-up.
@@ -809,7 +811,9 @@ session whose urgent mail reopens done parks there, see
 how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
 the lease. Coordinator changes are signed too, although the role grants no
 authority: otherwise any session could evict another's coordinator. A session
-holds one of the two roles at most.
+holds one of the two roles at most: the delegate's own claim of the
+coordinator lease is refused `already_delegate`, and a session queued for it
+leaves the queue when it is made the delegate.
 
 **Setup.**
 
@@ -852,15 +856,20 @@ holds one of the two roles at most.
 
 **What a passkey does not prove.**
 
-- A tap on a prompt you did not start can sign a payload an agent prepared: a
-  process running as your user can drive the platform passkey API, and the
-  OS prompt names the site, not the message. Tap only prompts you started
-  from the Console, and check the Sent log; a surprise message can be
-  withdrawn.
-- Agents that run as root on the daemon host, in its docker group, or with
-  its database password can reset the keys and enrol their own. Maintainer
-  authority means something only where agents on the daemon host have none of
-  the three.
+- The passkey prompt shows only the site, not the action. Tap only for a
+  prompt you started yourself in the Console. A session that can drive your
+  browser (browser automation), or the platform passkey API as your user,
+  can start one with a payload it prepared.
+- Check afterwards. Every signed message is listed in the Console's Sent log,
+  and a surprise one can be withdrawn there. A signed role change shows only
+  as the current holder in the Roles band; its record is in the board's
+  [audit log](#audit-log) (`pseudolife-mcp board-audit export`, actor
+  `maintainer`). Key changes show in Settings, Your passkeys.
+- Anyone who can run `pseudolife-mcp maintainer ...` on the daemon host, or
+  who holds the database owner's credentials, can reset the keys and enrol
+  their own. Root and the docker group on the host can run that command too.
+  So the daemon host and the database password are part of your trust
+  boundary. Keep the database password where agent sessions cannot read it.
 - Moving the bank to another host changes the name, so every passkey stops
   working: run `pseudolife-mcp maintainer reset` on the new host and enrol
   again.

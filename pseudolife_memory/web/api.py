@@ -65,6 +65,9 @@ CONSOLE_SECURITY_HEADERS = (
     (b"content-security-policy", CONSOLE_CSP.encode("ascii")),
     (b"x-frame-options", b"DENY"),
     (b"referrer-policy", b"no-referrer"),
+    # Served types are meant: never sniff one as HTML or script (security
+    # review, 2026-10-04). JSON answers send it too (``_send_json``).
+    (b"x-content-type-options", b"nosniff"),
 )
 _MAINTAINER_PREFIX = "/api/maintainer"
 
@@ -102,7 +105,8 @@ async def _send_json(send, status: int, payload: Any) -> None:
         "status": status,
         "headers": [(b"content-type", b"application/json; charset=utf-8"),
                     (b"content-length", str(len(body)).encode()),
-                    (b"cache-control", b"no-store")],
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff")],
     })
     await send({"type": "http.response.body", "body": body})
 

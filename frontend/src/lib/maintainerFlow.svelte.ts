@@ -29,6 +29,7 @@ import {
   failureLine,
   normalizeInbox,
   normalizeSent,
+  SEND_WAKE,
   signReadiness,
   wakeText,
   type Readiness,
@@ -298,16 +299,14 @@ export function revokeCoordinator(t: Target) {
 
 // ---- messages ----------------------------------------------------------------------
 
-export function sendMessage(to: { agent_id: string; name: string; roleName: string }, text: string, urgent: boolean) {
+export function sendMessage(to: { agent_id: string; name: string; roleName: string }, text: string) {
   return askSigned<SendResult>({
     title: `Send this to ${to.roleName}?`,
-    body: urgent
-      ? `${q(to.name)} gets it with your authority, and it is woken if it is parked.`
-      : `${q(to.name)} gets it with your authority on its next turn.`,
+    body: `${q(to.name)} gets it with your authority. ${SEND_WAKE}`,
     note: MESSAGE_NOTE,
     tone: "canon",
     confirmLabel: "Send with passkey",
-    challenge: () => ({ purpose: "send", to: to.agent_id, text, urgent }),
+    challenge: () => ({ purpose: "send", to: to.agent_id, text, urgent: false }),
     complete: (s) => maintainerApi.send(s),
     success: (r) => {
       const w = wakeText(r.wake);

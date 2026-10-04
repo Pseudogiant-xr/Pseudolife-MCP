@@ -50,11 +50,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one, revoke). Without HTTPS or an enrolled key, the band still shows who
   holds each role and says how to set it up.
 - Every `/ui/` response carries a strict Content-Security-Policy,
-  `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`; the Console's
-  theme bootstrap moved out of an inline script into `/ui/theme.js`.
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and
+  `X-Content-Type-Options: nosniff` (JSON API answers carry `nosniff` too);
+  the Console's theme bootstrap moved out of an inline script into
+  `/ui/theme.js`.
 - `pseudolife-mcp lease delegate` now also frees the grantee's
   `coordinator:<project>` lease (one role per session; the answer names it in
-  `also_broken`).
+  `also_broken`). The rule also holds outside the signed routes: the
+  delegate's own claim of its project's coordinator lease is refused
+  `already_delegate`, and a session queued for that lease leaves the queue
+  when it is made the delegate (security review, 2026-10-04).
 - `memory_message` documents replying with `reply_to` and no `to` (how a
   session answers the maintainer); a receive result that holds maintainer
   mail carries `maintainer_note`, saying that mail was signed by the maintainer.
