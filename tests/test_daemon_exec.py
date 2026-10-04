@@ -156,6 +156,40 @@ def test_board_audit_export_out_leaves_no_empty_file_when_the_container_fails(do
     assert not target.exists()
 
 
+def test_board_audit_export_out_drops_a_file_cut_short_by_a_failure(docker, tmp_path):
+    # A truncated export would still verify (verify cannot see dropped
+    # newest rows), so the file goes, as the native export's does.
+    docker.out, docker.code = '{"seq":1}\n', 2
+    target = tmp_path / "board.jsonl"
+    assert board_audit_cli.main(["export", "--out", str(target)]) == 2
+    assert not target.exists()
+
+
+def test_board_audit_export_out_drops_the_file_when_interrupted(docker, monkeypatch, tmp_path):
+    def interrupted(argv, **kw):
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, "true\n", "")
+        kw["stdout"].write(b'{"seq":1}\n')
+        raise KeyboardInterrupt
+    monkeypatch.setattr(daemon_exec, "run", interrupted)
+    target = tmp_path / "board.jsonl"
+    with pytest.raises(KeyboardInterrupt):
+        board_audit_cli.main(["export", "--out", str(target)])
+    assert not target.exists()
+
+
+class ClosedPipe(io.StringIO):
+    def write(self, text):
+        raise BrokenPipeError(32, "Broken pipe")
+
+
+def test_board_audit_stats_to_a_closed_pipe_says_so(docker, monkeypatch, capsys):
+    docker.out = '{"window":{}}\n'
+    monkeypatch.setattr(sys, "stdout", ClosedPipe())
+    assert board_audit_cli.main(["stats"]) == 2
+    assert "the output was closed" in capsys.readouterr().err
+
+
 def test_board_audit_stats_sends_this_hosts_durations_and_writes_here(docker, tmp_path, capsys):
     durations = tmp_path / "durations.jsonl"
     durations.write_text('{"waited": 3}\n', encoding="utf-8")

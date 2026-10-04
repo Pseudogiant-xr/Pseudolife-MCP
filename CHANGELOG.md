@@ -21,7 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so, and exit with the container's code. A terminal is passed through
   (`-it`) when stdin and stdout are both terminals, `-i` otherwise, so
   piped JSON stays byte-clean. `board-audit` keeps the files it names on the
-  host: `export --out` and `stats --out` / `--append` are written here, and
+  host: `export --out` and `stats --out` / `--append` are written here (an
+  export that fails or is interrupted leaves no file, as before), and
   `stats` sends this host's suite-lock durations file to the container on
   stdin. The re-run marks itself (`PSEUDOLIFE_DAEMON_EXEC`) and never
   re-runs again. With no running container the old message stays, now

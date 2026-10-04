@@ -512,9 +512,15 @@ def _in_daemon(args) -> int:
             stream = target.open("xb")
         except OSError as exc:
             raise AuditCliError(f"cannot create {target}: {exc.strerror}") from None
-        with stream:
-            ran = run_in_daemon("board-audit", argv, stdout=stream)
-        if ran is None or (ran.returncode != 0 and target.stat().st_size == 0):
+        # As the native export: a file cut short is removed, since verify
+        # cannot tell a log that lost its newest rows from a whole one.
+        try:
+            with stream:
+                ran = run_in_daemon("board-audit", argv, stdout=stream)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        if ran is None or ran.returncode != 0:
             target.unlink()
     else:
         ran = run_in_daemon("board-audit", argv)
@@ -595,13 +601,12 @@ def main(argv=None) -> int:
     except SystemExit as exc:
         return EXIT_ERROR if exc.code else EXIT_OK
     try:
-        return {"export": _export, "verify": _verify, "redact": _redact,
-                "stats": _stats}[args.action](args)
-    except NoBank:
+        # Nested, so the handlers below also cover the run in the container.
         try:
+            return {"export": _export, "verify": _verify, "redact": _redact,
+                    "stats": _stats}[args.action](args)
+        except NoBank:
             return _in_daemon(args)
-        except AuditCliError as exc:
-            print(f"board-audit: {exc}", file=sys.stderr)
     except AuditCliError as exc:
         print(f"board-audit: {exc}", file=sys.stderr)
     except _ReaderClosed:
