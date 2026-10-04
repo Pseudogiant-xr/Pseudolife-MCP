@@ -3,6 +3,11 @@ description: Check the Pseudolife-MCP memory daemon and report bank health
 ---
 Report the state of the Pseudolife memory stack:
 
+`memory_stats` needs the core tool tier and `memory_dream` the full one:
+if your client does not list them, call `memory_toolset(action="expand")`
+(one tier per call) until it reports `current: "full"`, then rediscover
+tools.
+
 1. Fetch `http://127.0.0.1:8765/health` (curl or WebFetch). If it fails,
    report that the daemon is down and how to start it:
    `docker compose -f <clone>/ops/docker-compose.yml up -d`

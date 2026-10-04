@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-05 — each memory tool says which sibling fits instead, and marks tools your tier hides)
+- A model reading one tool's description now learns when another tool is
+  the right call. `memory_fact_set` sends a narrative, decision or
+  observation to `memory_store` and many concurrent values to
+  `memory_set_add`, and says it errors on a set-valued slot;
+  `memory_fact_get` sends open questions to `memory_search`;
+  `memory_supersede` sends test junk or a never-true entry to
+  `memory_forget` and a canonical slot to `memory_fact_set`.
+- A description that names a tool the reader's tier hides now says which
+  tier shows it, in the form `memory_fact_resolve (core)` already used by
+  `memory_search`: on `memory_fact_get` (`memory_fact_resolve`,
+  `memory_history`), `memory_fact_set` and `memory_set_add`
+  (`memory_fact_resolve`) and `memory_graph_relate`
+  (`memory_relation_define`). The 2026-10-04 review counted five "No such
+  tool" errors and about ten abandoned searches for hidden tools; every
+  session that expanded found them. A test now fails when a lower-tier
+  description names a higher-tier tool without its tier, and another when
+  `memory_toolset(action="status")`'s hand-written tier summary drifts
+  from the registry.
+- The `/dream` and `/memory-status` plugin commands say their full-tier
+  tools need `memory_toolset(action="expand")`, one tier per call, until it
+  reports `current: "full"`; the daemon's compose default is core.
+- `memory_recall` no longer quotes its current output caps as numbers
+  (they drift); it says the lists are capped.
+
 ### Added (2026-10-05 — the installer and update set up maintainer passkeys and the test login)
 - Turning on maintainer passkeys took four manual steps on the daemon host:
   a `tailscale serve` command, a hand edit of the daemon's config file, a

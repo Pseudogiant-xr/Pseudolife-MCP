@@ -490,6 +490,22 @@ def test_plugin_commands_reference_only_real_tools():
         assert not unknown, f"{rel} names unregistered tools: {unknown}"
 
 
+def test_plugin_commands_say_how_to_reach_hidden_tools():
+    """The compose default tier is core, and both commands call full-tier
+    tools (memory_dream, memory_graph_review, memory_forget). Sessions
+    running them searched for those tools, found nothing and gave up
+    without expanding (2026-10-04 review, H5), so a command that names a
+    tool above the minimal tier says how to expand to it."""
+    from pseudolife_memory.mcp_server import _TOOL_TIERS
+    for rel in ("plugin/commands/dream.md", "plugin/commands/memory-status.md"):
+        text = _read(rel)
+        hidden = {t for t in _referenced_tools(text) if _TOOL_TIERS[t] != "minimal"}
+        assert hidden, f"{rel}: expected tools above the minimal tier"
+        flat = " ".join(text.split())
+        assert 'memory_toolset(action="expand")' in flat, rel
+        assert 'current: "full"' in flat, rel
+
+
 def test_memory_loop_block_carries_the_write_policy_boundary():
     """MCB (arXiv 2608.19564): agents over-persist ambiguous
     interaction-derived information, and a prompt naming the four options
