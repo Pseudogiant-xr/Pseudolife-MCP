@@ -1445,7 +1445,8 @@ class MaintainerConfig:
     to it) and ``origin`` that exact origin: ``https://<rp_id>`` or
     ``https://<rp_id>:<port>`` (for example behind ``tailscale serve
     --https=8443``), or, for local use only, ``http://localhost[:<port>]``
-    with ``rp_id`` ``localhost``. The origin is never taken from a request
+    with ``rp_id`` ``localhost``; written as a browser serialises it, without
+    the scheme's default port. The origin is never taken from a request
     header. Unset, or any other shape (see :meth:`problem`), and every
     maintainer route answers ``409 maintainer_https_required``.
     ``maintainer_per_recipient_per_hour`` caps the rings maintainer messages
@@ -1485,6 +1486,11 @@ class MaintainerConfig:
             return "plain http is allowed for rp_id localhost only"
         if scheme not in ("https", "http"):
             return "origin must be https"
+        # A browser serialises the origin without its scheme's default port,
+        # so a configured one would never match an assertion (review of
+        # #569, 2026-10-05).
+        if port == {"https": 443, "http": 80}[scheme]:
+            return f"origin must leave out the default port :{port}"
         expected = f"{scheme}://{self.rp_id}" + (f":{port}" if port is not None else "")
         if parts.hostname != self.rp_id or self.origin != expected:
             return "origin must be exactly <scheme>://<rp_id>[:<port>]"

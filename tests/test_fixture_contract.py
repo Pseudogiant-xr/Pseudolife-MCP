@@ -269,6 +269,21 @@ def test_fixture_maintainer_answers_match_the_real_service():
     rep, _ = signed("repudiate", "repudiate", message_id=out["message_id"])
     assert set(rep) == {"message_id", "repudiated_at", "follow_up"}
 
+    # A grant also carries the other role's holder, as the real route signs it.
+    c = fx.maintainer_challenge({"purpose": "grant-delegate", "project": project,
+                                 "agent_id": delegate, "hold": 3600})
+    coordinator = roles[project]["coordinator"]["agent_id"]
+    assert json.loads(c["payload"])["other_holder"] == coordinator
+    slot = fx._mx()["roles"][project]["coordinator"]
+    slot["agent_id"] = delegate                  # the other role moved before the tap
+    try:
+        fx.maintainer_role({"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY})
+    except ValueError as exc:
+        assert str(exc) == "role_changed"
+    else:
+        raise AssertionError("a moved other-role holder was not refused")
+    slot["agent_id"] = coordinator
+
     # A role payload carries the holder the daemon read; a change in between
     # is role_changed, as the real route answers.
     c = fx.maintainer_challenge({"purpose": "revoke-delegate", "project": project})

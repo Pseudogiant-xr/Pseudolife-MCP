@@ -396,6 +396,10 @@ _CONFUSABLES = str.maketrans({
 })
 # What a recipient reads in place of a message the maintainer withdrew.
 WITHDRAWN_TEXT = "the maintainer withdrew this message; do not act on it"
+# The audit event a withdrawal appends, so history, which keeps a send's
+# body for the audit retention, still withdraws it once the live row (and
+# its ``repudiated_at``) is pruned.
+REPUDIATE_EVENT = "maintainer_repudiate"
 # The wake reason a maintainer message's ring is recorded under; its own
 # hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
 # counts these rows per recipient.
@@ -1970,11 +1974,15 @@ class CoordinationStore:
                 # claims nor queues for the coordinator lease (security
                 # review, 2026-10-04: only the signed routes kept the rule).
                 # Both role leases lock in the order the role changes take.
+                # The live holder still renews: before v54 a session could
+                # hold both roles, and refusing its renewal let the lease
+                # lapse under it (review of #569, 2026-10-05).
                 project = name[len(COORDINATOR_PREFIX):]
                 self._lock_role_leases(project)
-                if self._one("SELECT 1 AS d FROM coordination_leases WHERE name=%s "
-                             "AND holder_agent_id=%s AND expires_at>%s",
-                             (DELEGATE_PREFIX + project, agent_id, now)) is not None:
+                live = "SELECT 1 AS d FROM coordination_leases WHERE name=%s " \
+                       "AND holder_agent_id=%s AND expires_at>%s"
+                if (self._one(live, (DELEGATE_PREFIX + project, agent_id, now)) is not None
+                        and self._one(live, (name, agent_id, now)) is None):
                     raise CoordinationError("already_delegate")
             self.storage.conn.execute(
                 "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
@@ -3438,7 +3446,8 @@ class CoordinationStore:
             "(SELECT s.seq FROM coordination_events s WHERE " + " AND ".join(incoming)
             + " ORDER BY " + incoming_order + " LIMIT %s)) sends ORDER BY seq LIMIT %s) "
             "SELECT p.*,COALESCE(m.acknowledged_at,l.acknowledged_at) AS acknowledged_at,"
-            "COALESCE(m.first_read_at,l.first_read_at) AS first_read_at,l.redacted_at "
+            "COALESCE(m.first_read_at,l.first_read_at) AS first_read_at,l.redacted_at,"
+            "COALESCE(m.repudiated_at,l.repudiated_at) AS repudiated_at "
             "FROM page ids JOIN coordination_events p ON p.seq=ids.seq "
             "LEFT JOIN coordination_messages m ON m.message_id=p.message_id "
             "LEFT JOIN LATERAL (SELECT "
@@ -3446,10 +3455,13 @@ class CoordinationStore:
             "e.agent_id=p.recipient_agent_id) AS acknowledged_at,"
             "min(e.created_at) FILTER (WHERE e.event='read' AND "
             "e.agent_id=p.recipient_agent_id) AS first_read_at,"
-            "min(e.created_at) FILTER (WHERE e.event='redact') AS redacted_at "
+            "min(e.created_at) FILTER (WHERE e.event='redact') AS redacted_at,"
+            "min(e.created_at) FILTER (WHERE e.event=%s AND e.actor='maintainer') "
+            "AS repudiated_at "
             "FROM coordination_events e WHERE e.message_id=p.message_id "
-            "AND e.event IN ('ack','read','redact')) l ON true ORDER BY p.seq",
-            outgoing_params + [limit + 1] + incoming_params + [limit + 1, limit + 1])
+            "AND e.event IN ('ack','read','redact',%s)) l ON true ORDER BY p.seq",
+            outgoing_params + [limit + 1] + incoming_params + [limit + 1, limit + 1]
+            + [REPUDIATE_EVENT, REPUDIATE_EVENT])
         has_more = len(rows) > limit
         rows = rows[:limit]
         messages = []
@@ -3466,6 +3478,8 @@ class CoordinationStore:
             if redacted:
                 expires_at = (sent["redacted_at"] if expires_at is None else
                               min(expires_at, sent["redacted_at"]))
+            maintainer = (payload.get("origin") == MAINTAINER_ORIGIN
+                          and sent["principal"] == MAINTAINER_PRINCIPAL)
             state = ("acknowledged" if sent["acknowledged_at"] is not None else
                      "expired" if expires_at is not None and expires_at <= now else "pending")
             messages.append({
@@ -3483,8 +3497,12 @@ class CoordinationStore:
                 "state": state,
                 # History names a maintainer message's origin (v54); only a
                 # receive result carries its verification.
-                "origin": (MAINTAINER_ORIGIN if payload.get("origin") == MAINTAINER_ORIGIN
-                           and sent["principal"] == MAINTAINER_PRINCIPAL else MESSAGE_ORIGIN)})
+                "origin": MAINTAINER_ORIGIN if maintainer else MESSAGE_ORIGIN})
+            if maintainer and sent["repudiated_at"] is not None:
+                # Withdrawn, as receive shows it (review of #569, 2026-10-05).
+                messages[-1]["repudiated_at"] = sent["repudiated_at"]
+                if not redacted:
+                    messages[-1]["text"] = WITHDRAWN_TEXT
         return {"messages": messages, "after": f"{agent_id}:history:{rows[-1]['seq'] if rows else seq}",
                 "has_more": has_more, "retention_days": audit_retention_days,
                 "retained_since": cutoff}
