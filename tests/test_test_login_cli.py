@@ -162,7 +162,8 @@ class _FakeServer:
                 "owner_connect": True}}
             return json.dumps({"role": role, "member_of": [], "banks": banks,
                                "owns": self.owns, "others": ["pseudolife_memory_bench"],
-                               "daemon": self.daemon})
+                               "daemon": self.daemon,
+                               "template1_public_connect": not self.applied})
         if "CREATE EXTENSION" in sql:
             before, self.vector = self.vector, "vector 0.8.6"
             return f"{before}|{self.vector}"
@@ -313,6 +314,22 @@ def test_an_answer_that_is_not_json_fails_cleanly(tmp_path):
     assert not (tmp_path / "test-pg.env").exists()
 
 
+def test_template1_is_closed_to_public(tmp_path):
+    """A login connected to template1 makes every CREATE DATABASE that copies
+    it fail, the owner's after a restore's DROP included. Nothing needs
+    PUBLIC there: CREATE DATABASE copies a template it cannot connect to."""
+    sql = "\n".join(cli.role_statements("pseudolife_test", "SCRAM-SHA-256$1:a$b:c", []))
+    assert 'REVOKE CONNECT ON DATABASE "template1" FROM PUBLIC' in sql
+    code, out = _run([], _FakeServer(), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "template1: CONNECT revoked from PUBLIC" in out
+    problems = cli._verify({"role": {"super": False, "login": True, "createdb": True,
+                                     "createrole": False, "replication": False,
+                                     "bypassrls": False},
+                            "template1_public_connect": True}, "pseudolife_test", [])
+    assert problems == ["PUBLIC can still connect to template1"]
+
+
 def test_template1_is_opened_once(tmp_path):
     """CREATE DATABASE fails while another session is connected to its
     template, so a concurrent test run's database creation can collide with
@@ -425,6 +442,8 @@ def scratch_admin():
     with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
         names = {row[0] for row in conn.execute("SELECT datname FROM pg_database")}
         created = "pseudolife_memory" not in names
+        template1_open = conn.execute(
+            "SELECT has_database_privilege('public', 'template1', 'CONNECT')").fetchone()[0]
         if created:
             conn.execute('CREATE DATABASE "pseudolife_memory"')
     bank = RedactedUrl(conninfo_with_dbname(url, "pseudolife_memory"))
@@ -444,6 +463,8 @@ def scratch_admin():
             pass  # it still owns a database a failed slice leaked
         if created:
             conn.execute('DROP DATABASE IF EXISTS "pseudolife_memory" WITH (FORCE)')
+        if template1_open:
+            conn.execute("GRANT CONNECT ON DATABASE template1 TO PUBLIC")
 
 
 @pytest.fixture(scope="module")
@@ -481,10 +502,11 @@ def test_the_login_cannot_connect_to_the_bank_and_the_owner_still_can(provisione
     import psycopg
     from tests.pg_defaults import RedactedUrl, conninfo_with_dbname
 
-    with pytest.raises(psycopg.OperationalError) as refused:
-        psycopg.connect(RedactedUrl(_login_url(provisioned, "pseudolife_memory")),
-                        connect_timeout=5)
-    assert "permission denied for database" in str(refused.value)
+    for database in ("pseudolife_memory", "template1"):
+        with pytest.raises(psycopg.OperationalError) as refused:
+            psycopg.connect(RedactedUrl(_login_url(provisioned, database)),
+                            connect_timeout=5)
+        assert "permission denied for database" in str(refused.value)
     owner = RedactedUrl(conninfo_with_dbname(provisioned["admin"], "pseudolife_memory"))
     with psycopg.connect(owner, connect_timeout=5) as conn:
         assert conn.execute("SELECT 1").fetchone() == (1,)

@@ -21,6 +21,9 @@ owner's password (2026-10-04). ``create`` makes a separate login, idempotently:
   superuser the daemon connects as on the Docker tier. When
   ``PSEUDOLIFE_MCP_DATABASE_URL`` names a user that would lose CONNECT with
   PUBLIC (not owner, superuser or explicitly granted), it refuses first.
+* ``REVOKE CONNECT ON DATABASE template1 FROM PUBLIC``: a session there
+  fails every ``CREATE DATABASE`` that copies it (a restore's, after its
+  DROP); copying a template needs no CONNECT on it.
 * ``vector`` installed (and updated) in ``template1``. pgvector does not mark
   its extension trusted, so ``CREATE EXTENSION vector`` needs a superuser;
   ``CREATE DATABASE`` copies template1, so every database the login creates
@@ -261,6 +264,8 @@ def state_statement(role: str, banks: list[str], daemon_user: str | None = None)
     role_oid = f"(SELECT oid FROM pg_roles WHERE rolname = {r})"
     return f"""SELECT json_build_object(
   'daemon', {_daemon_state(daemon_user, role_oid, banks)},
+  'template1_public_connect', (SELECT has_database_privilege('public', oid, 'CONNECT')
+                               FROM pg_database WHERE datname = 'template1'),
   'role', (SELECT json_build_object('super', rolsuper, 'login', rolcanlogin,
             'createdb', rolcreatedb, 'createrole', rolcreaterole,
             'replication', rolreplication, 'bypassrls', rolbypassrls)
@@ -314,6 +319,9 @@ END $do$""",
     for bank in banks:
         statements.append(f"REVOKE CONNECT ON DATABASE {_ident(bank)} FROM PUBLIC")
         statements.append(f"REVOKE ALL ON DATABASE {_ident(bank)} FROM {_ident(role)}")
+    # A session in template1 fails every CREATE DATABASE that copies it, the
+    # owner's after a restore's DROP included; copying needs no CONNECT.
+    statements.append(f"REVOKE CONNECT ON DATABASE {_ident('template1')} FROM PUBLIC")
     statements.append("SELECT 'ok'")
     return statements
 
@@ -575,6 +583,10 @@ def _create(args, executor, path: Path, banks: list[str], report: _Report,
             report.say(f"  database {bank}: not on this server")
     if daemon_line:
         report.say(daemon_line)
+    report.say("  template1: " + ("CONNECT revoked from PUBLIC"
+                                  if before.get("template1_public_connect")
+                                  else "already closed to PUBLIC")
+               + "; CREATE DATABASE still copies it")
 
     old_ext, _, new_ext = executor.query("template1", extension_statements()).partition("|")
     if not old_ext:
@@ -615,6 +627,8 @@ def _verify(state: dict, role: str, banks: list[str]) -> list[str]:
         problems.append(f"role {role} has the wrong {', '.join(wrong)}")
     if state.get("member_of"):
         problems.append(f"role {role} is still a member of {', '.join(state['member_of'])}")
+    if state.get("template1_public_connect"):
+        problems.append("PUBLIC can still connect to template1")
     for bank in banks:
         info = (state.get("banks") or {}).get(bank) or {}
         if info.get("public_connect"):
