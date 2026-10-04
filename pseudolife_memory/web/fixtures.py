@@ -10,6 +10,11 @@ console looks realistic in screenshots. Shapes mirror the real service methods
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -780,3 +785,373 @@ class FixtureService:
     def delete(self, text=None, substring=None, source=None, episode=None, tag=None,
                confirm_bulk=False):
         return {"deleted_count": 3, "deleted_texts": ["(fixture) deleted entry"]}
+
+    # ── maintainer passkey and Board roles: DEMO ONLY ───────────────────────
+    # In-memory stand-ins for the maintainer routes (docs/superpowers/specs/
+    # 2026-10-04-board-roles-passkey.md, section 4) so the Console's Roles
+    # band, its message composer and Settings' "Your passkeys" can be clicked
+    # through on the devserver. Shapes follow the contract; NOTHING here
+    # verifies a passkey. In fixture mode (health ``fixtures: true``) the
+    # Console skips the browser ceremony and sends a placeholder assertion,
+    # which these methods accept and a real daemon refuses. Errors raise
+    # ``ValueError(<contract code>)``, which the API layer answers with that
+    # code's real HTTP status. Shapes mirror pseudolife_memory/maintainer.py.
+
+    _MX_SECRET = b"fixture-demo-secret-not-a-real-key"
+    _MX_PROJECT = "Pseudolife-MCP"
+    _MX_SESSIONS = {
+        "a7e2c4d1f0b94e5a8c3d2b1a09f8e7d6": ("Release relay", "laptop"),
+        "8d2fedbd6a3c4f1e9b8a7d6c5e4f3a2b": ("Console board roles", "laptop"),
+        "3b7c91e04d2a4b6c8e1f0a9b8c7d6e5f": ("Forget cascade fix", "box"),
+    }
+    _MX_ROLE_PURPOSES = ("grant-delegate", "revoke-delegate", "assign-coordinator",
+                         "revoke-coordinator")
+    # As the real route: any other field in a challenge body is refused.
+    _MX_FIELDS = {
+        "send": {"to", "text", "urgent"},
+        "enrol-approve": {"label"}, "enrol-bootstrap": {"label"},
+        "cancel": {"credential_id"}, "revoke-self": {"credential_id"},
+        "repudiate": {"message_id"},
+        "grant-delegate": {"project", "agent_id", "hold"},
+        "assign-coordinator": {"project", "agent_id", "hold"},
+        "revoke-delegate": {"project"}, "revoke-coordinator": {"project"},
+    }
+
+    def _mx(self) -> dict:
+        """The demo's mutable maintainer state, built on first use."""
+        state = getattr(self, "_mx_state", None)
+        if state is None:
+            now = time.time()
+            relay, roles_session, _ = list(self._MX_SESSIONS)
+            key_id = "ZGVtby1sYXB0b3Atd2luZG93cy1oZWxsbw"
+            state = self._mx_state = {
+                "passkeys": [{
+                    "credential_id": key_id, "label": "Demo laptop (fixture)",
+                    "state": "active", "enrolled_by": "bootstrap",
+                    "active_from": now - 6 * _D, "created_at": now - 6 * _D,
+                    "last_used_at": now - 2 * _H, "revoked_at": None,
+                    "revoked_by": None, "flagged_at": None}],
+                "roles": {self._MX_PROJECT: {
+                    "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
+                                 "granted_by": "maintainer"},
+                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H},
+                }},
+                "sent": [{
+                    "message_id": "f1c0ffee00000000000000000000000a",
+                    "recipient_agent_id": relay, "recipient_label": "Release relay",
+                    "created_at": now - 2 * _H, "label": "Demo laptop (fixture)",
+                    "text": "Merge #563 once CI is green, then deploy with update -All.",
+                    "wake": {"decision": "rung", "reason": "maintainer_message",
+                             "ring_at": now - 2 * _H + 1},
+                    "first_read_at": now - 2 * _H + 60,
+                    "acknowledged_at": now - 2 * _H + 420, "repudiated_at": None}],
+                "inbox": [{
+                    "message_id": "f1c0ffee00000000000000000000000b",
+                    "sender_agent_id": relay, "sender_label": "Release relay",
+                    "sender_principal": "laptop",
+                    "reply_to": "f1c0ffee00000000000000000000000a",
+                    "text": "CI green; merged as d7cfd36b. Deploy started, ETA 10 min. "
+                            "I will verify /ui/ live after.",
+                    "created_at": now - 2 * _H + 420, "acknowledged_at": None,
+                    "origin": "agent"}],
+                "spent": set(),
+                "fence": 7,
+            }
+        return state
+
+    @staticmethod
+    def _mx_b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    def _mx_options(self, payload: str, *, create: bool) -> dict:
+        challenge = self._mx_b64(hashlib.sha256(payload.encode("utf-8")).digest())
+        keys = self._mx()["passkeys"]
+        if create:
+            return {"challenge": challenge, "rp": {"id": "localhost", "name": "Pseudolife"},
+                    "user": {"id": self._mx_b64(b"maintainer"), "name": "maintainer",
+                             "displayName": "Maintainer"},
+                    "pubKeyCredParams": [{"type": "public-key", "alg": a} for a in (-7, -8, -257)],
+                    "timeout": 120000, "attestation": "none",
+                    "authenticatorSelection": {"userVerification": "required",
+                                               "residentKey": "preferred"},
+                    "excludeCredentials": [{"type": "public-key", "id": k["credential_id"]}
+                                           for k in keys if k["state"] != "revoked"]}
+        return {"challenge": challenge, "rpId": "localhost", "timeout": 120000,
+                "userVerification": "required",
+                "allowCredentials": [{"type": "public-key", "id": k["credential_id"]}
+                                     for k in keys if k["state"] == "active"]}
+
+    def _mx_mac(self, payload: str) -> str:
+        return hmac.new(self._MX_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _mx_issue(self, purpose: str, fields: dict) -> tuple[str, str]:
+        payload = json.dumps({**fields, "purpose": purpose, "nonce": secrets.token_hex(16),
+                              "expires_at": round(time.time() + 120, 3)},
+                             sort_keys=True, separators=(",", ":"))
+        return payload, self._mx_mac(payload)
+
+    def _mx_open(self, body: dict, purpose: str, proof: str = "assertion") -> dict:
+        """The completing route's checks a real daemon runs, minus the signature."""
+        payload, mac = body.get("payload"), body.get("mac")
+        if (not isinstance(payload, str) or not isinstance(mac, str)
+                or not hmac.compare_digest(self._mx_mac(payload), mac)):
+            raise ValueError("assertion_invalid")
+        fields = json.loads(payload)
+        if fields.get("purpose") != purpose:
+            raise ValueError("assertion_invalid")
+        if time.time() > fields["expires_at"]:
+            raise ValueError("challenge_expired")
+        if not isinstance(body.get(proof), dict):
+            raise ValueError("assertion_invalid")
+        if fields["nonce"] in self._mx()["spent"]:
+            raise ValueError("challenge_spent")
+        self._mx()["spent"].add(fields["nonce"])
+        return fields
+
+    @staticmethod
+    def _mx_purpose(body: dict) -> str | None:
+        try:
+            return json.loads(body.get("payload") or "{}").get("purpose")
+        except (TypeError, ValueError):
+            return None
+
+    def _mx_session(self, agent_id) -> tuple[str, str]:
+        if agent_id not in self._MX_SESSIONS:
+            raise ValueError("recipient_unknown")
+        return self._MX_SESSIONS[agent_id]
+
+    def _mx_preview(self, agent_id) -> dict:
+        label, principal = self._mx_session(agent_id)
+        return {"agent_id_prefix": agent_id[:12], "name": label, "label": label,
+                "principal": principal, "host": None, "client": "claude",
+                "project": self._MX_PROJECT, "task": "",
+                "last_activity": time.time() - 120, "duplicate_name": False}
+
+    def _mx_holder(self, role: str, project) -> str | None:
+        """The live holder of ``<role>:<project>``, as ``role_holder`` reads it."""
+        held = (self._mx()["roles"].get(project) or {}).get(role)
+        return held["agent_id"] if held and held["expires_at"] > time.time() else None
+
+    def _mx_signing(self) -> list:
+        now = time.time()
+        return [k for k in self._mx()["passkeys"] if k["state"] == "active"
+                and k["active_from"] is not None and now >= k["active_from"]]
+
+    def _mx_live_roles(self) -> dict:
+        now = time.time()
+        out = {}
+        for project, slots in self._mx()["roles"].items():
+            d, c = slots.get("delegate"), slots.get("coordinator")
+            entry = {"delegate": dict(d) if d and d["expires_at"] > now else None,
+                     "coordinator": dict(c) if c and c["expires_at"] > now else None}
+            if entry["delegate"] or entry["coordinator"]:
+                out[project] = entry
+        return out
+
+    def maintainer_status(self) -> dict:
+        out = {"available": bool(self._mx_signing())}
+        if not out["available"]:
+            out["reason"] = "maintainer_not_enrolled"
+        out.update(rp_id="localhost", origin="http://localhost:8770",
+                   passkeys=[dict(k) for k in self._mx()["passkeys"]],
+                   roles=self._mx_live_roles())
+        return out
+
+    def maintainer_challenge(self, body: dict) -> dict:
+        purpose = body.get("purpose")
+        if purpose not in self._MX_FIELDS or set(body) - {"purpose"} - self._MX_FIELDS[purpose]:
+            raise ValueError("invalid_request")
+        if purpose == "enrol-bootstrap":
+            if any(k["state"] in ("pending", "active") for k in self._mx()["passkeys"]):
+                raise ValueError("enrolment_closed")
+        elif not self._mx_signing():
+            raise ValueError("maintainer_not_enrolled")
+        preview = None
+        if purpose == "send":
+            to, text = body.get("to"), body.get("text")
+            preview = self._mx_preview(to)
+            if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 8192:
+                raise ValueError("invalid_request")
+            fields = {"to": to, "text": text, "urgent": body.get("urgent") is True}
+        elif purpose in self._MX_ROLE_PURPOSES:
+            project = body.get("project")
+            if project != self._MX_PROJECT:
+                raise ValueError("invalid_request")
+            fields = {"project": project}
+            role = "delegate" if purpose.endswith("delegate") else "coordinator"
+            other = "coordinator" if role == "delegate" else "delegate"
+            holder = self._mx_holder(role, project)
+            preview = {"role": role, "project": project,
+                       "action": "revoke" if purpose.startswith("revoke") else (
+                           "grant" if role == "delegate" else "assign"),
+                       "current_holder": holder}
+            if purpose in ("grant-delegate", "assign-coordinator"):
+                agent_id, hold = body.get("agent_id"), body.get("hold")
+                if type(hold) is not int or not 60 <= hold <= 604800:
+                    raise ValueError("invalid_request")
+                fields.update(agent_id=agent_id, hold=hold)
+                preview.update(self._mx_preview(agent_id))
+                preview["replaces"] = holder if holder != agent_id else None
+                preview["also_breaks"] = (f"{other}:{project}"
+                                          if self._mx_holder(other, project) == agent_id else None)
+            # The holder the change displaces is signed too, as the real route does.
+            fields["holder"] = holder
+        elif purpose in ("cancel", "revoke-self"):
+            fields = {"credential_id": body.get("credential_id")}
+        elif purpose == "repudiate":
+            fields = {"message_id": body.get("message_id")}
+        elif purpose in ("enrol-bootstrap", "enrol-approve"):
+            label = body.get("label")
+            if not isinstance(label, str) or not 1 <= len(label.strip()) <= 64:
+                raise ValueError("invalid_request")
+            fields = {"label": label.strip()}
+        else:
+            raise ValueError("invalid_request")
+        payload, mac = self._mx_issue(purpose, fields)
+        out = {"payload": payload, "mac": mac,
+               "publicKey": self._mx_options(payload, create=purpose == "enrol-bootstrap")}
+        if preview is not None:
+            out["preview"] = preview
+        return out
+
+    def maintainer_enrol(self, body: dict) -> dict:
+        now = time.time()
+        if "assertion" in body:
+            # Step 1 of another key: the approval answers with the enrol challenge.
+            fields = self._mx_open(body, "enrol-approve")
+            approver = self._mx()["passkeys"][0]["credential_id"]
+            payload, mac = self._mx_issue("enrol", {"label": fields["label"],
+                                                    "approved_by": approver,
+                                                    "approval_nonce": fields["nonce"]})
+            return {"payload": payload, "mac": mac, "label": fields["label"],
+                    "publicKey": self._mx_options(payload, create=True)}
+        purpose = self._mx_purpose(body)
+        if purpose not in ("enrol-bootstrap", "enrol"):
+            raise ValueError("assertion_invalid")
+        fields = self._mx_open(body, purpose, proof="attestation")
+        if purpose == "enrol-bootstrap":
+            if any(k["state"] in ("pending", "active") for k in self._mx()["passkeys"]):
+                raise ValueError("enrolment_closed")
+            if not body.get("code"):
+                raise ValueError("bootstrap_code_invalid")
+            state, active_from, by = "pending", None, "bootstrap"
+        else:
+            state, active_from, by = "active", now + 24 * _H, fields["approved_by"]
+        key = {"credential_id": self._mx_b64(secrets.token_bytes(16)), "label": fields["label"],
+               "state": state, "enrolled_by": by, "active_from": active_from,
+               "created_at": now, "last_used_at": None, "revoked_at": None,
+               "revoked_by": None, "flagged_at": None}
+        self._mx()["passkeys"].append(key)
+        return {"credential_id": key["credential_id"], "label": key["label"], "state": state}
+
+    def maintainer_send(self, body: dict) -> dict:
+        fields = self._mx_open(body, "send")
+        label, principal = self._mx_session(fields["to"])
+        now = time.time()
+        message_id = secrets.token_hex(16)
+        # The board's decision object, as a real send answers it.
+        wake = ({"decision": "rung", "reason": "maintainer_message", "ring_at": now}
+                if fields["urgent"] else
+                {"decision": "no_path", "reason": "no_listener", "queued": True,
+                 "last_activity": now - 300, "fallback": None, "fallback_paths": []})
+        self._mx()["sent"].append({
+            "message_id": message_id, "recipient_agent_id": fields["to"],
+            "recipient_label": label, "created_at": now,
+            "label": self._mx()["passkeys"][0]["label"], "text": fields["text"],
+            "wake": wake, "first_read_at": None, "acknowledged_at": None,
+            "repudiated_at": None})
+        # A canned reply, so the demo thread shows both sides.
+        self._mx()["inbox"].append({
+            "message_id": secrets.token_hex(16), "sender_agent_id": fields["to"],
+            "sender_label": label, "sender_principal": principal, "reply_to": message_id,
+            "text": "On it. (A demo reply from the fixture devserver.)",
+            "created_at": now + 1, "acknowledged_at": None, "origin": "agent"})
+        return {"message_id": message_id, "wake": wake}
+
+    def maintainer_role(self, body: dict) -> dict:
+        purpose = self._mx_purpose(body)
+        if purpose not in self._MX_ROLE_PURPOSES:
+            raise ValueError("assertion_invalid")
+        fields = self._mx_open(body, purpose)
+        now = time.time()
+        project = fields["project"]
+        slots = self._mx()["roles"].setdefault(project, {"delegate": None, "coordinator": None})
+        role = "delegate" if purpose.endswith("delegate") else "coordinator"
+        name = f"{role}:{project}"
+        if self._mx_holder(role, project) != fields.get("holder"):
+            raise ValueError("role_changed")
+        held = slots.get(role)
+        if held and held["expires_at"] <= now:
+            held = None
+        if purpose.startswith("revoke"):
+            slots[role] = None
+            return {"name": name, "broken": held is not None,
+                    "was_held_by": held["agent_id"] if held else None}
+        agent_id = fields["agent_id"]
+        self._mx_session(agent_id)
+        other = "coordinator" if role == "delegate" else "delegate"
+        also_broken = None
+        if (slots.get(other) or {}).get("agent_id") == agent_id:
+            # One role per session: the other role's lease breaks too.
+            slots[other] = None
+            also_broken = f"{other}:{project}"
+        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"]}
+        if role == "delegate":
+            entry["granted_by"] = "maintainer"
+        slots[role] = entry
+        self._mx()["fence"] += 1
+        out = {"name": name, "agent_id": agent_id, "fence": self._mx()["fence"],
+               "expires_at": entry["expires_at"],
+               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None}
+        if also_broken:
+            out["also_broken"] = also_broken
+        return out
+
+    def _mx_key(self, credential_id) -> dict:
+        for key in self._mx()["passkeys"]:
+            if key["credential_id"] == credential_id:
+                return key
+        raise ValueError("credential_not_found")
+
+    def maintainer_cancel(self, body: dict) -> dict:
+        fields = self._mx_open(body, "cancel")
+        key = self._mx_key(fields["credential_id"])
+        now = time.time()
+        if key["state"] != "active" or not key["active_from"] or key["active_from"] <= now:
+            raise ValueError("assertion_invalid")
+        key.update(state="revoked", revoked_at=now,
+                   revoked_by=self._mx()["passkeys"][0]["credential_id"])
+        return {"state": "revoked"}
+
+    def maintainer_revoke(self, body: dict) -> dict:
+        fields = self._mx_open(body, "revoke-self")
+        key = self._mx_key(fields["credential_id"])
+        key.update(state="revoked", revoked_at=time.time(), revoked_by=key["credential_id"])
+        return {"state": "revoked"}
+
+    def maintainer_repudiate(self, body: dict) -> dict:
+        fields = self._mx_open(body, "repudiate")
+        for message in self._mx()["sent"]:
+            if message["message_id"] == fields["message_id"]:
+                message["repudiated_at"] = message["repudiated_at"] or time.time()
+                follow_up = None
+                if message["acknowledged_at"] is not None:
+                    # Already acknowledged: a withdrawal notice goes out, as the real route.
+                    follow_up = secrets.token_hex(16)
+                    self._mx()["sent"].append({
+                        **message, "message_id": follow_up, "created_at": time.time(),
+                        "text": "The maintainer withdrew message " + message["message_id"]
+                                + "; do not act on it.",
+                        "wake": None, "first_read_at": None, "acknowledged_at": None,
+                        "repudiated_at": None})
+                return {"message_id": message["message_id"],
+                        "repudiated_at": message["repudiated_at"], "follow_up": follow_up}
+        raise ValueError("message_not_found")
+
+    def maintainer_sent(self, limit=50) -> dict:
+        rows = sorted(self._mx()["sent"], key=lambda m: m["created_at"], reverse=True)
+        return {"messages": [dict(m) for m in rows[:int(limit)]]}
+
+    def maintainer_inbox(self, limit=50) -> dict:
+        rows = sorted(self._mx()["inbox"], key=lambda m: m["created_at"], reverse=True)
+        return {"messages": [dict(m) for m in rows[:int(limit)]]}

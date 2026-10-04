@@ -84,3 +84,18 @@ def test_vendored_galaxy_bundle_ships_with_its_licences():
     assert (FRONTEND / "public" / "vendor" / "README.md").is_file(), \
         "the bundle's provenance and licence audit live in vendor/README.md"
     assert (STATIC / "assets" / "Geist-LICENSE.txt").is_file(), "the Geist font licence must ship"
+
+
+def _inline_scripts(html: str) -> list[str]:
+    """Every <script> element that carries code instead of a src."""
+    return [m.group(0) for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", html, re.S | re.I)
+            if "src=" not in m.group(1) or m.group(2).strip()]
+
+
+def test_console_build_carries_no_inline_script():
+    """/ui/ is served with ``script-src 'self'``: an inline script would be
+    blocked, so the theme bootstrap lives in ``/ui/theme.js``."""
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert _inline_scripts(html) == [], "inline <script> in the built index.html"
+    assert (STATIC / "theme.js").is_file()
+    assert '<script src="/ui/theme.js"></script>' in html
