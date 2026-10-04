@@ -169,8 +169,8 @@ CHILD_POLL = 0.2
 # How often ``hold`` looks whether the process it follows is still there.
 PID_POLL = 0.5
 
-_DURATION = re.compile(r"([0-9]+)([smh]?)", re.IGNORECASE)
-_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+_DURATION = re.compile(r"([0-9]+)([smhd]?)", re.IGNORECASE)
+_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 _CODE = re.compile(r"[a-z0-9_]{1,64}")
 
 # Why a daemon's refusal means no board for this run, by error code.
@@ -186,10 +186,10 @@ _REFUSALS = {
 
 
 def parse_duration(text: str) -> int:
-    """Whole seconds from ``90``, ``90s``, ``20m`` or ``2h``."""
+    """Whole seconds from ``90``, ``90s``, ``20m``, ``2h`` or ``7d``."""
     match = _DURATION.fullmatch(text.strip())
     if match is None:
-        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m or 2h)")
+        raise ValueError(f"not a duration: {text!r} (use 90, 90s, 20m, 2h or 7d)")
     return int(match.group(1)) * _UNITS[match.group(2).lower()]
 
 
@@ -1710,7 +1710,7 @@ signal N (130 Ctrl-C), releasing the lease and leaving PID running.
 
 
 _RUN_EPILOG = """\
-DURATION is whole seconds or minutes or hours: 90, 90s, 20m, 2h.
+DURATION is whole seconds, minutes, hours or days: 90, 90s, 20m, 2h, 7d.
 
 The lease is an OS file lock in ~/.pseudolife-mcp/locks (PSEUDOLIFE_LEASE_LOCK_DIR
 overrides it), released by the OS when this process exits or dies. With a

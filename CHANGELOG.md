@@ -56,6 +56,96 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the per-tool client limits (1,600 characters, 4,000 schema bytes) are
   unchanged and every tool stays under them (largest schema
   `memory_agents`, 3,459 bytes).
+### Fixed (2026-10-04 — `lease delegate --for 7d` works as documented)
+- The `pseudolife-mcp lease` duration arguments (`delegate --for`,
+  `run`/`hold --expect`, `--ttl` and `--timeout`) now accept a `d` suffix
+  for days, so `--for 7d` is 604800 seconds, alongside the bare seconds,
+  `s`, `m` and `h` forms that keep working; each argument's own bounds
+  still apply (`--for` at most a week). 0.16.0 and 0.16.1 refused `7d` with
+  "not a duration" although their CHANGELOG entries show `lease designate
+  PROJECT AGENT --for 7d` (0.16.0) and `lease delegate PROJECT AGENT --for
+  7d` (0.16.1, and the configuration guide): on those versions use
+  `--for 168h`.
+
+### Fixed (2026-10-04 — a shim runtime records the version it actually holds)
+- A shim runtime installed by `pseudolife-mcp update` run from inside a
+  checkout could record the wrong version in its `runtime.json`. The
+  install asks the new runtime's Python which `pseudolife-mcp` it holds,
+  and `python -c` puts the working directory first on `sys.path`, so a
+  stale `pseudolife_mcp.egg-info` left in the checkout by an earlier
+  in-tree build answered instead (seen on Linux: 0.16.1 installed,
+  0.15.0 recorded). The wrong label made the same-release check miss, so
+  every rerun installed yet another runtime. The probe now runs isolated
+  (`python -I`), reading only the runtime's own packages.
+- A runtime already labelled wrongly is harmless: the launcher picks a
+  runtime by its sequence number, not its label, so it runs the right
+  code. The first update run by a release with this fix installs one
+  correctly labelled runtime, and a later update removes the mislabelled
+  one once nothing runs from it.
+- The probe runs inside the updater doing the install, so an updater
+  without this fix still mislabels the runtime it installs, the fixed
+  release's included. Run `pseudolife-mcp update` from outside a
+  checkout to avoid that.
+
+### Fixed (2026-10-04 — `pseudolife-mcp connect` verifies the installed shim, not the checkout it runs from)
+- `connect`'s MCP handshake ran its child Python, and the shim that child
+  starts, in the current directory. `python -c` and `-m` put that directory
+  first on `sys.path`, so `connect` run from inside a source checkout
+  validated the checkout's `pseudolife_memory` instead of the installed one.
+  The handshake child now runs from the system temporary directory, and the
+  shim it starts inherits that directory, and a relative token-file path
+  in a registration is resolved against the directory `connect` ran from
+  before the child gets it, as the checks before the handshake already
+  resolve it. Not `python -I`: the handshake passes `PYTHONIOENCODING`,
+  which `-I` would ignore.
+
+### Fixed (2026-10-04 — the plugin marketplace is added by its HTTPS URL, so updates work without a GitHub SSH key)
+- The installers (`ops/install.sh`, `ops/install.ps1`) added the Claude Code
+  plugin marketplace as `Pseudogiant-xr/Pseudolife-MCP`. Claude Code records
+  that shorthand as a `github` source and refreshes it over SSH, so on a host
+  with no GitHub SSH key or known_hosts entry every later
+  `claude plugin marketplace update` failed ("SSH host key is not in your
+  known_hosts file") and the plugin silently stopped updating (seen on a
+  Linux host, 2026-10-04). They now add it by
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`, as do the manual
+  `/plugin marketplace add` commands in the README, the plugin README, the
+  remote-bank guide, the translated READMEs, and the client step's advice
+  when the marketplace clone is missing. `tests/test_plugin_packaging.py`
+  fails while any of them names the shorthand.
+- **Existing installs** keep the `github` source until it is moved; the
+  README's Updating section gives the steps. If `~/.claude/settings.json`
+  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
+  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
+  (the CLI refuses an add that differs from a declared source), then run
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
+  Do not remove the marketplace first: that uninstalls its plugins.
+
+### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
+- The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
+  `ops/update_clients.py`) runs `claude plugin marketplace update
+  pseudolife-mcp` and then compares the marketplace clone with the installed
+  cache. It ignored a failed marketplace update, so a cache matching a clone
+  that could not be refreshed read `current`. On 2026-10-04 the homelab box
+  had no github.com host key for root: Claude Code's SSH clone failed, the
+  clone stayed at 0.16.0's commit, and the box kept 0.16.0's plugin hooks
+  after a 0.16.1 deploy that reported the plugin green.
+- A failed marketplace update (a non-zero exit, or the CLI's `Failed to
+  update marketplace` / `Failed to refresh marketplace` line even with exit
+  0) now makes the step `failed`, which fails the run with the client-step
+  exit code. The detail quotes the CLI's line and the remedy: for a missing
+  host key, add github.com's key to `known_hosts` after checking its
+  fingerprint, or point the marketplace at HTTPS with `claude plugin
+  marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
+  which re-points the existing entry in place (measured on Claude Code
+  2.1.287). Claude Code refuses that add while `settings.json` declares the
+  marketplace under `extraKnownMarketplaces` with another source, as the
+  box's did, so where such a declaration exists the detail names the file
+  and says to change the entry's source to the HTTPS git URL first; it
+  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  still installs a clone that differs from the cache,
+  since that is progress, but it reports `failed` and says the clone may be
+  behind, not `refreshed`. A successful marketplace update behaves as
+  before.
 
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 

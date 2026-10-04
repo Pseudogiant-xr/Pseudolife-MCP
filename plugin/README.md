@@ -15,7 +15,7 @@ first if needed, and reports the result on its wiring ladder
 Claude Code:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 

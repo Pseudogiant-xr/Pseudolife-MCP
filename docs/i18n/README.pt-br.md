@@ -106,7 +106,7 @@ instalador, então o plugin nunca duplica as ferramentas dele. Para
 adicionar o plugin manualmente, dentro do Claude Code:
 
 ```
-/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
