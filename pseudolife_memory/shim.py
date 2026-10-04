@@ -2175,8 +2175,8 @@ async def _run_session_proxy(url: str, token: str | None, session_uid: str, *,
             # shows for it (custom or generated), read from its transcript.
             claude_session = _claude_session_id()
             harness_name = None
-            if claude_session is not None:
-                from pseudolife_memory.harness_names import ClaudeSessionTitle
+            from pseudolife_memory.harness_names import ClaudeSessionTitle, harness_names_enabled
+            if claude_session is not None and harness_names_enabled():
                 harness_name = ClaudeSessionTitle(claude_session).poll
 
             def build_adapter():

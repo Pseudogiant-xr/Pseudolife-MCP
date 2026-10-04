@@ -811,6 +811,14 @@ sources, and a lower one never replaces a name a higher one set:
    restarting the session. The reader looks at the end of the transcript
    first, then reads at most 1 MiB per heartbeat and nothing at all while
    the file is unchanged; any read or parse error just sends no name.
+   Harness titles are on by default. A generated title (`ai-title`) is
+   written from your first prompt, so it reaches the roster and the
+   coordination audit log; to keep titles off the board, set
+   `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` (or `false`, `no`, `off`) in the
+   environment the shim starts with (its MCP server `env` block). The shim
+   then reads no transcript and no `session_index.jsonl`, and a row falls
+   back to the agent's own name, the session title, then its label and short
+   id.
 3. **`title`**: a `memory_session_title` rename names the rows registered
    under that session (their `episode` is its session key) when neither a
    harness nor an agent has named them, and only rows of the retitling

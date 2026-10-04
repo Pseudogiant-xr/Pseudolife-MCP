@@ -171,9 +171,12 @@ class CodexCoordinationRegistry:
         self._thread_names = None
 
     def _thread_name_reader(self, thread_id):
-        """What a thread's adapter asks for the name Codex shows (v55)."""
+        """What a thread's adapter asks for the name Codex shows (v55), or
+        ``None`` when PSEUDOLIFE_BOARD_HARNESS_NAMES turns the readers off."""
+        from .harness_names import CodexThreadNames, harness_names_enabled
+        if not harness_names_enabled():
+            return None
         if self._thread_names is None:
-            from .harness_names import CodexThreadNames
             self._thread_names = CodexThreadNames()
         names = self._thread_names
         return lambda: names.name(thread_id)

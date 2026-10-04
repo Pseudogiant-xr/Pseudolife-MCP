@@ -206,6 +206,15 @@ def test_backfill_keeps_a_title_that_straddles_a_chunk_after_a_giant_line(tmp_pa
     assert lost == []
 
 
+def test_the_off_switch_reads_the_environment():
+    from pseudolife_memory.harness_names import harness_names_enabled
+    assert harness_names_enabled({}) is True
+    for on in ("1", "true", "yes", "on", ""):
+        assert harness_names_enabled({"PSEUDOLIFE_BOARD_HARNESS_NAMES": on}) is True, on
+    for off in ("0", "false", "No", " OFF "):
+        assert harness_names_enabled({"PSEUDOLIFE_BOARD_HARNESS_NAMES": off}) is False, off
+
+
 def test_malformed_lines_are_ignored(tmp_path):
     text = ('{"type":"custom-title","customTitle":\n'           # cut short
             + _line(type="custom-title", customTitle=42)          # not a string

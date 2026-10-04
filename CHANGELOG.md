@@ -15,7 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ai-title`; formats re-checked on Claude Code 2.1.287) and Codex's thread
   name (`session_index.jsonl`; Codex 0.160.0). The shim reads it with
   bounded reads on its heartbeat and sends it only when it changed, so a
-  rename reaches the board within a heartbeat, with no restart. A name the
+  rename reaches the board within a heartbeat, with no restart (a `/rename`
+  or a renamed Desktop session appends a new `custom-title` line; a renamed
+  Codex thread a new index line). `PSEUDOLIFE_BOARD_HARNESS_NAMES=0` in the
+  shim's environment turns the title reading off. A name the
   agent sets (`memory_agents(action="update", name=...)`) outranks it, so a
   session can correct a stale title (after `/clear` the shim still reads the
   old transcript); `""` clears it and brings the harness title back. Below

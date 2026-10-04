@@ -456,6 +456,67 @@ def test_a_claude_code_shim_names_its_row_from_the_session_transcript(monkeypatc
     assert options["harness_name"]() == "Desktop title"
     options = _claude_adapter_options(monkeypatch, {})
     assert options.get("harness_name") is None
+    # The maintainer's off switch (2026-10-05): no transcript is read.
+    options = _claude_adapter_options(monkeypatch, {"CLAUDE_CODE_SESSION_ID": session,
+                                                    "CLAUDE_CONFIG_DIR": str(tmp_path),
+                                                    "PSEUDOLIFE_BOARD_HARNESS_NAMES": "0"})
+    assert options.get("harness_name") is None
+
+
+def _rename_reaches_the_board(monkeypatch, reader, rename):
+    """Drive a real adapter whose harness name comes from ``reader``; after
+    the first name is sent, ``rename()`` renames the session in the
+    harness's own file, and the next heartbeats must carry the new name."""
+    async def drive():
+        from pseudolife_memory.coordination_adapter import CoordinationAdapter
+        monkeypatch.setattr(CoordinationAdapter, "HEARTBEAT_SECONDS", 0.01)
+        daemon = FakeDaemon()
+        client, instance = adapter(daemon, harness_name=reader)
+        async with client, instance:
+            await _wait_for(lambda: "Before the rename" in _named(daemon))
+            rename()
+            await _wait_for(lambda: "After the rename" in _named(daemon))
+        return _named(daemon)
+
+    return asyncio.run(asyncio.wait_for(drive(), 5))
+
+
+def test_a_claude_code_rename_reaches_the_board_on_the_next_heartbeat(monkeypatch, tmp_path):
+    # /rename, or renaming the session in the Desktop app, appends a new
+    # custom-title line to the transcript; no restart is involved.
+    from pseudolife_memory.harness_names import ClaudeSessionTitle
+    session = str(uuid.uuid4())
+    transcript = tmp_path / "projects" / "C--repo" / f"{session}.jsonl"
+    transcript.parent.mkdir(parents=True)
+    line = lambda title: json.dumps({"type": "custom-title", "customTitle": title,  # noqa: E731
+                                     "sessionId": session}) + "\n"
+    transcript.write_text(line("Before the rename"), encoding="utf-8")
+
+    def rename():
+        with open(transcript, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "user", "message": {"content": "x"}}) + "\n")
+            stream.write(line("After the rename"))
+
+    reader = ClaudeSessionTitle(session, config_dir=tmp_path, glob_interval=0).poll
+    assert _rename_reaches_the_board(monkeypatch, reader, rename) == [
+        "Before the rename", "After the rename"]
+
+
+def test_a_codex_thread_rename_reaches_the_board_on_the_next_heartbeat(monkeypatch, tmp_path):
+    from pseudolife_memory.harness_names import CodexThreadNames
+    thread = str(uuid.uuid4())
+    index = tmp_path / "session_index.jsonl"
+    entry = lambda name: json.dumps({"id": thread, "thread_name": name,  # noqa: E731
+                                     "updated_at": "2026-10-05T00:00:00Z"}) + "\n"
+    index.write_text(entry("Before the rename"), encoding="utf-8")
+
+    def rename():
+        with open(index, "a", encoding="utf-8") as stream:
+            stream.write(entry("After the rename"))
+
+    names = CodexThreadNames(codex_home=tmp_path)
+    assert _rename_reaches_the_board(monkeypatch, lambda: names.name(thread), rename) == [
+        "Before the rename", "After the rename"]
 
 
 def test_each_codex_thread_adapter_reads_its_own_thread_name(tmp_path, monkeypatch):
@@ -486,6 +547,11 @@ def test_each_codex_thread_adapter_reads_its_own_thread_name(tmp_path, monkeypat
     asyncio.run(drive())
     assert built[first]["harness_name"]() == "Thread one"
     assert built[second]["harness_name"]() == "Thread two"
+    # The off switch: no thread reads session_index.jsonl.
+    monkeypatch.setenv("PSEUDOLIFE_BOARD_HARNESS_NAMES", "off")
+    built.clear()
+    asyncio.run(drive())
+    assert built[first]["harness_name"] is None and built[second]["harness_name"] is None
 
 
 def test_lease_holders_and_waiters_carry_the_board_name(store):

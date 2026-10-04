@@ -26,6 +26,11 @@ of at most ``max_read`` bytes per poll, and reads nothing when the file's
 size and mtime have not changed. A shrunk or replaced file is read afresh.
 Every error reads as ``None``: a name is decoration, never a reason to
 fail a heartbeat.
+
+``PSEUDOLIFE_BOARD_HARNESS_NAMES=0`` (or ``false``/``no``/``off``) in the
+shim's environment turns the readers off: no transcript or index is read,
+and a row falls back to the agent's own name, the session title, then its
+label and short id (maintainer decision, 2026-10-05).
 """
 from __future__ import annotations
 
@@ -57,6 +62,17 @@ _LINE_TYPES = {"custom-title": ("custom", "customTitle"),
                "ai-title": ("ai", "aiTitle")}
 _KINDS = ("custom", "agent", "ai")
 _MARKERS = tuple(t.encode() for t in _LINE_TYPES)
+
+
+HARNESS_NAMES_ENV = "PSEUDOLIFE_BOARD_HARNESS_NAMES"
+
+
+def harness_names_enabled(environ=None) -> bool:
+    """Whether the shim may read the harness's own files for a board name:
+    on unless ``PSEUDOLIFE_BOARD_HARNESS_NAMES`` says 0/false/no/off."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(HARNESS_NAMES_ENV) or "").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def clean_name(value) -> str | None:
