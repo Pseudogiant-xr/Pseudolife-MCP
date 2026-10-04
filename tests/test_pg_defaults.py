@@ -565,6 +565,9 @@ def test_ensure_test_db_refuses_a_run_database_another_role_owns(monkeypatch, ow
     login would fail on every reset there. Say so once, with the fix."""
     executed = []
     monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
+    # Under xdist the run name gains the worker suffix; the message names
+    # exactly the database it checked.
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setattr(pg_fixtures.psycopg, "connect",
                         lambda *a, **k: _CatalogConn(owner, "pseudolife_test", executed))
     monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL",

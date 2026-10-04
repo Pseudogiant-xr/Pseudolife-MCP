@@ -152,7 +152,7 @@ _KEYWORD_PASSWORD = re.compile(r"(password\s*=\s*)('(?:[^'\\]|\\.)*'|\S+)", re.I
 _QUOTED_TOKEN = re.compile(r'(percent-encoded token:\s*)"[^"]*"', re.IGNORECASE)
 
 
-def _url_passwords(url: str | None) -> list[str]:
+def _userinfo_tokens(url: str | None) -> list[str]:
     """The password an admin URL carries, raw and decoded; none when the
     URL has none (libpq then reads PGPASSWORD or ~/.pgpass)."""
     if not url:
@@ -173,8 +173,8 @@ def _url_passwords(url: str | None) -> list[str]:
 def mask_secrets(text: str, url: str | None = None) -> str:
     """``text`` with the admin URL's password, and anything shaped like a
     password, replaced by ``***``."""
-    for secret in sorted(_url_passwords(url), key=len, reverse=True):
-        text = text.replace(secret, "***")
+    for token in sorted(_userinfo_tokens(url), key=len, reverse=True):
+        text = text.replace(token, "***")
     text = _URL_PASSWORD.sub(r"\1***@", text)
     text = _KEYWORD_PASSWORD.sub(r"\1***", text)
     return _QUOTED_TOKEN.sub(r'\1"***"', text)
