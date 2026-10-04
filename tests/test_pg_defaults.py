@@ -62,13 +62,133 @@ def test_env_file_password_rejects_unsupported_compose_expansion_without_value(
     assert "UNSUPPORTED_SECRET_VALUE" not in str(exc.value)
 
 
-def test_default_password_precedence(tmp_path):
+@pytest.fixture
+def no_login_file(monkeypatch, tmp_path):
+    """Hide the machine's own test login file (``~/.pseudolife-mcp/test-pg.env``,
+    once ``pseudolife-mcp test-login create`` has run here) from a test that
+    resolves the ops/.env or compose-default layers."""
+    monkeypatch.setattr(pg_defaults, "LOGIN_FILE", tmp_path / "no-test-login.env")
+    monkeypatch.delenv(pg_defaults.LOGIN_FILE_ENV, raising=False)
+
+
+def _login_file(tmp_path: Path, user: str = "pseudolife_test",
+                password: str = "login-file-value") -> Path:
+    path = tmp_path / "test-pg.env"
+    path.write_text("# written by pseudolife-mcp test-login create\n"
+                    f"PSEUDOLIFE_TEST_PG_USER={user}\n"
+                    f"PSEUDOLIFE_TEST_PG_PASSWORD={password}\n", encoding="utf-8")
+    return path
+
+
+def test_default_password_precedence(tmp_path, no_login_file):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=from-env-file\n", encoding="utf-8")
     assert pg_defaults.default_password({}, env_file) == "from-env-file"
     assert pg_defaults.default_password(
         {"PSEUDOLIFE_TEST_PG_PASSWORD": "explicit"}, env_file) == "explicit"
     assert pg_defaults.default_password({}, tmp_path / "absent") == "pseudolife"
+
+
+# -- the test login: its own role, never the bank owner's password ------------
+#
+# The bundled server serves the live bank and the per-run test databases under
+# one owning role, so until 2026-10-04 every session that ran the suite held
+# the bank owner's password (ops/.env, copied into each worktree).
+# `pseudolife-mcp test-login create` provisions a role that can create its own
+# databases and cannot connect to the bank, and writes its credentials to a
+# file outside the checkout that the suite reads before ops/.env.
+
+def test_the_login_file_supplies_its_own_role_and_password(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=bank-owner-value\n", encoding="utf-8")
+    env = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path))}
+    assert pg_defaults.default_login(env, env_file) == (
+        "pseudolife_test", "login-file-value")
+    assert pg_defaults.default_admin_url(env, env_file) == (
+        f"postgresql://pseudolife_test:login-file-value@{pg_defaults.DEV_HOST_PORT}/postgres")
+
+
+def test_the_login_file_is_read_from_the_home_directory_by_default(
+        tmp_path, monkeypatch):
+    assert pg_defaults.LOGIN_FILE == Path.home() / ".pseudolife-mcp" / "test-pg.env"
+    monkeypatch.setattr(pg_defaults, "LOGIN_FILE", _login_file(tmp_path))
+    assert pg_defaults.default_login({}, tmp_path / "absent") == (
+        "pseudolife_test", "login-file-value")
+
+
+def test_login_precedence_override_then_login_file_then_ops_env(tmp_path, no_login_file):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=bank-owner-value\n", encoding="utf-8")
+    login = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path))}
+    # The explicit override wins, as the bank owner unless a user is named.
+    assert pg_defaults.default_login(
+        {**login, "PSEUDOLIFE_TEST_PG_PASSWORD": "explicit"}, env_file) == (
+        "pseudolife", "explicit")
+    assert pg_defaults.default_login(
+        {**login, "PSEUDOLIFE_TEST_PG_PASSWORD": "explicit",
+         "PSEUDOLIFE_TEST_PG_USER": "someone"}, env_file) == ("someone", "explicit")
+    # Then the login file, before ops/.env.
+    assert pg_defaults.default_login(login, env_file)[0] == "pseudolife_test"
+    # A login file that is missing, or holds no password, falls through.
+    missing = {pg_defaults.LOGIN_FILE_ENV: str(tmp_path / "absent.env")}
+    assert pg_defaults.default_login(missing, env_file) == (
+        "pseudolife", "bank-owner-value")
+    empty = tmp_path / "empty.env"
+    empty.write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife_test\n", encoding="utf-8")
+    assert pg_defaults.default_login(
+        {pg_defaults.LOGIN_FILE_ENV: str(empty)}, env_file)[0] == "pseudolife"
+
+
+def test_bench_admin_fallback_follows_the_login_file(tmp_path, no_login_file):
+    env = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path))}
+    parsed = psycopg.conninfo.conninfo_to_dict(
+        pg_defaults.bench_admin_url(env, tmp_path / "absent"))
+    assert parsed["user"] == "pseudolife_test"
+    assert parsed["password"] == "login-file-value"
+
+
+def test_the_login_source_names_the_file_never_the_value(tmp_path, no_login_file):
+    path = _login_file(tmp_path, password=SECRET)
+    described = pg_defaults.describe_pg_login_source(
+        {pg_defaults.LOGIN_FILE_ENV: str(path)}, tmp_path / "absent")
+    assert "test login" in described and "test-pg.env" in described
+    assert SECRET not in described
+
+
+def test_a_run_on_the_bank_owners_password_gets_one_line_naming_the_fix(
+        tmp_path, no_login_file):
+    env_file = tmp_path / ".env"
+    env_file.write_text("POSTGRES_PASSWORD=" + SECRET + "\n", encoding="utf-8")
+    for kind in ("full", "targeted"):
+        out = io.StringIO()
+        assert pg_defaults.full_run_password_preflight(
+            kind, {}, env_file, probe=lambda env, path, **kwargs: "ok",
+            out=out) is None
+        lines = out.getvalue().splitlines()
+        assert len(lines) == 1, lines
+        assert "bank owner" in lines[0]
+        assert "pseudolife-mcp test-login create" in lines[0]
+        assert SECRET not in lines[0]
+
+
+@pytest.mark.parametrize("answer", ["ok", "absent", "other"])
+def test_a_run_on_the_test_login_is_not_told_anything(tmp_path, answer):
+    out = io.StringIO()
+    env = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path))}
+    assert pg_defaults.full_run_password_preflight(
+        "full", env, tmp_path / "absent", probe=lambda env, path, **kwargs: answer,
+        out=out) is None
+    assert out.getvalue() == ""
+
+
+def test_a_rejected_login_file_is_named_with_its_own_fix(tmp_path):
+    env = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path, password=SECRET))}
+    refusal = pg_defaults.full_run_password_preflight(
+        "full", env, tmp_path / "absent", probe=lambda env, path, **kwargs: "auth",
+        out=io.StringIO())
+    assert "test login" in refusal
+    assert "pseudolife-mcp test-login create" in refusal
+    assert SECRET not in refusal
 
 
 @pytest.mark.parametrize("prefix", ['"', '$'])
@@ -89,7 +209,7 @@ def test_env_parser_traceback_redaction_is_load_bearing(tmp_path, monkeypatch):
     assert SECRET in _rendered(failure, showlocals=True)
 
 
-def test_default_admin_url_embeds_the_resolved_password(tmp_path):
+def test_default_admin_url_embeds_the_resolved_password(tmp_path, no_login_file):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=s3cret\n", encoding="utf-8")
     assert pg_defaults.default_admin_url({}, env_file) == (
@@ -127,7 +247,7 @@ def test_default_admin_url_percent_encodes_a_generated_password():
     assert conninfo_to_dict(url)["password"] == "p@ss/w:rd#1%?"
 
 
-def test_fixture_default_admin_follows_the_env_file(monkeypatch, tmp_path):
+def test_fixture_default_admin_follows_the_env_file(monkeypatch, tmp_path, no_login_file):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=rotated\n", encoding="utf-8")
     monkeypatch.setattr(pg_defaults, "ENV_FILE", env_file)
@@ -646,7 +766,8 @@ def _example_env(tmp_path: Path) -> Path:
     return example
 
 
-def test_password_source_names_a_missing_or_example_env_file_without_the_value(tmp_path):
+def test_password_source_names_a_missing_or_example_env_file_without_the_value(
+        tmp_path, no_login_file):
     example = _example_env(tmp_path)
     env_file = tmp_path / ".env"
     describe = pg_defaults.describe_pg_login_source
@@ -718,7 +839,8 @@ def test_preflight_lets_a_full_run_through_unless_the_server_rejects_it(tmp_path
     assert out.getvalue() == ""
 
 
-def test_preflight_refuses_a_full_run_the_server_rejects_and_names_the_fix(tmp_path):
+def test_preflight_refuses_a_full_run_the_server_rejects_and_names_the_fix(
+        tmp_path, no_login_file):
     example = _example_env(tmp_path)
     env_file = tmp_path / ".env"
     env_file.write_bytes(example.read_bytes())
@@ -734,13 +856,13 @@ def test_preflight_refuses_a_full_run_the_server_rejects_and_names_the_fix(tmp_p
     assert refusal is not None
     assert refusal.startswith("refusing the full suite")
     assert "copy of ops/.env.example" in refusal
-    assert "copy ops/.env from the main checkout" in refusal
+    assert "pseudolife-mcp test-login create" in refusal
     assert "PSEUDOLIFE_TEST_PG_PASSWORD" in refusal
     assert out.getvalue() == ""  # the refusal is raised by conftest, not printed
     assert probed == [({}, env_file)]
 
 
-def test_preflight_gives_a_targeted_run_one_line_and_lets_it_run(tmp_path):
+def test_preflight_gives_a_targeted_run_one_line_and_lets_it_run(tmp_path, no_login_file):
     env_file = tmp_path / ".env"
     env_file.write_text("POSTGRES_PASSWORD=" + SECRET + "\n", encoding="utf-8")
     out = io.StringIO()

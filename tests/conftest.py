@@ -51,12 +51,13 @@ from tests.report_redaction import (  # noqa: E402, F401 — conftest hooks
 # The eval-backed suites (test_recall, test_memcot_bench,
 # test_constraint_pinning) and evals/ladder_sweep.py read the bench admin
 # URL from PSEUDOLIFE_BENCH_ADMIN_URL. Seed it once, here, from the same
-# resolver pg_fixtures uses (explicit test DSN, then password from ops/.env),
+# resolver pg_fixtures uses (explicit test DSN, then the test login file or
+# the password from ops/.env),
 # so a rotated dev password or alternate test server cannot turn those files
 # into silent skips. An operator's own bench value is left alone.
 from tests.pg_defaults import (  # noqa: E402
     ENV_FILE, bench_admin_url, conninfo_with_dbname, full_run_password_preflight,
-    run_suffix,
+    login_file_path, run_suffix,
 )
 
 if "PSEUDOLIFE_BENCH_ADMIN_URL" not in os.environ:
@@ -387,17 +388,21 @@ def pytest_configure(config: pytest.Config) -> None:
     # A full run queues for the suite lock first, while it holds ~50 MB:
     # the embedding import below commits ~1.3 GB (measured 2026-09-23).
     # What it read from the checkout by now (this file, its imports, and
-    # ops/.env for the bench URL above) is fingerprinted and re-checked on
+    # ops/.env and the test login file for the bench URL above) is
+    # fingerprinted and re-checked on
     # every poll: a run whose copies changed while it queued stops instead
     # of running them.
     #
     # Before it queues, the dev Postgres is asked whether it accepts the
-    # password the suite resolved (PSEUDOLIFE_TEST_PG_PASSWORD, else
-    # ops/.env, else the compose default). A full run it rejects is refused
-    # here: from a fresh worktree, whose ops/.env is missing or the template
-    # copy, such a run went to the end with 1,424 PG-backed setup errors
-    # (2026-09-27, twice), holding the machine's one slot for a gate that
-    # gated nothing. A targeted run gets one line and goes on, as it did.
+    # login the suite resolved (PSEUDOLIFE_TEST_PG_PASSWORD, else the test
+    # login file ~/.pseudolife-mcp/test-pg.env, else ops/.env, else the
+    # compose default). A full run it rejects is refused here: from a fresh
+    # worktree, whose ops/.env is missing or the template copy, such a run
+    # went to the end with 1,424 PG-backed setup errors (2026-09-27, twice),
+    # holding the machine's one slot for a gate that gated nothing. A
+    # targeted run gets one line and goes on, as it did. A run the server
+    # accepts as the bank owner, through ops/.env, gets one line naming
+    # `pseudolife-mcp test-login create` (2026-10-04).
     #
     # A machine whose lock directory says so refuses a full run on native
     # Windows before anything else (PSEUDOLIFE_SUITE_WINDOWS, else
@@ -424,7 +429,8 @@ def pytest_configure(config: pytest.Config) -> None:
             raise pytest.UsageError(refusal)
 
     held = suite_lock.take_for_session(
-        config, os.environ, ROOT / "tests", read_files=(ENV_FILE,), preflight=preflight,
+        config, os.environ, ROOT / "tests", read_files=(ENV_FILE, login_file_path()),
+        preflight=preflight,
         mirror=lambda: suite_lock.board_mirror(
             suite_lock.lock_dir(os.environ), ROOT, _BOARD_ENV,
             name=suite_lock.lease_name(os.environ, suite_lock.lock_dir(os.environ))))
