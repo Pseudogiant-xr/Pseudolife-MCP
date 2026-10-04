@@ -287,23 +287,27 @@ class _StringSafeMetadata(FuncMetadata):
                     for name, field in self.arg_model.model_fields.items()]
         unknown = [key for key in arguments_to_validate if key not in accepted]
         if unknown:
+            # hide_input: a misnamed argument can carry a secret, so the
+            # refusal names the parameter and never prints its value. The
+            # accepted list closes the last entry only, once per error.
             raise ValidationError.from_exception_data(self.tool_name or "arguments", [
                 {"type": PydanticCustomError(
                     "unknown_parameter", "{detail}",
-                    {"detail": self._unknown_message(key, accepted)}),
-                 "loc": (key,), "input": arguments_to_validate[key]}
-                for key in unknown])
+                    {"detail": self._unknown_message(
+                        key, accepted, last=key == unknown[-1])}),
+                 "loc": (key,), "input": None}
+                for key in unknown], hide_input=True)
         return super().validate_arguments(arguments_to_validate)
 
-    def _unknown_message(self, key: str, accepted: list[str]) -> str:
+    def _unknown_message(self, key: str, accepted: list[str], *, last: bool) -> str:
         guess = next((a for a in _PARAM_ALIASES.get(key, ()) if a in accepted),
                      None)
         if guess is None:
             close = difflib.get_close_matches(key, accepted, n=1)
             guess = close[0] if close else None
         hint = f"; did you mean '{guess}'?" if guess else "."
-        return (f"unknown parameter '{key}' for {self.tool_name}{hint} "
-                f"Accepted: {', '.join(accepted)}")
+        listed = f" Accepted: {', '.join(accepted)}" if last else ""
+        return f"unknown parameter '{key}' for {self.tool_name}{hint}{listed}"
 
     def pre_parse_json(self, data: dict[str, Any]) -> dict[str, Any]:
         """Keep text literal while retaining the SDK's list/dict compatibility.

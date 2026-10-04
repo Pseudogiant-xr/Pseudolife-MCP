@@ -19,7 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Accepted: query, top_k, ...`. Suggestions come from a small map of the
   measured confusions (`limit` to `top_k` or `n`, `content` to `text`,
   `note`/`notes`/`text` to `detail`) and from close spelling matches.
-  Every tool's input schema now says `additionalProperties: false`
+  The refusal names the parameter and never echoes its value, since a
+  misnamed argument can carry a secret. Every tool's input schema now says `additionalProperties: false`
   (29 bytes per tool; the largest schema, `memory_agents`, is 3,488 of its
   4,000-byte cap). MCP request `_meta` is not an argument and is unaffected,
   and stringified list arguments are still decoded.

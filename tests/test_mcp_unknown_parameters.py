@@ -124,6 +124,23 @@ def test_every_unknown_name_is_reported(tmp_path, monkeypatch):
     assert result.is_error
     text = _text(result)
     assert "'limit'" in text and "'page'" in text
+    assert text.count("Accepted:") == 1
+
+
+def test_the_refusal_never_echoes_the_value(tmp_path, monkeypatch):
+    """A misnamed argument can carry a secret; the error names the
+    parameter and never prints what was passed in it."""
+    mod = reload_mcp_filemode(tmp_path, monkeypatch)
+    calls = _never_called(mod, monkeypatch, "store")
+    result = _call(mod, "memory_store", {
+        "text": "kept",
+        "api_key": "sk-ant-api03-SECRETSECRETSECRETSECRETSECRETTAIL"})
+    assert result.is_error, _text(result)
+    text = _text(result)
+    assert "unknown parameter 'api_key' for memory_store" in text
+    for leak in ("sk-ant", "SECRET", "TAIL", "input_value"):
+        assert leak not in text, text
+    assert calls == []
 
 
 def test_request_meta_is_not_an_argument(tmp_path, monkeypatch):
