@@ -41,7 +41,7 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | SHIM-WAKE-REASON | 1 | Rust char predicates replace Python Unicode 14 alnum/space tables in the bounded wake reason; repository claim tables remain pinned. `board/liveness.rs` | `board_ring_contract.rs`; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
-| CLI-DISPATCH | 1/2/3/4/5 | All 26 modes, aliases, unknown-mode exit 2, help bytes and runtime version metadata, light import/startup. `cli.py` and help fixture | `test_cli_dispatch.py`, `test_release_ux.py`, `test_client_install_ux.py` I/A; add argv subprocess records | deferred |
+| CLI-DISPATCH | 1/2 | First slice: help aliases/trailing argv and documented unknown-command exit-2 cases with UTF-8 streams, valid Unicode scalar argv and Windows CRLF/Linux LF. Remaining mode/version/encoding contracts are separately deferred below. `cli.py` and help fixture | Five unchanged `cli-main-process` nodes; final 15-case Windows/native Linux receipts, 45 controls per OS and both help 3x10 pairs linked in PORT-STATE.md; all four executing Rust/Parity jobs passed in run 37242071017 for 6e936887, with actual CI CLI outcomes verified | ported |
 | CLI-LEASE | 2 | OS lock truth, crash release, FIFO tickets, board mirror, check/run/hold/list/break and child status. `lease_cli.py`, `os_lock.py` | `test_lease_cli.py`, `test_lease_cli_board.py`, `test_coordination_leases.py`, `test_coordination_leases_api.py` mixed/I; subprocess nodes suitable after dispatcher audit | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
 | CLI-HOOK | 2 | Briefing text and bounded hook JSON, memory-change note; episode start/end CLI exit/output. `briefing_cli.py`, `episode_cli.py`, `web/session_hook.py` | `test_briefing.py`, `test_episode_cli.py`, `test_memory_changes_hook.py`, `test_web.py` I/mixed; add fake HTTP server subprocess cases | deferred |
@@ -291,18 +291,23 @@ They remain deferred without introducing a database client into this binary.
 
 The first slice implements help and unknown dispatch and adds a separate 15-case
 CLI corpus, strict byte self-replay/candidate judge, environment selector and help
-cold-start-to-exit measurement instrument. Windows focused checks and a private
-15-case debug-binary proof passed for UTF-8 stdout/stderr and valid Unicode scalar
-argv, with Windows CRLF preserved. Locale/default and other output encodings and
-non-UTF-8/surrogate argv remain deferred. No committed first-slice receipts, Linux/CI
-proof or paired measurements exist yet, so help and CLI-DISPATCH remain deferred. The five existing
+cold-start-to-exit measurement instrument. Final receipts from committed
+`6e936887` on Windows and native Linux pass 15 cases, 45 controls and five
+Python/five Rust original nodes each; both help 3x10 measurement pairs and
+descriptive repeat floors are linked in PORT-STATE.md. Scope is UTF-8
+stdout/stderr and valid Unicode scalar argv, preserving Windows CRLF and Linux
+LF. Locale/default and other output encodings and non-UTF-8/surrogate argv remain
+deferred. Help and scoped CLI-DISPATCH acceptance are ported: both-OS local
+receipts, help pairs and the executing Rust/Parity workflow 37242071017 pass.
+CI retains the same tree at PR merge commit 014d37dc; current documentation-head
+review/suites/CI checks remain separate. The five existing
 `cli-main-process` nodes remain the only routed CLI nodes. Other entries below
 name concrete oracle nodes or internal test-function pools awaiting a process
 adapter; a function name without parameter suffixes is not a routed node claim.
 
 | Mode | Phase | Status | Evidence |
 |---|---|---|---|
-| help | 1 | deferred | A carried gap; implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; exact UTF-8 stream/scalar argv corpus with Windows CRLF, both-OS local/CI receipts and measurement pending |
+| help | 1 | ported | Implementation in `shim/src/cli.rs`; `test_cli_dispatch.py::test_help_prints_usage_and_exits_zero[--help]`, `[-h]`, `[help]`, `test_help_lists_version`; final UTF-8 stream/scalar argv Windows/native Linux receipts and help pairs linked in PORT-STATE.md; executing both-OS CI and actual five-node outcomes verified in run 37242071017 |
 | version | 1 | deferred | A carried gap; runtime identity is Python `sys.prefix` (`runtimes.py::running_runtime`); `test_cli_dispatch.py::test_version_prints_the_package_version[--version]`, `[version]`, `test_version_from_a_runtime_names_its_directory_and_commit` remain internal; Rust runtime identity decision and process equivalents pending |
 | shim | 1 | deferred | No accepted Rust evidence |
 | serve | 3/4 | deferred | Outside client leaves; `daemon.py`, storage/model ownership; `test_daemon_http.py` oracle pool |

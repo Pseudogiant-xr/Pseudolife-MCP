@@ -344,4 +344,20 @@ committed and clean. The existing Parity job runs this additive lane on both OS.
 Receipts record the UTF-8 stream, scalar argv and platform newline boundary.
 Locale/default and other output encodings, non-UTF-8 or surrogate argv,
 version/runtime identity and all other mode contracts stay deferred;
-passing this slice alone does not accept the entire CLI dispatch row.
+Acceptance closes only help and the scoped CLI-DISPATCH cases; other modes
+remain deferred.
+
+Final local CLI receipts at `6e936887` are
+[`rust-port-phase2-cli-windows-6e936887.json`](../results/rust-port-phase2-cli-windows-6e936887.json)
+and [`rust-port-phase2-cli-linux-native-6e936887.json`](../results/rust-port-phase2-cli-linux-native-6e936887.json).
+Each has 15 passing self/candidate cases, 45 rejected mutations and five passing
+original outcomes for Python and Rust. The accepted Linux receipt uses native
+temporary/evidence storage; the earlier mounted-home collection failure remains
+private and is excluded. Both help measurement pairs and numerical repeat floors
+are linked in `rust/PORT-STATE.md`. These artifacts preserve their executed
+source/tree/binary/runtime identities through the subsequent docs-only merge;
+both-OS executing CI and its actual CLI outcomes pass in
+[run 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017).
+CI's PR merge commit `014d37dc` has the same tree as `6e936887`. Only the
+UTF-8/scalar help/unknown-dispatch slice is accepted; the separate current
+documentation-head gates remain pending.

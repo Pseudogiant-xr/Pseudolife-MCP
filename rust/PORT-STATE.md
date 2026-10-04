@@ -24,7 +24,7 @@ Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate clos
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
 | 1: Stdio shim | ready-for-review | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current PR-head suites, integrated CI and final review must pass before #560 is marked ready. |
-| 2: Client CLI leaves | Implementation started; acceptance deferred | — | All 28 current modes classified in PARITY.md; 19 requested leaves plus carried help/version/channel accounted for. Windows watched red controls, 82 focused Python checks, 3 Rust process tests, all-target clippy/release build and private 15-case exact-byte debug proof passed for UTF-8 stdout/stderr and valid Unicode scalar argv, preserving Windows CRLF; other output encodings remain deferred. No committed final receipts, Linux/CI proof or measurements yet. Final Phase 1 a-f evidence integrated; next: freeze source, capture both-OS pinned self-replay/candidate receipts and schedule help paired measurement |
+| 2: Client CLI leaves | Help/scoped unknown dispatch ported; remaining leaves deferred | — | All 28 modes classified; 19 requested leaves plus carried help/version/channel accounted for. Final native Windows/Linux receipts at 6e936887 each pass 15 cases, 45 controls and five Python/five Rust nodes; both help 3x10 pairs and floors are below. All four executing Rust/Parity jobs passed in run 37242071017; retained CLI receipts independently verify those outcomes. Scope is UTF-8 streams, valid Unicode scalar argv and platform newlines. Final documentation-head review/checks remain pending; version, other encodings and other modes stay deferred. |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
@@ -356,3 +356,69 @@ required. Current documentation PR-head suites and integrated CI must pass
 before #560 is marked ready; these earlier results do not claim the dirty
 documentation head has been tested. Measurements and all four local judges
 retain their executed `690bb8ac` identities.
+
+## Phase 2 help and unknown dispatch evidence at `6e936887`
+
+The [Windows CLI receipt](../evals/results/rust-port-phase2-cli-windows-6e936887.json)
+and [native Linux CLI receipt](../evals/results/rust-port-phase2-cli-linux-native-6e936887.json)
+retain the executed source `6e936887a05cd848679e6a0cf0b0b3d618f1e29c`, tree
+`6649de0fce2440ac3026e633f6269fa03928fd18`. Each passes Python self-replay and
+Rust replay for 15 cases, rejects all 45 exit/stream mutations, and records five
+complete passing original test outcomes per implementation. The fifth test
+checks that help lists version; it does not invoke version. Capture runtimes are
+genuine CPython 3.11.9 on Windows and 3.11.15 on Linux, package 0.16.1/MCP 2.1.1,
+with production/tests checked against `f709abb54f7912ae9cd767998d0926ca33df4bcd`.
+
+These gates cover help aliases/trailing arguments and the documented unknown
+command cases for UTF-8 stdout/stderr and valid Unicode scalar argv, preserving
+Windows CRLF and Linux LF. Locale/default and other output encodings,
+non-UTF-8/surrogate argv, version identity and other mode contracts stay deferred.
+The initial Linux receipt had incomplete pytest collection on a mounted temporary
+home; it is not accepted. Native Linux evidence-home placement passed without
+changing source, runtime or binary. Raw logs/JUnit and the failed receipt remain
+private; only the successful native receipt is linked here.
+
+The [Windows help pair](../evals/results/rust-phase2-help-measurement-windows-6e936887.json)
+and [Linux help pair](../evals/results/rust-phase2-help-measurement-linux-6e936887.json)
+each retain three repeat blocks of ten samples per arm, alternating first arm,
+two untimed byte controls and three resource checks. Every timed output was
+byte-checked. Pooled nearest-rank p50/p95 use n=30; each floor is max minus min
+of the three repeat-block quantiles, not a confidence interval.
+
+| OS | Arm | p50 ms / floor ms | p95 ms / floor ms | Executable bytes |
+| --- | --- | --- | --- | ---: |
+| Windows | Python | 95.904 / 0.952 | 109.906 / 5.752 | 274,712 |
+| Windows | Rust | 15.939 / 0.219 | 17.034 / 1.186 | 13,289,984 |
+| Linux | Python | 123.234 / 0.339 | 130.363 / 9.578 | 21,662,864 |
+| Linux | Rust | 1.323 / 0.273 | 1.530 / 0.701 | 16,751,968 |
+
+Rust executable SHA256 is
+`cc8ccddab9adfd6e83bd77c209cc1892d8f309c61543787ff9e6423b92e24503` on Windows
+and `577c44a2100cd67938f11d1ae446ca04fe990bc7cd1fe56263449731fe99ce11` on Linux.
+Executable size excludes interpreter dependencies. Timing includes process setup,
+complete output collection and clean exit with warm filesystem caches; it is not
+comparable to Phase 1 first-frame/initialize timing or historical r5. No causal
+speedup or fixed performance threshold is asserted.
+
+The subsequent merge `cdcca248` integrates only reviewed Phase 1 documentation
+and acceptance data from `7f890590`; Rust/Python source, fixtures, instruments
+and workflow are unchanged from the executed `6e936887`. These records keep
+their original source/tree/runtime/binary identities.
+
+[Rust workflow 37242071017](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37242071017)
+passed all four executing jobs for PR head `6e936887`: Rust Ubuntu 2m12s,
+Rust Windows 9m38s, Parity Ubuntu 7m17s and Parity Windows 13m57s. Both
+`Run unchanged candidates and differential judges` steps executed successfully.
+The retained `rust-parity-Windows` and `rust-parity-Linux` CLI receipts each
+independently record 15 passing cases, 45 rejected controls and complete passing
+five-Python/five-Rust outcomes. Their actual checkout/instrument commit is
+`014d37dc2aafa037f28d01be959f206ac391ca37`, the PR merge commit with the exact
+same tree `6649de0fce2440ac3026e633f6269fa03928fd18` as the local executed head.
+CI receipt SHA256 is
+`33efcbb83ad604248fae6a1c638176e47ad2e11da4f2e44d3f08ccbdc2f0644d` on Windows
+and `5a06ae45ecf17f0003b2ab3b3429df56ca9b43171eabb3a7c759e880b075a7e1` on Linux.
+
+Help and CLI-DISPATCH are ported only for the UTF-8/scalar/platform-newline
+slice described above. Version and every other mode remain deferred. Final
+documentation-head review, suites and current CI/checks remain separate;
+implementation-head CI does not establish that the docs successor was tested.

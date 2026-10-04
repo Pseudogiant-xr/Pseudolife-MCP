@@ -311,4 +311,12 @@ arguments are `--oracle-root`, `--candidate-root`, `--candidate`, `--out` and
 the existing resource-check option; optional `--candidate-sha256` binds a frozen
 binary. `--smoke` permits smaller positive counts and marks the output as plumbing
 evidence. Version, lease check and doctor measurements remain deferred until their
-mode contracts are implemented; no measurement has yet been promoted for this slice.
+mode contracts are implemented. Final help pairs at committed `6e936887` are
+[`rust-phase2-help-measurement-windows-6e936887.json`](../results/rust-phase2-help-measurement-windows-6e936887.json)
+and [`rust-phase2-help-measurement-linux-6e936887.json`](../results/rust-phase2-help-measurement-linux-6e936887.json).
+Each has 30 rows per arm; PORT-STATE.md links the matching accepted CLI receipts
+and reports pooled nearest-rank p50/p95 and repeat-block floors. The later
+Phase 1 docs/data merge leaves source/instruments unchanged; executed artifact
+identities remain `6e936887`. Both-OS executing CI passed in workflow
+37242071017 for that head's exact tree; current documentation-head gates
+remain pending.
