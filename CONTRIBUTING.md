@@ -127,9 +127,11 @@ is not a pass for the affected behavior.
 
 A local full suite remains required for schema/DDL/migration changes;
 shared test infrastructure, conftest, fixtures, suite lock or imported test
-helpers; daemon process creation, ownership, shutdown or recovery changes
-in Windows- or macOS-specific code (CI's full PostgreSQL job covers Linux);
-and dependent coverage that cannot be bounded confidently. Finish review
+helpers; and dependent coverage that cannot be bounded confidently. A
+Windows- or macOS-specific daemon process change instead runs that
+platform's affected test files natively and lists them in its CI lite lane
+(`.github/workflows/ci.yml`); on Linux, CI's full PostgreSQL job covers
+daemon processes. Finish review
 fixes and targeted validation before queueing a required full run. Keep
 the suite lock, one local slot, CPU-only execution, PostgreSQL preflight
 and fingerprint guard, and avoid overlapping saturating work. Follow

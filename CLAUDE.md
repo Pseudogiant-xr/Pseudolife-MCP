@@ -35,12 +35,21 @@ exactly; they exist because each one was violated at least once.
 
    Ordinary code changes do not require a local full suite. A local full
    suite is required for schema/DDL/migration changes; shared test
-   infrastructure, conftest, fixture or suite-lock changes; daemon process
-   creation, ownership, shutdown or recovery changes in Windows- or
-   macOS-specific code, which CI runs only in its lite lanes; and changes
-   whose dependent coverage cannot be bounded confidently. CI's full
-   PostgreSQL job starts, stops and recovers real daemons on Linux, so a
-   process change that is not platform-specific is ordinary code.
+   infrastructure, conftest, fixture or suite-lock changes; and changes
+   whose dependent coverage cannot be bounded confidently. Daemon process
+   creation, ownership, shutdown or recovery changes are ordinary code on
+   Linux: CI's full PostgreSQL job starts and stops real daemons there and
+   covers recovery against stand-in daemons. When such a change is
+   Windows- or macOS-specific, a local full suite would not help (this
+   host runs full suites only on Linux). Instead, run that platform's
+   affected test files natively as a targeted run (Windows allows one), and
+   make sure they are in its CI lite lane's file list (`test-lite-windows`
+   / `test-lite-macos` in `.github/workflows/ci.yml`), adding them if
+   missing. Platform-specific means code that runs only there (a branch on
+   `os.name` / `sys.platform`, `creationflags`, `msvcrt`, `SIGBREAK`,
+   scheduled tasks or launchd, the `.ps1` launchers), or shared code whose
+   behaviour rests on OS process semantics (signals, terminate and kill,
+   file locks, detached sessions).
    Documentation-only, test-only and review-fix changes, and integration
    batches, follow the narrower rules below.
 
@@ -378,20 +387,25 @@ took 143 CUDA OOMs.
   the overlap, plus doc guards when docs overlap, and require fresh CI on
   the updated merge ref. A manually resolved code conflict requires a local
   full suite. Ordinary code branches with no local-full requirement do not
-  acquire one merely by merging master forward.
+  acquire one merely by merging master forward. A pass carried forward
+  under the review-fix rule below counts as the branch's passed run.
 - **Review fixes after a passing local full suite need no new one** unless
-  the fixes themselves touch a class that requires it: schema, DDL or
-  migration, or shared test infrastructure (conftest, fixtures, the suite
-  lock, imported test helpers). Run the touched and dependent tests for the
-  fixes, record them in the PR beside the earlier full run's head and
-  result, and require CI on the current merge ref (maintainer decision
-  2026-10-05, after #576).
+  the fixes themselves fall under a class that requires one (shipping
+  checklist item 3, including its platform-specific process rule). A review
+  fix answers findings on the same PR; a fix that widens the PR's scope is
+  a new change. Run the touched and dependent tests for the fixes, and
+  require CI on the current merge ref. The PR says "local full suite:
+  passed at `<head>`; later commits are review fixes" with the targeted
+  runs listed (maintainer decision 2026-10-05, after #576).
 - **An integration batch needs no batch-level local full suite** when every
   merge into it is clean (no code conflict resolved by hand) and each PR's
-  own required local validation has passed. CI on the batch's merge ref is
-  the combined check; run the test files covering any overlap, plus the doc
-  guards when docs overlap. A hand-resolved code conflict requires a local
-  full suite on the batch head.
+  own required local validation has passed. An integration batch is an
+  `integrate/<date>-batch-N` branch that lands several reviewed PRs under
+  one CI run. CI on the batch's merge ref is the combined check; run the
+  test files covering any overlap, plus the doc guards when docs overlap.
+  The PR says "local full suite: not required, clean integration batch". A
+  hand-resolved code conflict requires a local full suite on the batch
+  head.
 - **Test-only changes skip the local full suite** when the diff touches only
   `tests/test_*.py`, non-code test data and optional docs-only files, and
   does not change shared fixture behavior, module-level state affecting
