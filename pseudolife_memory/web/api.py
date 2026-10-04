@@ -51,6 +51,43 @@ _TEXT_BODY_PATHS = {"/api/facts/set", "/api/consolidate", "/api/supersede"}
 _OPERATOR_POST_PATHS = frozenset({"/api/config", "/api/daemon-notice"})
 
 
+# v54 (addendum 2026-10-04-board-roles-passkey.md, section 3): script in the
+# Console's origin could request its own maintainer challenge at the moment
+# the maintainer expects a passkey prompt, so every /ui/ response forbids
+# inline and foreign script, plugins, <base> rewrites, framing and foreign
+# form targets. ``style-src 'unsafe-inline'`` stays: Svelte and the vendored
+# 3D engine set style attributes; script is the attack this blocks.
+CONSOLE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+               "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; "
+               "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+               "form-action 'self'")
+CONSOLE_SECURITY_HEADERS = (
+    (b"content-security-policy", CONSOLE_CSP.encode("ascii")),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+    # Served types are meant: never sniff one as HTML or script (security
+    # review, 2026-10-04). JSON answers send it too (``_send_json``).
+    (b"x-content-type-options", b"nosniff"),
+)
+_MAINTAINER_PREFIX = "/api/maintainer"
+
+
+def _is_maintainer_path(path: str) -> bool:
+    return path == _MAINTAINER_PREFIX or path.startswith(_MAINTAINER_PREFIX + "/")
+
+
+def _maintainer_error(exc: Exception) -> tuple[int, dict]:
+    """A maintainer route's refusal: its public code and status, never the
+    text of an unexpected exception. A plain ``ValueError`` whose text is a
+    known code (the Console's fixture service raises those) maps the same."""
+    from pseudolife_memory.storage.maintainer import MaintainerError
+    code = getattr(exc, "code", None) if isinstance(exc, MaintainerError) else str(exc)
+    if code not in MaintainerError.STATUS:
+        code = "invalid_request" if isinstance(exc, ValueError) else "coordination_unavailable"
+    public = exc.public if isinstance(exc, MaintainerError) and exc.public else {}
+    return MaintainerError.STATUS[code], {**public, "error": code}
+
+
 def _body_limit(path: str) -> int:
     if path.startswith("/api/coordination/"):
         return 32768
@@ -69,7 +106,8 @@ async def _send_json(send, status: int, payload: Any) -> None:
         "status": status,
         "headers": [(b"content-type", b"application/json; charset=utf-8"),
                     (b"content-length", str(len(body)).encode()),
-                    (b"cache-control", b"no-store")],
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff")],
     })
     await send({"type": "http.response.body", "body": body})
 
@@ -390,7 +428,7 @@ def build_console_app(
         # 2) root -> console
         if path == "/":
             await send({"type": "http.response.start", "status": 307,
-                        "headers": [(b"location", b"/ui/")]})
+                        "headers": [(b"location", b"/ui/"), *CONSOLE_SECURITY_HEADERS]})
             await send({"type": "http.response.body", "body": b""})
             return
 
@@ -403,10 +441,12 @@ def build_console_app(
                 # never be cached so updates are picked up without a hard reload.
                 cache = ("max-age=86400" if ctype.startswith(("font/", "image/"))
                          else "no-store")
-                await _send_bytes(send, status, body, ctype, cache)
+                await _send_bytes(send, status, body, ctype, cache,
+                                  extra_headers=CONSOLE_SECURITY_HEADERS)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("static serve error for %s: %s", path, exc)
-                await _send_bytes(send, 500, b"static error", "text/plain")
+                await _send_bytes(send, 500, b"static error", "text/plain",
+                                  extra_headers=CONSOLE_SECURITY_HEADERS)
             return
 
         # 4) plugin SessionStart hook context (plain text, 200 always; also
@@ -696,6 +736,7 @@ def build_console_app(
             coordination_path = path.startswith("/api/coordination/")
             coordination_errors = coordination_path or (
                 path == "/api/agents" and params.get("view") == "coordination")
+            maintainer_path = _is_maintainer_path(path)
             if coordination_path and method != "POST":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
@@ -753,9 +794,11 @@ def build_console_app(
                         bind_request_headers, unbind_request_headers)
                     headers = {k.decode().lower(): v.decode("latin-1")
                                for k, v in scope.get("headers", [])}
-                    if coordination_errors:
+                    if coordination_errors or maintainer_path:
                         # The board requires a configured bearer even on an
-                        # otherwise open loopback Console installation.
+                        # otherwise open loopback Console installation, and
+                        # so do the maintainer routes (v54): a tokenless
+                        # daemon refuses them outright.
                         from pseudolife_memory.coordination import authenticated_principal
                         authenticated_principal(headers, token_map=token_map, token=token)
                     # Bind the transport-validated principal, restoring the
@@ -772,18 +815,29 @@ def build_console_app(
                 if coordination_path:
                     await _send_coordination_error(send, exc)
                     return
+                if maintainer_path and routes.has(path):
+                    # A KeyError out of a known maintainer route is a bug or
+                    # a missing body field; never echo it.
+                    logger.error("maintainer route failed (KeyError)")
+                    await _send_json(send, 400, {"error": "invalid_request"})
+                    return
                 # unknown path, or a wrong-verb hit on a known path
                 status = 405 if routes.has(path) else 404
                 await _send_json(send, status, {
                     "error": "not_found" if status == 404 else "method_not_allowed",
                     "path": path})
             except ValueError as exc:
-                if coordination_errors:
+                if maintainer_path:
+                    await _send_json(send, *_maintainer_error(exc))
+                elif coordination_errors:
                     await _send_coordination_error(send, exc)
                 else:
                     await _send_json(send, 400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001
-                if coordination_errors:
+                if maintainer_path:
+                    logger.error("maintainer route failed (%s)", type(exc).__name__)
+                    await _send_json(send, *_maintainer_error(exc))
+                elif coordination_errors:
                     await _send_coordination_error(send, exc)
                 else:
                     logger.exception("api handler error: %s %s", method, path)

@@ -96,13 +96,19 @@ class CoordinationConnection:
 
     @contextmanager
     def _txn(self):
+        # Re-entrant (v54): a maintainer's signed action spends its nonce
+        # and changes the board in one transaction, so the board method's
+        # own block becomes a savepoint of the outer one, and only the
+        # outermost block ends the pin.
         conn = self.conn
+        outer = not self._in_txn
         self._in_txn = True
         try:
             with conn.transaction() as tx:
                 yield
         finally:
-            self._in_txn = False
+            if outer:
+                self._in_txn = False
         if tx.status is not tx.Status.COMMITTED:
             raise psycopg.OperationalError(
                 f"transaction did not commit (status={tx.status.name}); "
@@ -191,6 +197,15 @@ _REOPEN_ROW_REASONS = (*REOPEN_REASONS, "coordinator")
 # nothing (the operator re-grants with ``lease delegate``).
 DELEGATE_PREFIX = "delegate:"
 RESERVED_LEASE_PREFIXES = (DELEGATE_PREFIX, "designated:")
+# The open per-project coordinator lease any session may claim. The
+# maintainer may also assign or free it from the Console with a passkey
+# (``assign_coordinator`` / ``break_lease``, v54).
+COORDINATOR_PREFIX = "coordinator:"
+# Who may write a role record (``lease_delegate``, ``lease_assign``, a
+# ``lease_break``): the operator through the host CLI, or the maintainer
+# through a passkey-signed Console route (v54, addendum 2026-10-04). Never
+# an agent: no bearer-callable path passes either.
+ROLE_ACTORS = ("operator", "maintainer")
 # A grant lasts at least a minute and at most a week (the longest park and
 # expected end); the CLI's default is a day. Starting values, not
 # measurements.
@@ -332,6 +347,59 @@ MESSAGE_ORIGIN = "agent"
 # ``hinted`` without the wake table, and never a live-channel turn.
 DAEMON_PRINCIPAL = "daemon"
 DAEMON_NOTICE_WAKE = {"decision": "hinted", "reason": "daemon_notice"}
+# The maintainer's own sender (v54, spec 2026-10-02-maintainer-wake-design).
+# Reserved like ``daemon``: never a bearer principal, a label or a target.
+# Only the maintainer routes send as it, and only after a verified passkey
+# assertion; its messages carry origin ``maintainer`` and their proof.
+MAINTAINER_PRINCIPAL = "maintainer"
+MAINTAINER_ORIGIN = "maintainer"
+RESERVED_SENDERS = frozenset({DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL})
+# Words no label may spell, except a reserved sender's own: a label is the
+# name the digest and the Console show, so ``m a i n t a i n e r`` must not
+# pass for it. Compared on a label's skeleton (``_skeleton``), and refused
+# as near to each word as its rule says (security review, 2026-10-04:
+# "Mаintainer" with a Cyrillic а, "maintainer-bot", "Maintainer (passkey)",
+# "maintainer1" and "maintaner" all registered). ``contained``: refused
+# anywhere in the label, not only as all of it; ``edits``: refused within
+# that many single-letter edits or adjacent swaps of the whole label.
+# ``maintainer`` is the name a human acts on, so it is refused inside any
+# label and one edit off. ``daemon`` is an everyday word in session labels
+# ("daemon watcher") and its notices carry no authority, so only the whole
+# label one edit off. ``passkey`` and ``verified`` are only ever spelled
+# exactly: one edit off they are ordinary words ("passkeys", "verifier").
+NAME_RULES = {MAINTAINER_PRINCIPAL: {"contained": True, "edits": 1},
+              DAEMON_PRINCIPAL: {"contained": False, "edits": 1},
+              "passkey": {"contained": False, "edits": 0},
+              "verified": {"contained": False, "edits": 0}}
+RESERVED_NAMES = frozenset(NAME_RULES)
+# Letters that render like a Latin one, folded to it before comparing: a
+# small hand-picked subset of Unicode's confusables (UTS #39 skeleton), the
+# Cyrillic and Greek look-alikes of Latin letters plus the digits 0 and 1
+# and the ``l``/``ı`` that pass for ``o`` and ``i``. Case-sensitive, applied
+# before casefolding, because some letters only look Latin in one case
+# (Greek capital Η is an H, small η is not). Fullwidth and mathematical
+# letters need no entry: NFKD folds them.
+_CONFUSABLES = str.maketrans({
+    # Cyrillic small
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+    "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "һ": "h", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+    # Cyrillic capital
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P",
+    "С": "C", "Т": "T", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S", "У": "Y",
+    # Greek small
+    "α": "a", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "υ": "u", "χ": "x",
+    # Greek capital
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M",
+    "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+    # Latin and digits
+    "ı": "i", "l": "i", "0": "o", "1": "i",
+})
+# What a recipient reads in place of a message the maintainer withdrew.
+WITHDRAWN_TEXT = "the maintainer withdrew this message; do not act on it"
+# The wake reason a maintainer message's ring is recorded under; its own
+# hourly cap (``coordination.maintainer.maintainer_per_recipient_per_hour``)
+# counts these rows per recipient.
+MAINTAINER_WAKE_REASON = "maintainer_message"
 # The audit log (schema v42): one append-only row per board mutation, written
 # in the mutation's own transaction and chained by sha256(prev_hash ||
 # canonical row), so an edited, inserted, reordered or removed row fails
@@ -386,6 +454,10 @@ class WakePolicy:
     fan_out_stagger_seconds: int = 30
     active_seconds: int = 60
     authority_per_sender_per_hour: int = 12
+    # v54: rings maintainer messages may cause per recipient per hour. Set
+    # from ``coordination.maintainer``, not WakeConfig; 30 is the spec's
+    # starting value (2026-10-02), not a measurement.
+    maintainer_per_recipient_per_hour: int = 30
 
     @classmethod
     def from_config(cls, config) -> "WakePolicy":
@@ -422,6 +494,69 @@ def body_commitment(salt_hex, body):
     except (ValueError, UnicodeEncodeError):
         return None
 MAX_REDACT_REASON = 240
+
+
+def _skeleton(value: str) -> str:
+    """``value`` as it reads: NFKD-normalized with combining marks dropped,
+    confusables folded (``_CONFUSABLES``), casefolded, and every
+    non-alphanumeric removed. An approximation of the UTS #39 skeleton,
+    not an implementation of it."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    bare = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    folded = bare.translate(_CONFUSABLES).casefold()
+    return "".join(ch for ch in folded if ch.isalnum())
+
+
+def _edits(a: str, b: str) -> int:
+    """Edits (insert, delete, substitute, swap two adjacent letters) that
+    turn ``a`` into ``b``: the optimal-string-alignment distance."""
+    previous, row = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        current = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            current[j] = min(row[j] + 1, current[j - 1] + 1,
+                             row[j - 1] + (a[i - 1] != b[j - 1]))
+            if (previous is not None and j > 1 and a[i - 1] == b[j - 2]
+                    and a[i - 2] == b[j - 1]):
+                current[j] = min(current[j], previous[j - 2] + 1)
+        previous, row = row, current
+    return row[-1]
+
+
+def reserved_name(value) -> bool:
+    """Whether ``value`` reads as a reserved word (``RESERVED_NAMES``): its
+    skeleton contains or comes near one, as ``NAME_RULES`` says."""
+    if not isinstance(value, str):
+        return False
+    skeleton = _skeleton(value)
+    for word, rule in NAME_RULES.items():
+        if rule["contained"] and word in skeleton:
+            return True
+        # Lengths further apart than the allowance cannot be within it.
+        if (abs(len(skeleton) - len(word)) <= rule["edits"]
+                and _edits(skeleton, word) <= rule["edits"]):
+            return True
+    return False
+
+
+def message_origin(row) -> dict:
+    """The origin fields a receive shows for one message row (v54).
+
+    ``maintainer`` only for a row the maintainer's reserved sender stored
+    with a proof; anything else is agent mail, whatever a column says.
+    ``verified`` names the passkey while the message stands; once the
+    maintainer withdrew it, ``repudiated_at`` and the withdrawal sentence
+    in place of the body instead."""
+    proof = row.get("maintainer_proof")
+    if (row.get("origin") != MAINTAINER_ORIGIN or not isinstance(proof, dict)
+            or row.get("sender_principal") != MAINTAINER_PRINCIPAL):
+        return {"origin": MESSAGE_ORIGIN}
+    if row.get("repudiated_at") is not None:
+        return {"origin": MAINTAINER_ORIGIN, "repudiated_at": row["repudiated_at"],
+                "text": WITHDRAWN_TEXT}
+    return {"origin": MAINTAINER_ORIGIN,
+            "verified": {"by": "passkey", "label": proof.get("label"),
+                         "signed_at": proof.get("signed_at")}}
 
 
 class CoordinationError(ValueError):
@@ -471,6 +606,12 @@ ID_PREFIX_MIN = 8
 ID_LENGTH = 32
 # Candidates named in an ambiguous-prefix refusal; a longer prefix narrows it.
 AMBIGUITY_LISTED = 8
+
+
+def is_full_agent_id(value: Any) -> bool:
+    """A full agent id: 32 lower-case hex characters."""
+    return (isinstance(value, str) and len(value) == ID_LENGTH
+            and set(value) <= _ID_HEX)
 
 
 def is_id_prefix(value: Any) -> bool:
@@ -1186,10 +1327,15 @@ class CoordinationStore:
     def _check_label(principal, fields):
         """The label ``daemon`` names the daemon's own sender: the per-turn
         digest shows a sender's label, so a session could otherwise post as
-        "from daemon" (PR #456 review)."""
+        "from daemon" (PR #456 review). Since v54 the same holds for
+        ``maintainer``, ``passkey`` and ``verified``, in any spelling that
+        reads as one (``reserved_name``: look-alike letters, and for
+        ``maintainer`` inside a longer label or one edit off, since the
+        2026-10-04 review); a reserved sender keeps its own name. Checked
+        only when a label is set, so an older row keeps working."""
         label = fields.get("label")
-        if (principal != DAEMON_PRINCIPAL and isinstance(label, str)
-                and label.strip().casefold() == DAEMON_PRINCIPAL):
+        if reserved_name(label) and not (
+                principal in RESERVED_SENDERS and label.strip().casefold() == principal):
             raise CoordinationError("invalid_label")
 
     @staticmethod
@@ -1819,6 +1965,17 @@ class CoordinationStore:
         with self.storage._txn():
             agent = self._auth(principal, agent_id, credential)
             now = self.clock()
+            if name.startswith(COORDINATOR_PREFIX):
+                # A session holds one role per project: the delegate neither
+                # claims nor queues for the coordinator lease (security
+                # review, 2026-10-04: only the signed routes kept the rule).
+                # Both role leases lock in the order the role changes take.
+                project = name[len(COORDINATOR_PREFIX):]
+                self._lock_role_leases(project)
+                if self._one("SELECT 1 AS d FROM coordination_leases WHERE name=%s "
+                             "AND holder_agent_id=%s AND expires_at>%s",
+                             (DELEGATE_PREFIX + project, agent_id, now)) is not None:
+                    raise CoordinationError("already_delegate")
             self.storage.conn.execute(
                 "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                 (name,))
@@ -1953,10 +2110,69 @@ class CoordinationStore:
                 "queued": counts.get(row["name"], 0), "queue": queues[row["name"]]})
         return {"leases": leases, "truncated": len(rows) > limit}
 
-    def break_lease(self, name):
-        """Operator only (the offline CLI; never exposed to agents): free a
-        held lease whatever its holder says, and grant it to the next
-        waiter. The break is logged with the operator as its actor."""
+    @staticmethod
+    def _role_actor(actor):
+        if actor not in ROLE_ACTORS:
+            raise CoordinationError("invalid_request")
+        return actor
+
+    @staticmethod
+    def _role_project(project, prefix):
+        """A project the recipient's row can carry exactly: no surrounding
+        whitespace (it would never match), and short enough for the name."""
+        if (not isinstance(project, str) or not project or project != project.strip()
+                or len(prefix + project) > MAX_LEASE_NAME):
+            raise CoordinationError("invalid_project")
+        return prefix + project
+
+    def _lock_role_leases(self, project):
+        """Create and lock both role leases of ``project`` in name order
+        (``coordinator:`` before ``delegate:``), the order ``_settle_due``
+        locks leases in, before any waiter or agent row is touched."""
+        # A name past MAX_LEASE_NAME can hold no lease (acquire refuses it).
+        names = sorted(name for name in (COORDINATOR_PREFIX + project,
+                                          DELEGATE_PREFIX + project)
+                       if len(name) <= MAX_LEASE_NAME)
+        for name in names:
+            self.storage.conn.execute(
+                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                (name,))
+        self._all("SELECT name FROM coordination_leases WHERE name=ANY(%s) ORDER BY name "
+                  "FOR UPDATE", (names,))
+
+    def _role_agent(self, agent_id):
+        """The registered, unrevoked row a role goes to. Only read: the
+        lease rows are locked first (lease row before agent row)."""
+        agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
+        agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
+        if agent is None:
+            raise CoordinationError("instance_not_found")
+        if agent["credential_hash"] is None:
+            raise CoordinationError("agent_revoked")
+        return agent
+
+    def _break_held(self, name, agent_id, now, events, *, actor):
+        """Inside a role change: free ``name`` when ``agent_id`` holds it
+        live (a session holds one role per project at a time), logged as a
+        break by ``actor``; the next queued waiter takes it as after any
+        break. Returns the name when it broke one."""
+        row = self._one("SELECT * FROM coordination_leases WHERE name=%s", (name,))
+        if (row is None or row["holder_agent_id"] != agent_id
+                or row["expires_at"] is None or row["expires_at"] <= now):
+            return None
+        self._vacate(name, now)
+        events.append(self._event("lease_break", {"name": name, "fence": row["fence"],
+                                                  "reason": "one_role"},
+                                  actor=actor, agent_id=agent_id))
+        self._settle(name, now, events)
+        return name
+
+    def break_lease(self, name, *, actor="operator"):
+        """Operator only (the offline CLI; never exposed to agents), or the
+        maintainer through a passkey-signed Console route (v54, ``actor``
+        ``maintainer``): free a held lease whatever its holder says, and
+        grant it to the next waiter. The break is logged with its actor."""
+        self._role_actor(actor)
         self._lease_args(name)
         with self.storage._txn():
             now = self.clock()
@@ -1965,57 +2181,107 @@ class CoordinationStore:
                 return {"name": name, "broken": False, "was_held_by": None}
             self._vacate(name, now)
             events = [self._event("lease_break", {"name": name, "fence": row["fence"]},
-                                  actor="operator", agent_id=row["holder_agent_id"])]
+                                  actor=actor, agent_id=row["holder_agent_id"])]
             self._settle(name, now, events)
             self._append(events, now)
         return {"name": name, "broken": True, "was_held_by": row["holder_agent_id"]}
 
-    def grant_delegate(self, project, agent_id, *, hold):
-        """Operator only (the offline CLI; never exposed to agents): make
-        ``agent_id`` (or a unique prefix of a registered one) the
-        maintainer's delegate for ``project`` for ``hold`` seconds, replacing
-        any current one. The hold is the lease ``delegate:<project>``, so it
-        expires, shows on the board and is revoked with ``break_lease`` like
-        any lease; the delegate may release it, never take or renew it."""
-        # A project the recipient's row can carry exactly: no surrounding
-        # whitespace (it would never match), and short enough for the name.
-        if (not isinstance(project, str) or not project or project != project.strip()
-                or len(DELEGATE_PREFIX + project) > MAX_LEASE_NAME):
-            raise CoordinationError("invalid_project")
+    def grant_delegate(self, project, agent_id, *, hold, actor="operator"):
+        """Operator only (the offline CLI; never exposed to agents), or the
+        maintainer through a passkey-signed Console route (v54, ``actor``
+        ``maintainer``): make ``agent_id`` (or a unique prefix of a
+        registered one) the maintainer's delegate for ``project`` for
+        ``hold`` seconds, replacing any current one. The hold is the lease
+        ``delegate:<project>``, so it expires, shows on the board and is
+        revoked with ``break_lease`` like any lease; the delegate may
+        release it, never take or renew it. A session holds one role per
+        project: the new delegate's live ``coordinator:<project>`` hold is
+        broken in the same transaction (``also_broken``)."""
+        self._role_actor(actor)
+        name = self._role_project(project, DELEGATE_PREFIX)
         if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
             raise CoordinationError("invalid_ttl")
-        name = DELEGATE_PREFIX + project
         self._lease_args(name)
         with self.storage._txn():
-            agent_id = resolve_agent_id(self.storage.conn, agent_id, registered_only=True)
             now = self.clock()
-            # The lease row is locked first and the agent row only read, the
-            # order release and prune take (a lease, then its holder's row).
-            self.storage.conn.execute(
-                "INSERT INTO coordination_leases (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
-                (name,))
-            self._one("SELECT name FROM coordination_leases WHERE name=%s FOR UPDATE", (name,))
-            agent = self._one("SELECT * FROM coordination_agents WHERE agent_id=%s", (agent_id,))
-            if agent is None:
-                raise CoordinationError("instance_not_found")
-            if agent["credential_hash"] is None:
-                raise CoordinationError("agent_revoked")
+            self._lock_role_leases(project)
+            agent = self._role_agent(agent_id)
+            agent_id = agent["agent_id"]
+            events = []
+            # Queued for the coordinator lease, the new delegate leaves that
+            # queue rather than be handed the second role later.
+            if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                         "RETURNING ticket", (COORDINATOR_PREFIX + project, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": COORDINATOR_PREFIX + project,
+                                                            "reason": "one_role"},
+                                          actor="daemon", agent_id=agent_id))
+            also = self._break_held(COORDINATOR_PREFIX + project, agent_id, now, events,
+                                    actor=actor)
             # A waiter queued before the namespace was reserved never takes
             # it; dropped here too, since a held lease's settle keeps its queue.
-            events = []
             self._drop_reserved_waiters(name, events)
             row = self._settle(name, now, events)
             replaced = row["holder_agent_id"]
             row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
-                              expect=None, purpose="granted by the operator")
+                              expect=None, purpose=f"granted by the {actor}")
             events.append(self._event("lease_delegate",
                                       {"name": name, "fence": row["fence"], "hold": hold,
                                        "replaced": replaced},
-                                      actor="operator", agent_id=agent_id,
+                                      actor=actor, agent_id=agent_id,
                                       project=agent["project"], task=agent["task"]))
             self._append(events, now)
-        return {"name": name, "agent_id": agent_id, "fence": row["fence"],
-                "expires_at": row["expires_at"], "replaced": replaced}
+        out = {"name": name, "agent_id": agent_id, "fence": row["fence"],
+               "expires_at": row["expires_at"], "replaced": replaced}
+        if also:
+            out["also_broken"] = also
+        return out
+
+    def assign_coordinator(self, project, agent_id, *, hold, actor="operator"):
+        """Give ``coordinator:<project>`` to ``agent_id`` for ``hold``
+        seconds, vacating the current holder (logged, ``replaced``): the
+        maintainer's passkey-signed Console route (v54). Afterwards it is an
+        ordinary lease: the holder renews or releases it, others queue, and
+        the queue is left as it was (the assignee leaves it). A session
+        holds one role per project: the assignee's live
+        ``delegate:<project>`` hold is broken in the same transaction
+        (``also_broken``)."""
+        self._role_actor(actor)
+        name = self._role_project(project, COORDINATOR_PREFIX)
+        if type(hold) is not int or not DELEGATION_MIN <= hold <= DELEGATION_MAX:
+            raise CoordinationError("invalid_ttl")
+        self._lease_args(name)
+        with self.storage._txn():
+            now = self.clock()
+            self._lock_role_leases(project)
+            agent = self._role_agent(agent_id)
+            agent_id = agent["agent_id"]
+            events = []
+            also = self._break_held(DELEGATE_PREFIX + project, agent_id, now, events,
+                                    actor=actor)
+            row = self._one("SELECT * FROM coordination_leases WHERE name=%s", (name,))
+            replaced = None
+            if row["holder_agent_id"] is not None and row["expires_at"] <= now:
+                events.append(self._event("lease_expire", {"name": name, "fence": row["fence"]},
+                                          actor="daemon", agent_id=row["holder_agent_id"]))
+            elif row["holder_agent_id"] is not None:
+                replaced = row["holder_agent_id"]
+            if self._one("DELETE FROM coordination_lease_waiters WHERE name=%s AND agent_id=%s "
+                         "RETURNING ticket", (name, agent_id)) is not None:
+                events.append(self._event("lease_dequeue", {"name": name, "reason": "assigned"},
+                                          actor="daemon", agent_id=agent_id))
+            row = self._grant(name, agent_id, agent["principal"], now=now, hold=hold,
+                              expect=None, purpose=f"assigned by the {actor}")
+            events.append(self._event("lease_assign",
+                                      {"name": name, "fence": row["fence"], "hold": hold,
+                                       "replaced": replaced},
+                                      actor=actor, agent_id=agent_id,
+                                      project=agent["project"], task=agent["task"]))
+            self._append(events, now)
+        out = {"name": name, "agent_id": agent_id, "fence": row["fence"],
+               "expires_at": row["expires_at"], "replaced": replaced}
+        if also:
+            out["also_broken"] = also
+        return out
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "
@@ -2026,13 +2292,16 @@ class CoordinationStore:
 
         Oldest first so a backlog shows what has waited longest; the count
         beside it says how much the preview omits. Reading is not delivery:
-        nothing here touches attempts or acknowledgements."""
+        nothing here touches attempts or acknowledgements. Maintainer
+        messages (v54) are left out: the digest only counts them, in fixed
+        text, so no body of one reaches a local file."""
         rows = self._all(
             "SELECT m.message_id,m.sender_agent_id,m.sender_principal,m.created_at,m.text,"
             "a.label AS sender_label "
             "FROM coordination_messages m LEFT JOIN coordination_agents a ON a.agent_id=m.sender_agent_id "
             "WHERE m.recipient_agent_id=%s AND m.acknowledged_at IS NULL AND m.expires_at>%s "
-            "ORDER BY m.recipient_sequence LIMIT %s", (agent_id, self.clock(), PREVIEW_LIMIT))
+            "AND m.origin<>%s ORDER BY m.recipient_sequence LIMIT %s",
+            (agent_id, self.clock(), MAINTAINER_ORIGIN, PREVIEW_LIMIT))
         return [{"message_id": r["message_id"], "sender_agent_id": r["sender_agent_id"],
                  "sender_principal": r["sender_principal"],
                  "sender_label": self._preview_label(r), "created_at": r["created_at"],
@@ -2046,11 +2315,20 @@ class CoordinationStore:
         if row["sender_principal"] == DAEMON_PRINCIPAL:
             return DAEMON_PRINCIPAL
         label = row["sender_label"] or ""
-        return "" if label.strip().casefold() == DAEMON_PRINCIPAL else label
+        return "" if reserved_name(label) else label
+
+    def _maintainer_pending(self, agent_id):
+        """Pending maintainer-origin messages (v54), withdrawn ones too: the
+        digest's one fixed line counts them, the agent-mail line the rest."""
+        return self._one("SELECT count(*) AS n FROM coordination_messages WHERE "
+                         "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s "
+                         "AND origin=%s AND sender_principal=%s",
+                         (agent_id, self.clock(), MAINTAINER_ORIGIN, MAINTAINER_PRINCIPAL))["n"]
 
     def _mailbox_state(self, agent_id):
         return {"pending_count": self._pending_count(agent_id),
-                "pending_preview": self._pending_preview(agent_id)}
+                "pending_preview": self._pending_preview(agent_id),
+                "maintainer_pending": self._maintainer_pending(agent_id)}
 
     def attach(self, principal, agent_id, credential, *, attachment_id, wake_enabled=False,
                ring=None, ring_armed_until=None):
@@ -2190,13 +2468,18 @@ class CoordinationStore:
             (agent_id,)) if park else None
         park_seq = park_event["seq"] if park_event and park_event["park_set_at"] == park_since else None
         ring_allowed = park_seq is not None and self._listener_path(row, now) is None
-        serve_guard = (" AND (decision='attention' OR (%s AND EXISTS (SELECT 1 "
-                       "FROM coordination_events s WHERE s.event='send' "
-                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))") if codex else ""
-        serve_values = (ring_allowed, park_seq or 0) if codex else ()
+        # A maintainer message's ring (v54) needs no park: a live listener
+        # is enough, a done park included.
+        listening = self._listener_path(row, now) is None
+        serve_guard = (" AND (decision='attention' OR (%s AND reason=%s) OR (%s AND EXISTS "
+                       "(SELECT 1 FROM coordination_events s WHERE s.event='send' "
+                       "AND s.message_id=coordination_wakes.message_id AND s.seq>%s)))"
+                       ) if codex else ""
+        serve_values = (listening, MAINTAINER_WAKE_REASON, ring_allowed,
+                        park_seq or 0) if codex else ()
         if reopen_only:
             serve_guard += " AND decision='rung' AND reason=ANY(%s)"
-            serve_values += (list(_REOPEN_ROW_REASONS),)
+            serve_values += ([*_REOPEN_ROW_REASONS, MAINTAINER_WAKE_REASON],)
         if not codex and self._listener_path(row, now) is not None:
             return None
         self.storage.conn.execute(
@@ -2218,12 +2501,14 @@ class CoordinationStore:
             "AND (w.served_at IS NOT NULL OR %s) AND m.acknowledged_at IS NULL AND m.expires_at>%s",
             (park_seq or 0, agent_id, codex, now))
         if reopen_only:
-            rows = [item for item in rows if park_seq is not None and item["decision"] == "rung"
-                    and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"]]
+            rows = [item for item in rows if item["reason"] == MAINTAINER_WAKE_REASON or (
+                park_seq is not None and item["decision"] == "rung"
+                and item["reason"] in _REOPEN_ROW_REASONS and item["park_authorized"])]
         if not rows:
             return None
         if codex:
             eligible = [item for item in rows if item["decision"] == "attention"
+                        or (listening and item["reason"] == MAINTAINER_WAKE_REASON)
                         or (ring_allowed and item["park_authorized"])]
             if not eligible:
                 # Historical ring authorization without its unchanged park is
@@ -2299,7 +2584,9 @@ class CoordinationStore:
         and proves nothing. The audit scan runs only for a sender that holds
         such a lease. An audit window shorter than the grant
         (``audit_retention_days`` under 7) can end the authority early,
-        never extend it."""
+        never extend it. Since v54 the record's actor is ``operator`` (the
+        host CLI) or ``maintainer`` (the passkey-signed Console route,
+        addendum 2026-10-04); nothing else writes either."""
         if sender["principal"] in self.maintainer_principals:
             return "maintainer"
         project = recipient.get("project") or ""
@@ -2307,15 +2594,17 @@ class CoordinationStore:
                 "SELECT 1 AS hit FROM coordination_leases l WHERE l.name=%s "
                 "AND l.holder_agent_id=%s AND l.expires_at>%s AND EXISTS (SELECT 1 "
                 "FROM coordination_events e WHERE e.event='lease_delegate' "
-                "AND e.actor='operator' AND e.agent_id=l.holder_agent_id "
+                "AND e.actor=ANY(%s) AND e.agent_id=l.holder_agent_id "
                 "AND CASE WHEN e.event='lease_delegate' THEN "
                 "e.payload::jsonb->>'name'=l.name "
                 "AND (e.payload::jsonb->>'fence')::bigint=l.fence ELSE false END)",
-                (DELEGATE_PREFIX + project, sender["agent_id"], now)) is not None:
+                (DELEGATE_PREFIX + project, sender["agent_id"], now,
+                 list(ROLE_ACTORS))) is not None:
             return "delegate"
         return None
 
-    def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id):
+    def _wake_decision(self, sender, recipient, now, *, clears, urgent, message_id,
+                       maintainer=False):
         """Decide at send whether the recipient's shim should ring (v49).
 
         The decision table (Coordination v2 design, decided 2026-09-28):
@@ -2344,8 +2633,17 @@ class CoordinationStore:
         hourly ``nudged`` ring; rows decided ``nudged`` before then are
         history, never served). Every ring is bounded per recipient per
         hour and by the nightly total, and rings from one sender's burst
-        are staggered by ``fan_out_stagger_seconds``. Chatter never rings."""
+        are staggered by ``fan_out_stagger_seconds``. Chatter never rings.
+
+        A maintainer message (v54, ``maintainer``) is decided first and on
+        its own: it rings whenever the recipient has a live listener,
+        whatever its park record (``done`` included) or recent activity,
+        never answers ``withheld`` or ``not_needed``, is ``capped`` above
+        ``maintainer_per_recipient_per_hour``, and with no live listener
+        answers ``no_path``, queued for the next receive, as any ring does."""
         policy = self.wake
+        if maintainer:
+            return self._maintainer_wake(sender, recipient, now, message_id=message_id)
         park = self._live_park(recipient, now)
         done = park is not None and park["park_reason"] == "done"
         need = ({"park_needs": park["park_needs"], "park_clear_by": park["park_clear_by"]}
@@ -2458,6 +2756,29 @@ class CoordinationStore:
                                            else FALLBACK_PATHS_CLAUDE),
                     **need, **reopened, **ring}
         return {"decision": decision, "reason": reason, "ring_at": ring_at, **reopened, **ring}
+
+    def _maintainer_wake(self, sender, recipient, now, *, message_id):
+        """The maintainer branch of ``_wake_decision`` (v54)."""
+        sent = self._one("SELECT count(*) AS n FROM coordination_wakes WHERE "
+                         "recipient_agent_id=%s AND reason=%s AND created_at>%s",
+                         (recipient["agent_id"], MAINTAINER_WAKE_REASON, now - 3600))["n"]
+        if sent >= self.wake.maintainer_per_recipient_per_hour:
+            return {"decision": "capped", "reason": "maintainer_hour"}
+        self.storage.conn.execute(
+            "INSERT INTO coordination_wakes (recipient_agent_id,sender_agent_id,message_id,"
+            "decision,reason,urgent,ring_at,created_at) VALUES (%s,%s,%s,'rung',%s,false,%s,%s)",
+            (recipient["agent_id"], sender["agent_id"], message_id, MAINTAINER_WAKE_REASON,
+             now, now))
+        ring = {"_ring": MAINTAINER_WAKE_REASON}
+        missing = self._listener_path(recipient, now)
+        if missing is not None:
+            codex = "codex" in (recipient.get("capabilities") or {})
+            return {"decision": "no_path", "reason": missing, "queued": True,
+                    "last_activity": recipient["last_activity"],
+                    "fallback": FALLBACK_CODEX if codex else FALLBACK_CLAUDE,
+                    "fallback_paths": list(FALLBACK_PATHS_CODEX if codex
+                                           else FALLBACK_PATHS_CLAUDE), **ring}
+        return {"decision": "rung", "reason": MAINTAINER_WAKE_REASON, "ring_at": now, **ring}
 
     def park_gate(self, agent_id, principal, *, since=None):
         """What the Stop hook asks when a turn ends (v49): ``block`` when the
@@ -2609,7 +2930,8 @@ class CoordinationStore:
         first = existing[0]
         if fanout is None:
             target, parent = first["recipient_agent_id"], first["reply_to"]
-            if to != target and not (is_id_prefix(to) and target.startswith(to)):
+            if to is not None and to != target and not (
+                    is_id_prefix(to) and target.startswith(to)):
                 raise CoordinationError("request_conflict")
             if reply_to is not None and reply_to != parent and not (
                     parent and is_id_prefix(reply_to) and parent.startswith(reply_to)):
@@ -2654,9 +2976,10 @@ class CoordinationStore:
                 "created_at": row["created_at"], "expires_at": row["expires_at"],
                 "acknowledged_at": row["acknowledged_at"]}
 
-    def send(self, principal, agent_id, credential, *, to, text, request_id,
+    def send(self, principal, agent_id, credential, *, to=None, text, request_id,
              reply_to=None, expires_at=None, hlc="", expected_writer_epoch=None,
-             enforce_writer_epoch=False, clears=None, urgent=False, notice=False):
+             enforce_writer_epoch=False, clears=None, urgent=False, notice=False,
+             maintainer_proof=None):
         """Queue ``text`` for ``to``: one agent (a full id, or a unique
         prefix of at least ID_PREFIX_MIN hex characters), or a burst,
         ``project:<name>`` or ``all`` (see ``_fanout_rows``), at most
@@ -2675,10 +2998,32 @@ class CoordinationStore:
 
         ``notice`` is the daemon's own send (``DAEMON_PRINCIPAL`` only, never
         reachable from dispatch): every recipient's decision is
-        ``DAEMON_NOTICE_WAKE``, so nothing rings."""
+        ``DAEMON_NOTICE_WAKE``, so nothing rings.
+
+        v54: ``to`` may be left out of a reply, which goes to the sender of
+        ``reply_to`` (one of the caller's own messages); that is the only way
+        to reach the maintainer's reserved address, and only in reply to a
+        maintainer message. A reserved address named by ``to``
+        (``daemon``, ``maintainer`` or either row's id or prefix) is
+        ``recipient_reserved``. ``maintainer_proof`` is the maintainer's own
+        send (``MAINTAINER_PRINCIPAL`` only, never reachable from dispatch):
+        one recipient by full id, a session's own address (never a reserved
+        row or a subagent's), stored with origin ``maintainer`` and the
+        proof, its wake decided by the maintainer branch of
+        ``_wake_decision``."""
         if notice and principal != DAEMON_PRINCIPAL:
             raise CoordinationError("invalid_request")
-        _string(to, 120, "recipient", empty=False)
+        maintainer = maintainer_proof is not None
+        if maintainer != (principal == MAINTAINER_PRINCIPAL) or (
+                maintainer and (notice or not isinstance(maintainer_proof, dict))):
+            raise CoordinationError("invalid_request")
+        if to is None:
+            if reply_to is None or maintainer:
+                raise CoordinationError("invalid_recipient")
+        else:
+            _string(to, 120, "recipient", empty=False)
+            if to.strip().casefold() in RESERVED_SENDERS:
+                raise CoordinationError("recipient_reserved")
         _string(request_id, 120, "request_id", empty=False)
         _string(hlc, 120, "hlc")
         if clears is not None:
@@ -2711,9 +3056,11 @@ class CoordinationStore:
         if expires_at is not None and (isinstance(expires_at, bool) or
                 not isinstance(expires_at, (int, float)) or not math.isfinite(expires_at)):
             raise CoordinationError("invalid_expiry")
-        fanout = _fanout_target(to)
+        fanout = None if to is None else _fanout_target(to)
         if fanout is not None and reply_to is not None:
             raise CoordinationError("invalid_reply")
+        if maintainer and (fanout is not None or not is_full_agent_id(to)):
+            raise CoordinationError("invalid_recipient")
         with self.storage._txn():
             now = self.clock()
             # Authenticated before anything is resolved: a prefix lookup
@@ -2739,7 +3086,19 @@ class CoordinationStore:
             # be locked in one global order, including the sender's own
             # rate/idempotency state; a burst re-reads its set under the
             # locks below.
-            if fanout is None:
+            if to is None:
+                # A routed reply: to the sender of one of the caller's own
+                # messages, resolved among them.
+                reply_to = self._resolve_message(
+                    reply_to, scope="recipient_agent_id=%s", params=(agent_id,),
+                    missing="invalid_reply", ambiguous="ambiguous_reply")
+                routed = self._one("SELECT sender_agent_id FROM coordination_messages "
+                                   "WHERE message_id=%s AND recipient_agent_id=%s",
+                                   (reply_to, agent_id))
+                if routed is None:
+                    raise CoordinationError("invalid_reply")
+                targets = [routed["sender_agent_id"]]
+            elif fanout is None:
                 targets = [self._resolve_agent(to, missing="recipient_not_found",
                                                ambiguous="ambiguous_recipient")]
                 if reply_to is not None:
@@ -2802,21 +3161,43 @@ class CoordinationStore:
             expiry = now + MESSAGE_TTL if expires_at is None else float(expires_at)
             if not now < expiry <= now + MESSAGE_TTL:
                 raise CoordinationError("invalid_expiry")
+            parent = None
             if reply_to is not None:
-                parent = self._one("SELECT sender_agent_id,recipient_agent_id FROM "
-                                   "coordination_messages WHERE message_id=%s", (reply_to,))
+                parent = self._one("SELECT sender_agent_id,recipient_agent_id,origin,"
+                                   "sender_principal FROM coordination_messages "
+                                   "WHERE message_id=%s", (reply_to,))
                 if (parent is None or parent["sender_agent_id"] != recipients[0]["agent_id"]
                         or parent["recipient_agent_id"] != agent_id):
                     raise CoordinationError("invalid_reply")
+            for recipient in recipients:
+                # A reserved address is reached only by a routed reply to a
+                # maintainer message; a maintainer message reaches only a
+                # session's own address, never a subagent's (v54).
+                if recipient["principal"] in RESERVED_SENDERS and not (
+                        to is None and recipient["principal"] == MAINTAINER_PRINCIPAL
+                        and parent is not None and parent["origin"] == MAINTAINER_ORIGIN
+                        and parent["sender_principal"] == MAINTAINER_PRINCIPAL):
+                    raise CoordinationError("recipient_reserved")
+                if maintainer and recipient.get("parent_thread") is not None:
+                    raise CoordinationError("recipient_reserved")
             # One request, however many recipients, is one send for the rate.
             if self._one("SELECT count(DISTINCT request_id) AS n FROM coordination_messages "
                          "WHERE sender_agent_id=%s AND created_at>%s",
                          (agent_id, now - 60))["n"] >= SEND_RATE:
                 raise CoordinationError("rate_limited")
             for recipient in recipients:
+                # Nothing acknowledges the maintainer's reserved row (the
+                # Console only reads its inbox, and no bearer may ack it), so
+                # a cap over all its pending mail let one session's replies
+                # refuse every other session's until they expired (review,
+                # 2026-10-04). There the cap counts the sender's own pending
+                # replies; the sender rate and MESSAGE_TTL bound the rest.
+                own = (" AND sender_agent_id=%s"
+                       if recipient["principal"] == MAINTAINER_PRINCIPAL else "")
                 if self._one("SELECT count(*) AS n FROM coordination_messages WHERE "
-                             "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s",
-                             (recipient["agent_id"], now))["n"] >= MAX_PENDING:
+                             "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s"
+                             + own, (recipient["agent_id"], now, *((agent_id,) if own else ()))
+                             )["n"] >= MAX_PENDING:
                     raise CoordinationError("queue_full", recipient["agent_id"][:12])
             self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
                                       "WHERE agent_id=%s", (now, agent_id))
@@ -2831,7 +3212,8 @@ class CoordinationStore:
                 # so the fan-out stagger spaces them.
                 wake = (dict(DAEMON_NOTICE_WAKE) if notice else
                         self._wake_decision(sender, recipient, now, clears=clears,
-                                            urgent=urgent, message_id=message_id))
+                                            urgent=urgent, message_id=message_id,
+                                            maintainer=maintainer))
                 # The send event names the authority a ring used (maintainer,
                 # delegate, clearer, urgent, ...; ``coordinator`` on events
                 # from before the 2026-10-04 rename), so board-audit export
@@ -2843,11 +3225,12 @@ class CoordinationStore:
                 rows.append(self._one(
                     "INSERT INTO coordination_messages (message_id,sender_agent_id,recipient_agent_id,"
                     "sender_principal,project,task,text,reply_to,request_id,fingerprint,"
-                    "recipient_sequence,hlc,created_at,expires_at,wake) VALUES "
-                    "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+                    "recipient_sequence,hlc,created_at,expires_at,wake,origin,maintainer_proof) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
                     (message_id, agent_id, recipient["agent_id"], principal, sender["project"],
                      sender["task"], text, reply_to, request_id, fingerprint, seq, hlc, now,
-                     expiry, Jsonb(wake))))
+                     expiry, Jsonb(wake), MAINTAINER_ORIGIN if maintainer else MESSAGE_ORIGIN,
+                     Jsonb(maintainer_proof) if maintainer else None)))
                 # The body lives on in the event's body column after prune
                 # blanks the live copy. The hashed payload holds a salted
                 # commitment to it, not the text (v46), so ``redact`` can
@@ -2858,7 +3241,8 @@ class CoordinationStore:
                     "send", {"text_commitment": body_commitment(salt, text),
                              "reply_to": reply_to, "request_id": request_id,
                              "recipient_sequence": seq, "expires_at": expiry,
-                             "wake": wake["decision"], **audited, **marker},
+                             "wake": wake["decision"], **audited, **marker,
+                             **({"origin": MAINTAINER_ORIGIN} if maintainer else {})},
                     principal=principal, agent_id=agent_id, recipient=recipient["agent_id"],
                     project=sender["project"], task=sender["task"], message_id=message_id,
                     hlc=hlc, body=text, body_salt=salt))
@@ -2914,7 +3298,8 @@ class CoordinationStore:
                           "coordination_wakes w WHERE w.recipient_agent_id="
                           "coordination_messages.recipient_agent_id AND "
                           "w.message_id=coordination_messages.message_id AND "
-                          "w.decision='nudged')))" if for_delivery else "")
+                          "w.decision='nudged'))) AND repudiated_at IS NULL"
+                          if for_delivery else "")
         now = self.clock()
         params = ([agent_id, seq, now] + ([MAX_ATTEMPTS, DAEMON_PRINCIPAL] if for_delivery else [])
                   + [limit])
@@ -2958,7 +3343,7 @@ class CoordinationStore:
                     for r in rows if r["message_id"] in first], now)
         keys = ("message_id", "sender_agent_id", "sender_principal", "recipient_agent_id",
                 "project", "task", "text", "reply_to", "recipient_sequence", "hlc", "created_at", "expires_at")
-        return {"messages": [{**{k: r[k] for k in keys}, "origin": MESSAGE_ORIGIN} for r in rows],
+        return {"messages": [{**{k: r[k] for k in keys}, **message_origin(r)} for r in rows],
                 "after": f"{agent_id}:{rows[-1]['recipient_sequence'] if rows else seq}",
                 "continuity": {"status": status, "expired_unacknowledged": expired,
                                "metadata_gap": gap, "high_water": continuity["high_water"],
@@ -3095,7 +3480,11 @@ class CoordinationStore:
                 "recipient_sequence": payload.get("recipient_sequence"), "hlc": sent["hlc"],
                 "created_at": sent["created_at"], "expires_at": expires_at,
                 "acknowledged_at": sent["acknowledged_at"], "first_read_at": sent["first_read_at"],
-                "state": state, "origin": MESSAGE_ORIGIN})
+                "state": state,
+                # History names a maintainer message's origin (v54); only a
+                # receive result carries its verification.
+                "origin": (MAINTAINER_ORIGIN if payload.get("origin") == MAINTAINER_ORIGIN
+                           and sent["principal"] == MAINTAINER_PRINCIPAL else MESSAGE_ORIGIN)})
         return {"messages": messages, "after": f"{agent_id}:history:{rows[-1]['seq'] if rows else seq}",
                 "has_more": has_more, "retention_days": audit_retention_days,
                 "retained_since": cutoff}

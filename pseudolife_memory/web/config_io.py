@@ -841,6 +841,13 @@ def _write_config_locked(service: Any, patch: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(patch, dict) or not patch:
         raise ValueError("empty patch")
 
+    for path in patch:
+        # v54: the maintainer's RP ID and origin decide which passkeys the
+        # daemon accepts, and every environment principal can call this
+        # route; they are set in config.yaml on the daemon host only.
+        folded = str(path).strip().casefold()
+        if folded == "coordination.maintainer" or folded.startswith("coordination.maintainer."):
+            raise ValueError("config_protected")
     coerced: dict[str, Any] = {}
     for path, raw in patch.items():
         knob = _KNOB_BY_PATH.get(path)
