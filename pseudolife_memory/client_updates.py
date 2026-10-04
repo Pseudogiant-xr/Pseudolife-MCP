@@ -697,9 +697,9 @@ def update_plugin(repo: Path | None = None) -> dict:
 # Claude Code 2.1.287 reports a marketplace it could not refresh with exit 1
 # and `Failed to update marketplace(s): Failed to refresh marketplace '<name>':
 # ...` on stderr behind a cross mark (U+2718), measured 2026-10-04 in a
-# sandboxed CLAUDE_CONFIG_DIR. The line counts without the exit code, and
-# without its mark, which a non-UTF-8 console decodes as something else.
-_MARKETPLACE_FAILED = ("Failed to update marketplace", "Failed to refresh marketplace")
+# sandboxed CLAUDE_CONFIG_DIR. The line counts without the exit code, and is
+# found past its mark, which a cp1252 console decodes as other characters.
+_MARKETPLACE_FAILED = re.compile(r"Failed to (?:update|refresh) marketplace")
 MARKETPLACE_HTTPS = "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"
 
 
@@ -707,10 +707,10 @@ def _marketplace_failure(code: int, out: str) -> str | None:
     """The CLI's failure line for a marketplace update that did not refresh
     the clone, else None."""
     lines = [line.strip() for line in out.splitlines() if line.strip()]
-    flagged = next((line for line in lines
-                    if line.startswith("\u2718") or line.startswith(_MARKETPLACE_FAILED)), None)
-    if flagged is not None:
-        return flagged.lstrip("\u2718").strip()
+    for line in lines:
+        found = _MARKETPLACE_FAILED.search(line)
+        if found:
+            return line[found.start():]
     if code == 0:
         return None
     return lines[-1] if lines else f"exit {code}"

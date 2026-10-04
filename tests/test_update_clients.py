@@ -969,8 +969,13 @@ HOST_KEY_FAILURE = (
     "fatal: Could not read from remote repository.\n")
 
 
-@pytest.mark.parametrize("answer", [(1, HOST_KEY_FAILURE), (0, HOST_KEY_FAILURE)],
-                         ids=["exit-1", "exit-0-with-failure-line"])
+# run_cli decodes with the locale codec: on a cp1252 Windows console Node's
+# UTF-8 cross mark arrives as three other characters ahead of the line.
+GARBLED_HOST_KEY_FAILURE = HOST_KEY_FAILURE.encode("utf-8").decode("cp1252", errors="replace")
+
+
+@pytest.mark.parametrize("answer", [(1, HOST_KEY_FAILURE), (0, HOST_KEY_FAILURE), (0, GARBLED_HOST_KEY_FAILURE)],
+                         ids=["exit-1", "exit-0-with-failure-line", "exit-0-with-garbled-mark"])
 def test_a_failed_marketplace_update_never_reads_as_current(cli, tmp_path, answer):
     """2026-10-04 on the homelab box: the marketplace update failed (no
     github.com host key for root), the clone stayed at the previous release,
@@ -986,6 +991,17 @@ def test_a_failed_marketplace_update_never_reads_as_current(cli, tmp_path, answe
     assert "known_hosts" in result["detail"] and "fingerprint" in result["detail"]
     assert "claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git" in result["detail"]
     assert not any(c[:2] == ["plugin", "update"] for c in _claude_calls(cli))
+
+
+def test_a_marketplace_update_that_timed_out_is_named(cli, tmp_path):
+    """A hung clone stopped at run_cli's timeout carries no CLI line; the
+    reason run_cli gives is quoted instead, with the generic remedy."""
+    _plugin_fixture(cli, tmp_path, differ=False)
+    cli.marketplace_update = (uc.TIMED_OUT, "TimeoutExpired: Command 'claude' timed out after 600 seconds")
+    result = uc.update_plugin(ROOT)
+    assert result["state"] == "failed", result
+    assert "timed out after 600 seconds" in result["detail"]
+    assert "run claude plugin marketplace update pseudolife-mcp" in result["detail"]
 
 
 def test_a_failed_marketplace_update_fails_the_ladder(cli, tmp_path, capsys):
