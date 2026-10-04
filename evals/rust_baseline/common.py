@@ -90,7 +90,9 @@ def lease_gate(board_checked_at=None, *, offline_resource_checked_at=None):
                             capture_output=True, text=True, timeout=30)
     try:
         report = json.loads(result.stdout)
-        local_free = report["local"]["state"] == "free"
+        # The CLI reports an absent lock as null and confirms freedom through
+        # exit zero and held=false; a fresh hosted runner has no lock file yet.
+        local_free = report["local"]["state"] in (None, "free")
         board_available = report["board"]["available"] is True
         held = report["held"] is not False
     except (ValueError, KeyError, TypeError):
