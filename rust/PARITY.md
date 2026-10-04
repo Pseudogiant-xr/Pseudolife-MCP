@@ -7,7 +7,8 @@ Recount at this pin: 38 MCP tools, 72 ConsoleRoutes registrations plus the
 separate POST /api/pair route, eight hook endpoints, 15 coordination actions
 and 28 CLI modes. The original 26-mode checklist remains the phase 2 scope;
 `maintainer` and `test-login` were added upstream and stay deferred outside Tier A. The current Console is v3 at /ui/; /ui/next/ is absent.
-No production Rust surface has been accepted. `ported` requires the brief's
+Overall Phase 1 acceptance remains pending. Named retirements and scoped
+substitutions below do not close the full surface. `ported` requires the brief's
 wire, differential and measurement gates; `deferred` is unfinished;
 `retired-by-decision` requires a recorded maintainer decision. The SDK preflight
 retirement below names the maintainer's 2026-10-05 decision.
@@ -24,7 +25,7 @@ inventory and still require runtime schema/transcript evidence.
 
 ## Parity rows
 
-BASE and RULES record the completed phase 0 instruments and measurements; historical evidence from PR #540 retains its original pin. Phase 0b evidence review and all ten CI checks passed at 9a62ed02, as recorded in PORT-STATE.md; subsequent PR updates require fresh review and current-merge-ref CI. All production behavior rows remain deferred. The SDK preflight retirement is authorized by the 2026-10-05 phase 2 decision; other unfinished behavior remains deferred. `P` means real process/wire eligible nodes; `I` means Python internals requiring additive wire cases or Rust unit equivalents; `A` means artifact/static contract. Paths below are repository-relative.
+BASE and RULES record the completed phase 0 instruments and measurements; historical evidence from PR #540 retains its original pin. Phase 0b evidence review and all ten CI checks passed at 9a62ed02, as recorded in PORT-STATE.md; subsequent PR updates require fresh review and current-merge-ref CI. Broader production behavior rows remain deferred; named retirements and scoped substitutions are explicit. The SDK preflight retirement is authorized by the 2026-10-05 phase 2 decision; other unfinished behavior remains deferred. `P` means real process/wire eligible nodes; `I` means Python internals requiring additive wire cases or Rust unit equivalents; `A` means artifact/static contract. Paths below are repository-relative.
 
 | Row | Phase | Behavior to preserve and Python source | Existing test pool and boundary | Status |
 |---|---:|---|---|---|
@@ -34,9 +35,9 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 | MCP-TIER | 1/3 | Principal-scoped list filtering, 12h TTL/precedence, cumulative 9/24/38 visibility, hidden calls accepted, list_changed. `toolset_tiers.py`, `mcp_server.py` | `test_shim.py` notification nodes P; `test_toolset_tiers.py`, `test_mcp_server.py` I; add 38-tool differential schema/argument/error corpus | deferred |
 | SHIM-LIFECYCLE | 1 | Canonical origin validation, discovery/probe, local spawn/reuse, no-spawn waiting, ownership, child exit and recovery, version notices and gated client updates. `shim.py`, `daemon_url.py`, `runtimes.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py`, `test_connection_loss_recovery.py`, `test_shim_runtimes.py` mixed; `test_client_environment.py`, `test_credentials.py`, `test_version_handshake.py`, `test_update_offer.py` I/mixed | deferred |
 | SHIM-SDK-PREFLIGHT | 1 | Python-only MCP SDK import preflight is retired in the Rust candidate by the maintainer's 2026-10-05 phase 2 decision, section 1; no Rust SDK diagnostic counterpart. `PORTING.md` no-python-before-first-frame | `test_shim.py` SDK guard nodes remain Python oracle tests; the three manifest rows explicitly record the decision | retired-by-decision |
-| SHIM-DAEMON-LAUNCH | 1 | Explicit interpreter or JSON serve argv replaces Python `sys.executable`; missing configuration uses the unchanged no-spawn wait with a named explanation. `lifecycle.rs` | `nonboard_spawn_policy.rs`, `nonboard_startup.rs`; execution evidence pending, intended final status ported-with-substitution | deferred |
-| SHIM-UPDATE-SCHEDULING | 1 | Unattended loopback client updates start after the first successful stdout frame flush, using only the configured interpreter; manual version remedy precedes the update. `wire_json.rs`, `lifecycle.rs` | `wire_json.rs` callback ordering/failure tests, `nonboard_final_assertions.rs`, remote updater subprocess test; execution evidence pending, intended final status ported-with-substitution | deferred |
-| SHIM-WAKE-REASON | 1 | Rust char predicates replace Python Unicode 14 alnum/space tables in the bounded wake reason; repository claim tables remain pinned. `board/liveness.rs` | `board_ring_contract.rs`; execution evidence pending, intended final status ported-with-substitution | deferred |
+| SHIM-DAEMON-LAUNCH | 1 | Explicit interpreter or JSON serve argv replaces Python `sys.executable`; missing configuration uses the unchanged no-spawn wait with a named explanation. `lifecycle.rs` | `nonboard_spawn_policy.rs`, `nonboard_startup.rs`; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
+| SHIM-UPDATE-SCHEDULING | 1 | Unattended loopback client updates start after the first successful stdout frame flush, using only the configured interpreter; manual version remedy precedes the update. `wire_json.rs`, `lifecycle.rs` | `wire_json.rs` callback ordering/failure tests, `nonboard_final_assertions.rs`, remote updater subprocess test; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
+| SHIM-WAKE-REASON | 1 | Rust char predicates replace Python Unicode 14 alnum/space tables in the bounded wake reason; repository claim tables remain pinned. `board/liveness.rs` | `board_ring_contract.rs`; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
 | SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | deferred |
 | SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | deferred |
 | CLI-DISPATCH | 1/2/3/4/5 | All 26 modes, aliases, unknown-mode exit 2, help bytes and runtime version metadata, light import/startup. `cli.py` and help fixture | `test_cli_dispatch.py`, `test_release_ux.py`, `test_client_install_ux.py` I/A; add argv subprocess records | deferred |
@@ -311,7 +312,7 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The Phase 1 pinned oracle contains 419 `tests/test_*.py` files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates, 1 public oracle CLI case and 180 internal cases. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. These component checks leave substitution acceptance and final-head CI, receipts, measurements and full suites pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The Phase 1 pinned oracle contains 419 `tests/test_*.py` files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates, 1 public oracle CLI case and 180 internal cases. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four current 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below; full suites and final integrated-head review/CI remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 The final Phase 1 judge always adds seven startup and six concurrent non-EOF candidate cells through `evals/rust_port/stdio_scenarios.py`. The pinned byte templates and platform-specific common-release order evidence are committed in `stdio_startup_contract.json` and `stdio_concurrent_orders.json`; each cell must bind the actual candidate executable. Separate response releases retain exact AB or BA order, while a common release permits only the observed final call pair orders. These additive checks do not establish final-head acceptance or replace the existing EOF corpus.
 
@@ -322,9 +323,10 @@ platforms with zero differences. Historical receipts are
 `evals/results/rust-port-phase1-rust-linux-2e628b27.json`; historical receipts
 retain their recorded identities. The independent code verdict is conditional
 approval after four original blockers were fixed. The first hosted attempt
-failed in new fixtures on both platforms and skipped parity; fixture-repair
-validation, final-head CI, required committed full suites and
-open PR #546 remain gates. No production row changes status.
+failed in new fixtures on both platforms and skipped parity. That attempt
+remains historical evidence; executing green CI at 690bb8ac is recorded below.
+Required committed full suites, final integrated-head CI and fresh review
+remain gates. PR #546 may remain open and stacked under the close-out brief.
 
 ## Health, HTTP bodies and logical transfer
 
@@ -512,7 +514,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 
 
 
-## Phase 1 paired measurement evidence
+## Historical phase 1 paired measurement evidence
 
 Paired measurements at `2e628b27` completed three repeats of ten samples per
 arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
@@ -531,9 +533,8 @@ contribute to sampled process-tree RSS. Receipts are
 | Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,644,008 / 16,644,008 | 0 / 0 | 0 / 0 |
 
 Floors are observed ranges of three identical-input repeat-block quantiles,
-not confidence intervals. Windows Rust is slower and uses more sampled RSS.
-Linux pooled latency is modestly lower; the p95 difference is within observed
-floors, so it does not establish a p95 improvement. RSS is a sampled lower
+not confidence intervals. Each arm retains its own source, runtime and
+descriptive floors. RSS is a sampled lower
 bound and can miss peaks between 5 ms polls. Size covers only the selected
 executable, excluding Python runtime/dependencies; it is not deployment footprint.
 The pair uses warm filesystem caches and an empty loopback fixture, with no
@@ -559,3 +560,20 @@ no Rust implementation or DDL change is claimed.
 | POST | /api/maintainer/repudiate | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
 | GET | /api/maintainer/sent | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
 | GET | /api/maintainer/inbox | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+
+## Current phase 1 close-out evidence
+
+Candidate `690bb8ac` has four complete schema-2 Windows/Linux Python self-replay
+and Rust stdio receipts, each with eight actual pytest passes, 32 executable-bound
+cells, all judge sections, zero retained-wire differences and verified cleanup.
+The separate five dispatcher passes per OS use Python; they establish no Rust
+CLI coverage. Current receipt links, before/after numeric tables and the four
+executed CI job durations are recorded in PORT-STATE.md. The SDK preflight
+remains retired-by-decision; daemon launch, update scheduling and wake-reason
+predicates are the named ported-with-substitution rows. MCP-WIRE, MCP-TIER,
+SHIM-LIFECYCLE, SHIM-AUTH and SHIM-BOARD retain their broader deferred acceptance status until g.
+The historical failed CI attempt and 2e receipts remain historical evidence.
+PR #546 may remain open and stacked under the close-out brief; the maintainer
+owns its merge. Candidate-routed committed WSL/box full suites, final integrated
+head CI and fresh independent whole changed-since-2e review remain pending;
+PR #560 stays draft.

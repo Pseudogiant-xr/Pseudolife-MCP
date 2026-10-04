@@ -242,8 +242,9 @@ The pending row now records targeted Windows/Linux evidence at frozen tree
 `a4ff3236eb349aaed427d80129513fe22cf0183f`; Windows retains its transient reset
 and successful reruns, and Linux passed all four checks (66 integration and
 5 wire cases). The 55 other internal functions remain outside this phase.
-Substitution acceptance, final-head CI, receipts, measurements and full suites
-remain pending.
+The inventory mapping's pending row remains subject to full acceptance g.
+Current runtime evidence and the register's scoped substitutions are recorded
+in PORT-STATE.md; final integrated-head CI, full suites and review remain pending.
 
 The final judge always executes the seven startup scenarios and six concurrent
 call cells in addition to the original nineteen candidate cells. Both scenario
@@ -264,7 +265,7 @@ export PATH="$PWD/../runtime/bin:$PATH"
 
 On Windows the interpreter is `../runtime/Scripts/python.exe`; prepend its
 directory to `PATH` so the existing lease CLI resolves from that runtime. Preparation
-creates a detached clone at `0b015f9279a778f996e71ee78510695e5fee7196`, overlays
+creates a detached clone at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, overlays
 only the current harness instruments, and installs that oracle editable without
 dependencies in a private runtime. It checks both source bytes and imported
 package/version identity. The candidate is the current absolute binary path;
@@ -284,9 +285,18 @@ or be reused by schema 2. Their recorded source identities remain unchanged.
 Keep one current complete combined receipt per replay kind (`python-self` or
 `rust-candidate`) and platform (Windows or Linux). Promote four fresh receipts
 only after checking their final instrument fingerprints, source/executable
-bindings, all eight actual node passes, zero differences and cleanup. Until
-those captures run, current close-out receipts and final acceptance are pending.
-Prune the eleven other superseded or failed Phase 1 receipts after promotion;
+bindings, all eight actual node passes, zero differences and cleanup.
+The four current 690bb8ac captures are
+`rust-port-phase1-python-windows-690bb8ac.json`,
+`rust-port-phase1-python-linux-690bb8ac.json`,
+`rust-port-phase1-rust-windows-690bb8ac.json` and
+`rust-port-phase1-rust-linux-690bb8ac.json` under `evals/results/`.
+They each record eight actual pytest passes, 32 bound candidate cells, zero
+retained-wire differences and verified complete private cleanup. The public
+files exactly use the committed export behavior, omitting raw stream cells.
+Separate `rust-port-phase1-cli-python-{windows,linux}-690bb8ac.json` receipts
+record five Python dispatcher passes per OS; they are not Rust CLI coverage.
+The eleven other superseded or failed Phase 1 receipts are pruned;
 they have no retained-history exception. The two named `2e628b27` files above
 are the sole historical exception. The contaminated Windows measurement smoke
 is removed; it is not measurement evidence.
@@ -295,6 +305,15 @@ Paired measurements of `2e628b27` completed three ten-sample repeats per arm
 on each platform, with SDK preflight included and all 120 launches clean.
 Receipts are `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
 `evals/results/rust-phase1-measurement-linux-2e628b27.json`. Peak RSS is sampled;
-executable size excludes runtime/dependency footprint. Windows Rust is slower
-and heavier in this fixture. Linux pooled latency is modestly lower, with the
-p95 difference within descriptive repeat floors. No general speed claim follows.
+executable size excludes runtime/dependency footprint. These two paired
+receipts are retained as the named before-retirement measurement history,
+with their original source/runtime bindings; they are not current evidence.
+
+Current post-retirement pairs are
+`evals/results/rust-phase1-measurement-windows-690bb8ac.json` and
+`evals/results/rust-phase1-measurement-linux-690bb8ac.json`, each three repeats
+of ten samples per arm with clean normal and separate RSS launches. PORT-STATE.md
+records their numeric quantiles and per-arm repeat floors. Historical r5 remains
+unchanged and noncomparable; its canonical LF Git blob SHA256 is
+`3d29fcba85601c4647208da7448e85245861af16671ec22a33c9393c43fac581`.
+Final full-suite, integrated-head CI and independent review gates remain pending.

@@ -49,9 +49,12 @@ require security review before publication.
 
 The executable accepts no mode, `shim`, or `channel`. It reads the Python shim's
 configuration environment and forwards daemon tool operations over fresh MCP
-HTTP sessions. `PSEUDOLIFE_MCP_PYTHON` selects the Python executable used for
-local daemon startup; otherwise it resolves `python` from PATH. The candidate
-is launched directly from the build output during evaluation.
+HTTP sessions. Local daemon startup requires an explicit
+`PSEUDOLIFE_MCP_PYTHON` interpreter
+or `PSEUDOLIFE_MCP_SERVE_COMMAND` JSON argv; absent both, the candidate uses
+the no-spawn wait and its named stderr explanation. The SDK preflight is
+retired by the 2026-10-05 decision; remote daemon URLs never launch Python.
+The candidate is launched directly from the build output during evaluation.
 
 Targeted Rust cells cover EOF ownership, session deletion, sanitized transport
 failures, cancellation, cursorless handshake caching, daemon recovery, exact
