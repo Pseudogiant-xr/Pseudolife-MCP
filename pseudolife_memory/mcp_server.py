@@ -472,7 +472,9 @@ def memory_store(
     text: Annotated[str, Field(
         description="The claim to remember.")],
     source: Annotated[str, Field(
-        description="Stable per-project/topic tag for later filtering.")] = "agent",
+        description="Stable per-project/topic tag for later filtering; "
+                    '"status" for in-flight progress notes (peers see '
+                    "those; the dream skips them).")] = "agent",
     tags: Annotated[list[str] | None, Field(
         description='Optional labels, e.g. ["decision", "blocker"].')] = None,
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
@@ -1670,11 +1672,12 @@ def memory_outcome(
     used_ids: Annotated[list[int] | str | None, Field(
         description="Ids of the search hits you actually used, e.g. "
                     "[1421, 903] — the relevance label only you can "
-                    "write. At most 50. Credits this session's searches "
-                    "from the last hour; log before that lapses.")] = None,
+                    "write. At most 50.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. The dream distils signals into next session's lessons.
+    ``used_ids`` credits this session's searches from the last hour;
+    log before that lapses.
 
     Returns ``{recorded, signal_id, task, outcome}``; needs Postgres.
     ``used_ids`` adds ``used_ids_recorded`` (credited),

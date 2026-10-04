@@ -83,7 +83,10 @@ READS = [("memory_agents", {"action": "list"}),
          ("memory_agents", {}),                       # action defaults to list
          ("memory_agents", {"action": "list", "project": "x"}),
          ("memory_message", {"action": "receive"}),
-         ("memory_message", {"action": "receive", "after": "abc:3"})]
+         ("memory_message", {"action": "receive", "after": "abc:3"}),
+         # history is read-only: no ack, no delivery, no wake.
+         ("memory_message", {"action": "history"}),
+         ("memory_message", {"action": "history", "peer": "a1", "limit": 5})]
 
 
 @pytest.mark.parametrize("tool,tool_input", WRITES, ids=lambda v: v if isinstance(v, str) else v.get("action"))
@@ -92,6 +95,7 @@ def test_a_subagents_board_write_is_denied_with_a_reason_it_can_act_on(tmp_path,
     assert reason.startswith("Pseudolife board: ")
     assert f"{tool}(action={tool_input['action']})" in reason
     assert "shares its parent session's board address" in reason
+    assert "memory_message receive without ack or history" in reason   # the reads it may make
     assert "Ask your parent session to update status, ack or send." in reason
 
 

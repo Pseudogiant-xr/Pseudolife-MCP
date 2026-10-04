@@ -1837,14 +1837,15 @@ parent's cursor). Nothing in the shim can tell the two apart: a subagent's
 status update overwrites the parent's, its `ack` marks the parent's mail read
 before the parent sees it, and its `send` goes out under the parent's name. So
 a subagent only reads the board (`memory_agents(action="list")`,
-`memory_message(action="receive")` without `ack`, `memory_search`), and the
+`memory_message(action="receive")` without `ack`, the read-only
+`memory_message(action="history")`, `memory_search`), and the
 orchestrating session owns the address. The served check-in says so, and
 since 2026-09-30 the Claude Code plugin enforces it: a PreToolUse hook
 (`plugin/hooks/subagent-board-guard.sh`) sees the `agent_id` Claude Code
 puts in a subagent's hook input, and never in the parent's, and denies that
 subagent's `memory_agents` update, claim and release and `memory_message`
-send and ack, whatever the server's name. Its list and receive pass, and so
-does every call the parent makes. The subagent reads the refusal as
+send and ack, whatever the server's name. Its list, receive and history
+pass, and so does every call the parent makes. The subagent reads the refusal as
 `PreToolUse:<tool> hook error: Pseudolife board: refused ...`, which tells
 it to ask the parent instead (probed on Claude Code 2.1.283: the child's
 update never reached the server, its list and the parent's update did). A
@@ -2419,7 +2420,7 @@ memory_policy:
 |---|---|
 | `none` | No policy text. The episode line and the briefing still serve; the cold-bank onboarding block, which names memory tools too, does not. |
 | `compact` (default) | The short core, ahead of the briefing, in the memory hook's output. Since 2026-09-25 it restates three of the full block's rules: search before stating a "current" version, number or benchmark; correct memory-vs-code drift on the spot; route verified external facts to `memory_world_set`. |
-| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), 7.5 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
+| `full_separate_hook` | The full memory-loop block ([`examples/CLAUDE.memory.md`](../../examples/CLAUDE.memory.md), about 8 KB), served by a separate SessionStart output (`GET /api/hook/memory-policy`), because the block plus the briefing exceed the 9,500-byte budget of one hook output. |
 
 The separate output is the plugin's third SessionStart handler
 (`session-start.sh memory-policy`, or `lifecycle.ps1 -Event MemoryPolicy` in
@@ -2943,8 +2944,8 @@ session expands its tier before calling a hidden tool. Defaults:
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
-Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
-`minimal`; clients that defer schemas client-side (Claude Code) barely
+Eager-loading clients (Claude Desktop) start at about 16 KB of manifest (9
+tools) on `minimal`; clients that defer schemas client-side (Claude Code) barely
 notice tiers at all.
 
 **Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes

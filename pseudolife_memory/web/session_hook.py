@@ -702,10 +702,16 @@ def hook_session_start(
 # (2026-09-26): speak only when memory changed since this session's last
 # note, meaning new lessons or other sessions' status notes; mail keeps its
 # coordination digest. This tail carries the old line's rules on those turns.
+# It names the source, not just the word: peers' change notes and the dream's
+# exclusion key on source="status", and Claude sessions following "a status
+# note" literally stored under the default "agent" (2026-10-04 review).
+# The used_ids credit window stays in memory_outcome's description: the
+# worst-case note is capped at 900 bytes (test_memory_changes_hook) and the
+# clause would have taken it to 945.
 MEMORY_CHANGES_TAIL = (
     "Memory loop: before a review, a design or work in a new area, recall "
     "(`memory_search` + `memory_lesson_search`) and compare memory against the "
-    "files; `memory_store` a status note when long work starts or ends; "
+    "files; `memory_store(source=\"status\")` when long work starts or ends; "
     "`memory_outcome` with `used_ids` when an outcome lands.")
 # A cursor is this daemon's wall clock with six decimals; the hook stores it
 # verbatim and sends it back as ``since``.
