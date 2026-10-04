@@ -171,6 +171,46 @@ def test_a_run_on_the_bank_owners_password_gets_one_line_naming_the_fix(
         assert SECRET not in lines[0]
 
 
+OWNER_SECRET = "owner-s3cr3t-never-shown"
+
+
+@pytest.mark.parametrize("extra,source", [
+    ({"PSEUDOLIFE_TEST_PG_PASSWORD": OWNER_SECRET}, "PSEUDOLIFE_TEST_PG_PASSWORD"),
+    ({"PSEUDOLIFE_TEST_PG_PASSWORD": OWNER_SECRET, "PSEUDOLIFE_TEST_PG_USER": "pseudolife"},
+     "PSEUDOLIFE_TEST_PG_PASSWORD"),
+    ("owner-login-file", "test-pg.env"),
+], ids=["override-as-owner", "override-naming-the-owner", "login-file-naming-the-owner"])
+def test_any_run_that_logs_in_as_the_bank_owner_gets_the_note(tmp_path, extra, source):
+    """The override beats the login file, so an exported owner password
+    silently undid the test login (review, 2026-10-04): the note follows
+    the resolved user, whatever the source, and names the source."""
+    login = _login_file(tmp_path)
+    if extra == "owner-login-file":
+        login.write_text("PSEUDOLIFE_TEST_PG_USER=pseudolife\n"
+                         f"PSEUDOLIFE_TEST_PG_PASSWORD={OWNER_SECRET}\n", encoding="utf-8")
+        extra = {}
+    env = {pg_defaults.LOGIN_FILE_ENV: str(login), **extra}
+    out = io.StringIO()
+    assert pg_defaults.full_run_password_preflight(
+        "targeted", env, tmp_path / "absent", probe=lambda env, path, **kwargs: "ok",
+        out=out) is None
+    lines = out.getvalue().splitlines()
+    assert len(lines) == 1, lines
+    assert "bank owner" in lines[0] and source in lines[0]
+    assert "pseudolife-mcp test-login create" in lines[0]
+    assert OWNER_SECRET not in lines[0]
+
+
+def test_an_override_naming_another_user_gets_no_note(tmp_path):
+    out = io.StringIO()
+    env = {pg_defaults.LOGIN_FILE_ENV: str(_login_file(tmp_path)),
+           "PSEUDOLIFE_TEST_PG_PASSWORD": OWNER_SECRET, "PSEUDOLIFE_TEST_PG_USER": "someone"}
+    assert pg_defaults.full_run_password_preflight(
+        "full", env, tmp_path / "absent", probe=lambda env, path, **kwargs: "ok",
+        out=out) is None
+    assert out.getvalue() == ""
+
+
 @pytest.mark.parametrize("answer", ["ok", "absent", "other"])
 def test_a_run_on_the_test_login_is_not_told_anything(tmp_path, answer):
     out = io.StringIO()
@@ -883,12 +923,18 @@ def test_probe_classifies_the_dev_server_answer(monkeypatch):
 
 
 @pytest.mark.parametrize("answer", ["ok", "absent", "other"])
-def test_preflight_lets_a_full_run_through_unless_the_server_rejects_it(tmp_path, answer):
+def test_preflight_lets_a_full_run_through_unless_the_server_rejects_it(
+        tmp_path, answer, no_login_file):
     out = io.StringIO()
     assert pg_defaults.full_run_password_preflight(
         "full", {}, tmp_path / "absent", probe=lambda env, env_file, **kwargs: answer,
         out=out) is None
-    assert out.getvalue() == ""
+    # The compose default logs in as the bank owner: a server that accepts
+    # it gets the owner note, like any other owner login.
+    if answer == "ok":
+        assert "as the bank owner (the compose default password" in out.getvalue()
+    else:
+        assert out.getvalue() == ""
 
 
 def test_preflight_refuses_a_full_run_the_server_rejects_and_names_the_fix(

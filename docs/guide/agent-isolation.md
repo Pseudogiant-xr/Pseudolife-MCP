@@ -76,10 +76,12 @@ The suite logs in with the first of:
    bank owner `pseudolife`);
 2. the test login file (`PSEUDOLIFE_TEST_PG_LOGIN_FILE`, else
    `~/.pseudolife-mcp/test-pg.env`);
-3. `POSTGRES_PASSWORD` from the checkout's `ops/.env`, as the bank owner.
-   This still works, and the run prints one line saying it is using the bank
-   owner's password and naming `test-login create`;
+3. `POSTGRES_PASSWORD` from the checkout's `ops/.env`, as the bank owner;
 4. the compose default password.
+
+Whichever of these logs it in as the bank owner (an exported
+`PSEUDOLIFE_TEST_PG_PASSWORD` beats the login file), the run still works and
+prints one line naming the source and `test-login create`.
 
 `PSEUDOLIFE_TEST_DATABASE_URL` (CI's form) still overrides all of it.
 `ops/wsl-suite.ps1` sends WSL runs the login file and, when there is one,

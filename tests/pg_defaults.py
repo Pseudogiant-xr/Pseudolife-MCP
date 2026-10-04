@@ -427,11 +427,12 @@ _LOGIN_FILE_FIX = (
     "re-applies the test login file's password (--rotate for a new one), or "
     "point PSEUDOLIFE_TEST_PG_LOGIN_FILE at the current file"
 )
-# One line for a run that logs in as the bank owner through ops/.env: it
-# works, and it is what the test login exists to retire (2026-10-04).
+# One line for a run that logs in as the bank owner, whatever the source (an
+# exported PSEUDOLIFE_TEST_PG_PASSWORD beats the login file): it works, and
+# it is what the test login exists to retire (2026-10-04).
 _OWNER_LOGIN_NOTE = (
     "note: this run logs in to the test Postgres at {where} as the bank owner "
-    "(POSTGRES_PASSWORD from ops/.env). Run `pseudolife-mcp test-login create` "
+    "({source}). Run `pseudolife-mcp test-login create` "
     "once on the daemon host: the suite then uses a test login that cannot "
     "open the bank, and checkouts no longer need ops/.env."
 )
@@ -454,7 +455,8 @@ def full_run_password_preflight(kind: str,
     ``PSEUDOLIFE_TEST_DATABASE_URL`` is used verbatim by the fixtures, so
     there is nothing to check either. The message names the password's
     source, never its value. A run the server accepts as the bank owner,
-    through ops/.env's ``POSTGRES_PASSWORD``, gets one line on ``out`` naming
+    whatever the source (an exported ``PSEUDOLIFE_TEST_PG_PASSWORD`` beats
+    the login file), gets one line on ``out`` naming that source and
     ``pseudolife-mcp test-login create``.
 
     Measured 2026-09-27, twice: a full suite from a fresh worktree whose
@@ -476,8 +478,13 @@ def full_run_password_preflight(kind: str,
     # briefly; a full run waits out libpq's timeout once, before ~20 minutes.
     answer = probe(env, env_file, quick=kind == "targeted")
     layer = login_source_kind(env, env_file)
-    if answer == "ok" and layer == "ops-env":
-        print(_OWNER_LOGIN_NOTE.format(where=DEV_HOST_PORT),
+    try:
+        as_owner = default_login(env, env_file)[0] == DEV_ROLE
+    except ValueError:
+        as_owner = False  # a file the parser refuses: the server refuses it too
+    if answer == "ok" and as_owner:
+        source = describe_pg_login_source(env, env_file, example_file)
+        print(_OWNER_LOGIN_NOTE.format(where=DEV_HOST_PORT, source=source),
               file=out or sys.stderr, flush=True)
     if answer != "auth":
         return None
