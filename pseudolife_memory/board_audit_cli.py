@@ -10,7 +10,9 @@ file, as one JSON object that carries counts, seconds and names only.
 
 All four reach the bank directly, through ``PSEUDOLIFE_MCP_DATABASE_URL`` or
 the lite tier's embedded instance, so they need the database owner's
-credentials, never a bearer token. ``export``, ``verify`` and ``stats`` read
+credentials, never a bearer token. With neither, they re-run inside the
+Docker tier's daemon container when it runs here (daemon_exec.py); files
+they name stay on this host. ``export``, ``verify`` and ``stats`` read
 one read-only snapshot; ``redact`` writes one transaction under the same
 locks as the daemon's own writes. All are safe to run beside a live daemon.
 There is deliberately no MCP tool and no REST route: the log holds message
@@ -33,6 +35,7 @@ import json
 import math
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -41,6 +44,7 @@ from pseudolife_memory.storage.coordination import (
     AUDIT_COLUMNS, CoordinationError, CoordinationStore, audit_events, audit_has_body_column, resolve_agent_id,
     verify_audit_chain,
 )
+from pseudolife_memory.daemon_exec import NoBank, no_bank_message, run_in_daemon
 
 EXIT_OK, EXIT_BROKEN, EXIT_ERROR = 0, 1, 2
 # The suite lock's durations file (tests/suite_lock.py writes it); the lock
@@ -108,8 +112,7 @@ def _bank(*, write=False):
     dsn, own_instance = _resolve_dsn(_default_data_dir(os.environ))
     try:
         if not dsn:
-            raise AuditCliError("no bank found: set PSEUDOLIFE_MCP_DATABASE_URL to the bank's "
-                                "database URL, or run where the lite tier's data dir holds one")
+            raise NoBank
         import psycopg
         conn = psycopg.connect(dsn, connect_timeout=5, autocommit=write)
         try:
@@ -443,7 +446,14 @@ def _stats(args) -> int:
         sources.update(events="bank", wakes="bank" if wakes is not None else "absent")
     report = compute_stats(events, wakes or [], durations, since=since, until=until, now=now,
                            version=__version__, sources=sources)
-    line = json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n"
+    _emit(args, json.dumps(report, ensure_ascii=True, separators=(",", ":")) + "\n")
+    return EXIT_OK
+
+
+def _emit(args, line: str) -> None:
+    """Where ``stats`` puts its one line: a new ``--out`` file, an
+    ``--append`` log, else stdout."""
+    target = Path(args.out) if args.out else None
     if target is not None:
         try:
             with target.open("x", encoding="utf-8", newline="\n") as stream:
@@ -462,6 +472,83 @@ def _stats(args) -> int:
             sys.stdout.flush()
         except OSError as exc:
             raise _write_error(None, exc) from None
+
+
+# --- no bank here: the daemon container ------------------------------------------
+
+def _forward(args) -> list[str]:
+    """The arguments the container needs. Files the command names (--out,
+    --append, --durations) are this host's: they are read and written here."""
+    out = [args.action]
+
+    def add(flag, value):
+        if value is not None:
+            out.extend([flag, str(value)])
+    if args.action == "export":
+        add("--project", args.project)
+        add("--task", args.task)
+        add("--agent", args.agent)
+    if args.action in ("export", "stats"):
+        add("--since", args.since)
+        add("--until", args.until)
+    if args.action == "verify" and args.expect_head is not None:
+        add("--expect-head", "%d:%s" % args.expect_head)
+    if args.action == "redact":
+        add("--message-id", args.message_id)
+        add("--reason", args.reason)
+    return out
+
+
+def _in_daemon(args) -> int:
+    """No bank in this shell: run the action in the daemon container when
+    it runs here (pseudolife_memory/daemon_exec.py); the container only
+    reads the bank."""
+    argv = _forward(args)
+    if args.action == "stats":
+        return _stats_in_daemon(args, argv)
+    if args.action == "export" and args.out:
+        target = Path(args.out)
+        try:
+            stream = target.open("xb")
+        except OSError as exc:
+            raise AuditCliError(f"cannot create {target}: {exc.strerror}") from None
+        # As the native export: a file cut short is removed, since verify
+        # cannot tell a log that lost its newest rows from a whole one.
+        try:
+            with stream:
+                ran = run_in_daemon("board-audit", argv, stdout=stream)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        if ran is None or ran.returncode != 0:
+            target.unlink()
+    else:
+        ran = run_in_daemon("board-audit", argv)
+    if ran is None:
+        raise AuditCliError(no_bank_message("board-audit"))
+    return ran.returncode
+
+
+def _stats_in_daemon(args, argv) -> int:
+    """This host's suite-lock durations go in on stdin; the report comes
+    back on stdout and is written here, as ``_stats`` writes it."""
+    path = Path(args.durations) if args.durations else _durations_path(os.environ)
+    try:
+        durations = path.open("rb")
+    except OSError:
+        durations = None    # the container then finds none either: "absent", as here
+    else:
+        argv = [*argv, "--durations", "/dev/stdin"]
+    try:
+        ran = run_in_daemon("board-audit", argv, stdin=durations, stdout=subprocess.PIPE)
+    finally:
+        if durations is not None:
+            durations.close()
+    if ran is None:
+        raise AuditCliError(no_bank_message("board-audit"))
+    if ran.returncode != 0:
+        return ran.returncode
+    _emit(args, ran.stdout.decode("utf-8", errors="replace"))
     return EXIT_OK
 
 
@@ -471,7 +558,8 @@ def main(argv=None) -> int:
         prog="pseudolife-mcp board-audit",
         description="Export, verify, redact or compute stats on the agent board's audit log "
                     "(operator-only). Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's "
-                    "bank. An export holds message bodies: keep it private.")
+                    "bank, else runs inside the pseudolife-mcp-daemon container when it "
+                    "runs here. An export holds message bodies: keep it private.")
     actions = parser.add_subparsers(dest="action", required=True)
     export = actions.add_parser("export", help="write events as JSON lines, oldest first")
     export.add_argument("--project", help="only events in this project")
@@ -513,8 +601,12 @@ def main(argv=None) -> int:
     except SystemExit as exc:
         return EXIT_ERROR if exc.code else EXIT_OK
     try:
-        return {"export": _export, "verify": _verify, "redact": _redact,
-                "stats": _stats}[args.action](args)
+        # Nested, so the handlers below also cover the run in the container.
+        try:
+            return {"export": _export, "verify": _verify, "redact": _redact,
+                    "stats": _stats}[args.action](args)
+        except NoBank:
+            return _in_daemon(args)
     except AuditCliError as exc:
         print(f"board-audit: {exc}", file=sys.stderr)
     except _ReaderClosed:

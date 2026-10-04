@@ -25,7 +25,8 @@ modes:
   channel        experimental Claude channel transport (requires explicit opt-in)
   coordination-recovery  offline mailbox recovery after a database restore
   board-audit    export, verify, redact or stats on the agent board's audit log
-                 (operator-only; reads PSEUDOLIFE_MCP_DATABASE_URL)
+                 (operator-only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs
+                 inside the pseudolife-mcp-daemon container)
   serve          run the HTTP memory daemon (deployment mode)
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
@@ -94,7 +95,8 @@ modes:
                  frees a stuck one, `lease delegate PROJECT AGENT` makes
                  one session the maintainer's delegate for a project
   maintainer    on the daemon host, the maintainer's passkeys (operator
-                 only; reads PSEUDOLIFE_MCP_DATABASE_URL):
+                 only; reads PSEUDOLIFE_MCP_DATABASE_URL, else runs inside
+                 the pseudolife-mcp-daemon container):
                  `maintainer setup` does it all, guided (the Console's
                  HTTPS name, the config, the first passkey); `enrol-code`
                  admits the first passkey from the Console,
