@@ -18,8 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`python -I`), reading only the runtime's own packages.
 - A runtime already labelled wrongly is harmless: the launcher picks a
   runtime by its sequence number, not its label, so it runs the right
-  code. The next update installs one correctly labelled runtime beside it
-  and removes the mislabelled one once nothing runs from it.
+  code. The first update run by a release with this fix installs one
+  correctly labelled runtime, and a later update removes the mislabelled
+  one once nothing runs from it.
+- The probe runs inside the updater doing the install, so an updater
+  without this fix still mislabels the runtime it installs, the fixed
+  release's included. Run `pseudolife-mcp update` from outside a
+  checkout to avoid that.
 
 ## [0.16.1] - 2026-10-04 — the update finishes on Linux, and the maintainer's delegate replaces the designated coordinator
 
