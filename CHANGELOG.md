@@ -42,7 +42,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`) must be the
   container's published port. A host whose suites use another server, such
   as a box whose bundled Postgres holds the live bank, is skipped with one
-  line. A refusal warns with the fix and leaves the deploy standing;
+  line. A match on the suite's default alone (no variable, no env file, as
+  for a deploy run as root) is not taken as the suite's word: a deploy at a
+  terminal asks once, default no, and one without a terminal skips with one
+  line naming `pseudolife-mcp test-login create`. A refusal warns with the
+  fix and leaves the deploy standing;
   `-NoTestLogin` / `--no-test-login` skips it. A release update never
   creates it.
 

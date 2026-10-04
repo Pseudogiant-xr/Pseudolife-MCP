@@ -1156,11 +1156,16 @@ def test_login(world, tmp_path, monkeypatch):
 
     monkeypatch.setattr(up, "create_test_login", create)
     monkeypatch.setenv(test_login_cli.FILE_ENV, str(tmp_path / "test-pg.env"))
-    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    # The suite says where it connects: the bundled server (an explicit
+    # setting; the suite's bare default only asks, see below).
+    monkeypatch.setenv("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433")
     monkeypatch.setattr(up, "home", lambda: tmp_path / "home")      # no suite env file
+    state = {"tty": False, "answer": "", "asked": []}
+    monkeypatch.setattr(up, "interactive", lambda: state["tty"])
+    monkeypatch.setattr(up, "ask", lambda q: state["asked"].append(q) or state["answer"])
     world.pg_running = "true"
     world.pg_published = "127.0.0.1:5433"
-    return {"seen": seen, "answer": answer, "file": tmp_path / "test-pg.env"}
+    return {"seen": seen, "answer": answer, "file": tmp_path / "test-pg.env", "term": state}
 
 
 def _pg_aware(world: World) -> None:
@@ -1393,9 +1398,11 @@ def test_a_suite_pointed_at_another_server_gets_no_test_login(world, clients, te
     assert "127.0.0.1:5434" in line and "5433" in line
 
 
-def test_the_box_suite_env_file_counts_as_where_the_suite_connects(world, clients, test_login, tmp_path):
+def test_the_box_suite_env_file_counts_as_where_the_suite_connects(world, clients, test_login, tmp_path,
+                                                                   monkeypatch):
     _pg_aware(world)
-    env = tmp_path / "home" / ".config" / "pseudolife-suite" / "env"
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    env =tmp_path / "home" / ".config" / "pseudolife-suite" / "env"
     env.parent.mkdir(parents=True)
     env.write_text("# suite settings\nexport PSEUDOLIFE_TEST_PG_HOST_PORT='127.0.0.1:5434'\n"
                    "PSEUDOLIFE_TEST_PG_PASSWORD=x\n", encoding="utf-8")
@@ -1420,3 +1427,41 @@ def test_the_suite_on_the_bundled_port_by_any_loopback_name_gets_it(world, clien
     root, _ = _checkout(world, tmp_path)
     assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
     assert test_login["seen"] == [["create"]]
+
+
+
+# The box, measured by the delegate (2026-10-05): deploys run as root, which
+# has no suite env file, so the suite's bare default (127.0.0.1:5433) matched
+# the bundled container that holds the live bank. A default-only match is
+# unconfirmed: no login without a person saying so (maintainer decision).
+
+def test_a_root_deploy_without_the_suite_env_file_creates_no_test_login(world, clients, test_login,
+                                                                        tmp_path, monkeypatch, capsys):
+    _pg_aware(world)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [] and test_login["term"]["asked"] == []
+    [line] = [l for l in capsys.readouterr().out.splitlines() if "test login" in l]
+    assert "pseudolife-mcp test-login create" in line and "PSEUDOLIFE_TEST_PG_HOST_PORT" in line
+
+
+@pytest.mark.parametrize("answer,created", [("y", True), ("", False), ("n", False)])
+def test_at_a_terminal_a_default_only_match_is_asked_default_no(world, clients, test_login, tmp_path,
+                                                                 monkeypatch, answer, created):
+    _pg_aware(world)
+    monkeypatch.delenv("PSEUDOLIFE_TEST_PG_HOST_PORT", raising=False)
+    test_login["term"].update(tty=True, answer=answer)
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    [question] = test_login["term"]["asked"]
+    assert "[y/N]" in question and "bank" in question
+    assert test_login["seen"] == ([["create"]] if created else [])
+
+
+def test_an_explicit_suite_setting_decides_without_asking(world, clients, test_login, tmp_path):
+    _pg_aware(world)
+    test_login["term"].update(tty=True, answer="n")
+    root, _ = _checkout(world, tmp_path)
+    assert _run(["--checkout", str(root), "--no-backup", "--no-cache-prune"]) == 0
+    assert test_login["seen"] == [["create"]] and test_login["term"]["asked"] == []

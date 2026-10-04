@@ -146,6 +146,7 @@ def ask(question: str) -> str:
 _LOOPBACK = ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::")
 # tests/pg_defaults.py's default when PSEUDOLIFE_TEST_PG_HOST_PORT is unset.
 SUITE_DEFAULT_HOST_PORT = "127.0.0.1:5433"
+SUITE_DEFAULT_SOURCE = "the suite's default"
 
 
 def suite_env_file() -> Path:
@@ -170,7 +171,7 @@ def suite_test_server() -> tuple[str, str]:
         match = re.match(r"^\s*(?:export\s+)?PSEUDOLIFE_TEST_PG_HOST_PORT\s*=\s*(.*?)\s*$", line)
         if match and match.group(1).strip("'\""):
             return match.group(1).strip("'\""), str(path)
-    return SUITE_DEFAULT_HOST_PORT, "the suite's default"
+    return SUITE_DEFAULT_HOST_PORT, SUITE_DEFAULT_SOURCE
 
 
 def create_test_login(argv: list[str]) -> dict:
@@ -1032,6 +1033,18 @@ class Update:
             self.step(f"test login not created: this account's test suite uses the Postgres at {suite} "
                       f"({source}), not the bundled container ({bundled})")
             return
+        if source == SUITE_DEFAULT_SOURCE:
+            # Only the suite's bare default matched: nothing on this account
+            # says its suite uses this server, and where suites use another
+            # one (the box, deployed as root) the bundled server holds the
+            # live bank. A person decides; without one, nothing is created.
+            question = (f"This account's test suite would use the bundled Postgres ({suite}), which also holds "
+                        f"the bank. Give it its own login there, one that cannot open the bank? [y/N] ")
+            if self.o.as_json or not interactive() or ask(question) not in ("y", "yes"):
+                self.step(f"test login not created: nothing on this account says its test suite uses the "
+                          f"bundled Postgres (no PSEUDOLIFE_TEST_PG_HOST_PORT, no {suite_env_file()}); if it "
+                          f"does, run pseudolife-mcp test-login create")
+                return
         self.step(f"creating the test suite's own Postgres login ({path} is missing on this account; "
                   f"--no-test-login skips this)...")
         report = create_test_login(["create"])

@@ -85,7 +85,9 @@ for a password login that can create databases. A checkout deploy
 host deploys from a checkout: when this account has no login file, the
 bundled Postgres container runs on the host and this account's suite
 connects to it (a host whose suites use a separate test server, like one
-whose bundled Postgres holds the live bank, is skipped), never with `--rotate`
+whose bundled Postgres holds the live bank, is skipped; a match on the
+suite's default port alone asks at a terminal, default no, and otherwise
+skips), never with `--rotate`
 (`-NoTestLogin` / `--no-test-login` skips it). A release update
 (`pseudolife-mcp update`) never runs it: an end user's server gets no
 password login that can create databases.

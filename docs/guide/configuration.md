@@ -3340,7 +3340,10 @@ container runs here, and this account's suite connects to it (its
 `PSEUDOLIFE_TEST_PG_HOST_PORT`, else that variable in
 `~/.config/pseudolife-suite/env`, else `127.0.0.1:5433`, is the container's
 published port; a host whose suites use another server is skipped with one
-line). It never passes `--rotate` (`-NoTestLogin` / `--no-test-login` skips
+line). When only the suite's default matched (no variable, no env file, as
+for a deploy run as root), it asks once at a terminal, default no, and
+without one skips with one line naming `test-login create`. It never passes
+`--rotate` (`-NoTestLogin` / `--no-test-login` skips
 it); a refusal only warns, with the fix. A release
 update (`pseudolife-mcp update`) never does. A bank restore keeps the bank closed
 (`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it,
