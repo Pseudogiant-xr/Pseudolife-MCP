@@ -23,16 +23,26 @@ pip install -e .[dev]
 
 Tests need a Postgres to talk to. Easiest is the bundled stack's instance
 (`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`) — the suite
-finds it at `127.0.0.1:5433` on its own, reading the role password from
-`ops/.env` (`POSTGRES_PASSWORD`; `PSEUDOLIFE_TEST_PG_PASSWORD` overrides it).
+finds it at `127.0.0.1:5433` on its own. It logs in with the first of:
+`PSEUDOLIFE_TEST_PG_PASSWORD` (as `PSEUDOLIFE_TEST_PG_USER`, else the bank
+owner); the **test login file** `~/.pseudolife-mcp/test-pg.env`
+(`PSEUDOLIFE_TEST_PG_LOGIN_FILE` moves it); `POSTGRES_PASSWORD` from
+`ops/.env`, as the bank owner; the compose default. Create the test login
+once with `pseudolife-mcp test-login create` on the daemon host (the
+installer does it on a fresh install): it is a role that creates and drops
+its own databases and cannot connect to the bank, so no checkout needs
+`ops/.env`, which holds the bank owner's password. A run that still logs in
+through `ops/.env` prints one line saying so. See
+[agent isolation](docs/guide/agent-isolation.md).
 A server that answers but rejects the credentials makes the PG-backed tests
 **error**, not skip — only an absent server skips them — so a rotated
 password can never produce a green run by accident. A full run checks this
 before it queues for the suite lock and refuses to start, naming where the
-rejected password came from and the fix: copy `ops/.env` from the main
-checkout into the worktree's `ops/`, or export `PSEUDOLIFE_TEST_PG_PASSWORD`
-(or correct it, since it overrides `ops/.env`). A targeted run prints one
-warning line and starts. The check is skipped when
+rejected password came from and the fix: create the test login (or re-run
+`test-login create`, which re-applies the file's password), or export
+`PSEUDOLIFE_TEST_PG_USER` and `PSEUDOLIFE_TEST_PG_PASSWORD` (or correct the
+latter, since it overrides the file). A targeted run prints one warning line
+and starts. The check is skipped when
 `PSEUDOLIFE_TEST_DATABASE_URL` is set, in xdist workers, and with
 `PSEUDOLIFE_SUITE_LOCK=off`.
 

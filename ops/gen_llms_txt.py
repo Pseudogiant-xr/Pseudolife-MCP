@@ -70,6 +70,9 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/tunnels.md",
      "Guided ChatGPT Secure MCP Tunnel setup: private keys, resumable account "
      "steps, read-only cloud verification, updates and optional autostart"),
+    ("docs/guide/agent-isolation.md",
+     "The test suite's own Postgres login that cannot open the bank, and "
+     "running agent sessions under a separate account"),
 ]
 
 
