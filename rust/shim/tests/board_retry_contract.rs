@@ -7,7 +7,7 @@ use std::time::Duration;
 fn fast(runtime: &pseudolife_stdio::lifecycle::Runtime, home: &Home, setting: &str) -> Options {
     let mut options = options(runtime, home, setting);
     options.timing.startup = Duration::from_millis(60);
-    options.timing.probe = Duration::from_millis(40);
+    // Keep the production probe deadline: client setup is inside that budget.
     options.timing.retry_attempt = Duration::from_millis(300);
     options.timing.retry_delays = [Duration::from_millis(40); 6];
     options
@@ -252,7 +252,7 @@ async fn board_retry_cancelled_attach_waits_out_attachment_busy() {
     fixture.answer(
         "attach",
         Answer::json(200, json!({"generation":1,"pending_count":0}))
-            .delayed(Duration::from_millis(90)),
+            .delayed(Duration::from_millis(350)),
     );
     fixture.answer(
         "attach",

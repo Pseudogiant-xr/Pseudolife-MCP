@@ -21,7 +21,7 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | — | Preliminary Rust judges and scoped internal equivalents have targeted evidence on both platforms; frozen validation, review corrections and final phase gates remain open; no Rust acceptance claimed |
+| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Frozen 2e628b27 checks and strict judges pass on both platforms; all 125 scoped equivalents have evidence. Paired measurements are recorded; required full suites and final-head CI remain pending; no Rust acceptance claimed |
 | 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -42,7 +42,7 @@ No production Rust surface has been accepted.
   captured on WSL2, while production runs in a Linux container. Shim and CLI
   captures run on Windows and Linux. Every receipt records its platform and uses anonymous host
   labels with hardware/software details.
-- Existing tests and conftest stay immutable; candidate routing uses the external
+- Existing files under `tests/`, including `tests/conftest.py`, stay immutable; candidate routing uses the external
   pytest plugin and the concrete nodes in phase1-test-buckets.json only.
 - The old Console was replaced by Console v3 on master, with /ui/next/ removed.
   Other proposed simplifications remain open and are not implemented by the port.
@@ -83,39 +83,98 @@ No production Rust surface has been accepted.
 
 ## Resume
 
-Phase 1 implementation uses the `0b015f92` oracle and the stacked phase 0b
-branch described above. Python self-comparison and control proofs have passed
-on Windows and Linux in disposable environments; their summaries are
-`evals/results/rust-port-phase1-windows-ci-r1.json` and
-`evals/results/rust-port-phase1-linux-ci-r3.json`. These are oracle/instrument
-proofs, not Rust acceptance. Preliminary Rust comparisons pass with zero
-differences in `evals/results/rust-port-phase1-rust-windows-r3.json` and
-`evals/results/rust-port-phase1-rust-linux-r1.json`; their eight public
-subprocess tests pass on each platform and cleanup is verified. The historical
-and Phase 1 inventory audits pass separately. The integrated harness/audit
-selection passed 202 tests after the mixed-suite routing addition; the separate
-historical and Phase 1 audit selection passed 42 tests. The explicit mixed-suite
-routing mode passes eight focused checks and keeps every unmapped Python
-assertion active. Existing tracked test files remain unchanged.
+Phase 1 uses Python 0.16.0/schema 53 at `0b015f9279a778f996e71ee78510695e5fee7196`
+and the stacked phase 0b branch above. PR #546 remains open and unmerged;
+PR #560 remains a draft. All production behavior rows remain deferred.
 
-The guarded non-Board candidate passes 108 Windows and 104 Linux targeted tests;
-its selected Python SDK capability check is preserved before daemon traffic.
-Board completion passes 74 Windows and 75 Linux targeted tests. The final
-non-Board assertion selection passes 33 tests on each platform, including
-configured shim/channel instructions for ready and unready Board adapters.
-The manifest records mappings for all 125 scoped internal assertions;
-mapping coverage does not establish acceptance. Four additional
-public file-claim preparation/recovery tests pass on each platform, including
-Git-child timeout and cancellation cleanup. Windows doorbell validation passes
-35 targeted tests: 26 completion tests, three immutable tests and six native
-helper tests, including job-failure fallback. Linux validation passes all
-29 targeted tests, including the repaired ENOEXEC shell-fallback assertion
-and ELF/shebang execution with PID=SID=PGID. Both platforms report zero owned
-processes after fixture cleanup. These targeted results do not
-replace frozen whole-candidate validation, and all Phase 1 acceptance rows
-remain deferred.
-Final frozen Rust comparisons on both platforms, measurements, committed
-full-suite validation and independent whole-branch review remain open.
-Phase 1 parity rows stay deferred until phase 0b is merged and the
-required judges pass. Subsequent PR updates require fresh review and
-current-merge-ref CI.
+Frozen candidate `2e628b27226ac28344d3218f679ff2c2de99422e`
+(tree `6ee4ecde802fefa88f5bc64f3aeebe4c41289f91`) passes Rust 1.94
+fmt, all-target check, clippy and release build on both platforms. Windows
+nextest passes 280/280 and Linux 262/262, with no skipped tests. The combined
+harness/inventory selection passes 214 tests; the Phase 1 audit accounts for
+408 files, 13 routed process nodes and 26 CLI modes with no missing surfaces.
+Of the routed nodes, eight public stdio cases select Rust; five historical CLI
+nodes remain separately accounted for. All 125 scoped internal assertions name
+Rust targets with Windows/Linux evidence; 56 internal functions remain outside
+this phase. These overlapping selections are not summed into a coverage count.
+Existing files under `tests/`, including `tests/conftest.py`, remain unchanged
+relative to the merged master base.
+
+The strict frozen Rust judges pass eight public subprocess tests on each
+platform with zero retained-wire differences and verified cleanup:
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json`. Each covers both
+protocol eras on fresh guarded banks, EOF observations and fault cells.
+Real public-process identity passes; wrong-protocol and duplicate-key controls
+reject their named defects under `stdio-raw-compared`. The six stdio mutation
+controls and seven generic HTTP proxy controls reject their intended defects;
+the fresh-bank generic identity proxy passes with zero mutations/differences.
+Generic Python controls establish judge policy, not Rust daemon parity.
+The only wire allowances remain named source-newline spans and the observed
+final EOF error order set. Earlier receipts retain their original candidate
+and oracle identities and are not relabeled as current acceptance.
+
+The initial independent whole-branch review of `4d31fd56` found four blockers.
+A fresh independent review of `2e628b27` verified their fixes and approved the
+code conditional on the remaining acceptance gates. The selected Python SDK
+preflight remains preserved before daemon traffic; its startup cost belongs
+in the measurements. No maintainer retirement decision is implemented.
+
+The first hosted Rust workflow attempt at `2e628b27` failed in new fixtures:
+Linux ran 171/262 (169 passed, two Board retry failures); Windows ran 230/280
+(227 passed, three updater-fixture failures). Parity jobs were skipped.
+The original two-helper repairs have conditional independent code approval.
+The final fixture adjustment requires fresh review and completion evidence;
+final-head CI remains pending. The failed
+attempt remains evidence and is not replaced by the local passing counts.
+
+Candidate-routed committed
+full-suite receipts on the authorized WSL/box paths, green final-head CI,
+validation of any integrated fixture repairs and the #546 merge dependency
+remain open. No Phase 1 parity row flips on inventory, component coverage or
+these frozen judge receipts alone. Subsequent substantive PR updates require
+fresh review of changed source and current-merge-ref CI.
+
+The first two-helper validation passed Windows but failed one Linux case:
+`board_retry_cancelled_attach_waits_out_attachment_busy` observed one attach
+call instead of three. A controlled startup-before-attach schedule reproduced
+that failure with the old 90 ms reply. Changing only that NEW fixture reply to
+350 ms, beyond the existing 300 ms retry-attempt deadline, produced the required
+one register, three attach and one detach while preserving the assertions.
+The final Windows PATH-only target passes 23/23 with fmt/check/clippy exit 0.
+Final Linux also passes 23/23 with fmt/check/clippy exit 0. Both final
+controllers completed; cleanup verified zero owned processes on both platforms
+at approximately 00:32:40Z (Windows) and 00:32:42Z (Linux). The earlier explicit absolute-selector updater
+selection passed three cases on each platform. Fresh review of the final
+fixture adjustment, committed full suites and final-head CI remain gates;
+no green hosted CI or Phase 1 acceptance is claimed.
+
+## Phase 1 paired measurement evidence
+
+Paired measurements at `2e628b27` completed three repeats of ten samples per
+arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
+The real Python SDK preflight remains inside Rust startup; its descendants
+contribute to sampled process-tree RSS. Receipts are
+`evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`.
+
+| Platform | Metric | Python p50 / p95 | Rust p50 / p95 | Python floor p50 / p95 | Rust floor p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| Windows | First stdout frame, ms | 811.794 / 852.468 | 871.665 / 903.501 | 8.382 / 26.310 | 12.934 / 15.408 |
+| Windows | Sampled peak tree RSS, bytes | 87,924,736 / 91,459,584 | 100,642,816 / 100,904,960 | 143,360 / 4,829,184 | 131,072 / 24,576 |
+| Windows | Executable file, bytes | 274,712 / 274,712 | 13,487,616 / 13,487,616 | 0 / 0 | 0 / 0 |
+| Linux | First stdout frame, ms | 704.398 / 724.289 | 686.487 / 699.918 | 2.012 / 113.563 | 6.224 / 33.229 |
+| Linux | Sampled peak tree RSS, bytes | 73,633,792 / 73,879,552 | 74,027,008 / 74,166,272 | 53,248 / 135,168 | 57,344 / 36,864 |
+| Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,644,008 / 16,644,008 | 0 / 0 | 0 / 0 |
+
+Floors are observed ranges of three identical-input repeat-block quantiles,
+not confidence intervals. Windows Rust is slower and uses more sampled RSS.
+Linux pooled latency is modestly lower; the p95 difference is within observed
+floors, so it does not establish a p95 improvement. RSS is a sampled lower
+bound and can miss peaks between 5 ms polls. Size covers only the selected
+executable, excluding Python runtime/dependencies; it is not deployment footprint.
+The pair uses warm filesystem caches and an empty loopback fixture, with no
+PostgreSQL, models, daemon spawn or coordination. Desktop activity is uncontrolled.
+Historical r5 uses a different timing/RSS boundary and cannot substitute for
+this pair. These source-bound measurements establish no general speed claim
+or Phase 1 acceptance.

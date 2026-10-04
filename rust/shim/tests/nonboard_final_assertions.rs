@@ -16,9 +16,11 @@ use std::{
 };
 
 fn python() -> PathBuf {
-    std::env::var_os("PSEUDOLIFE_MCP_PYTHON")
+    let selected = std::env::var_os("PSEUDOLIFE_MCP_PYTHON")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "python".into())
+        .unwrap_or_else(|| "python".into());
+    // Resolve before the disposable child clears PATH and changes directory.
+    which::which(selected).expect("selected Python runtime for the disposable fixture")
 }
 fn health() -> Value {
     json!({"status":"ok","auth":false,"version":"99.0.0","updates":{"unattended_clients":true}})

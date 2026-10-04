@@ -10,7 +10,7 @@ wire, differential and measurement gates; `deferred` is unfinished;
 `retired-by-decision` requires a recorded maintainer decision. No retirement
 has been authorized.
 
-Existing test files are immutable. On 2026-10-03 the maintainer selected an
+Existing files under `tests/`, including `tests/conftest.py`, are immutable. On 2026-10-03 the maintainer selected an
 external pytest plugin instead of modifying `tests/conftest.py`. The test pools
 below are an inventory, not a claim that whole files can target Rust. The
 executable manifest must enumerate actual selected nodes, fail closed for
@@ -303,7 +303,18 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases. All 125 scoped internal cases name Rust equivalents with targeted Windows and Linux evidence; 56 internal cases remain outside this phase's scope. Completed mappings do not establish frozen whole-candidate parity, whose acceptance gates remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases. All 125 scoped internal cases name Rust equivalents with targeted Windows and Linux evidence; 56 internal cases remain outside this phase's scope. Completed mappings establish scoped assertion coverage; Phase 1 acceptance gates remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+
+Frozen candidate `2e628b27` passes 280 Windows and 262 Linux Rust tests,
+214 combined harness/audit tests, and strict eight-node stdio judges on both
+platforms with zero differences. Current receipts are
+`evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json`; historical receipts
+retain their recorded identities. The independent code verdict is conditional
+approval after four original blockers were fixed. The first hosted attempt
+failed in new fixtures on both platforms and skipped parity; fixture-repair
+validation, final-head CI, required committed full suites and
+open PR #546 remain gates. No production row changes status.
 
 ## Health, HTTP bodies and logical transfer
 
@@ -482,3 +493,33 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_WSL_DISTRO` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1` |
 | `PSEUDOLIFE_WSL_SUITE_SOURCE` | `ops/wsl-suite.ps1` |
 | `_PSEUDOLIFE_PRODUCTION_DB` | `pseudolife_memory/storage/schema.py` |
+
+## Phase 1 paired measurement evidence
+
+Paired measurements at `2e628b27` completed three repeats of ten samples per
+arm on each platform. All 120 timing/RSS launches per platform exited cleanly.
+The real Python SDK preflight remains inside Rust startup; its descendants
+contribute to sampled process-tree RSS. Receipts are
+`evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`.
+
+| Platform | Metric | Python p50 / p95 | Rust p50 / p95 | Python floor p50 / p95 | Rust floor p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| Windows | First stdout frame, ms | 811.794 / 852.468 | 871.665 / 903.501 | 8.382 / 26.310 | 12.934 / 15.408 |
+| Windows | Sampled peak tree RSS, bytes | 87,924,736 / 91,459,584 | 100,642,816 / 100,904,960 | 143,360 / 4,829,184 | 131,072 / 24,576 |
+| Windows | Executable file, bytes | 274,712 / 274,712 | 13,487,616 / 13,487,616 | 0 / 0 | 0 / 0 |
+| Linux | First stdout frame, ms | 704.398 / 724.289 | 686.487 / 699.918 | 2.012 / 113.563 | 6.224 / 33.229 |
+| Linux | Sampled peak tree RSS, bytes | 73,633,792 / 73,879,552 | 74,027,008 / 74,166,272 | 53,248 / 135,168 | 57,344 / 36,864 |
+| Linux | Executable file, bytes | 21,662,864 / 21,662,864 | 16,644,008 / 16,644,008 | 0 / 0 | 0 / 0 |
+
+Floors are observed ranges of three identical-input repeat-block quantiles,
+not confidence intervals. Windows Rust is slower and uses more sampled RSS.
+Linux pooled latency is modestly lower; the p95 difference is within observed
+floors, so it does not establish a p95 improvement. RSS is a sampled lower
+bound and can miss peaks between 5 ms polls. Size covers only the selected
+executable, excluding Python runtime/dependencies; it is not deployment footprint.
+The pair uses warm filesystem caches and an empty loopback fixture, with no
+PostgreSQL, models, daemon spawn or coordination. Desktop activity is uncontrolled.
+Historical r5 uses a different timing/RSS boundary and cannot substitute for
+this pair. These source-bound measurements establish no general speed claim
+or Phase 1 acceptance.

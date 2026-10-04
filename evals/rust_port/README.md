@@ -205,8 +205,9 @@ pass through the shared boundary observation wrapper and generic comparator.
 The identity proxy seeds a fresh bank and must make zero mutations and produce
 zero differences. HTTP raw bodies remain retained but ignored until Phase 3.
 Deterministic test embeddings establish protocol and storage execution, not
-model or retrieval parity. Per-function Rust equivalents remain pending until
-their own executable evidence passes.
+model or retrieval parity. All 125 scoped Phase 1 internal functions now name Rust targets with
+Windows/Linux assertion evidence; 56 internal functions remain outside this
+phase. This mapping completion does not establish final acceptance.
 
 After merging newer Python source, keep the oracle at its recorded pin. Prepare
 an isolated oracle from the current checkout-installed dependency runtime:
@@ -226,3 +227,25 @@ dependencies in a private runtime. It checks both source bytes and imported
 package/version identity. The candidate is the current absolute binary path;
 the immutable test functions execute from the pinned source. Dependency paths
 come from the caller's installed `[dev,lite]` runtime. The destination must be new.
+
+
+Frozen Phase 1 candidate `2e628b27` has passing Windows/Linux strict judge
+receipts at `evals/results/rust-port-phase1-rust-windows-2e628b27.json` and
+`evals/results/rust-port-phase1-rust-linux-2e628b27.json`: eight public stdio
+nodes each, zero differences and verified process cleanup. Real identity,
+wrong-protocol and duplicate-key subprocess controls are checked for their
+named outcomes; generic Python controls verify comparison policy rather than
+Rust daemon parity. Rust checks pass 280 Windows / 262 Linux tests; the combined
+harness/audit selection passes 214 tests. Existing files under `tests/`,
+including `tests/conftest.py`, retain their assertions. The first hosted attempt
+failed in new fixtures and skipped parity; fixture repairs, final-head CI,
+required committed full suites and the open #546 dependency
+remain pending. All Phase 1 acceptance rows remain deferred.
+
+Paired measurements of `2e628b27` completed three ten-sample repeats per arm
+on each platform, with SDK preflight included and all 120 launches clean.
+Receipts are `evals/results/rust-phase1-measurement-windows-2e628b27.json` and
+`evals/results/rust-phase1-measurement-linux-2e628b27.json`. Peak RSS is sampled;
+executable size excludes runtime/dependency footprint. Windows Rust is slower
+and heavier in this fixture. Linux pooled latency is modestly lower, with the
+p95 difference within descriptive repeat floors. No general speed claim follows.
