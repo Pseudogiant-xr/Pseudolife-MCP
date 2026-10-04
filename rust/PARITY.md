@@ -1,10 +1,12 @@
 # Behaviour parity register
 
-Phase 1 oracle: Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
+Phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
+Historical phase 1 receipts retain Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
 Historical phase 0b receipts retain Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`.
-Recount at this pin: 38 MCP tools, 62 ConsoleRoutes registrations plus the
+Recount at this pin: 38 MCP tools, 72 ConsoleRoutes registrations plus the
 separate POST /api/pair route, eight hook endpoints, 15 coordination actions
-and 26 CLI modes. The current Console is v3 at /ui/; /ui/next/ is absent.
+and 28 CLI modes. The original 26-mode checklist remains the phase 2 scope;
+`maintainer` and `test-login` were added upstream and stay deferred outside Tier A. The current Console is v3 at /ui/; /ui/next/ is absent.
 No production Rust surface has been accepted. `ported` requires the brief's
 wire, differential and measurement gates; `deferred` is unfinished;
 `retired-by-decision` requires a recorded maintainer decision. No retirement
@@ -105,7 +107,7 @@ Phase 5: artifact/static guards can run unchanged because they inspect files; di
 4. Existing transport recovery creates Python `_proxy` programs and inspects internal error classifier/cancellation routines; preserve them unchanged and add binary fault server cases for redirect refusal, lost response, token rotation, event-size limits and no uncertain-write replay.
 5. HLC wall clock, ordering, equal-score ties, stale thresholds and retention need deterministic time-aware cases; normalizing away these fields destroys coverage. Compare state transitions, not merely final counts.
 6. ML defaults and optional fallback behavior are public contracts: ONNX runtime alone does not port sentence-transformers preprocessing/tokenizer/pooling/Dense/Normalize or cross-encoder inference. Record unsupported module/fallback behavior explicitly; no permission to retire torch fallback, NLI, Chroma, `.pt` or embedded/channel mode is implied; Console v3 replaces the old frontend by upstream product change at this pin.
-7. Public PII/evidence guards may need additive new guard tests outside immutable existing files; the port performs no DDL, table addition or column repurposing. The phase-start schema is 53; upstream schema bumps follow the seven-place checklist and a newly recorded phase pin.
+7. Public PII/evidence guards may need additive new guard tests outside immutable existing files; the port performs no DDL, table addition or column repurposing. The historical phase-start schema is 53; the close-out pin is schema 54; upstream schema bumps follow the seven-place checklist and a newly recorded phase pin.
 8. Ranking comparisons have side effects (access counts/read logs, retention boosts, metadata); use independent identical seeded banks and operation order, and include mutation/read observability rather than resetting state after every request indiscriminately.
 
 
@@ -298,12 +300,14 @@ Source: `pseudolife_memory/cli.py`. The default is `shim`; help aliases are `-h`
 | pair | 2 | deferred | No accepted Rust evidence |
 | expose | 2 | deferred | No accepted Rust evidence |
 | move | 2 | deferred | No accepted Rust evidence |
+| maintainer | 4/5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_maintainer_cli.py`, `test_maintainer_setup.py` |
+| test-login | 5 | deferred | Added upstream at the schema-54 close-out pin; outside the original 26-mode phase 2 scope; `test_test_login_cli.py` |
 
 ## Test-file buckets
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The Phase 1 pinned oracle contains 408 `tests/test_*.py` files: 68 oracle, 2 candidate and 338 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases. All 125 scoped internal cases name Rust equivalents with targeted Windows and Linux evidence; 56 internal cases remain outside this phase's scope. Completed mappings establish scoped assertion coverage; Phase 1 acceptance gates remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The Phase 1 pinned oracle contains 419 `tests/test_*.py` files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates and 181 internal cases. All 125 scoped internal cases name Rust equivalents with targeted Windows and Linux evidence; 56 internal cases remain outside this phase's scope. Completed mappings establish scoped assertion coverage; Phase 1 acceptance gates remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 Frozen candidate `2e628b27` passes 280 Windows and 262 Linux Rust tests,
 214 combined harness/audit tests, and strict eight-node stdio judges on both
@@ -336,35 +340,37 @@ One row per dataclass in utils/config.py, including nested band specs and aggreg
 
 | Section | Declared fields | Phase | Status |
 |---|---:|---|---|
-| `EmbeddingConfig` | 9; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `MIRASBandSpec` | 6; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `MIRASConfig` | 2; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `ReferenceConfig` | 5; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `NLIConfig` | 4; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `BM25Config` | 7; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `RerankerConfig` | 5; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `DreamConfig` | 41; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `DeepDreamConfig` | 49; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `CortexConfig` | 11; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `LessonsConfig` | 11; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `RetrievalLogConfig` | 3; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `CompactionConfig` | 3; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `MetaFilterConfig` | 1; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `GraphInsightConfig` | 8; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `TracesConfig` | 2; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `ScopesConfig` | 2; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `RecallConfig` | 12; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `SearchConfig` | 6; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `McpConfig` | 2; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `MemoryConfig` | 29; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `ContextConfig` | 1; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `TimeConfig` | 1; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `StorageConfig` | 1; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `MemoryPolicyConfig` | 2; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `WakeConfig` | 5; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `CoordinationConfig` | 6; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `UpdatesConfig` | 4; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
-| `AppConfig` | 8; see `contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `EmbeddingConfig` | 9; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `MIRASBandSpec` | 6; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `MIRASConfig` | 2; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `ReferenceConfig` | 5; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `NLIConfig` | 4; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `BM25Config` | 7; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `RerankerConfig` | 5; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `DreamConfig` | 41; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `DeepDreamConfig` | 49; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `CortexConfig` | 11; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `LessonsConfig` | 11; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `RetrievalLogConfig` | 3; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `CompactionConfig` | 3; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `MetaFilterConfig` | 1; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `GraphInsightConfig` | 8; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `TracesConfig` | 2; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `ScopesConfig` | 2; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `RecallConfig` | 12; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `SearchConfig` | 6; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `McpConfig` | 2; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `MemoryConfig` | 29; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `ContextConfig` | 1; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `TimeConfig` | 1; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `StorageConfig` | 1; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `MemoryPolicyConfig` | 2; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `WakeConfig` | 6; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `CoordinationConfig` | 8; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `UpdatesConfig` | 4; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+| `AppConfig` | 8; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
+
+| `MaintainerConfig` | 3; see `phase1-contract-inventory.json` | 1/2/3/4/5 | deferred |
 
 ## Environment variable appendix
 
@@ -397,7 +403,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_CLAUDE_SHIM_PORT` | `ops/shim_autostart.py` |
 | `PSEUDOLIFE_CLAUDE_SHIM_PROMPT_FILE` | `ops/shim_autostart.py` |
 | `PSEUDOLIFE_CLAUDE_SHIM_PYTHON` | `ops/shim_autostart.py` |
-| `PSEUDOLIFE_CODEX_BIN` | `ops/setup-codex-coordination.py`, `pseudolife_memory/codex_doorbell.py`, `pseudolife_memory/shim.py` |
+| `PSEUDOLIFE_CODEX_BIN` | `ops/setup-codex-coordination.py`, `pseudolife_memory/client_updates.py`, `pseudolife_memory/codex_doorbell.py`, `pseudolife_memory/shim.py` |
 | `PSEUDOLIFE_CODEX_DOORBELL` | `ops/setup-codex-coordination.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/shim.py` |
 | `PSEUDOLIFE_CODEX_HOOK` | `ops/setup-codex-hooks.py`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board-guard.sh`, `plugin/hooks/subagent-board.sh` |
 | `PSEUDOLIFE_CODEX_SERVER_TOKEN` | `ops/setup-codex-coordination.py`, `pseudolife_memory/shim.py` |
@@ -409,11 +415,12 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_CODEX_SHIM_MODEL` | `ops/shim_autostart.py` |
 | `PSEUDOLIFE_CODEX_SHIM_PORT` | `ops/shim_autostart.py` |
 | `PSEUDOLIFE_CODEX_SHIM_PYTHON` | `ops/shim_autostart.py` |
+| `PSEUDOLIFE_DAEMON_EXEC` | `pseudolife_memory/daemon_exec.py` |
 | `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py` |
 | `PSEUDOLIFE_DESKTOP_TOKENS_SOURCE` | `ops/install.ps1`, `ops/install.sh` |
 | `PSEUDOLIFE_DESKTOP_TOKEN_SOURCE` | `ops/install.ps1`, `ops/install.sh` |
 | `PSEUDOLIFE_DIGEST_DIR` | `plugin/hooks/coordination-prompt.sh`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board.sh`, `pseudolife_memory/briefing_cli.py`, `pseudolife_memory/coordination_identity.py`, `pseudolife_memory/wait_mail_cli.py` |
-| `PSEUDOLIFE_DOCKER` | `pseudolife_memory/update_cli.py` |
+| `PSEUDOLIFE_DOCKER` | `pseudolife_memory/daemon_exec.py`, `pseudolife_memory/update_cli.py` |
 | `PSEUDOLIFE_DREAM_API_KEY` | `ops/docker-compose.yml`, `ops/install.ps1`, `ops/install.sh`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/memory/dream.py`, `pseudolife_memory/memory/recall.py` |
 | `PSEUDOLIFE_DREAM_BASE_URL` | `ops/docker-compose.yml`, `ops/install-codex-shim-autostart.ps1`, `ops/install-codex-shim-autostart.sh`, `ops/install-shim-autostart.ps1`, `ops/install-shim-autostart.sh`, `ops/install.ps1`, `ops/install.sh`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/memory/dream.py`, `pseudolife_memory/memory/recall.py`, `pseudolife_memory/shim.py` |
 | `PSEUDOLIFE_DREAM_EXTRACTOR_MODE` | `ops/docker-compose.yml`, `ops/install-codex-shim-autostart.ps1`, `ops/install-codex-shim-autostart.sh`, `ops/install-shim-autostart.ps1`, `ops/install-shim-autostart.sh`, `ops/install.ps1`, `ops/install.sh`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/memory/dream.py` |
@@ -436,10 +443,10 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | `pseudolife_memory/writer_context.py` |
 | `PSEUDOLIFE_MALLOC_TRIM_SECONDS` | `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/utils/heap_trim.py` |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `pseudolife_memory/mcp_server.py` |
-| `PSEUDOLIFE_MCP_CONFIG` | `ops/dedup_cortex.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/web/config_io.py` |
+| `PSEUDOLIFE_MCP_CONFIG` | `ops/dedup_cortex.py`, `pseudolife_memory/maintainer_setup.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/web/config_io.py` |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `ops/client_credentials.py`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/remote-suite.ps1`, `ops/setup-codex-coordination.py`, `ops/setup-codex-hooks.py`, `ops/wsl-suite.ps1`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board.sh`, `pseudolife_memory/client_config.py`, `pseudolife_memory/codex_connection.py`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/daemon_url.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/runtimes.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_cli.py`, `pseudolife_memory/tunnel_runtime.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py` |
-| `PSEUDOLIFE_MCP_DATABASE_URL` | `ops/backfill_edge_confidence.py`, `ops/dedup_cortex.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/measure_reverify_population.py`, `ops/migrate_drop_age.py`, `ops/migrate_embeddings.py`, `ops/restore_from_pt.py`, `ops/retire_by_writer.py`, `pseudolife_memory/backup_cli.py`, `pseudolife_memory/board_audit_cli.py`, `pseudolife_memory/cli.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/coordination_recovery.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/invite_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/service.py`, `pseudolife_memory/storage/embedded_pg.py`, `pseudolife_memory/storage/schema.py`, `pseudolife_memory/transfer_cli.py` |
-| `PSEUDOLIFE_MCP_DATA_DIR` | `ops/Dockerfile.daemon`, `ops/dedup_cortex.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/restore_from_pt.py`, `pseudolife_memory/backup_cli.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/storage/embedded_pg.py`, `pseudolife_memory/transfer_cli.py`, `pseudolife_memory/update_cli.py` |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | `ops/backfill_edge_confidence.py`, `ops/dedup_cortex.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/measure_reverify_population.py`, `ops/migrate_drop_age.py`, `ops/migrate_embeddings.py`, `ops/restore_from_pt.py`, `ops/retire_by_writer.py`, `pseudolife_memory/backup_cli.py`, `pseudolife_memory/board_audit_cli.py`, `pseudolife_memory/cli.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/coordination_recovery.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/daemon_exec.py`, `pseudolife_memory/invite_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/maintainer_cli.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/service.py`, `pseudolife_memory/storage/embedded_pg.py`, `pseudolife_memory/storage/schema.py`, `pseudolife_memory/test_login_cli.py`, `pseudolife_memory/transfer_cli.py` |
+| `PSEUDOLIFE_MCP_DATA_DIR` | `ops/Dockerfile.daemon`, `ops/dedup_cortex.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/restore_from_pt.py`, `pseudolife_memory/backup_cli.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py`, `pseudolife_memory/maintainer_setup.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/storage/embedded_pg.py`, `pseudolife_memory/transfer_cli.py`, `pseudolife_memory/update_cli.py` |
 | `PSEUDOLIFE_MCP_HOST` | `ops/Dockerfile.daemon`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py` |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/setup-codex-coordination.py`, `pseudolife_memory/client_updates.py`, `pseudolife_memory/codex_connection.py`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/runtimes.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_runtime.py` |
 | `PSEUDOLIFE_MCP_PORT` | `ops/Dockerfile.daemon`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py`, `pseudolife_memory/invite_cli.py` |
@@ -447,7 +454,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_MCP_SHARED_HOST` | `pseudolife_memory/shim.py` |
 | `PSEUDOLIFE_MCP_STORAGE` | `pseudolife_memory/mcp_server.py`, `pseudolife_memory/storage/embedded_pg.py` |
 | `PSEUDOLIFE_MCP_TIER_MAP` | `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/invite_cli.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/principals.py`, `pseudolife_memory/toolset_tiers.py` |
-| `PSEUDOLIFE_MCP_TOKEN` | `ops/client_credentials.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/remote-suite.ps1`, `ops/setup-codex-coordination.py`, `ops/setup-codex-hooks.py`, `ops/wsl-suite.ps1`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board.sh`, `pseudolife_memory/board_status.py`, `pseudolife_memory/briefing_cli.py`, `pseudolife_memory/cli.py`, `pseudolife_memory/client_config.py`, `pseudolife_memory/codex_connection.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/credentials.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/episode_cli.py`, `pseudolife_memory/expose_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/principal_store.py`, `pseudolife_memory/principals.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_cli.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py`, `pseudolife_memory/web/api.py` |
+| `PSEUDOLIFE_MCP_TOKEN` | `ops/client_credentials.py`, `ops/docker-compose.yml`, `ops/install-autostart.ps1`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/remote-suite.ps1`, `ops/setup-codex-coordination.py`, `ops/setup-codex-hooks.py`, `ops/wsl-suite.ps1`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board.sh`, `pseudolife_memory/board_status.py`, `pseudolife_memory/briefing_cli.py`, `pseudolife_memory/cli.py`, `pseudolife_memory/client_config.py`, `pseudolife_memory/codex_connection.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/credentials.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/episode_cli.py`, `pseudolife_memory/expose_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/maintainer_setup.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/principal_store.py`, `pseudolife_memory/principals.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_cli.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py`, `pseudolife_memory/web/api.py` |
 | `PSEUDOLIFE_MCP_TOKENS` | `ops/client_credentials.py`, `ops/docker-compose.yml`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/daemon.py`, `pseudolife_memory/expose_cli.py`, `pseudolife_memory/invite_cli.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/principal_store.py`, `pseudolife_memory/principals.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py`, `pseudolife_memory/utils/config.py`, `pseudolife_memory/web/routes.py`, `pseudolife_memory/writer_context.py` |
 | `PSEUDOLIFE_MCP_TOKEN_FILE` | `ops/client_credentials.py`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/setup-codex-coordination.py`, `ops/setup-codex-hooks.py`, `ops/wsl-suite.ps1`, `plugin/hooks/coordination-start.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-end.sh`, `plugin/hooks/session-start.sh`, `plugin/hooks/stop-wake.sh`, `plugin/hooks/subagent-board.sh`, `pseudolife_memory/cli.py`, `pseudolife_memory/client_config.py`, `pseudolife_memory/codex_connection.py`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/credentials.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/lease_cli.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/storage/coordination.py`, `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_cli.py`, `pseudolife_memory/tunnel_runtime.py`, `pseudolife_memory/unattended_update.py`, `pseudolife_memory/update_cli.py` |
 | `PSEUDOLIFE_MCP_TOOLSET` | `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/move_cli.py`, `pseudolife_memory/toolset_tiers.py` |
@@ -463,7 +470,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_SESSION_RESUME_SECONDS` | `pseudolife_memory/service.py` |
 | `PSEUDOLIFE_SHIM_CLAUDE_CLI` | `ops/shim_autostart.py` |
 | `PSEUDOLIFE_SHIM_CODEX_CLI` | `ops/shim_autostart.py` |
-| `PSEUDOLIFE_SHIM_LAUNCHER` | `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-start.sh`, `pseudolife_memory/runtimes.py` |
+| `PSEUDOLIFE_SHIM_LAUNCHER` | `plugin/hooks/coordination-prompt.sh`, `plugin/hooks/lifecycle.ps1`, `plugin/hooks/session-start.sh`, `pseudolife_memory/runtimes.py` |
 | `PSEUDOLIFE_SHIM_PYTHON` | `ops/install.ps1`, `ops/install.sh` |
 | `PSEUDOLIFE_SHIM_RUNTIMES` | `pseudolife_memory/runtimes.py` |
 | `PSEUDOLIFE_SHIM_USER_BIN` | `pseudolife_memory/runtimes.py` |
@@ -486,13 +493,18 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_TEST_CUDA` | `ops/wsl-suite.ps1` |
 | `PSEUDOLIFE_TEST_DATABASE_URL` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/storage/schema.py` |
 | `PSEUDOLIFE_TEST_EMBEDDER` | `ops/ci_tests.sh`, `ops/wsl-suite.ps1` |
-| `PSEUDOLIFE_TEST_PG_HOST_PORT` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
-| `PSEUDOLIFE_TEST_PG_PASSWORD` | `ops/wsl-suite.ps1` |
+| `PSEUDOLIFE_TEST_PG_HOST_PORT` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh`, `pseudolife_memory/update_cli.py` |
+| `PSEUDOLIFE_TEST_PG_LOGIN_FILE` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh`, `pseudolife_memory/test_login_cli.py` |
+| `PSEUDOLIFE_TEST_PG_PASSWORD` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `pseudolife_memory/test_login_cli.py` |
+| `PSEUDOLIFE_TEST_PG_USER` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `pseudolife_memory/test_login_cli.py` |
 | `PSEUDOLIFE_TUNNEL_LAUNCH_PROFILE` | `pseudolife_memory/tunnel_bridge.py`, `pseudolife_memory/tunnel_runtime.py` |
 | `PSEUDOLIFE_WRITER_ID` | `ops/docker-compose.yml`, `ops/install.ps1`, `ops/install.sh`, `ops/register_claude_desktop.py`, `ops/setup-codex-coordination.py`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/connect_cli.py`, `pseudolife_memory/doctor_cli.py`, `pseudolife_memory/mcp_server.py`, `pseudolife_memory/service.py`, `pseudolife_memory/shim.py`, `pseudolife_memory/tunnel_runtime.py`, `pseudolife_memory/writer_context.py` |
 | `PSEUDOLIFE_WSL_DISTRO` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1` |
 | `PSEUDOLIFE_WSL_SUITE_SOURCE` | `ops/wsl-suite.ps1` |
 | `_PSEUDOLIFE_PRODUCTION_DB` | `pseudolife_memory/storage/schema.py` |
+
+
+
 
 ## Phase 1 paired measurement evidence
 
@@ -523,3 +535,21 @@ PostgreSQL, models, daemon spawn or coordination. Desktop activity is uncontroll
 Historical r5 uses a different timing/RSS boundary and cannot substitute for
 this pair. These source-bound measurements establish no general speed claim
 or Phase 1 acceptance.
+
+## Schema 54 upstream surfaces
+
+These daemon-side maintainer registrations were added at the close-out oracle pin;
+no Rust implementation or DDL change is claimed.
+
+| Method | Route | Phase | Status | Oracle tests |
+|---|---|---|---|---|
+| GET | /api/maintainer | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/challenge | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/enrol | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/send | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/role | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/cancel | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/revoke | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| POST | /api/maintainer/repudiate | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| GET | /api/maintainer/sent | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |
+| GET | /api/maintainer/inbox | 4 | deferred | `test_maintainer_web.py`, `test_maintainer_messages.py`, `test_maintainer_roles.py` |

@@ -39,8 +39,8 @@ def prepare(destination):
         "import json; from evals.rust_port.provenance import runtime_metadata; "
         "from pathlib import Path; print(json.dumps(runtime_metadata(Path.cwd())))"], cwd=source, text=True)
     metadata = json.loads(probe)
-    if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != "0.16.0" \
-            or metadata["distribution_versions"]["pseudolife-mcp"] != "0.16.0":
+    if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != "0.16.1" \
+            or metadata["distribution_versions"]["pseudolife-mcp"] != "0.16.1":
         raise RuntimeError("prepared oracle runtime does not import the pinned checkout/version")
     return {"source": str(source), "python": str(python), **checked, "runtime": metadata}
 

@@ -16,11 +16,11 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "0b015f9279a778f996e71ee78510695e5fee7196"
+    assert inventory.PHASE1_ORACLE == "f709abb54f7912ae9cd767998d0926ca33df4bcd"
     result = inventory.validate_phase1()
-    assert result["test_files"] == 408
+    assert result["test_files"] == 419
     assert result["candidate_nodes"] == 13
-    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 338}
+    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 349}
 
 
 def test_legacy_inventory_retains_its_real_pin(inventory):
@@ -31,7 +31,7 @@ def test_legacy_inventory_retains_its_real_pin(inventory):
     assert result["buckets"] == {"oracle": 68, "candidate": 1, "internal": 337}
 
 
-@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 408)])
+@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 419)])
 def test_newer_checkout_test_cannot_shift_either_pin(inventory, monkeypatch, tmp_path, phase1, count):
     newer = tmp_path / "test_newer_master_surface.py"
     newer.write_text("def test_newer():\n    pass\n", encoding="utf-8")
@@ -140,3 +140,14 @@ def test_phase1_rejects_missing_or_unverified_equivalents(inventory, monkeypatch
                         if path == "rust/phase1-test-buckets.json" else original(path))
     with pytest.raises(AssertionError, match=error):
         inventory.validate_phase1()
+
+
+@pytest.mark.parametrize("phase1", [False, True])
+def test_shared_register_rejects_names_absent_from_both_documented_pins(inventory, monkeypatch, phase1):
+    original = inventory.source
+    def unknown_reference(path):
+        text = original(path)
+        return text + "\n`test_unknown_oracle_reference.py`\n" if path == "rust/PARITY.md" else text
+    monkeypatch.setattr(inventory, "source", unknown_reference)
+    with pytest.raises(AssertionError, match="obsolete test reference: test_unknown_oracle_reference.py"):
+        inventory.validate(phase1=phase1)

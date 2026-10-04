@@ -10,10 +10,11 @@ import sys
 import time
 
 from .harness import capture_platform, write_new
-from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version
+from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version, source_metadata
 from .stdio import capture
 
-ORACLE_HEAD = "0b015f9279a778f996e71ee78510695e5fee7196"
+ORACLE_HEAD = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+ORACLE_SCHEMA = 54
 BEHAVIOR_TESTS = ("tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/test_shim_board_retry.py", "tests/test_version_handshake.py", "tests/test_update_offer.py",
     "tests/test_mcp_client_neutrality.py", "tests/test_mcp_stdio_errlog.py",
@@ -27,9 +28,10 @@ def require_phase1_source(root):
                             cwd=root, capture_output=True, timeout=10)
     untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard",
                                         "--", *checked_paths], cwd=root)
-    if result.returncode != 0 or untracked or schema_version(root / "pseudolife_memory/storage/schema.py") != 53:
+    if result.returncode != 0 or untracked or schema_version(root / "pseudolife_memory/storage/schema.py") != ORACLE_SCHEMA:
         raise RuntimeError("phase-1 pinned production source required")
-    return {"oracle_head": ORACLE_HEAD, "oracle_schema": 53,
+    return {**source_metadata(root, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_SCHEMA),
+            "oracle_head": ORACLE_HEAD, "oracle_schema": ORACLE_SCHEMA,
             "production_source_matches_pin": True, "behavior_test_sources_match_pin": True}
 
 

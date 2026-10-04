@@ -35,10 +35,10 @@ def _git(root, *arguments):
     return subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True, timeout=10)
 
 
-def source_metadata(root=ROOT):
+def source_metadata(root=ROOT, *, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_SCHEMA):
     head = _git(root, "rev-parse", "HEAD")
     difference = _git(root, "diff", "--quiet", HISTORICAL_HEAD, "--", *SOURCE_PATHS)
-    current_difference = _git(root, "diff", "--quiet", ORACLE_HEAD, "--", *SOURCE_PATHS)
+    current_difference = _git(root, "diff", "--quiet", oracle_head, "--", *SOURCE_PATHS)
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "--", *SOURCE_PATHS)
     if head.returncode or current_difference.returncode not in (0, 1) or untracked.returncode:
         raise RuntimeError("historical oracle source comparison unavailable")
@@ -56,7 +56,7 @@ def source_metadata(root=ROOT):
             "source_schema": schema_version(Path(root) / "pseudolife_memory/storage/schema.py"),
             "historical_oracle": {"source_head": HISTORICAL_HEAD, "source_schema": HISTORICAL_SCHEMA},
             "historical_source_comparison_available": difference.returncode in (0, 1),
-            "phase_oracle": {"source_head": ORACLE_HEAD, "source_schema": ORACLE_SCHEMA},
+            "phase_oracle": {"source_head": oracle_head, "source_schema": oracle_schema},
             "production_source_matches_phase_oracle": current_difference.returncode == 0 and not untracked.stdout.strip(),
             "production_source_matches_historical": difference.returncode == 0 and not untracked.stdout.strip(),
             "source_comparison_paths": list(SOURCE_PATHS)}

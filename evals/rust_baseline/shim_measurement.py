@@ -11,7 +11,7 @@ import time
 from .common import controls, distribution, memory_tree, percentile
 from .transport import Stdio
 
-ORACLE_HEAD = "0b015f9279a778f996e71ee78510695e5fee7196"
+ORACLE_HEAD = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
 
 
 def artifact_identity(path, expected=None):

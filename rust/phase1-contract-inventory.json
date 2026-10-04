@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "oracle_commit": "0b015f9279a778f996e71ee78510695e5fee7196",
-  "database_schema": 53,
+  "oracle_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+  "database_schema": 54,
   "config_sections": {
     "EmbeddingConfig": [
       "model_name",
@@ -284,6 +284,11 @@
       "active_seconds",
       "authority_per_sender_per_hour"
     ],
+    "MaintainerConfig": [
+      "rp_id",
+      "origin",
+      "maintainer_per_recipient_per_hour"
+    ],
     "CoordinationConfig": [
       "enabled",
       "awareness_limit",
@@ -291,7 +296,8 @@
       "daemon_notice_principals",
       "maintainer_principals",
       "audit_retention_days",
-      "wake"
+      "wake",
+      "maintainer"
     ],
     "UpdatesConfig": [
       "check_releases",
@@ -483,6 +489,9 @@
     "PSEUDOLIFE_CODEX_SHIM_PYTHON": [
       "ops/shim_autostart.py"
     ],
+    "PSEUDOLIFE_DAEMON_EXEC": [
+      "pseudolife_memory/daemon_exec.py"
+    ],
     "PSEUDOLIFE_DAEMON_MEM_LIMIT": [
       "ops/docker-compose.yml",
       "pseudolife_memory/compose/docker-compose.yml",
@@ -509,6 +518,7 @@
       "pseudolife_memory/wait_mail_cli.py"
     ],
     "PSEUDOLIFE_DOCKER": [
+      "pseudolife_memory/daemon_exec.py",
       "pseudolife_memory/update_cli.py"
     ],
     "PSEUDOLIFE_DREAM_API_KEY": [
@@ -661,6 +671,7 @@
     ],
     "PSEUDOLIFE_MCP_CONFIG": [
       "ops/dedup_cortex.py",
+      "pseudolife_memory/maintainer_setup.py",
       "pseudolife_memory/mcp_server.py",
       "pseudolife_memory/web/config_io.py"
     ],
@@ -708,13 +719,16 @@
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/coordination_recovery.py",
       "pseudolife_memory/daemon.py",
+      "pseudolife_memory/daemon_exec.py",
       "pseudolife_memory/invite_cli.py",
       "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/maintainer_cli.py",
       "pseudolife_memory/mcp_server.py",
       "pseudolife_memory/move_cli.py",
       "pseudolife_memory/service.py",
       "pseudolife_memory/storage/embedded_pg.py",
       "pseudolife_memory/storage/schema.py",
+      "pseudolife_memory/test_login_cli.py",
       "pseudolife_memory/transfer_cli.py"
     ],
     "PSEUDOLIFE_MCP_DATA_DIR": [
@@ -726,6 +740,7 @@
       "pseudolife_memory/backup_cli.py",
       "pseudolife_memory/compose/docker-compose.yml",
       "pseudolife_memory/daemon.py",
+      "pseudolife_memory/maintainer_setup.py",
       "pseudolife_memory/mcp_server.py",
       "pseudolife_memory/storage/embedded_pg.py",
       "pseudolife_memory/transfer_cli.py",
@@ -809,6 +824,7 @@
       "pseudolife_memory/episode_cli.py",
       "pseudolife_memory/expose_cli.py",
       "pseudolife_memory/lease_cli.py",
+      "pseudolife_memory/maintainer_setup.py",
       "pseudolife_memory/mcp_server.py",
       "pseudolife_memory/move_cli.py",
       "pseudolife_memory/principal_store.py",
@@ -1021,10 +1037,24 @@
     "PSEUDOLIFE_TEST_PG_HOST_PORT": [
       "ops/remote-suite.ps1",
       "ops/wsl-suite.ps1",
-      "ops/wsl-suite.sh"
+      "ops/wsl-suite.sh",
+      "pseudolife_memory/update_cli.py"
+    ],
+    "PSEUDOLIFE_TEST_PG_LOGIN_FILE": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh",
+      "pseudolife_memory/test_login_cli.py"
     ],
     "PSEUDOLIFE_TEST_PG_PASSWORD": [
-      "ops/wsl-suite.ps1"
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "pseudolife_memory/test_login_cli.py"
+    ],
+    "PSEUDOLIFE_TEST_PG_USER": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "pseudolife_memory/test_login_cli.py"
     ],
     "PSEUDOLIFE_TUNNEL_LAUNCH_PROFILE": [
       "pseudolife_memory/tunnel_bridge.py",
@@ -1453,6 +1483,46 @@
     },
     {
       "method": "GET",
+      "path": "/api/maintainer"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/challenge"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/enrol"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/send"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/role"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/revoke"
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintainer/repudiate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintainer/sent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintainer/inbox"
+    },
+    {
+      "method": "GET",
       "path": "/api/config"
     },
     {
@@ -1478,11 +1548,13 @@
     "import",
     "invite",
     "lease",
+    "maintainer",
     "move",
     "pair",
     "prompt-hook",
     "serve",
     "shim",
+    "test-login",
     "tunnel",
     "update",
     "version",

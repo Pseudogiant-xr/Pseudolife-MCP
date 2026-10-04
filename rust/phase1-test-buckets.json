@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "oracle_commit": "0b015f9279a778f996e71ee78510695e5fee7196",
-  "database_schema": 53,
+  "oracle_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+  "database_schema": 54,
   "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
   "counts": {
-    "internal": 338,
+    "internal": 349,
     "oracle": 68,
     "candidate": 2
   },
@@ -738,6 +738,12 @@
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
     },
     {
+      "path": "tests/test_daemon_exec.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
       "path": "tests/test_daemon_http.py",
       "bucket": "internal",
       "equivalent": "pending",
@@ -1270,6 +1276,12 @@
       "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
     },
     {
+      "path": "tests/test_installer_maintainer_setup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
       "path": "tests/test_installer_plugin.py",
       "bucket": "oracle",
       "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
@@ -1278,6 +1290,12 @@
       "path": "tests/test_installer_shim_upgrade.py",
       "bucket": "oracle",
       "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
+    },
+    {
+      "path": "tests/test_installer_test_login.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_invite_cli.py",
@@ -1463,6 +1481,48 @@
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_maintainer_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_messages.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_rendering.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_roles.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_setup.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_web.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
+    },
+    {
+      "path": "tests/test_maintainer_webauthn.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_mcp_client_neutrality.py",
@@ -2235,6 +2295,12 @@
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_test_login_cli.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Pinned Python implementation tests; no public process adapter mapped."
     },
     {
       "path": "tests/test_tool_annotations.py",
@@ -5444,7 +5510,7 @@
       "equivalent": "rust-unit:rust/shim/tests/nonboard_contract.rs::test_mcp_initialization_advertises_memory_workflow",
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "fa5483cd1dbfddb44ff0f6ead75de6b0a1ebf8537924f9deb32c3c520a7b00e8",
+      "source_sha256": "d32cf9a8c9fb4dcae9c7f130ec93118993b1a05f4bb7da6df9f9dcf05a3def89",
       "equivalence_evidence": {
         "status": "validated-targeted",
         "rust_tests": [
@@ -5462,25 +5528,25 @@
     },
     {
       "nodeid": "tests/test_mcp_client_neutrality.py::test_mcp_store_default_source_is_client_neutral",
-      "line": 36,
+      "line": 37,
       "bucket": "internal",
       "scope": "other-python-surface",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "fa5483cd1dbfddb44ff0f6ead75de6b0a1ebf8537924f9deb32c3c520a7b00e8"
+      "source_sha256": "d32cf9a8c9fb4dcae9c7f130ec93118993b1a05f4bb7da6df9f9dcf05a3def89"
     },
     {
       "nodeid": "tests/test_mcp_client_neutrality.py::test_public_package_metadata_is_client_neutral",
-      "line": 42,
+      "line": 43,
       "bucket": "internal",
       "scope": "other-python-surface",
       "reason": "Direct Python object/helper/source/SDK/ASGI implementation access; no replaceable public shim process launch.",
       "equivalent": null,
       "required_equivalent": null,
       "acceptance": "pending",
-      "source_sha256": "fa5483cd1dbfddb44ff0f6ead75de6b0a1ebf8537924f9deb32c3c520a7b00e8"
+      "source_sha256": "d32cf9a8c9fb4dcae9c7f130ec93118993b1a05f4bb7da6df9f9dcf05a3def89"
     },
     {
       "nodeid": "tests/test_mcp_stdio_errlog.py::test_conftest_imports_mcp_at_module_level",

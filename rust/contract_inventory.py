@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ORACLE = "3691f5cb75487d3fda54a6bde6fab35dcf32c681"
-PHASE1_ORACLE = "0b015f9279a778f996e71ee78510695e5fee7196"
+PHASE1_ORACLE = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
 
 
 def source(path: str) -> str:
@@ -107,7 +107,12 @@ def snapshot(*, oracle: str = ORACLE) -> dict:
                    for node in ast.parse(read("pseudolife_memory/coordination.py")).body
                    if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
                    and node.targets[0].id == "_PARAMETERS")
-    return {"schema": 1, "oracle_commit": oracle, "database_schema": 53,
+    schema = next(ast.literal_eval(node.value)
+                  for node in ast.parse(read("pseudolife_memory/storage/schema.py")).body
+                  if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name) and target.id == "SCHEMA_META_VERSION"
+                          for target in node.targets))
+    return {"schema": 1, "oracle_commit": oracle, "database_schema": schema,
             "config_sections": sections,
             "environment_variables": {key: sorted(value) for key, value in sorted(variables.items())},
             "tools": tools, "console_routes": routes, "cli_modes": sorted(modes),
@@ -260,8 +265,13 @@ def validate(*, phase1: bool = False) -> dict:
         assert row in checked_surface_rows, f"surface row outside status table: {row}"
     for mode in inventory["cli_modes"]:
         assert mode in checked_cli_modes, f"CLI mode outside status table: {mode}"
+    # The shared register names both documented oracle snapshots. Candidate
+    # and function ownership above remains checked against its own exact pin.
+    register_files = set(pinned_files)
+    if not phase1:
+        register_files.update(test_files_at_pin(oracle=PHASE1_ORACLE))
     for name in set(re.findall(r'`(?:tests/)?(test_[A-Za-z0-9_]+\.py)`', register)):
-        assert f"tests/{name}" in pinned_files, f"obsolete test reference: {name}"
+        assert f"tests/{name}" in register_files, f"obsolete test reference: {name}"
     return {"test_files": len(files), "buckets": counts, "candidate_nodes": len(selected),
             "config_sections": len(inventory["config_sections"]),
             "environment_variables": len(inventory["environment_variables"]),

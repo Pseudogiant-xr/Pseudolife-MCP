@@ -1,7 +1,9 @@
 # Rust port state
 
 The Python oracle for phase 1 is pinned to master
-`0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53).
+`f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
+The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
+existing receipts retain their original source identities.
 The historical phase 0b oracle remains
 `3691f5cb75487d3fda54a6bde6fab35dcf32c681` (0.15.0, schema 53);
 existing phase 0b receipts retain that source identity.
@@ -21,7 +23,7 @@ No production Rust surface has been accepted.
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | In progress; phase 0b must merge before parity rows can flip | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Frozen 2e628b27 checks and strict judges pass on both platforms; all 125 scoped equivalents have evidence. Paired measurements are recorded; required full suites and final-head CI remain pending; no Rust acceptance claimed |
+| 1: Stdio shim | In progress; master-forward inventory closed; acceptance gates pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Frozen 2e628b27 checks and strict judges pass on both platforms; all 125 scoped equivalents have evidence. Paired measurements are recorded; required full suites and final-head CI remain pending; no Rust acceptance claimed |
 | 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -83,7 +85,7 @@ No production Rust surface has been accepted.
 
 ## Resume
 
-Phase 1 uses Python 0.16.0/schema 53 at `0b015f9279a778f996e71ee78510695e5fee7196`
+Phase 1 close-out uses Python 0.16.1/schema 54 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`
 and the stacked phase 0b branch above. PR #546 remains open and unmerged;
 PR #560 remains a draft. All production behavior rows remain deferred.
 
@@ -130,8 +132,8 @@ attempt remains evidence and is not replaced by the local passing counts.
 
 Candidate-routed committed
 full-suite receipts on the authorized WSL/box paths, green final-head CI,
-validation of any integrated fixture repairs and the #546 merge dependency
-remain open. No Phase 1 parity row flips on inventory, component coverage or
+validation of any integrated fixture repairs
+remain open. The close-out brief permits #546 to remain open and stacked. No Phase 1 parity row flips on inventory, component coverage or
 these frozen judge receipts alone. Subsequent substantive PR updates require
 fresh review of changed source and current-merge-ref CI.
 
@@ -178,3 +180,22 @@ PostgreSQL, models, daemon spawn or coordination. Desktop activity is uncontroll
 Historical r5 uses a different timing/RSS boundary and cannot substitute for
 this pair. These source-bound measurements establish no general speed claim
 or Phase 1 acceptance.
+
+## Phase 2 close-out item a
+
+Merged actual `origin/master` at `f709abb54f7912ae9cd767998d0926ca33df4bcd` forward;
+only `CHANGELOG.md` conflicted and both entries were preserved. PR #546
+remains open and stacked, as the close-out brief permits; no upstream branch
+from phase 0b was merged or rewritten. The current inventory audit accounts for 419 test
+files (68 oracle, 2 candidate, 349 internal), 189 function mappings and 13
+routed process nodes. Its 28 CLI modes include upstream `maintainer` and
+`test-login`, deferred outside the original 26-mode phase 2 scope. Historical
+phase 0b manifests and all historical receipts retain their pins.
+
+Item a is complete: both inventory audits pass with no missing surfaces;
+the inventory/provenance selection passes 56 tests, including unknown-reference
+negative controls. Validation: `python rust/contract_inventory.py --phase1`,
+`python rust/contract_inventory.py` and the targeted inventory/provenance files.
+Next: apply the authorized
+retirements and substitutions in item b, then run item c; no compilation,
+full suite or receipt replay is claimed for this integration alone.
