@@ -739,7 +739,8 @@ def _marketplace_remedy(out: str) -> str:
     return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
             "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
             "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
-            f"{first}claude plugin marketplace add {MARKETPLACE_HTTPS}")
+            f"{first}claude plugin marketplace add {MARKETPLACE_HTTPS} (the README's Updating section has the "
+            "steps)")
 
 
 def _declared_marketplace() -> tuple[Path, object]:
@@ -772,7 +773,7 @@ def _install_from_clone(claude: str, plugins_dir: Path, record: dict, repo: Path
     if not (clone / ".claude-plugin" / "plugin.json").is_file():
         return {"state": "failed",
                 "detail": f"no marketplace clone at {clone}; run: claude plugin marketplace add "
-                          f"https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}
+                          f"{MARKETPLACE_HTTPS}"}
     if cache.is_dir() and not tree_differs(clone, cache):
         return {"state": f"current:{version}",
                 "detail": f"cache matches the marketplace clone (v{version})"}

@@ -3036,9 +3036,10 @@ its own and an update never replaces a folder a session is using:
   on a host with no github.com key in `known_hosts`. Add the key after
   checking its fingerprint against GitHub's published ones, or point the
   marketplace at HTTPS with
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
-  which replaces the existing entry's source (the installed plugin follows
-  it), then run the update again. Claude Code refuses that add while
+  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
+  (it replaces the existing entry's source, and the installed plugin
+  follows it), then run the update again; the README's Updating section
+  has the same steps. Claude Code refuses that add while
   `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
   with another source: change that entry's source to
   `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
