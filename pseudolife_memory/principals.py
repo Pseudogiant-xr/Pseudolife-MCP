@@ -44,7 +44,9 @@ DEFAULT_PRINCIPAL = "default"
 #: pinned equal by tests/test_stored_principals.py): never a client.
 DAEMON_PRINCIPAL = "daemon"
 
-#: Held for a future maintainer-passkey identity; no invite may take it.
+#: The board's maintainer sender (``storage.coordination.MAINTAINER_PRINCIPAL``,
+#: schema v54): its authority is a passkey signature in the Console, never a
+#: bearer, so no token, invite or board admission may name it.
 MAINTAINER_PRINCIPAL = "maintainer"
 
 #: Names no stored principal may take: an invite refuses them, the snapshot
@@ -128,6 +130,14 @@ def parse_token_map(raw: str | None) -> dict[str, str]:
                 "skipped; use PSEUDOLIFE_MCP_TOKEN for the default identity",
                 i + 1, DEFAULT_PRINCIPAL)
             continue
+        if principal == MAINTAINER_PRINCIPAL:
+            # v54: maintainer messages are proven by a passkey, never a
+            # token; a token naming the maintainer must not authenticate.
+            logger.warning(
+                "token-map entry #%d names the reserved principal %r — "
+                "skipped; maintainer messages are proven by a passkey, not a token",
+                i + 1, MAINTAINER_PRINCIPAL)
+            continue
         if token in out:
             logger.warning(
                 "token-map entry #%d duplicates an earlier token — first "
@@ -190,9 +200,9 @@ def principal_admitted(coordination_config, principal, *, store=None) -> bool:
     """Whether ``principal`` may use the agent board: listed in
     ``coordination.allowed_principals``, or a stored principal whose row has
     ``board = true`` and is not revoked. The board's own sender is never
-    admitted. ``store`` defaults to the installed snapshot; this reads
-    memory only, never storage."""
-    if not isinstance(principal, str) or principal == DAEMON_PRINCIPAL:
+    admitted, nor (v54) the maintainer's. ``store`` defaults to the
+    installed snapshot; this reads memory only, never storage."""
+    if not isinstance(principal, str) or principal in (DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL):
         return False
     if principal in coordination_config.allowed_principals:
         return True

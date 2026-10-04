@@ -13,6 +13,13 @@ Plain module (no pytest import) so ``conftest.py``, ``pg_fixtures.py`` and
   trap CLAUDE.md warns about, in a new form.
 * A reachable server that rejects the credentials is a misconfiguration,
   never a reason to skip. Skips are for a server that is not there.
+
+Since 2026-10-04 the suite prefers a test login of its own, ahead of
+``ops/.env``: the bundled server serves the live bank and the test databases,
+and ``ops/.env``'s ``POSTGRES_PASSWORD`` is the bank owner's (a superuser).
+``pseudolife-mcp test-login create`` provisions a role that can create its own
+databases and cannot connect to the bank, and writes ``~/.pseudolife-mcp/
+test-pg.env``; see :func:`default_login` for the order.
 """
 from __future__ import annotations
 
@@ -78,7 +85,19 @@ COMPOSE_DEFAULT_PASSWORD = "pseudolife"
 DEV_HOST_PORT = os.environ.get("PSEUDOLIFE_TEST_PG_HOST_PORT", "127.0.0.1:5433").strip()
 if not DEV_HOST_PORT.rpartition(":")[0] or not DEV_HOST_PORT.rpartition(":")[2].isdigit():
     raise ValueError(f"PSEUDOLIFE_TEST_PG_HOST_PORT={DEV_HOST_PORT!r}: expected host:port")
+# The bank owner: the compose stack's POSTGRES_USER, the server's superuser.
+# The suite logs in as it only on the ops/.env and compose-default fallbacks.
 DEV_ROLE = "pseudolife"
+# The test login `pseudolife-mcp test-login create` provisions
+# (pseudolife_memory/test_login_cli.py): LOGIN CREATEDB, no superuser, no
+# membership in the owner, no CONNECT on the bank. Its credentials live in a
+# file outside every checkout, so a worktree never needs ops/.env, which holds
+# the bank owner's password beside the daemon's bearer tokens (2026-10-04).
+TEST_LOGIN_ROLE = "pseudolife_test"
+LOGIN_FILE_ENV = "PSEUDOLIFE_TEST_PG_LOGIN_FILE"
+LOGIN_FILE = Path.home() / ".pseudolife-mcp" / "test-pg.env"
+LOGIN_USER_KEY = "PSEUDOLIFE_TEST_PG_USER"
+LOGIN_PASSWORD_KEY = "PSEUDOLIFE_TEST_PG_PASSWORD"
 # The compose stack's env file; the installer writes POSTGRES_PASSWORD there.
 ENV_FILE = Path(__file__).resolve().parent.parent / "ops" / ".env"
 # The template beside it, and the placeholder its commented-out line carries.
@@ -116,7 +135,7 @@ _UNAVAILABLE_ERRNOS = {
 }
 
 
-def _compose_value(raw: str, line_number: int) -> str:
+def _compose_value(raw: str, line_number: int, key: str = "POSTGRES_PASSWORD") -> str:
     """Parse the Compose ``.env`` value forms needed for a password.
 
     Single-quoted values are literal. Unquoted and double-quoted values use
@@ -137,7 +156,7 @@ def _compose_value(raw: str, line_number: int) -> str:
         if "$" in raw:
             raise ValueError(
                 f"ops env line {line_number}: unsupported Compose variable "
-                "expansion in POSTGRES_PASSWORD; use a single-quoted literal "
+                f"expansion in {key}; use a single-quoted literal "
                 "or PSEUDOLIFE_TEST_PG_PASSWORD"
             )
         return raw
@@ -168,18 +187,18 @@ def _compose_value(raw: str, line_number: int) -> str:
         chars.append(char)
     if closing is None:
         raise ValueError(
-            f"ops env line {line_number}: unterminated quoted POSTGRES_PASSWORD"
+            f"ops env line {line_number}: unterminated quoted {key}"
         )
     tail = raw[closing + 1:].strip()
     if tail and not tail.startswith("#"):
         raise ValueError(
-            f"ops env line {line_number}: unexpected text after POSTGRES_PASSWORD"
+            f"ops env line {line_number}: unexpected text after {key}"
         )
     value = "".join(chars)
     if quote_char == '"' and "$" in value:
         raise ValueError(
             f"ops env line {line_number}: unsupported Compose variable "
-            "expansion in POSTGRES_PASSWORD; use a single-quoted literal "
+            f"expansion in {key}; use a single-quoted literal "
             "or PSEUDOLIFE_TEST_PG_PASSWORD"
         )
     return value
@@ -197,11 +216,17 @@ def env_file_password(path: Path | None = None) -> str | None:
 
 def _read_env_file_password(path: Path | None) -> str | None:
     path = ENV_FILE if path is None else path
+    return _read_env_values(path, ("POSTGRES_PASSWORD",)).get("POSTGRES_PASSWORD")
+
+
+def _read_env_values(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
+    """The last non-empty value of each of ``keys`` in a ``KEY=VALUE`` file;
+    {} when it cannot be read."""
     try:
         text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
-        return None
-    value = None
+        return {}
+    values: dict[str, str] = {}
     for line_number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
         if line.startswith("#") or "=" not in line:
@@ -210,21 +235,65 @@ def _read_env_file_password(path: Path | None) -> str | None:
         key = key.strip()
         if key.startswith("export "):
             key = key.removeprefix("export ").strip()
-        if key == "POSTGRES_PASSWORD":
-            value = _compose_value(raw, line_number)
-    return value or None
+        if key in keys:
+            values[key] = _compose_value(raw, line_number, key)
+    return {key: value for key, value in values.items() if value}
+
+
+def login_file_path(env: os._Environ | dict | None = None) -> Path:
+    """The test login file: ``PSEUDOLIFE_TEST_PG_LOGIN_FILE``, else
+    :data:`LOGIN_FILE` (``~/.pseudolife-mcp/test-pg.env``)."""
+    env = os.environ if env is None else env
+    explicit = env.get(LOGIN_FILE_ENV)
+    return Path(explicit) if explicit else LOGIN_FILE
+
+
+def login_file_credentials(path: Path) -> tuple[str, str] | None:
+    """``(user, password)`` from a test login file, or ``None`` when it is
+    missing or names no password. The user defaults to
+    :data:`TEST_LOGIN_ROLE`. A file the parser refuses raises a value-free
+    ``ValueError``."""
+    try:
+        values = _read_env_values(path, (LOGIN_USER_KEY, LOGIN_PASSWORD_KEY))
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None  # value-free, as env_file_password
+    password = values.get(LOGIN_PASSWORD_KEY)
+    if not password:
+        return None
+    return values.get(LOGIN_USER_KEY) or TEST_LOGIN_ROLE, password
+
+
+def _login_source(env, env_file: Path | None) -> tuple[str, str, str]:
+    """``(kind, user, password)``; kind is ``override``, ``login-file``,
+    ``ops-env`` or ``compose-default``."""
+    explicit = env.get("PSEUDOLIFE_TEST_PG_PASSWORD")
+    if explicit:
+        return "override", env.get(LOGIN_USER_KEY) or DEV_ROLE, explicit
+    login = login_file_credentials(login_file_path(env))
+    if login:
+        return ("login-file", *login)
+    password = env_file_password(env_file)
+    if password:
+        return "ops-env", DEV_ROLE, password
+    return "compose-default", DEV_ROLE, COMPOSE_DEFAULT_PASSWORD
+
+
+def default_login(env: os._Environ | dict | None = None,
+                  env_file: Path | None = None) -> tuple[str, str]:
+    """``(user, password)`` the suite logs in to the dev server with:
+    ``PSEUDOLIFE_TEST_PG_PASSWORD`` (as ``PSEUDOLIFE_TEST_PG_USER``, else the
+    bank owner), else the test login file (:func:`login_file_path`), else the
+    bank owner with ``ops/.env``'s ``POSTGRES_PASSWORD``, else the compose
+    default. CI sets a full ``PSEUDOLIFE_TEST_DATABASE_URL`` instead."""
+    env = os.environ if env is None else env
+    _, user, password = _login_source(env, env_file)
+    return user, password
 
 
 def default_password(env: os._Environ | dict | None = None,
                      env_file: Path | None = None) -> str:
-    """``PSEUDOLIFE_TEST_PG_PASSWORD``, else ``ops/.env``, else the compose
-    default. The env var exists for machines whose compose env file is
-    elsewhere (CI sets a full ``PSEUDOLIFE_TEST_DATABASE_URL`` instead)."""
-    env = os.environ if env is None else env
-    explicit = env.get("PSEUDOLIFE_TEST_PG_PASSWORD")
-    if explicit:
-        return explicit
-    return env_file_password(env_file) or COMPOSE_DEFAULT_PASSWORD
+    """The password half of :func:`default_login`."""
+    return default_login(env, env_file)[1]
 
 
 # No "password" in this name or _ENV_FILE_FIX's: CodeQL's clear-text-logging
@@ -242,6 +311,13 @@ def describe_pg_login_source(env: os._Environ | dict | None = None,
     env = os.environ if env is None else env
     if env.get("PSEUDOLIFE_TEST_PG_PASSWORD"):
         return "PSEUDOLIFE_TEST_PG_PASSWORD"
+    login = login_file_path(env)
+    try:
+        if login_file_credentials(login):
+            return f"the test login in {_shown_path(login)}"
+    except ValueError:
+        return (f"the test login file {_shown_path(login)}, which cannot be "
+                f"parsed; re-run `pseudolife-mcp test-login create` to rewrite it")
     path = ENV_FILE if env_file is None else env_file
     example = EXAMPLE_ENV_FILE if example_file is None else example_file
     try:
@@ -270,6 +346,31 @@ def describe_pg_login_source(env: os._Environ | dict | None = None,
     if value == EXAMPLE_PASSWORD:
         return "the example POSTGRES_PASSWORD from ops/.env"
     return "POSTGRES_PASSWORD from ops/.env"
+
+
+def _shown_path(path: Path) -> str:
+    """``path`` with the home directory written as ``~``."""
+    try:
+        return "~/" + path.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def login_source_kind(env: os._Environ | dict | None = None,
+                      env_file: Path | None = None) -> str:
+    """Which layer :func:`default_login` resolved: ``override``,
+    ``login-file``, ``ops-env`` or ``compose-default``. A login file the
+    parser refuses is ``login-file`` (its fix is the login file's), an
+    ``ops/.env`` it refuses ``ops-env``."""
+    env = os.environ if env is None else env
+    try:
+        return _login_source(env, env_file)[0]
+    except ValueError:
+        try:
+            login_file_credentials(login_file_path(env))
+        except ValueError:
+            return "login-file"
+        return "ops-env"
 
 
 # How long a quick probe waits for the dev server's port to accept a TCP
@@ -316,9 +417,24 @@ def probe_dev_server(env: os._Environ | dict | None = None,
 
 
 _ENV_FILE_FIX = (
-    "Fix: copy ops/.env from the main checkout into this worktree's ops/, or "
-    "export PSEUDOLIFE_TEST_PG_PASSWORD (its POSTGRES_PASSWORD value) for the "
-    "pytest process"
+    "Fix: create the test login once on the daemon host with `pseudolife-mcp "
+    "test-login create`, which writes ~/.pseudolife-mcp/test-pg.env for every "
+    "checkout of that account, or export PSEUDOLIFE_TEST_PG_USER and "
+    "PSEUDOLIFE_TEST_PG_PASSWORD for the pytest process"
+)
+_LOGIN_FILE_FIX = (
+    "Fix: re-run `pseudolife-mcp test-login create` on the daemon host, which "
+    "re-applies the test login file's password (--rotate for a new one), or "
+    "point PSEUDOLIFE_TEST_PG_LOGIN_FILE at the current file"
+)
+# One line for a run that logs in as the bank owner, whatever the source (an
+# exported PSEUDOLIFE_TEST_PG_PASSWORD beats the login file): it works, and
+# it is what the test login exists to retire (2026-10-04).
+_OWNER_LOGIN_NOTE = (
+    "note: this run logs in to the test Postgres at {where} as the bank owner "
+    "({source}). Run `pseudolife-mcp test-login create` "
+    "once on the daemon host: the suite then uses a test login that cannot "
+    "open the bank, and checkouts no longer need ops/.env."
 )
 _OVERRIDE_FIX = (
     "Fix: correct or unset PSEUDOLIFE_TEST_PG_PASSWORD, which takes "
@@ -338,7 +454,10 @@ def full_run_password_preflight(kind: str,
     GitHub Actions) is not checked at all. An explicit
     ``PSEUDOLIFE_TEST_DATABASE_URL`` is used verbatim by the fixtures, so
     there is nothing to check either. The message names the password's
-    source, never its value.
+    source, never its value. A run the server accepts as the bank owner,
+    whatever the source (an exported ``PSEUDOLIFE_TEST_PG_PASSWORD`` beats
+    the login file), gets one line on ``out`` naming that source and
+    ``pseudolife-mcp test-login create``.
 
     Measured 2026-09-27, twice: a full suite from a fresh worktree whose
     ops/.env was missing or the template copy ran to the end with 1,424
@@ -357,14 +476,25 @@ def full_run_password_preflight(kind: str,
     probe = probe_dev_server if probe is None else probe
     # A targeted run is never refused, so it only looks for a listener
     # briefly; a full run waits out libpq's timeout once, before ~20 minutes.
-    if probe(env, env_file, quick=kind == "targeted") != "auth":
+    answer = probe(env, env_file, quick=kind == "targeted")
+    layer = login_source_kind(env, env_file)
+    try:
+        as_owner = default_login(env, env_file)[0] == DEV_ROLE
+    except ValueError:
+        as_owner = False  # a file the parser refuses: the server refuses it too
+    if answer == "ok" and as_owner:
+        source = describe_pg_login_source(env, env_file, example_file)
+        print(_OWNER_LOGIN_NOTE.format(where=DEV_HOST_PORT, source=source),
+              file=out or sys.stderr, flush=True)
+    if answer != "auth":
         return None
     source = describe_pg_login_source(env, env_file, example_file)
     rejected = (f"the test Postgres at {DEV_HOST_PORT} is reachable but "
                 f"rejects {source}")
-    # The override wins over ops/.env, so copying the file cannot fix it.
-    fix = (_OVERRIDE_FIX if source == "PSEUDOLIFE_TEST_PG_PASSWORD"
-           else _ENV_FILE_FIX)
+    # The override wins over the login file and ops/.env, and the login file
+    # over ops/.env, so neither later layer can fix an earlier one.
+    fix = {"override": _OVERRIDE_FIX,
+           "login-file": _LOGIN_FILE_FIX}.get(layer, _ENV_FILE_FIX)
     if kind == "targeted":
         print(f"note: {rejected}; any PG-backed test in this run will ERROR "
               f"on setup. {fix}.", file=out or sys.stderr, flush=True)
@@ -495,11 +625,13 @@ def dispatched_live_bank_refusal(env: os._Environ | dict | None = None,
 
 def default_admin_url(env: os._Environ | dict | None = None,
                       env_file: Path | None = None) -> str:
-    """Admin (``postgres`` db) URL of the dev container. The password is
-    percent-encoded: a generated one may carry ``@`` ``/`` ``:`` ``#`` or
-    ``%``, any of which would re-split the URI or be mis-decoded by libpq."""
-    password = quote(default_password(env, env_file), safe="")
-    return f"postgresql://{DEV_ROLE}:{password}@{DEV_HOST_PORT}/postgres"
+    """Admin (``postgres`` db) URL of the dev container, as the login
+    :func:`default_login` resolves. User and password are percent-encoded: a
+    generated password may carry ``@`` ``/`` ``:`` ``#`` or ``%``, any of
+    which would re-split the URI or be mis-decoded by libpq."""
+    user, password = default_login(env, env_file)
+    return (f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
+            f"@{DEV_HOST_PORT}/postgres")
 
 
 def conninfo_with_dbname(conninfo: str, dbname: str) -> str:
@@ -555,9 +687,9 @@ def bench_admin_url(env: os._Environ | dict | None = None,
     source = os.environ if env is None else env
     explicit = source.get("PSEUDOLIFE_BENCH_ADMIN_URL")
     test_url = source.get("PSEUDOLIFE_TEST_DATABASE_URL")
-    fallback_env = {
-        "PSEUDOLIFE_TEST_PG_PASSWORD": source["PSEUDOLIFE_TEST_PG_PASSWORD"]
-    } if source.get("PSEUDOLIFE_TEST_PG_PASSWORD") else {}
+    fallback_env = {name: source[name] for name in (
+        "PSEUDOLIFE_TEST_PG_PASSWORD", LOGIN_USER_KEY, LOGIN_FILE_ENV)
+        if source.get(name)}
     env = None
     del source
     if explicit:
@@ -725,7 +857,8 @@ def auth_failure_message(url_hint: str, exc: BaseException,
         f"credentials ({detail}). This is a misconfiguration, not a missing "
         f"server, so PG-backed tests ERROR instead of skipping. Fix: set "
         f"PSEUDOLIFE_TEST_DATABASE_URL, or PSEUDOLIFE_TEST_PG_PASSWORD, or "
-        f"check POSTGRES_PASSWORD in ops/.env"
+        f"re-run `pseudolife-mcp test-login create` for the test login file, "
+        f"or check POSTGRES_PASSWORD in ops/.env"
     )
 
 

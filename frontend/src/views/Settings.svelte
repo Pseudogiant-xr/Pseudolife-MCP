@@ -1,5 +1,6 @@
 <script lang="ts">
-  // The daemon's live configuration: the Dreamer card, then every knob of
+  // Your passkeys (the maintainer's signing keys), then the daemon's live
+  // configuration: the Dreamer card, then every knob of
   // GET /api/config in the server's group order. Nothing about a knob is
   // hard-coded here. Edits stay local until "Review and save" shows the
   // exact patch, which POST /api/config writes to config.yaml on the daemon
@@ -7,6 +8,7 @@
   import { untrack } from "svelte";
   import DreamerCard from "../components/settings/DreamerCard.svelte";
   import KnobRow from "../components/settings/KnobRow.svelte";
+  import PasskeysPanel from "../components/settings/PasskeysPanel.svelte";
   import ErrorState from "../components/ErrorState.svelte";
   import Modal from "../components/Modal.svelte";
   import { ApiError, softError } from "../lib/api/client";
@@ -140,6 +142,8 @@
 </script>
 
 <div class="view settings">
+  <PasskeysPanel />
+
   {#if error && !config}
     <section class="panel pad">
       <ErrorState explained={explainError(error, "Settings")} />

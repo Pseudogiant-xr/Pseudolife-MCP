@@ -52,13 +52,19 @@ exactly; they exist because each one was violated at least once.
    revised head.
 
    Note that **a full run the bench Postgres rejects refuses to start**
-   (conftest asks the server before queueing for the suite lock): a fresh
-   worktree has no `ops/.env`, or the `.example` copy, so the suite resolves
-   the compose default password and every PG-backed test would ERROR on
-   setup (1,424 in one 2026-09-27 run). The refusal names the fix: copy
-   `ops/.env` from the main checkout into the worktree's `ops/`, or export
-   `PSEUDOLIFE_TEST_PG_PASSWORD` for the pytest process. Targeted runs print
-   one line and start.
+   (conftest asks the server before queueing for the suite lock): without
+   the test login file, a fresh worktree has no `ops/.env`, or the
+   `.example` copy, so the suite resolves the compose default password and
+   every PG-backed test would ERROR on setup (1,424 in one 2026-09-27 run).
+   The refusal names the fix: the **test login** (`pseudolife-mcp
+   test-login create`, once, on the daemon host, by the maintainer) writes
+   `~/.pseudolife-mcp/test-pg.env`, a role that creates its own databases
+   and cannot connect to the bank, and every checkout of that account
+   reads it. **Do not copy `ops/.env` into worktrees**: it holds the bank
+   owner's password and the operator bearer tokens (2026-10-04,
+   `docs/guide/agent-isolation.md`). A run that still logs in as the bank
+   owner, through `ops/.env` or an exported password, prints one line
+   saying so. Targeted runs print one line and start.
 
    Every PR requires passing CI for its current head integrated with current
    master, including the full PostgreSQL job, lite Linux, Windows, macOS and
@@ -176,9 +182,10 @@ took 143 CUDA OOMs.
   launcher tests the worktree's committed HEAD from a copy on WSL's own
   filesystem (it refuses uncommitted changes to tracked files: commit
   first), keeps a uv environment per checkout under `~/.venvs/pseudolife`
-  in WSL, needs the worktree's `ops/.env` like any run and the models in
-  WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and forwards the
-  bearer, so the run still shows as the `full-suite` lease; from Windows,
+  in WSL, forwards the test login file (`~/.pseudolife-mcp/test-pg.env`;
+  only without one does it copy the worktree's `ops/.env`), needs the
+  models in WSL's own Hugging Face cache (see `ops/wsl-suite.sh`), and
+  forwards the bearer, so the run still shows as the `full-suite` lease; from Windows,
   `lease check full-suite` sees it through the board only (its local-lock
   line stays free). `PSEUDOLIFE_SUITE_LOCK=off` skips the refusal along
   with the lock, so it is never a way to start a Windows full run here.

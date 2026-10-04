@@ -1046,23 +1046,29 @@ def test_a_targeted_pytest_run_is_not_locked(held, procs):
 
 _WRONG_PASSWORD = "not-the-dev-server-password-" + uuid.uuid4().hex
 _REFUSAL = "refusing the full suite"
-_FIX = "copy ops/.env from the main checkout"
+_FIX = "pseudolife-mcp test-login create"
 _EXAMPLE_COPY = "rejects the compose default password, as ops/.env is a copy of ops/.env.example"
 
 
-def _pg_env(directory: Path, mode: str, password: str | None) -> dict[str, str]:
+def _pg_env(directory: Path, mode: str, password: str | None,
+            user: str | None = None) -> dict[str, str]:
     """A lock-test environment that resolves the dev server's password the
     way a worktree run does (no explicit DSN), lock in ``mode``: ``password``
-    as the override, or with ``None`` from the checkout's ops/.env."""
+    (as ``user``, else the bank owner) as the override, or with ``None`` from
+    the checkout's ops/.env, this machine's test login file hidden."""
     env = _pytest_env(directory, mode)
     del env["PSEUDOLIFE_TEST_DATABASE_URL"]
     # The parent's conftest seeded the bench URL from its own password; a
     # child resolving from its ops/.env must seed its own.
-    for name in ("PSEUDOLIFE_TEST_PG_PASSWORD", "PSEUDOLIFE_BENCH_ADMIN_URL",
-                 "_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"):
+    for name in ("PSEUDOLIFE_TEST_PG_PASSWORD", "PSEUDOLIFE_TEST_PG_USER",
+                 "PSEUDOLIFE_BENCH_ADMIN_URL", "_PSEUDOLIFE_BENCH_ADMIN_URL_SEEDED"):
         env.pop(name, None)
+    # A fresh worktree on a machine without `pseudolife-mcp test-login create`.
+    env["PSEUDOLIFE_TEST_PG_LOGIN_FILE"] = str(directory / "no-test-login.env")
     if password is not None:
         env["PSEUDOLIFE_TEST_PG_PASSWORD"] = password
+    if user is not None:
+        env["PSEUDOLIFE_TEST_PG_USER"] = user
     return env
 
 
@@ -1097,8 +1103,9 @@ def dev_server_answers(tmp_path):
     if answer != "ok":
         pytest.skip(f"the dev Postgres at {pg_defaults.DEV_HOST_PORT} did not "
                     f"accept this run's credentials ({answer})")
+    no_login = {"PSEUDOLIFE_TEST_PG_LOGIN_FILE": str(tmp_path / "no-test-login.env")}
     for label, env in (("a wrong password", {"PSEUDOLIFE_TEST_PG_PASSWORD": _WRONG_PASSWORD}),
-                       ("the compose default password", {})):
+                       ("the compose default password", no_login)):
         verdict = pg_defaults.probe_dev_server(env, tmp_path / "no-env-file")
         if verdict != "auth":
             pytest.skip(f"the dev Postgres at {pg_defaults.DEV_HOST_PORT} does not "
@@ -1137,8 +1144,8 @@ def test_a_full_pytest_run_with_a_rejected_override_names_the_override(
 
 def test_a_full_pytest_run_the_server_accepts_takes_the_lock(tmp_path, procs,
                                                              dev_server_answers):
-    run = procs(_full_run_collecting_nothing(),
-                _pg_env(tmp_path, "fail", dev_server_answers.default_password()))
+    user, password = dev_server_answers.default_login()
+    run = procs(_full_run_collecting_nothing(), _pg_env(tmp_path, "fail", password, user))
     assert run.drain() == pytest.ExitCode.NO_TESTS_COLLECTED, run.seen
     assert not any(_REFUSAL in line for line in run.seen), run.seen
 

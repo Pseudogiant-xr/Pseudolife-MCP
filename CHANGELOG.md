@@ -6,6 +6,139 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-10-04 — maintainer messages and Board roles from the Console; schema v54)
+- The maintainer could not reach a board session at all, and changing who
+  holds a project's delegate or coordinator role took a shell on the daemon
+  host. Both now work from the Console, each action proven by a passkey tap
+  (WebAuthn, user verification required); a bearer token alone can do
+  neither. Specs: `docs/superpowers/specs/2026-10-02-maintainer-wake-design.md`
+  and its addendum `2026-10-04-board-roles-passkey.md`.
+- Schema v54: `maintainer_passkeys`, `maintainer_bootstrap` and
+  `maintainer_nonces` tables (in the bench reset roster, out of logical
+  exports with the `maintainer_secret_v1` meta key), and
+  `coordination_messages.origin`, `.maintainer_proof` and `.repudiated_at`.
+- Routes `GET /api/maintainer`, `POST /api/maintainer/challenge|enrol|send|role|cancel|revoke|repudiate`,
+  `GET /api/maintainer/sent|inbox`, each calling one `MemoryService.maintainer_*`
+  method. Challenges are stateless (an HMAC'd payload carrying every input
+  that decides the outcome); assertions and registrations are verified
+  strictly (`cryptography` plus a minimal CBOR/COSE decoder: ES256, EdDSA,
+  RS256; exact origin and RP ID; UP and UV; no crossOrigin or topOrigin;
+  sign-count compare-and-set). Every failure answers `assertion_invalid`.
+- `coordination.maintainer.rp_id`, `.origin` (HTTPS, or `http://localhost`
+  for local use) and `.maintainer_per_recipient_per_hour` (30) are
+  config-file only: `POST /api/config` refuses them (`config_protected`).
+- `pseudolife-mcp maintainer enrol-code|confirm|revoke|reset|list` on the
+  daemon host manages the passkeys.
+- Maintainer mail carries `origin: "maintainer"` and `verified` in a
+  `receive` result (with `maintainer_note`), rings any session with a live
+  listener whatever its park, and can be repudiated. Agents reply with
+  `memory_message send reply_to=<id>` and no `to`. `maintainer` is reserved:
+  never a bearer principal, a target, or a label (nor `daemon`, `passkey`,
+  `verified`, in any spelling that normalizes to one).
+- Role changes: grant/revoke the delegate and assign/revoke the coordinator
+  per project, one role per session; the delegate's reopen authority now
+  accepts a grant recorded by the operator or the maintainer. The holder a
+  change replaces or evicts is part of the signed payload: if another
+  session took the role during the tap, the change answers `409
+  role_changed` and does nothing.
+- The Console's Board gains a pinned Roles band per project: the delegate
+  (time left, Message, Extend, Revoke) and the coordinator (Message, Revoke),
+  with Make/Revoke buttons for both roles on every session. Each slot has a
+  composer and the thread with that session. Every change and message shows
+  what will be signed, then asks for the passkey. Settings gains Your passkeys
+  (bootstrap with the host's one-time code, add a key, cancel a quarantined
+  one, revoke). Without HTTPS or an enrolled key, the band still shows who
+  holds each role and says how to set it up.
+- Every `/ui/` response carries a strict Content-Security-Policy,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and
+  `X-Content-Type-Options: nosniff` (JSON API answers carry `nosniff` too);
+  the Console's theme bootstrap moved out of an inline script into
+  `/ui/theme.js`.
+- `pseudolife-mcp lease delegate` now also frees the grantee's
+  `coordinator:<project>` lease (one role per session; the answer names it in
+  `also_broken`). The rule also holds outside the signed routes: the
+  delegate's own claim of its project's coordinator lease is refused
+  `already_delegate`, and a session queued for that lease leaves the queue
+  when it is made the delegate (security review, 2026-10-04).
+- `memory_message` documents replying with `reply_to` and no `to` (how a
+  session answers the maintainer); a receive result that holds maintainer
+  mail carries `maintainer_note`, saying that mail was signed by the maintainer.
+- Every change to the maintainer's passkeys (bootstrap enrolment, host
+  confirm, an added key, cancel, revoke from the Console or the host, reset)
+  is recorded in the board's hash-chained audit log with the path it came by
+  and the key that signed it, and `GET /api/maintainer` lists the newest 30
+  (`key_changes`). Settings shows them; a change from the last 7 days that
+  this browser did not make is a banner there and a notice on the Roles band.
+  Console key changes also post a board notice. The passkey cannot stop
+  someone with the host shell or the database password from replacing the
+  keys, so it makes that loud.
+- A one-time enrolment code burns after 5 wrong attempts
+  (`maintainer_bootstrap.failed_attempts`, v54).
+- `pseudolife-mcp doctor` reports maintainer passkeys: off (information),
+  invalid configuration (a failure, with the fix), or the RP ID, origin and
+  number of active keys. The 409 `maintainer_https_required` answer names the
+  rule the configuration breaks (`config_problem`).
+- Board labels that only look like a reserved name are refused
+  (`invalid_label`): look-alike letters (Cyrillic, Greek, fullwidth, 0 and 1),
+  `maintainer` anywhere in a label or one edit away, `daemon` one edit away,
+  and `passkey` or `verified` exactly. Labels set earlier keep working and
+  the digest shows them as an unnamed peer. A label such as
+  `maintainer-helper`, accepted before, is now refused.
+- One session's replies can no longer fill the maintainer's inbox: the
+  pending-mail cap on the maintainer row counts each sender's own replies.
+- `pseudolife-mcp maintainer confirm|revoke` accept an id prefix that starts
+  with `-`.
+
+### Added (2026-10-04 — the test suite gets its own Postgres login, so agent sessions stop holding the bank owner's password)
+- The bundled Postgres serves the production bank and the test suite's
+  per-run databases under one role, `pseudolife`, the server's superuser,
+  and the suite logged in as it with `ops/.env`'s `POSTGRES_PASSWORD`. The
+  full-run refusal told every session to copy `ops/.env` into its worktree,
+  so any agent that ran tests held the bank owner's password, beside the
+  operator bearer tokens in the same file. New `pseudolife-mcp test-login
+  create`, run once on the daemon host, provisions idempotently a role
+  `pseudolife_test` (LOGIN CREATEDB; no superuser, CREATEROLE, REPLICATION
+  or BYPASSRLS; every role membership revoked), revokes CONNECT on the
+  production database and on `template1` from PUBLIC (the owner keeps it;
+  a session in `template1` would fail every `CREATE DATABASE` that copies
+  it, which needs no CONNECT there), hands leftover per-run test databases
+  an owner run left (the names the suite's prune drops) to the role,
+  installs `vector` in `template1` (pgvector's extension is not trusted, so
+  the login could not create it; `CREATE DATABASE` copies it), and writes
+  the login to an owner-only `~/.pseudolife-mcp/test-pg.env`. It runs
+  `psql` in the Postgres container as that container's superuser (or uses
+  `--admin-url`, which needs no password in it: libpq reads `PGPASSWORD`
+  or `~/.pgpass`, and an error never prints one), sends the server only the
+  password's SCRAM verifier, refuses without a superuser connection or when
+  the daemon's database user (`PSEUDOLIFE_MCP_DATABASE_URL`) would lose
+  CONNECT, prints what it changed and checks the result. A re-run
+  re-applies the file's password; `--rotate` draws a new one, and is
+  required when the role exists but no file here holds its password.
+- The suite logs in with `PSEUDOLIFE_TEST_PG_PASSWORD` (as
+  `PSEUDOLIFE_TEST_PG_USER`, else the owner), then the test login file
+  (`PSEUDOLIFE_TEST_PG_LOGIN_FILE`, else `~/.pseudolife-mcp/test-pg.env`),
+  then `ops/.env`, then the compose default. A run that still logs in as
+  the owner, whatever the source, works and prints one line naming the
+  source and the fix; the fresh-worktree refusal names `test-login create`
+  instead of copying `ops/.env`, and a run whose per-run database another
+  role owns is refused in one line naming the `DROP DATABASE` to run.
+  `ops/wsl-suite.ps1` forwards the login file and stops copying `ops/.env`
+  into WSL when it exists. The installers run the command only on request
+  (`-TestLogin` / `--test-login`, for contributors who run the suite against
+  the bundled server; a failure only warns); `pseudolife-mcp update` never
+  does. `ops/restore.*` revoke CONNECT from PUBLIC again after recreating
+  the bank, since a plain dump carries no database grants.
+- Running the suite as such a login found one more privileged act: the
+  per-test reset reaped autovacuum workers too, which PostgreSQL 18 allows
+  only superusers. The bulk reaps in `tests/` and `evals/` now end client
+  backends only.
+- CI's PostgreSQL job provisions the login (as its own role,
+  `pseudolife_test_ci`) on its service container
+  (`PSEUDOLIFE_TEST_LOGIN_ADMIN_URL`) and runs a slice of the PG-backed
+  suite under it, checking it cannot connect to the production-named
+  database or `template1`. New guide: [running agent sessions under a separate
+  account](docs/guide/agent-isolation.md).
+
 ### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
 - `memory_agents` and `memory_message` served 26 parameters with no
   description and docstrings in compressed shorthand ("Bearer required;

@@ -396,7 +396,8 @@ def memory_message(
         description="send, receive, ack or history; pass only that "
                     "action's fields.")],
     to: Annotated[str | None, Field(
-        description="send, required: agent id or unique 8+ hex prefix, "
+        description="send, required unless replying with reply_to: "
+                    "agent id or unique 8+ hex prefix, "
                     "project:<name>, or all (up to 50 attached non-idle "
                     "peers, not you); up to 120 chars.")] = None,
     text: Annotated[str | None, Field(
@@ -410,7 +411,8 @@ def memory_message(
     reply_to: Annotated[str | None, Field(
         description="send: ID/unique 8+ hex prefix of retained mail from "
                     "this recipient to you, up to 120 chars; no "
-                    "fanout.")] = None,
+                    "fanout. Omit to: the reply goes to that mail's "
+                    "sender (how to answer origin maintainer).")] = None,
     after: Annotated[str | None, Field(
         description="receive/history: cursor from the same action; omit "
                     "for unacknowledged receive mail or earliest retained "
