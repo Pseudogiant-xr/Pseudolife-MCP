@@ -94,8 +94,10 @@ modes:
                  frees a stuck one, `lease delegate PROJECT AGENT` makes
                  one session the maintainer's delegate for a project
   maintainer    on the daemon host, the maintainer's passkeys (operator
-                 only; reads PSEUDOLIFE_MCP_DATABASE_URL): `maintainer
-                 enrol-code` admits the first passkey from the Console,
+                 only; reads PSEUDOLIFE_MCP_DATABASE_URL):
+                 `maintainer setup` does it all, guided (the Console's
+                 HTTPS name, the config, the first passkey); `enrol-code`
+                 admits the first passkey from the Console,
                  `confirm PREFIX` activates it, `revoke PREFIX`, `reset
                  --yes` revokes all and reopens enrolment, `list`
   version       print the package version, and the shim runtime it runs

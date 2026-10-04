@@ -442,6 +442,57 @@ function Invoke-SharedBankExposeOffer {
 }
 # <<< shared bank notes <<<
 
+# >>> maintainer setup offer >>>
+# The maintainer's passkeys (signed Console messages and roles) on a daemon
+# host: `pseudolife-mcp maintainer setup` does every host step and asks
+# before each change; only the passkey itself needs the maintainer. A
+# tokenless daemon refuses passkeys, so a tokenless install is not asked.
+function Invoke-MaintainerSetupOffer {
+    if ($tokenState -notin "minted", "present") { return }
+    $haveShim = (Install-ShimOnce) -and $script:shimInstallPath
+    # A re-run on a host where they are set up asks nothing.
+    if ($haveShim) {
+        $global:LASTEXITCODE = 1
+        try { & $script:shimInstallPath maintainer setup --check *> $null } catch { $global:LASTEXITCODE = 1 }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Maintainer passkeys: in place."
+            return
+        }
+    }
+    if (-not $interactive) {
+        Write-Host "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
+        return
+    }
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    $reply = Read-BankAnswer "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]"
+    if ((Get-BankReply $reply) -cnotin "y", "Y", "yes", "Yes", "YES") {
+        Write-Host "  Not now: run pseudolife-mcp maintainer setup when you want them."
+        return
+    }
+    if (-not $haveShim) {
+        Write-Warning "The pseudolife-mcp shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed."
+        return
+    }
+    $oldTokenFile = $env:PSEUDOLIFE_MCP_TOKEN_FILE
+    try {
+        if ($boardFile) { $env:PSEUDOLIFE_MCP_TOKEN_FILE = $boardFile }
+        $global:LASTEXITCODE = 0
+        & $script:shimInstallPath maintainer setup --yes
+        $setupExit = $LASTEXITCODE
+    } catch {
+        Write-Host "  $($_.Exception.Message)"
+        $setupExit = 1
+    } finally {
+        $env:PSEUDOLIFE_MCP_TOKEN_FILE = $oldTokenFile
+    }
+    if ($setupExit -ne 0) {
+        Write-Warning "pseudolife-mcp maintainer setup exited $setupExit (see its message above). The install itself is complete: run it again once that is fixed."
+    }
+}
+# <<< maintainer setup offer <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 function Get-ProviderList([string]$Spec) {
     $expanded = @()
@@ -3115,6 +3166,7 @@ if ($ClientOnly) { Show-ClientOnlyNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Show-SharedBankNotes; Write-Host "" }
 if ($script:bankLocation -eq "shared") { Invoke-SharedBankExposeOffer }
 if ($script:shimUpgradeHeld) { Write-Warning $script:shimUpgradeHeld }
+if (-not $ClientOnly) { Invoke-MaintainerSetupOffer }
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this

@@ -15,6 +15,10 @@
 #   ops\update.ps1 -AllowDirty       # deploy a tree with uncommitted or
 #                                    # untracked files (stamped dirty=true),
 #                                    # or one git cannot describe (unknown)
+#   ops\update.ps1 -NoTestLogin      # do not create the test suite's own
+#                                    # Postgres login (made when it is
+#                                    # missing and the bundled Postgres
+#                                    # runs here: a contributor's host)
 #   ops\update.ps1 -ClientsOnly      # not here: python ops/update_clients.py
 #
 # The deploy itself is pseudolife_memory/update_cli.py — the same code
@@ -36,6 +40,7 @@ param(
     [int]$HealthDelayMs = 1500,
     [switch]$All,
     [switch]$AllowDirty,
+    [switch]$NoTestLogin,
     [switch]$ClientsOnly
 )
 
@@ -72,6 +77,7 @@ if ($ForceRollbackTag) { $updateArgs += "--force-rollback-tag" }
 if ($NoCachePrune) { $updateArgs += "--no-cache-prune" }
 if ($All) { $updateArgs += "--all" }
 if ($AllowDirty) { $updateArgs += "--allow-dirty" }
+if ($NoTestLogin) { $updateArgs += "--no-test-login" }
 
 & $python @pyArgs (Join-Path $PSScriptRoot "update.py") @updateArgs
 exit $LASTEXITCODE

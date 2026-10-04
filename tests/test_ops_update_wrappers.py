@@ -54,14 +54,14 @@ def test_update_ps1_maps_every_flag_and_returns_the_exit_code(tmp_path, exit_cod
     root = _sandbox(tmp_path)
     proc = subprocess.run([PWSH, "-NoProfile", "-File", str(root / "ops" / "update.ps1"), "-Tag", "pre-x", "-NoBackup",
                            "-ForceRollbackTag", "-KeepRollbacks", "5", "-KeepCacheHours", "24", "-NoCachePrune",
-                           "-HealthRetries", "2", "-HealthDelayMs", "50", "-All", "-AllowDirty"],
+                           "-HealthRetries", "2", "-HealthDelayMs", "50", "-All", "-AllowDirty", "-NoTestLogin"],
                           capture_output=True, text=True, timeout=120, env=_env(tmp_path, exit_code))
     assert proc.returncode == exit_code, proc.stderr
     args = _args(tmp_path)
     assert args[:2] == ["--checkout", str(root)]
     for flag in ("--rollback-tag pre-x", "--no-backup", "--force-rollback-tag", "--keep-rollbacks 5",
                  "--keep-cache-hours 24", "--no-cache-prune", "--health-retries 2", "--health-delay-ms 50",
-                 "--all", "--allow-dirty"):
+                 "--all", "--allow-dirty", "--no-test-login"):
         assert flag in " ".join(args), args
 
 
@@ -73,7 +73,8 @@ def test_update_ps1_defaults(tmp_path):
     assert proc.returncode == 0, proc.stderr
     args = " ".join(_args(tmp_path))
     assert "--keep-rollbacks 2" in args and "--health-retries 30" in args and "--health-delay-ms 1500" in args
-    for absent in ("--no-backup", "--all", "--allow-dirty", "--rollback-tag", "--force-rollback-tag", "--no-cache-prune"):
+    for absent in ("--no-backup", "--all", "--allow-dirty", "--rollback-tag", "--force-rollback-tag", "--no-cache-prune",
+                   "--no-test-login"):
         assert absent not in args
 
 
@@ -84,14 +85,15 @@ def test_update_sh_maps_every_flag_and_returns_the_exit_code(tmp_path, exit_code
     env = _env(tmp_path, exit_code)
     env["HEALTH_RETRIES"], env["HEALTH_DELAY_MS"] = "2", "50"
     proc = subprocess.run([BASH, str(root / "ops" / "update.sh"), "--tag", "pre-x", "--no-backup", "--force-rollback-tag",
-                           "--keep-rollbacks", "5", "--keep-cache-hours", "24", "--no-cache-prune", "--all", "--allow-dirty"],
+                           "--keep-rollbacks", "5", "--keep-cache-hours", "24", "--no-cache-prune", "--all", "--allow-dirty",
+                           "--no-test-login"],
                           capture_output=True, text=True, timeout=120, env=env)
     assert proc.returncode == exit_code, proc.stderr
     args = _args(tmp_path)
     assert args[0] == "--checkout" and Path(args[1]).name == "checkout"
     for flag in ("--rollback-tag pre-x", "--no-backup", "--force-rollback-tag", "--keep-rollbacks 5",
                  "--keep-cache-hours 24", "--no-cache-prune", "--health-retries 2", "--health-delay-ms 50",
-                 "--all", "--allow-dirty"):
+                 "--all", "--allow-dirty", "--no-test-login"):
         assert flag in " ".join(args), args
 
 

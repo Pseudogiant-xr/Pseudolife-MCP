@@ -365,7 +365,8 @@ def _board_line(timeout: float) -> str:
 # (``config_problem``), so doctor and daemon never disagree on it.
 
 MAINTAINER_FIX = (
-    "In the daemon's config.yaml (file-only), set coordination.maintainer.rp_id to the "
+    "Run `pseudolife-mcp maintainer setup` on the daemon host. By hand: "
+    "in the daemon's config.yaml (file-only), set coordination.maintainer.rp_id to the "
     "lower-case host name the Console is served at and coordination.maintainer.origin to "
     "exactly https://<rp_id> or https://<rp_id>:<port> (for local use only, rp_id localhost "
     "with origin http://localhost:<port>). Restart the daemon, then open the Console at "
@@ -415,7 +416,8 @@ def maintainer_probe(url: str, token: str | None, *, timeout: float = 2.0) -> di
     if status == 409 and answer.get("error") == "maintainer_https_required":
         problem = answer.get("config_problem")
         if problem == "unset":
-            return {"state": "off", "line": "off - coordination.maintainer is not configured"}
+            return {"state": "off", "line": "off - coordination.maintainer is not configured "
+                                            "(pseudolife-mcp maintainer setup)"}
         if isinstance(problem, str) and problem:
             return {"state": "invalid", "line": f"invalid - {problem}",
                     "recovery": MAINTAINER_FIX}

@@ -484,6 +484,49 @@ offer_shared_bank_expose() {
 }
 # <<< shared bank notes <<<
 
+# >>> maintainer setup offer >>>
+# The maintainer's passkeys (signed Console messages and roles) on a daemon
+# host: `pseudolife-mcp maintainer setup` does every host step and asks
+# before each change; only the passkey itself needs the maintainer. A
+# tokenless daemon refuses passkeys, so a tokenless install is not asked.
+offer_maintainer_setup() {
+    case "${TOKEN_STATE:-}" in minted|present) ;; *) return 0 ;; esac
+    ensure_shim
+    # A re-run on a host where they are set up asks nothing.
+    if [ -n "$SHIM_OK" ] && [ -n "$SHIM_PATH" ] &&
+            "$SHIM_PATH" maintainer setup --check >/dev/null 2>&1; then
+        echo "Maintainer passkeys: in place."
+        return 0
+    fi
+    if ! bank_can_ask; then
+        echo "Maintainer passkeys (sign Console messages and roles): run pseudolife-mcp maintainer setup in a terminal when you want them."
+        return 0
+    fi
+    # One question for the feature and its host changes, default no (it can
+    # put the daemon on the tailnet); --yes carries the answer, and setup
+    # still asks the passkey check itself.
+    bank_read "Set up maintainer passkeys (sign Console messages and roles with Windows Hello, Touch ID, a phone or a security key)? When Tailscale runs, this serves the daemon over HTTPS with tailscale serve (devices on your tailnet can reach it at https://<this machine>:8443), sets its config and restarts it. [y/N]: " ||
+        BANK_REPLY=""
+    case "$(bank_trimmed "$BANK_REPLY")" in
+        y|Y|yes|Yes|YES) ;;
+        *) echo "  Not now: run pseudolife-mcp maintainer setup when you want them."; return 0 ;;
+    esac
+    if [ -z "$SHIM_OK" ] || [ -z "$SHIM_PATH" ]; then
+        echo "WARNING: the pseudolife-mcp shim is unavailable (see above), so the passkey setup did not run: run pseudolife-mcp maintainer setup once it is installed." >&2
+        return 0
+    fi
+    setup_rc=0
+    if [ -n "${board_file:-}" ]; then
+        PSEUDOLIFE_MCP_TOKEN_FILE="$board_file" "$SHIM_PATH" maintainer setup --yes || setup_rc=$?
+    else
+        "$SHIM_PATH" maintainer setup --yes || setup_rc=$?
+    fi
+    if [ "$setup_rc" -ne 0 ]; then
+        echo "WARNING: pseudolife-mcp maintainer setup exited $setup_rc (see its message above). The install itself is complete: run it again once that is fixed." >&2
+    fi
+}
+# <<< maintainer setup offer <<<
+
 # Expand aliases, validate, dedupe, and emit the canonical provider order.
 normalize_clients() {
     raw="$(printf '%s' "$1" | tr ',' ' ')"
@@ -3158,6 +3201,7 @@ if [ -n "$CLIENT_ONLY" ]; then show_client_only_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then show_shared_bank_notes; echo ""; fi
 if [ "${BANK_LOCATION:-}" = shared ]; then offer_shared_bank_expose; fi
 if [ -n "$SHIM_HELD" ]; then echo "WARNING: $SHIM_HELD" >&2; fi
+if [ -z "$CLIENT_ONLY" ]; then offer_maintainer_setup; fi
 # >>> update line >>>
 # The installers do not put the shim launcher's directory on PATH, so a bare
 # `pseudolife-mcp` finds an older pipx install, or nothing: name the shim this

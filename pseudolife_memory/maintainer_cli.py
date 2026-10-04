@@ -1,5 +1,6 @@
 """``pseudolife-mcp maintainer``: the host side of maintainer passkeys (schema v54).
 
+``setup`` does the whole first setup, guided (maintainer_setup.py).
 ``enrol-code`` prints the one-time code that admits the first passkey (10
 base32 characters, 10 minutes, stored hashed; refused while any passkey is
 pending or active) and waits for the Console to redeem it, then prints the
@@ -120,11 +121,19 @@ def _enrol_code(store, args, out):
 
 def main(argv=None, out=None) -> int:
     out = out or sys.stdout
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["setup"]:
+        # Guided, and mostly not a bank operation: it runs the others in
+        # the daemon's environment (pseudolife_memory/maintainer_setup.py).
+        from pseudolife_memory import maintainer_setup
+        return maintainer_setup.main(argv[1:])
     parser = argparse.ArgumentParser(
         prog="pseudolife-mcp maintainer",
         description="Host-side management of the maintainer's passkeys (operator-only). "
                     "Reads PSEUDOLIFE_MCP_DATABASE_URL, or the lite tier's bank.")
     actions = parser.add_subparsers(dest="action", required=True)
+    actions.add_parser("setup", help="guided: the Console's HTTPS name, the daemon's config and "
+                                     "the first passkey (see `maintainer setup --help`)")
     code = actions.add_parser("enrol-code", help="print a one-time code for the first passkey")
     code.add_argument("--no-wait", action="store_true",
                       help="print the code and exit without waiting for the Console")
@@ -138,7 +147,6 @@ def main(argv=None, out=None) -> int:
     reset.add_argument("--yes", action="store_true",
                        help="confirm: every passkey stops working at once")
     actions.add_parser("list", help="print every passkey")
-    argv = list(sys.argv[1:] if argv is None else argv)
     # A base64url id starts with '-' one time in 64; typed as `list` printed
     # it, it is the prefix, not an option.
     if (len(argv) == 2 and argv[0] in ("confirm", "revoke")

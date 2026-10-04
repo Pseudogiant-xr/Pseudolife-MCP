@@ -15,6 +15,10 @@
 #   ops/update.sh --allow-dirty        # deploy a tree with uncommitted or
 #                                      # untracked files (stamped dirty=true),
 #                                      # or one git cannot describe (unknown)
+#   ops/update.sh --no-test-login      # do not create the test suite's own
+#                                      # Postgres login (made when it is
+#                                      # missing and the bundled Postgres
+#                                      # runs here: a contributor's host)
 #   ops/update.sh --clients-only       # not here: python ops/update_clients.py
 #
 # HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the health wait.
@@ -72,6 +76,7 @@ while [ $# -gt 0 ]; do
         --force-rollback-tag) args+=(--force-rollback-tag); shift ;;
         --all)            args+=(--all); shift ;;
         --allow-dirty)    args+=(--allow-dirty); shift ;;
+        --no-test-login)  args+=(--no-test-login); shift ;;
         --clients-only)   # a release-mode option of `pseudolife-mcp update`
             echo "--clients-only is a release-mode option; a checkout deploy builds what the tree holds (for the clients alone: python ops/update_clients.py)" >&2
             exit 2 ;;
