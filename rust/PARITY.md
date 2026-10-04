@@ -7,8 +7,9 @@ Recount at this pin: 38 MCP tools, 72 ConsoleRoutes registrations plus the
 separate POST /api/pair route, eight hook endpoints, 15 coordination actions
 and 28 CLI modes. The original 26-mode checklist remains the phase 2 scope;
 `maintainer` and `test-login` were added upstream and stay deferred outside Tier A. The current Console is v3 at /ui/; /ui/next/ is absent.
-Overall Phase 1 acceptance remains pending. Named retirements and scoped
-substitutions below do not close the full surface. `ported` requires the brief's
+Phase 1 implementation acceptance at `8b7a6c95` is recorded in
+`evals/results/rust-phase1-closeout-8b7a6c95.json`; current documentation
+PR-head suites, integrated CI and final review remain required before #560 ready. `ported` requires the brief's
 wire, differential and measurement gates; `deferred` is unfinished;
 `retired-by-decision` requires a recorded maintainer decision. The SDK preflight
 retirement below names the maintainer's 2026-10-05 decision.
@@ -31,15 +32,15 @@ BASE and RULES record the completed phase 0 instruments and measurements; histor
 |---|---:|---|---|---|
 | BASE | 0 | Commit/host/bank/run-count RSS idle and workload, shim cold start, search/store/fact-set and send/receive p50/p95; CI lane timing. `evals/`, `.github/workflows/ci.yml` | `tests/test_eval_evidence.py`, `test_report_redaction.py` A; current-pin Linux scaling in `evals/results/rust-phase0b-daemon-scaling-linux.json`, fixed-reference CI noise in `evals/results/rust-phase0b-ci-same-head.json`; historical #540 shim/write evidence retains its original pin | ported |
 | RULES | 0 | Error/type/ownership/unsafe/HTTP/SQL/float mappings; immutable manifest and trial corrections. `CLAUDE.md`, guides, atlas | `test_release_ux.py`, `test_atlas_currency.py`, `test_llms_txt.py`, `test_eval_evidence.py`, `test_i18n_readme.py` A; PORTING.md and `evals/results/rust-port-phase0b-acceptance.json`; current code reviewed after wire-span and candidate-release fixes | ported |
-| MCP-WIRE | 1 | initialize instructions/capabilities, tool annotations/schema/help, supported revision negotiation, JSON-RPC errors, streams, cancellation, notifications. `mcp_server.py`, `shim.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py` mixed P/I; `test_mcp_server.py`, `test_mcp_string_arguments.py`, `test_mcp_client_neutrality.py`, `test_mcp_stdio_errlog.py` I/A; help fixture A | deferred |
-| MCP-TIER | 1/3 | Principal-scoped list filtering, 12h TTL/precedence, cumulative 9/24/38 visibility, hidden calls accepted, list_changed. `toolset_tiers.py`, `mcp_server.py` | `test_shim.py` notification nodes P; `test_toolset_tiers.py`, `test_mcp_server.py` I; add 38-tool differential schema/argument/error corpus | deferred |
-| SHIM-LIFECYCLE | 1 | Canonical origin validation, discovery/probe, local spawn/reuse, no-spawn waiting, ownership, child exit and recovery, version notices and gated client updates. `shim.py`, `daemon_url.py`, `runtimes.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py`, `test_connection_loss_recovery.py`, `test_shim_runtimes.py` mixed; `test_client_environment.py`, `test_credentials.py`, `test_version_handshake.py`, `test_update_offer.py` I/mixed | deferred |
+| MCP-WIRE | 1 | initialize instructions/capabilities, tool annotations/schema/help, supported revision negotiation, JSON-RPC errors, streams, cancellation, notifications. `mcp_server.py`, `shim.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py` mixed P/I; `test_mcp_server.py`, `test_mcp_string_arguments.py`, `test_mcp_client_neutrality.py`, `test_mcp_stdio_errlog.py` I/A; help fixture A | ported |
+| MCP-TIER | 1/3 | Phase 1 client forwarding/visibility/list_changed boundary accepted; Phase 3 daemon implementation remains deferred: principal-scoped list filtering, 12h TTL/precedence, cumulative 9/24/38 visibility, hidden calls accepted, list_changed. `toolset_tiers.py`, `mcp_server.py` | `test_shim.py` notification nodes P; `test_toolset_tiers.py`, `test_mcp_server.py` I; add 38-tool differential schema/argument/error corpus | ported |
+| SHIM-LIFECYCLE | 1 | Canonical origin validation, discovery/probe, local spawn/reuse, no-spawn waiting, ownership, child exit and recovery, version notices and gated client updates. `shim.py`, `daemon_url.py`, `runtimes.py` | `test_shim.py` P/I; `test_shim_transport_recovery.py`, `test_connection_loss_recovery.py`, `test_shim_runtimes.py` mixed; `test_client_environment.py`, `test_credentials.py`, `test_version_handshake.py`, `test_update_offer.py` I/mixed | ported-with-substitution |
 | SHIM-SDK-PREFLIGHT | 1 | Python-only MCP SDK import preflight is retired in the Rust candidate by the maintainer's 2026-10-05 phase 2 decision, section 1; no Rust SDK diagnostic counterpart. `PORTING.md` no-python-before-first-frame | `test_shim.py` SDK guard nodes remain Python oracle tests; the three manifest rows explicitly record the decision | retired-by-decision |
 | SHIM-DAEMON-LAUNCH | 1 | Explicit interpreter or JSON serve argv replaces Python `sys.executable`; missing configuration uses the unchanged no-spawn wait with a named explanation. `lifecycle.rs` | `nonboard_spawn_policy.rs`, `nonboard_startup.rs`; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
 | SHIM-UPDATE-SCHEDULING | 1 | Unattended loopback client updates start after the first successful stdout frame flush, using only the configured interpreter; manual version remedy precedes the update. `wire_json.rs`, `lifecycle.rs` | `wire_json.rs` callback ordering/failure tests, `nonboard_final_assertions.rs`, remote updater subprocess test; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
 | SHIM-WAKE-REASON | 1 | Rust char predicates replace Python Unicode 14 alnum/space tables in the bounded wake reason; repository claim tables remain pinned. `board/liveness.rs` | `board_ring_contract.rs`; targeted checks and executing Windows/Linux Rust/Parity CI at 690bb8ac, current 32-cell receipts and paired measurements in PORT-STATE.md | ported-with-substitution |
-| SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | deferred |
-| SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | deferred |
+| SHIM-AUTH | 1 | Token-file precedence and reload, unsafe/malformed files fail closed, writer/session/agent/bank/principal headers; sanitized uncertain-write failures without replay. `credentials.py`, `writer_context.py`, `shim.py` | `test_shim_transport_recovery.py` mixed; `test_writer_keying.py`, `test_principals.py`, `test_credentials.py`, `test_session_identity.py` I; add wire rotation and malformed byte probes | ported |
+| SHIM-BOARD | 1 | Registration, scoped identity, addressed-mail continuity, shared-host refusal, local file claims, board retry, default doorbells and optional delivery invoked by the shim; channel process-boundary behavior is phase 1, with only named channel remainder deferred to phase 2. `coordination_adapter.py`, `coordination_identity.py`, `codex_doorbell.py`, `codex_delivery.py`, `repository_claims.py` | `test_shim_board_retry.py`, `test_shim_channel.py`, `test_channel.py`, `test_coordination_roster_hygiene.py`, `test_codex_doorbell.py`, `test_codex_delivery.py`, `test_coordination_adapter.py`, `test_repository_claims.py` I/mixed; add full binary identity/attachment/recovery tests | ported-with-substitution |
 | CLI-DISPATCH | 1/2/3/4/5 | All 26 modes, aliases, unknown-mode exit 2, help bytes and runtime version metadata, light import/startup. `cli.py` and help fixture | `test_cli_dispatch.py`, `test_release_ux.py`, `test_client_install_ux.py` I/A; add argv subprocess records | deferred |
 | CLI-LEASE | 2 | OS lock truth, crash release, FIFO tickets, board mirror, check/run/hold/list/break and child status. `lease_cli.py`, `os_lock.py` | `test_lease_cli.py`, `test_lease_cli_board.py`, `test_coordination_leases.py`, `test_coordination_leases_api.py` mixed/I; subprocess nodes suitable after dispatcher audit | deferred |
 | CLI-MAIL | 2 | `.seen`/digest watermark race, exits 0 mail/3 timeout/2 setup, output and durable wait cleanup. `wait_mail_cli.py`, `private_state.py` | `test_wait_mail_cli.py`, `test_coordination_mail_continuity.py`, `test_stop_wake_hook.py` mixed/I/A | deferred |
@@ -571,9 +572,21 @@ CLI coverage. Current receipt links, before/after numeric tables and the four
 executed CI job durations are recorded in PORT-STATE.md. The SDK preflight
 remains retired-by-decision; daemon launch, update scheduling and wake-reason
 predicates are the named ported-with-substitution rows. MCP-WIRE, MCP-TIER,
-SHIM-LIFECYCLE, SHIM-AUTH and SHIM-BOARD retain their broader deferred acceptance status until g.
+SHIM-LIFECYCLE, SHIM-AUTH and SHIM-BOARD now record bounded implementation
+acceptance in the separate close-out ledger at `8b7a6c95`. MCP-TIER acceptance
+covers only the Phase 1 client boundary; daemon tier enforcement remains Phase 3
+deferred. The SDK retirement and the three named substitutions are unchanged.
 The historical failed CI attempt and 2e receipts remain historical evidence.
 PR #546 may remain open and stacked under the close-out brief; the maintainer
-owns its merge. Candidate-routed committed WSL/box full suites, final integrated
-head CI and fresh independent whole changed-since-2e review remain pending;
-PR #560 stays draft.
+owns its merge. Both committed implementation-head suites and all fourteen
+integrated CI checks passed at `8b7a6c95`, as recorded in PORT-STATE.md.
+Current documentation PR-head suites, integrated CI and final review remain
+required before #560 is marked ready; PR #560 stays draft.
+The frozen pre-acceptance mapping in `phase1-test-buckets.json` is unchanged;
+the separate acceptance ledger records the final bounded register statuses.
+Only these four channel remainder nodes are deferred to Phase 2:
+
+- `tests/test_shim_board_retry.py::test_late_adapter_feeds_the_channel_inbox`
+- `tests/test_shim_channel.py::test_channel_proxy_preserves_upstream_instructions_and_tools`
+- `tests/test_shim_channel.py::test_channel_cli_is_explicit_and_leaves_ordinary_shim_default`
+- `tests/test_shim_channel.py::test_codex_channel_keeps_eager_channel_adapter`
