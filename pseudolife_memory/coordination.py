@@ -216,14 +216,16 @@ PARK_CHECKIN_SENTENCE = (
 # over-sending (-codex4). Over-sending is the costlier failure. Each was
 # scored without the closing "Subagents only read the board." (#425). That
 # closing sentence was reworded 2026-10-04 (cross-model review): the daemon
-# refuses every child send (``child_send_refused``), but a Codex subagent
-# has its own board address and does update/receive/ack, so "only read" was
-# wrong for half the subagents the sentence reaches. The scored part is
+# refuses every child send (``child_send_refused``); a Claude Code subagent
+# shares its parent's address and may receive but not ack or update
+# (plugin/hooks/subagent-board-guard.sh); a Codex subagent has its own
+# address and does update/receive/ack. "Only read" was wrong for the second
+# kind, so the sentence now says what each may do. The scored part is
 # unchanged.
 CHECKIN_INSTRUCTION = (
     "Board: memory_agents update, list; memory_message receive, ack. Need what a "
     "peer holds? Message them you're next. Free? Use it, update status. "
-    "Subagents never send; only those with own board IDs update/receive/ack.")
+    "Subagents never send; all may receive; update/ack need an own board ID.")
 
 
 # What the Stop hook shows when a turn ends without a park record (v49).

@@ -378,10 +378,11 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
       Gemini CLI documents a limit.
     * The tier totals are no client's limit: they are a deliberate wall on
       context cost (eager context for clients that do not defer tools, and
-      tool-selection quality). They leave about 1,000 description characters
-      of headroom on core and full, proportionally less on minimal (every
-      minimal tool counts against core and full too), and move only with a
-      recorded reason below."""
+      tool-selection quality). They leave a few hundred description
+      characters of headroom on core and full (about 1,000 when re-based,
+      ~400 after the 2026-10-04 rewrite), proportionally less on minimal
+      (every minimal tool counts against core and full too), and move only
+      with a recorded reason below."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
     mod = _reload(tmp_path, monkeypatch)
 
@@ -470,8 +471,9 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Caps 5,750 / 12,750 / 19,250 leave 518 / 1,022 / 1,003.
     # 2026-10-04, later (cross-model review): memory_agents, memory_message,
     # memory_search and memory_toolset rewritten to lead with purpose and
-    # sibling routing; minimal 5,502, core 12,075, full 18,594 — caps
-    # unchanged, 248 / 675 / 656 to spare.
+    # sibling routing, then review fixes (request_conflict, the receive
+    # cursor contract): minimal 5,501, core 12,352, full 18,871 — caps
+    # unchanged, 249 / 398 / 379 to spare.
     budgets = {"minimal": 5750, "core": 12750, "full": 19250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
@@ -525,8 +527,8 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 2026-10-04, later: the cross-model review (Claude + Codex) gave the
     # two board tools their first parameter descriptions (26 parameters,
     # +2,540, carrying the caps Codex strips from the schema) and
-    # memory_search its filter-scope wording: minimal 2,679, core 7,973,
-    # full 11,634. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
+    # memory_search its filter-scope wording: minimal 2,739, core 8,050,
+    # full 11,711. Re-based to 3,000 / 8,750 / 12,500 — the same tenth of
     # headroom, measured on the text that landed rather than assumed.
     param_budgets = {"minimal": 3000, "core": 8750, "full": 12500}
     for tier, cap in param_budgets.items():

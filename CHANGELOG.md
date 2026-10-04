@@ -43,19 +43,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after expanding and report a mismatch rather than expanding again. Its
   `status` ladder now lists the board tools under core and
   `memory_episode_summary` / `memory_graph_unrelate` under full.
-- The MCP initialization text is 498 characters composed (was 508): the
-  base says "pass episode where accepted" (only six write tools take one),
-  and the shim's check-in suffix says "Subagents never send; only those
-  with own board IDs update/receive/ack" instead of "only read the board",
-  which was wrong for a Codex subagent. Codex prefixes this text to every
-  tool declaration it shows the model, so it is paid 24 times per session.
-  The bench-pinned `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json`
-  is unchanged, so Codex users approve nothing again.
+- The MCP initialization text is 502 characters composed (was 508): the
+  base says "pass episode where accepted" (only the tools with an
+  `episode` parameter can record one; the others ignored it silently),
+  and the shim's check-in suffix says "Subagents never send; all may
+  receive; update/ack need an own board ID" instead of "only read the
+  board", which was wrong for a Codex subagent (its own address does
+  update, receive and ack) and overstated for a Claude Code one (it may
+  receive). Codex prefixes this text to every tool declaration it shows
+  the model, so it is paid 24 times per session. The bench-pinned
+  `CHECKIN_TEXT` is untouched. `plugin/hooks/hooks.json` is unchanged, so
+  Codex users approve nothing again.
 - The parameter-description budgets move to the measured totals plus a
   tenth of headroom (3,000 / 8,750 / 12,500); the description budgets and
   the per-tool client limits (1,600 characters, 4,000 schema bytes) are
   unchanged and every tool stays under them (largest schema
   `memory_agents`, 3,459 bytes).
+
 ### Fixed (2026-10-04 — `lease delegate --for 7d` works as documented)
 - The `pseudolife-mcp lease` duration arguments (`delegate --for`,
   `run`/`hold --expect`, `--ttl` and `--timeout`) now accept a `d` suffix
