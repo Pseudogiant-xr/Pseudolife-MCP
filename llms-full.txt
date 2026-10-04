@@ -5191,12 +5191,21 @@ leaves the queue when it is made the delegate.
   and a surprise one can be withdrawn there. A signed role change shows only
   as the current holder in the Roles band; its record is in the board's
   [audit log](#audit-log) (`pseudolife-mcp board-audit export`, actor
-  `maintainer`). Key changes show in Settings, Your passkeys.
+  `maintainer`). Key changes show in Settings, Your passkeys: every
+  enrolment, confirmation, added key, cancel, revoke and reset, with the
+  path it came by (Console or host). A change from the last 7 days that
+  this browser did not make is a banner there and on the Roles band; if you
+  did not make it, run `pseudolife-mcp maintainer list` on the host.
 - Anyone who can run `pseudolife-mcp maintainer ...` on the daemon host, or
   who holds the database owner's credentials, can reset the keys and enrol
   their own. Root and the docker group on the host can run that command too.
   So the daemon host and the database password are part of your trust
   boundary. Keep the database password where agent sessions cannot read it.
+  Agent sessions that run as your own OS user can read what you can and
+  use Docker if you can, so on such a host the passkey makes a takeover
+  visible (above) rather than impossible.
+- A one-time enrolment code burns after 5 wrong attempts; run
+  `pseudolife-mcp maintainer enrol-code` again for a new one.
 - Moving the bank to another host changes the name, so every passkey stops
   working: run `pseudolife-mcp maintainer reset` on the new host and enrol
   again.

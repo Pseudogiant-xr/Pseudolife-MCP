@@ -19,7 +19,11 @@ Tailscale Serve traffic arrives from 127.0.0.1, so any local caller could
 forge ``Tailscale-User-*`` or ``X-Forwarded-*``.
 
 Runs on the coordination mailbox connection under the coordination lock,
-like every board call. Failures raise :class:`MaintainerError` (its
+like every board call. A key-set change made here (bootstrap enrol, an
+added key, cancel, revoke) also posts a daemon notice to the attached
+sessions once the lock is released: courtesy only (spec "Enrolment" 4),
+since that channel is forgeable; the audit record and the Console's
+passkey list are the record. Failures raise :class:`MaintainerError` (its
 ``status`` and ``code`` are the HTTP answer); nothing else leaves here.
 """
 from __future__ import annotations
@@ -40,6 +44,8 @@ from pseudolife_memory.storage.maintainer import (
 logger = logging.getLogger("pseudolife-mcp.maintainer")
 
 WITHDRAWAL_NOTICE = "The maintainer withdrew message {message_id}; do not act on it."
+KEY_NOTICE = ("Maintainer passkey change in the Console: {what}. A courtesy notice only; "
+              "the Console's Settings, Your passkeys, is the record. Nothing for you to do.")
 # The fields each challenge purpose takes besides ``purpose``: anything else
 # in the body is refused, so nothing outside the signed payload can matter.
 _CHALLENGE_FIELDS = {
@@ -65,7 +71,7 @@ LIST_DEFAULT, LIST_MAX = 50, 200
 
 # -- gates and stores ---------------------------------------------------------
 
-def _gate(service) -> None:
+def _gate(service) -> str:
     from pseudolife_memory.principals import env_auth, principal_admitted
     from pseudolife_memory.writer_context import request_principal
     token_map, token = env_auth()
@@ -81,16 +87,19 @@ def _gate(service) -> None:
         raise MaintainerError("coordination_unavailable", check="board_off")
     problem = cfg.maintainer.problem()
     if problem is not None:
-        raise MaintainerError("maintainer_https_required", check=problem)
+        raise MaintainerError("maintainer_https_required", check=problem,
+                              public={"config_problem": problem})
+    return principal
 
 
 def _run(service, handler, *args, full=False, body=False):
     """Gate, then ``handler(service, board, store, *args)`` under the
     coordination lock; rings the recipients a handler names in
-    ``_notify`` after the lock is released, as dispatch does."""
+    ``_notify`` after the lock is released, as dispatch does, and posts the
+    daemon notice it names in ``_notice``."""
     from pseudolife_memory import coordination
     try:
-        _gate(service)
+        principal = _gate(service)
         if body and not isinstance(args[0], dict):
             raise MaintainerError("invalid_request", check="body")
         try:
@@ -101,7 +110,7 @@ def _run(service, handler, *args, full=False, body=False):
             board = coordination._store(service)
             m = service.config.coordination.maintainer
             store = MaintainerStore(board.storage, rp_id=m.rp_id, origin=m.origin,
-                                    clock=board.clock)
+                                    clock=board.clock, principal=principal)
             result = handler(service, board, store, *args)
     except MaintainerError as exc:
         if exc.check:
@@ -114,6 +123,9 @@ def _run(service, handler, *args, full=False, body=False):
     for recipient in result.pop("_notify", []):
         if notify is not None:
             notify(recipient)
+    notice = result.pop("_notice", None)
+    if notice:
+        coordination.daemon_notice(service, KEY_NOTICE.format(what=notice))
     return result
 
 
@@ -241,7 +253,8 @@ def _status(service, board, store):
     out = {"available": available}
     if not available:
         out["reason"] = "maintainer_not_enrolled"
-    out.update(rp_id=store.rp_id, origin=store.origin, passkeys=keys, roles=store.roles())
+    out.update(rp_id=store.rp_id, origin=store.origin, passkeys=keys, roles=store.roles(),
+               key_changes=store.key_changes())
     return out
 
 
@@ -393,20 +406,27 @@ def _enrol(service, board, store, body):
     if "code" in body:
         out = store.enrol_bootstrap(body.get("payload"), body.get("mac"),
                                     body.get("attestation"), body.get("code"))
+        notice = (f"key {out['credential_id'][:12]} was enrolled with a one-time code from "
+                  "the daemon host and waits for the host confirm")
     else:
         out = store.enrol_approved(body.get("payload"), body.get("mac"),
                                    body.get("attestation"))
-    return {"credential_id": out["credential_id"], "label": out["label"], "state": out["state"]}
+        notice = (f"key {out['credential_id'][:12]} was added; it cannot sign for 24 hours "
+                  "and an older key can cancel it meanwhile")
+    return {"credential_id": out["credential_id"], "label": out["label"], "state": out["state"],
+            "_notice": notice}
 
 
 def _cancel(service, board, store, body):
-    return {"state": store.cancel(body.get("payload"), body.get("mac"),
-                                  body.get("assertion"))["state"]}
+    out = store.cancel(body.get("payload"), body.get("mac"), body.get("assertion"))
+    return {"state": out["state"],
+            "_notice": f"key {out['credential_id'][:12]} was cancelled by an older key"}
 
 
 def _revoke(service, board, store, body):
-    return {"state": store.revoke_self(body.get("payload"), body.get("mac"),
-                                       body.get("assertion"))["state"]}
+    out = store.revoke_self(body.get("payload"), body.get("mac"), body.get("assertion"))
+    return {"state": out["state"],
+            "_notice": f"key {out['credential_id'][:12]} revoked itself"}
 
 
 class MaintainerOps:

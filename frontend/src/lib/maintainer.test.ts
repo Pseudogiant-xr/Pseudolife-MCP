@@ -1,20 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api/client";
-import type { MaintainerStatus, Passkey } from "./api/maintainer";
+import type { KeyChange, MaintainerStatus, Passkey } from "./api/maintainer";
 import type { BoardAgent, Lease } from "./api/types";
 import {
+  addToList,
   challengeExpiry,
+  changeId,
   defaultProject,
   displacedLines,
   ENROL_COMMAND,
   failureLine,
   HOLDS,
   HTTPS_COMMAND,
+  KEY_NOTICE_DAYS,
+  keyChangeText,
+  keyNotices,
   leftPercent,
   normalizeInbox,
   normalizeSent,
+  OWN_KEYS_KEY,
   payloadMismatch,
   projectsOf,
+  readList,
   SEND_WAKE,
   roleEligible,
   roleOf,
@@ -420,5 +427,74 @@ describe("messages", () => {
     expect(wakeText({ decision: "capped", reason: "maintainer_hour" })).toMatch(/hourly wake limit/);
     expect(wakeText(null)).toBe("");
     expect(wakeText("some_new_state")).toBe("some new state");
+  });
+});
+
+describe("key-change notices", () => {
+  const change = (c: Partial<KeyChange> = {}): KeyChange => ({
+    at: NOW - 3600,
+    change: "revoke",
+    credential_id: "keyA0000000000",
+    label: "laptop",
+    by: "host",
+    path: "host",
+    principal: null,
+    revoked: null,
+    ...c,
+  });
+
+  it("flags a recent change that no key of this browser made", () => {
+    const host = change();
+    const mine = change({ change: "cancel", by: "keyA0000000000", path: "console", credential_id: "keyB" });
+    const old = change({ at: NOW - KEY_NOTICE_DAYS * 86400 - 1 });
+    expect(keyNotices([host, mine, old], ["keyA0000000000"], [], NOW_MS)).toEqual([host]);
+  });
+
+  it("counts the host confirm of a key this browser enrolled as its own", () => {
+    const enrol = change({ change: "enrol", by: "bootstrap", path: "console" });
+    const confirm = change({ change: "confirm" });
+    expect(keyNotices([confirm, enrol], ["keyA0000000000"], [], NOW_MS)).toEqual([]);
+    // A browser that enrolled nothing sees both.
+    expect(keyNotices([confirm, enrol], [], [], NOW_MS)).toEqual([confirm, enrol]);
+    // A host revoke of this browser's own key is still a notice.
+    expect(keyNotices([change()], ["keyA0000000000"], [], NOW_MS)).toHaveLength(1);
+  });
+
+  it("drops a notice the maintainer said they made", () => {
+    const c = change();
+    expect(keyNotices([c], [], [changeId(c)], NOW_MS)).toEqual([]);
+    expect(keyNotices(undefined, [], [], NOW_MS)).toEqual([]);
+  });
+
+  it("puts each change in words, naming the path", () => {
+    expect(keyChangeText(change())).toBe("“laptop” (keyA0000) was revoked on the daemon host");
+    expect(keyChangeText(change({ by: "keyA0000000000", path: "console" }))).toBe("“laptop” (keyA0000) revoked itself");
+    expect(keyChangeText(change({ change: "reset", credential_id: null, label: null, revoked: 2 }))).toBe(
+      "every passkey was revoked on the daemon host (reset; 2 revoked)",
+    );
+    expect(keyChangeText(change({ change: "add", by: "keyZ9999999", path: "console" }))).toMatch(
+      /was added in the Console, approved by key keyZ9999/,
+    );
+    expect(keyChangeText(change({ change: "enrol", by: "bootstrap", path: "console" }))).toMatch(/one-time code/);
+    expect(keyChangeText(change({ change: "confirm" }))).toMatch(/confirmed on the daemon host/);
+  });
+
+  it("keeps a short list in storage, newest last", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    try {
+      expect(readList(OWN_KEYS_KEY)).toEqual([]);
+      addToList(OWN_KEYS_KEY, "a");
+      addToList(OWN_KEYS_KEY, "b");
+      expect(addToList(OWN_KEYS_KEY, "a")).toEqual(["b", "a"]);
+      store.set(OWN_KEYS_KEY, "not json");
+      expect(readList(OWN_KEYS_KEY)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

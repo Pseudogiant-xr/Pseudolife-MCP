@@ -10,6 +10,7 @@
     defaultProject,
     grantedByText,
     inQuarantine,
+    keyChangeText,
     leaseName,
     leftPercent,
     projectsOf,
@@ -20,6 +21,7 @@
   } from "../../lib/maintainer";
   import {
     extendDelegate,
+    keyChangeNotices,
     maintainer,
     readiness,
     revokeCoordinator,
@@ -49,6 +51,7 @@
   const blocked = $derived(ready.ok ? "" : ready.title);
   const settled = $derived(status !== null || maintainer.error !== null);
   const quarantined = $derived((status?.passkeys ?? []).filter((k) => inQuarantine(k, now)));
+  const keyNotice = $derived(keyChangeNotices(now)[0] ?? null);
 
   function agentOf(h: RoleHolder | null): BoardAgent | null {
     return h ? (agents.find((a) => a.agent_id === h.agent_id) ?? null) : null;
@@ -98,6 +101,12 @@
       <span class="blocked-title">{ready.title}.</span>
       {ready.body}
       {#if ready.command}<code class="mono">{ready.command}</code>{/if}
+    </p>
+  {/if}
+  {#if keyNotice}
+    <p class="key-notice" role="alert">
+      A passkey change this browser did not make: {keyChangeText(keyNotice)}, {fmtRelative(keyNotice.at, now)}.
+      <a href={hrefTo("settings")}>Review it in Settings</a>.
     </p>
   {/if}
   {#each quarantined as k (k.credential_id)}
@@ -324,6 +333,19 @@
     overflow-wrap: anywhere;
   }
   .quarantine a {
+    color: inherit;
+    font-weight: 600;
+  }
+  .key-notice {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--danger-ink) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger-ink) 28%, transparent);
+    font-size: 12.5px;
+    color: var(--danger-ink);
+    overflow-wrap: anywhere;
+  }
+  .key-notice a {
     color: inherit;
     font-weight: 600;
   }

@@ -84,7 +84,8 @@ def _maintainer_error(exc: Exception) -> tuple[int, dict]:
     code = getattr(exc, "code", None) if isinstance(exc, MaintainerError) else str(exc)
     if code not in MaintainerError.STATUS:
         code = "invalid_request" if isinstance(exc, ValueError) else "coordination_unavailable"
-    return MaintainerError.STATUS[code], {"error": code}
+    public = exc.public if isinstance(exc, MaintainerError) and exc.public else {}
+    return MaintainerError.STATUS[code], {**public, "error": code}
 
 
 def _body_limit(path: str) -> int:

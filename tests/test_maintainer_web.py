@@ -146,6 +146,16 @@ def test_refusals_answer_their_status_and_never_echo(error, status, code):
     assert b"client_data_origin" not in out and b"hunter2" not in out and b"Users" not in out
 
 
+def test_the_https_required_refusal_says_whether_the_config_is_unset_or_invalid():
+    """``pseudolife-mcp doctor`` tells "off" from "configured wrongly" by
+    this field; a config rule is no verification secret."""
+    error = MaintainerError("maintainer_https_required", check="origin must be https",
+                            public={"config_problem": "origin must be https"})
+    got, out = _hit(_app(Recorder(raise_with=error)), "GET", "/api/maintainer")
+    assert (got, json.loads(out)) == (409, {"error": "maintainer_https_required",
+                                            "config_problem": "origin must be https"})
+
+
 # ── config ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("patch", [

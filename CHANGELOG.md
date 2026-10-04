@@ -63,6 +63,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `memory_message` documents replying with `reply_to` and no `to` (how a
   session answers the maintainer); a receive result that holds maintainer
   mail carries `maintainer_note`, saying that mail was signed by the maintainer.
+- Every change to the maintainer's passkeys (bootstrap enrolment, host
+  confirm, an added key, cancel, revoke from the Console or the host, reset)
+  is recorded in the board's hash-chained audit log with the path it came by
+  and the key that signed it, and `GET /api/maintainer` lists the newest 30
+  (`key_changes`). Settings shows them; a change from the last 7 days that
+  this browser did not make is a banner there and a notice on the Roles band.
+  Console key changes also post a board notice. The passkey cannot stop
+  someone with the host shell or the database password from replacing the
+  keys, so it makes that loud.
+- A one-time enrolment code burns after 5 wrong attempts
+  (`maintainer_bootstrap.failed_attempts`, v54).
+- `pseudolife-mcp doctor` reports maintainer passkeys: off (information),
+  invalid configuration (a failure, with the fix), or the RP ID, origin and
+  number of active keys. The 409 `maintainer_https_required` answer names the
+  rule the configuration breaks (`config_problem`).
+- Board labels that only look like a reserved name are refused
+  (`invalid_label`): look-alike letters (Cyrillic, Greek, fullwidth, 0 and 1),
+  `maintainer` anywhere in a label or one edit away, `daemon` one edit away,
+  and `passkey` or `verified` exactly. Labels set earlier keep working and
+  the digest shows them as an unnamed peer. A label such as
+  `maintainer-helper`, accepted before, is now refused.
+- One session's replies can no longer fill the maintainer's inbox: the
+  pending-mail cap on the maintainer row counts each sender's own replies.
+- `pseudolife-mcp maintainer confirm|revoke` accept an id prefix that starts
+  with `-`.
 
 ### Changed (2026-10-04 — the board tools describe their parameters, and every rewritten description leads with what the tool is for)
 - `memory_agents` and `memory_message` served 26 parameters with no

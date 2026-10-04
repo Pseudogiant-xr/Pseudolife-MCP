@@ -355,6 +355,40 @@ def test_bootstrap_refuses_an_expired_code(svc, monkeypatch):
         "attestation": auth.register(challenge_bytes(challenge["payload"]))})
 
 
+def _guess(svc, challenge, att, code):
+    return call(svc, "enrol", {"payload": challenge["payload"], "mac": challenge["mac"],
+                               "code": code, "attestation": att})
+
+
+def test_a_bootstrap_code_burns_after_five_wrong_guesses(svc):
+    """A wrong code rolls the redemption back, so one payload could carry
+    every guess (security review, 2026-10-04): the failures are counted
+    outside that transaction, and the fifth burns the code."""
+    code = host(svc).bootstrap_code()
+    auth = SoftAuthenticator()
+    challenge = call(svc, "challenge", {"purpose": "enrol-bootstrap", "label": "x"})
+    att = auth.register(challenge_bytes(challenge["payload"]))
+    for i in range(maintainer_storage.BOOTSTRAP_MAX_FAILURES):
+        refused("bootstrap_code_invalid", _guess, svc, challenge, att, f"AAAAAAAA{i:02d}")
+    refused("bootstrap_code_invalid", _guess, svc, challenge, att, code)
+    assert host(svc).bootstrap_burned(code)
+    assert call(svc, "status")["passkeys"] == []
+    # The host issues a new code, which works.
+    fresh = host(svc).bootstrap_code()
+    assert _guess(svc, challenge, att, fresh)["state"] == "pending"
+
+
+def test_a_bootstrap_code_survives_fewer_wrong_guesses(svc):
+    code = host(svc).bootstrap_code()
+    auth = SoftAuthenticator()
+    challenge = call(svc, "challenge", {"purpose": "enrol-bootstrap", "label": "x"})
+    att = auth.register(challenge_bytes(challenge["payload"]))
+    for i in range(maintainer_storage.BOOTSTRAP_MAX_FAILURES - 1):
+        refused("bootstrap_code_invalid", _guess, svc, challenge, att, f"AAAAAAAA{i:02d}")
+    assert not host(svc).bootstrap_burned(code)
+    assert _guess(svc, challenge, att, code)["state"] == "pending"
+
+
 def test_a_second_bootstrap_registration_racing_the_first_is_refused(svc):
     """An agent that read the code and races the maintainer needs the host
     confirm too; a second key on a used code is refused, and the host sees
@@ -477,6 +511,65 @@ def test_host_revoke_and_reset(svc):
     assert host(svc).revoke(again.id[:12])["state"] == "revoked"
 
 
+# ── key changes are recorded and visible ───────────────────────────────────
+
+def _changes(svc):
+    return [(c["change"], c["by"], c["path"], c["credential_id"])
+            for c in reversed(call(svc, "status")["key_changes"])]
+
+
+def test_every_key_change_is_recorded_with_its_path_and_signer(svc):
+    """Whoever can reach the host or the database can reset and enrol their
+    own key; the passkey cannot stop that, so every change to the key set is
+    in the audit log, with the path and the key that made it."""
+    first = bootstrap(svc)
+    newcomer, _ = _enrol_second(svc, first)
+    signed(svc, first, "cancel", "cancel", credential_id=newcomer.id)
+    third, _ = _enrol_second(svc, first, label="tablet")
+    sql(svc, "UPDATE maintainer_passkeys SET active_from=0 WHERE credential_id=%s", (third.id,))
+    signed(svc, third, "revoke-self", "revoke", credential_id=third.id)
+    host(svc).revoke(first.id[:12])
+    host(svc).revoke(first.id[:12])          # already revoked: nothing changes, nothing logged
+    host(svc).reset()
+    assert _changes(svc) == [
+        ("enrol", "bootstrap", "console", first.id),
+        ("confirm", "host", "host", first.id),
+        ("add", first.id, "console", newcomer.id),
+        ("cancel", first.id, "console", newcomer.id),
+        ("add", first.id, "console", third.id),
+        ("revoke", third.id, "console", third.id),
+        ("revoke", "host", "host", first.id),
+        ("reset", "host", "host", None),
+    ]
+    latest = call(svc, "status")["key_changes"][0]
+    assert latest["revoked"] == 0 and latest["principal"] is None and latest["at"] > 0
+    console = [c for c in call(svc, "status")["key_changes"] if c["path"] == "console"]
+    assert {c["principal"] for c in console} == {PRINCIPAL}
+    from pseudolife_memory.storage.coordination import audit_events, verify_audit_chain
+    with svc._coordination_lock:
+        rows = list(audit_events(coordination._mailbox(svc).conn))
+    assert verify_audit_chain(rows)["ok"]
+
+
+def test_a_refused_key_change_records_nothing(svc):
+    first = bootstrap(svc)
+    before = _changes(svc)
+    refused("assertion_invalid", signed, svc, first, "cancel", "cancel", credential_id=first.id)
+    assert _changes(svc) == before
+
+
+def test_console_key_changes_send_a_courtesy_notice(svc):
+    """Courtesy only (spec "Enrolment" 4): the passkey list is the record."""
+    agent = peer(svc)
+    first = bootstrap(svc)
+    newcomer, _ = _enrol_second(svc, first)
+    signed(svc, first, "cancel", "cancel", credential_id=newcomer.id)
+    texts = [m["text"] for m in receive(svc, agent)["messages"]]
+    assert len(texts) == 3, texts
+    assert all("courtesy" in t and "Settings" in t for t in texts)
+    assert first.id[:12] in texts[0] and newcomer.id[:12] in texts[2]
+
+
 # ── bearer-only paths never produce maintainer mail ────────────────────────
 
 @pytest.mark.parametrize("smuggled", [{"origin": "maintainer"},
@@ -570,9 +663,48 @@ def test_reserved_words_are_refused_as_a_label(svc, label):
         board(svc).update(PRINCIPAL, agent["agent_id"], agent["credential"], label=label)
 
 
-def test_ordinary_labels_that_contain_a_reserved_word_are_fine(svc):
-    for label in ("maintainer-helper", "verified builds", "daemon watcher"):
+# The look-alikes the 2026-10-04 security review registered, and a few more
+# of each class: a confusable letter (Cyrillic, Greek, a digit), the word
+# inside a longer label, one edit or one swap away.
+@pytest.mark.parametrize("label", [
+    "Mаintainer", "maintainer-bot", "Maintainer (passkey)", "maintainer1", "maintaner",
+    "maintainer-helper", "the maintainer", "MAINTAINERS", "mаintаinеr",
+    "ma1ntainer", "maintαiner", "MAINTAΙNER", "mainatiner", "maintainr",
+    "maıntainer", "maïntainer", "dаemon", "deamon", "daеmon", "daem0n",
+    "vеrified", "pаsskey", "PASSKEУ"])
+def test_look_alikes_of_a_reserved_word_are_refused_as_a_label(svc, label):
+    with pytest.raises(coordination.CoordinationRefused, match="invalid_label"):
         dispatch(svc, "register", {"label": label}, headers={}, principal=PRINCIPAL)
+    agent = peer(svc)
+    with pytest.raises(CoordinationError, match="invalid_label"):
+        board(svc).update(PRINCIPAL, agent["agent_id"], agent["credential"], label=label)
+
+
+# Plausible labels that share letters with a reserved word: the shim and
+# Codex defaults, the board's own helpers, project names, and words one
+# rule would catch if it were looser.
+@pytest.mark.parametrize("label", [
+    "maintenance-bot", "main", "maint-runner", "Claude Code", "codex", "agent",
+    "pseudolife-mcp", "board-roles", "lease-hold", "unattended update", "Release relay",
+    "verified builds", "daemon watcher", "daemon-watch", "passkeys", "passkey tests",
+    "verifier", "maintain", "maintains", "maintaining docs", "container", "mainline"])
+def test_ordinary_labels_near_a_reserved_word_are_fine(svc, label):
+    dispatch(svc, "register", {"label": label}, headers={}, principal=PRINCIPAL)
+    agent = peer(svc)
+    board(svc).update(PRINCIPAL, agent["agent_id"], agent["credential"], label=label)
+
+
+def test_the_digest_shows_a_look_alike_label_registered_earlier_as_a_plain_peer(svc):
+    """A row registered before the look-alike rule keeps working, and the
+    digest names it as an unnamed peer rather than by its label."""
+    sender, recipient = peer(svc), peer(svc)
+    sql(svc, "UPDATE coordination_agents SET label=%s WHERE agent_id=%s",
+        ("maintainer-bot", sender["agent_id"]))
+    send_as(svc, sender, to=recipient["agent_id"], text="hi")
+    board(svc).update(PRINCIPAL, sender["agent_id"], sender["credential"], status="still here")
+    with svc._coordination_lock:
+        (entry,) = coordination._store(svc)._pending_preview(recipient["agent_id"])
+    assert entry["sender_label"] == ""
 
 
 # ── replies ────────────────────────────────────────────────────────────────
@@ -616,6 +748,25 @@ def test_a_send_without_to_or_reply_to_is_refused(svc):
     agent = peer(svc)
     with pytest.raises(coordination.CoordinationRefused, match="invalid_recipient"):
         send_as(svc, agent, text="to whom?")
+
+
+def test_one_sessions_backlog_never_refuses_anothers_reply_to_the_maintainer(svc, monkeypatch):
+    """Nothing acknowledges the maintainer's reserved row (the Console only
+    reads its inbox), so a recipient-wide pending cap there filled with one
+    session's replies and refused every other session's for up to a day.
+    The cap on that row counts the sender's own pending replies instead."""
+    from pseudolife_memory.storage import coordination as board_storage
+    monkeypatch.setattr(board_storage, "MAX_PENDING", 3)
+    auth = bootstrap(svc)
+    noisy, quiet = peer(svc), peer(svc)
+    to_noisy, _ = maintainer_send(svc, auth, noisy["agent_id"])
+    to_quiet, _ = maintainer_send(svc, auth, quiet["agent_id"], text="Status?")
+    for n in range(3):
+        send_as(svc, noisy, reply_to=to_noisy["message_id"], text=f"update {n}")
+    send_as(svc, quiet, reply_to=to_quiet["message_id"], text="Done.")
+    assert "Done." in [m["text"] for m in call(svc, "inbox", 50)["messages"]]
+    with pytest.raises(coordination.CoordinationRefused, match="queue_full"):
+        send_as(svc, noisy, reply_to=to_noisy["message_id"], text="update 3")
 
 
 def test_a_routed_reply_cannot_name_another_mailboxs_message(svc):
@@ -791,7 +942,8 @@ def test_unset_config_answers_https_required(coordinating, monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", BEARER)
     for name, arg in (("status", None), ("challenge", {"purpose": "send"}), ("sent", 5),
                       ("inbox", 5), ("send", {}), ("role", {}), ("enrol", {})):
-        refused("maintainer_https_required", call, coordinating, name, arg)
+        exc = refused("maintainer_https_required", call, coordinating, name, arg)
+        assert exc.public == {"config_problem": "unset"}
 
 
 @pytest.mark.parametrize("rp_id,origin", [
@@ -806,7 +958,8 @@ def test_a_misconfigured_origin_answers_https_required(coordinating, monkeypatch
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOKEN", BEARER)
     m = coordinating.config.coordination.maintainer
     m.rp_id, m.origin = rp_id, origin
-    refused("maintainer_https_required", call, coordinating, "status")
+    exc = refused("maintainer_https_required", call, coordinating, "status")
+    assert exc.public["config_problem"] not in (None, "unset")
 
 
 def test_localhost_over_plain_http_is_allowed(coordinating, monkeypatch):
@@ -829,7 +982,7 @@ def test_a_call_outside_a_request_is_refused(svc):
 def test_status_reports_enrolment_and_roles(svc):
     out = call(svc, "status")
     assert out == {"available": False, "reason": "maintainer_not_enrolled", "rp_id": RP_ID,
-                   "origin": ORIGIN, "passkeys": [], "roles": {}}
+                   "origin": ORIGIN, "passkeys": [], "roles": {}, "key_changes": []}
     bootstrap(svc)
     assert call(svc, "status")["available"] is True
 

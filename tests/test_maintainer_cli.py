@@ -12,7 +12,9 @@ import io
 import pytest
 
 from pseudolife_memory import maintainer_cli
-from pseudolife_memory.storage.maintainer import BOOTSTRAP_CODE_LENGTH, code_hash
+from pseudolife_memory.storage.maintainer import (
+    BOOTSTRAP_CODE_LENGTH, BOOTSTRAP_MAX_FAILURES, code_hash,
+)
 from tests.maintainer_authenticator import SoftAuthenticator
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
@@ -75,6 +77,25 @@ def test_enrol_code_waits_and_names_the_redeeming_key(bank, monkeypatch):
     assert f"pseudolife-mcp maintainer confirm {auth.id[:12]}" in out
 
 
+def test_enrol_code_stops_waiting_when_wrong_guesses_burn_the_code(bank, monkeypatch):
+    real = maintainer_cli._enrol_code
+
+    def burn_then_wait(store, args, out):
+        original = store.bootstrap_code
+
+        def code_then_burn():
+            value = original()
+            bank.execute("UPDATE maintainer_bootstrap SET failed_attempts=%s",
+                         (BOOTSTRAP_MAX_FAILURES,))
+            return value
+        store.bootstrap_code = code_then_burn
+        return real(store, args, out)
+
+    monkeypatch.setattr(maintainer_cli, "_enrol_code", burn_then_wait)
+    code, out = run("enrol-code", "--poll", "0.01")
+    assert code == 1 and "burned after too many wrong guesses" in out
+
+
 def test_confirm_activates_only_a_pending_key(bank, capsys):
     auth = SoftAuthenticator()
     _insert(bank, auth, "pending")
@@ -85,6 +106,19 @@ def test_confirm_activates_only_a_pending_key(bank, capsys):
     assert state == "active" and active_from is not None
     code, _ = run("confirm", auth.id[:8])   # no longer pending
     assert code == 1 and "no single passkey" in capsys.readouterr().err
+
+
+def test_an_id_that_starts_with_a_dash_is_a_prefix_not_an_option(bank):
+    """base64url ids start with '-' one time in 64: typed as `list` printed
+    them, they must still name the key."""
+    auth = SoftAuthenticator()
+    auth.credential_id = b"\xf8" + auth.credential_id[1:]
+    assert auth.id.startswith("-")
+    _insert(bank, auth, "pending")
+    code, out = run("confirm", auth.id[:8])
+    assert code == 0 and "Active" in out
+    code, out = run("revoke", auth.id[:8])
+    assert code == 0
 
 
 def test_revoke_revokes_any_key_however_old(bank):

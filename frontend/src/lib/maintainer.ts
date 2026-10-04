@@ -8,6 +8,7 @@ import type {
   ChallengeAnswer,
   ChallengeBody,
   InboxMessage,
+  KeyChange,
   MaintainerStatus,
   Passkey,
   Preview,
@@ -16,6 +17,7 @@ import type {
 } from "./api/maintainer";
 import type { BoardAgent, Epoch, Lease } from "./api/types";
 import { fmtDuration, shortId, words } from "./format";
+import { readKey, writeKey } from "./storage";
 import { CeremonyError, type AssertionJSON, type Support } from "./webauthn";
 
 // ---- durations ------------------------------------------------------------------
@@ -429,6 +431,86 @@ export async function signAndComplete<T>(
   const refused = softError(result);
   if (refused) throw new ApiError(200, refused, result as Record<string, string>);
   return result;
+}
+
+// ---- key-change notices -------------------------------------------------------------
+
+/** Credential ids this browser signed or enrolled with: "the key this Console uses". */
+export const OWN_KEYS_KEY = "pl_maintainer_keys";
+/** Key changes the maintainer said they made, so their notice stops. */
+export const SEEN_CHANGES_KEY = "pl_maintainer_seen_changes";
+/** How long a key change the Console did not make stays a notice. */
+export const KEY_NOTICE_DAYS = 7;
+const LIST_CAP = 50;
+
+/** A stored list of strings; empty when storage is unavailable or garbled. */
+export function readList(key: string): string[] {
+  try {
+    const v: unknown = JSON.parse(readKey(key) || "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add `value` to `base` (moved to the end if present), keep the newest
+ * LIST_CAP, store, return the list: the list still holds for this tab when
+ * storage is unavailable.
+ */
+export function addToList(key: string, value: string, base: string[] = readList(key)): string[] {
+  const list = [...base.filter((v) => v !== value), value].slice(-LIST_CAP);
+  writeKey(key, JSON.stringify(list));
+  return list;
+}
+
+export const changeId = (c: KeyChange) => `${c.at}:${c.change}:${c.credential_id ?? ""}`;
+
+/**
+ * Made by this Console: signed by one of its keys, or the enrolment and
+ * host confirm of a key it enrolled itself.
+ */
+function ownChange(c: KeyChange, own: Set<string>): boolean {
+  if (own.has(c.by)) return true;
+  return (c.change === "enrol" || c.change === "confirm") && !!c.credential_id && own.has(c.credential_id);
+}
+
+/**
+ * The key changes of the last KEY_NOTICE_DAYS that this Console did not make
+ * and the maintainer has not acknowledged, newest first.
+ */
+export function keyNotices(
+  changes: KeyChange[] | undefined,
+  own: Iterable<string>,
+  seen: Iterable<string>,
+  nowMs: number,
+): KeyChange[] {
+  const mine = new Set(own);
+  const acked = new Set(seen);
+  const since = nowMs / 1000 - KEY_NOTICE_DAYS * 86400;
+  return (changes ?? []).filter((c) => c.at >= since && !ownChange(c, mine) && !acked.has(changeId(c)));
+}
+
+/** A key change in words, naming the path it came by. */
+export function keyChangeText(c: KeyChange): string {
+  const key = c.credential_id ? `${c.label ? `“${c.label}” ` : "key "}(${shortId(c.credential_id)})` : "a key";
+  const signer = `key ${shortId(c.by)}`;
+  switch (c.change) {
+    case "enrol":
+      return `${key} was enrolled in the Console with a one-time code from the daemon host`;
+    case "confirm":
+      return `${key} was confirmed on the daemon host`;
+    case "add":
+      return `${key} was added in the Console, approved by ${signer}`;
+    case "cancel":
+      return `${key} was cancelled in the Console by ${signer}`;
+    case "revoke":
+      return c.path === "host" ? `${key} was revoked on the daemon host` : `${key} revoked itself`;
+    case "reset":
+      return `every passkey was revoked on the daemon host (reset; ${c.revoked ?? 0} revoked)`;
+    default:
+      return `${words(c.change)}: ${key}${c.path === "host" ? " on the daemon host" : ""}`;
+  }
 }
 
 // ---- messages ---------------------------------------------------------------------

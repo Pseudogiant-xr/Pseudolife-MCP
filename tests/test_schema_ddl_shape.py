@@ -119,7 +119,8 @@ _REQUIRED_COLUMNS = [
     ("maintainer_passkeys", {"credential_id", "public_key", "alg", "sign_count", "label",
                              "enrolled_by", "state", "active_from", "created_at",
                              "last_used_at", "revoked_at", "revoked_by", "flagged_at"}),
-    ("maintainer_bootstrap", {"code_hash", "expires_at", "used_at", "credential_id"}),
+    ("maintainer_bootstrap", {"code_hash", "expires_at", "used_at", "credential_id",
+                              "failed_attempts"}),
     ("maintainer_nonces", {"nonce", "expires_at"}),
     ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
 ]
@@ -159,6 +160,7 @@ _COLUMN_TYPES = [
     ("coordination_messages", "origin", "text"),             # v54
     ("maintainer_passkeys", "public_key", "bytea"),          # v54: the COSE key as registered
     ("maintainer_passkeys", "sign_count", "bigint"),         # v54: a 32-bit counter, unsigned
+    ("maintainer_bootstrap", "failed_attempts", "integer"),  # v54: wrong guesses; 5 burn a code
 ]
 
 _NULLABLE_COLUMNS = [
@@ -272,6 +274,20 @@ def test_a_v53_bank_gains_the_v54_message_columns_through_the_guarded_pass(pg_co
                            ).fetchone() == ("agent", None, None)
     pg_conn.execute(COORDINATION_SCHEMA_SQL)
     assert columns <= _columns(pg_conn, "coordination_messages")
+
+
+def test_an_early_v54_bootstrap_table_gains_the_failure_count(pg_conn):
+    """``failed_attempts`` joined the v54 DDL during development (security
+    review, 2026-10-04): a bank created before it gains it, zero for a code
+    already issued, and a second pass adds nothing."""
+    from pseudolife_memory.storage.schema import MAINTAINER_SCHEMA_SQL
+    pg_conn.autocommit = True
+    pg_conn.execute("INSERT INTO maintainer_bootstrap (code_hash,expires_at) VALUES ('h',1)")
+    pg_conn.execute("ALTER TABLE maintainer_bootstrap DROP COLUMN failed_attempts")
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+    assert pg_conn.execute("SELECT failed_attempts FROM maintainer_bootstrap").fetchone() == (0,)
+    pg_conn.execute(MAINTAINER_SCHEMA_SQL)
+    assert _column_attr(pg_conn, "maintainer_bootstrap", "failed_attempts", "is_nullable") == "NO"
 
 
 def test_maintainer_origin_defaults_to_agent_mail(pg_conn):

@@ -15,6 +15,7 @@ import {
   type EnrolResult,
   type GrantResult,
   type InboxMessage,
+  type KeyChange,
   type MaintainerStatus,
   type RepudiateResult,
   type RevokeRoleResult,
@@ -25,10 +26,16 @@ import {
 import {
   COORDINATOR_HOLD,
   HOLDS,
+  OWN_KEYS_KEY,
+  SEEN_CHANGES_KEY,
+  addToList,
   bootstrapReadiness,
+  changeId,
   failureLine,
+  keyNotices,
   normalizeInbox,
   normalizeSent,
+  readList,
   SEND_WAKE,
   signReadiness,
   wakeText,
@@ -109,6 +116,26 @@ export function loadThreads(): Promise<void> {
   });
 }
 
+// ---- key-change notices ------------------------------------------------------------
+
+/** This browser's keys and the key changes the maintainer acknowledged (per browser). */
+export const keyNotes = $state({ own: readList(OWN_KEYS_KEY), seen: readList(SEEN_CHANGES_KEY) });
+
+/** A key this Console signed with or enrolled: its changes are not notices. */
+export function rememberOwnKey(credentialId: string | null | undefined): void {
+  if (credentialId) keyNotes.own = addToList(OWN_KEYS_KEY, credentialId, keyNotes.own);
+}
+
+/** "I made this change": its notice stops in this browser. */
+export function acknowledgeChange(c: KeyChange): void {
+  keyNotes.seen = addToList(SEEN_CHANGES_KEY, changeId(c), keyNotes.seen);
+}
+
+/** The recent key changes this Console did not make, newest first. */
+export function keyChangeNotices(nowMs = Date.now()): KeyChange[] {
+  return keyNotices(maintainer.status?.key_changes, keyNotes.own, keyNotes.seen, nowMs);
+}
+
 /** The daemon declared demo data (health `fixtures: true`): no real ceremony. */
 export function fixtureMode(): boolean {
   return store.health.data?.fixtures === true;
@@ -186,7 +213,11 @@ export function settleSigning(result: unknown = null): void {
 export const PASSKEY_NOTE = "You confirm with your passkey, so no session can change a role on its own.";
 const MESSAGE_NOTE = "Your passkey signs this exact text and recipient. Tap only prompts you started here.";
 
-export const sign = (publicKey: unknown) => getAssertion(publicKey, { fixtures: fixtureMode() });
+export async function sign(publicKey: unknown) {
+  const assertion = await getAssertion(publicKey, { fixtures: fixtureMode() });
+  rememberOwnKey(assertion.id);
+  return assertion;
+}
 
 function holdLabel(seconds: number): string {
   return HOLDS.find((h) => h.seconds === seconds)?.label ?? `${Math.round(seconds / 3600)} h`;
@@ -388,7 +419,10 @@ export function addKey(label: string) {
     },
     success: (r) => `${q(r.label || label)} was added; it is ${r.state === "active" ? "in its 24-hour quarantine" : r.state}.`,
     failure: "The new key was not added",
-  }).then(keysChanged);
+  }).then((r) => {
+    rememberOwnKey(r?.credential_id);
+    return keysChanged(r);
+  });
 }
 
 /**
@@ -404,6 +438,7 @@ export async function enrolBootstrap(code: string, label: string): Promise<Enrol
     const r = await maintainerApi.enrol({ payload: answer.payload, mac: answer.mac, attestation, code });
     const refused = (r as { error?: unknown }).error;
     if (typeof refused === "string" && refused) throw new ApiError(200, refused, null);
+    rememberOwnKey(r.credential_id);
     toast(`Passkey ${q(r.label || label)} enrolled; it waits for the host confirm.`, "ok", 6000);
     void loadMaintainer();
     return r;

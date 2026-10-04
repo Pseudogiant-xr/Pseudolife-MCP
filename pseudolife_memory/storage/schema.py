@@ -819,15 +819,28 @@ CREATE TABLE IF NOT EXISTS maintainer_passkeys (
     flagged_at    DOUBLE PRECISION
 );
 CREATE TABLE IF NOT EXISTS maintainer_bootstrap (
-    code_hash     TEXT PRIMARY KEY,
-    expires_at    DOUBLE PRECISION NOT NULL,
-    used_at       DOUBLE PRECISION,
-    credential_id TEXT
+    code_hash       TEXT PRIMARY KEY,
+    expires_at      DOUBLE PRECISION NOT NULL,
+    used_at         DOUBLE PRECISION,
+    credential_id   TEXT,
+    failed_attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS maintainer_nonces (
     nonce      TEXT PRIMARY KEY,
     expires_at DOUBLE PRECISION NOT NULL
 );
+-- Wrong-code guesses against the live code, which burn it at the limit;
+-- added during v54 development, so a bank created before it gains the
+-- column here (guarded like the v49 and v50 columns).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_attribute
+                   WHERE attrelid = 'maintainer_bootstrap'::regclass
+                     AND attname = 'failed_attempts' AND attnum > 0 AND NOT attisdropped) THEN
+        ALTER TABLE maintainer_bootstrap
+            ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
+    END IF;
+END $$;
 """
 SCHEMA_SQL += MAINTAINER_SCHEMA_SQL
 

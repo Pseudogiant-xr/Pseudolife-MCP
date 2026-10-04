@@ -3,16 +3,20 @@
   // list is the authority; notices about keys are courtesy only), the first
   // enrolment with a one-time code from the daemon host, adding another key
   // (approved by an active one, then 24 h in quarantine), cancelling a
-  // quarantined newer key and revoking a key with itself.
+  // quarantined newer key and revoking a key with itself. Every key change is
+  // listed, and one this browser did not make is a notice for a week: anyone
+  // with a shell on the daemon host or the database password can change keys.
   import { untrack } from "svelte";
   import type { Passkey } from "../../lib/api/maintainer";
-  import { ENROL_COMMAND, inQuarantine, usableKey } from "../../lib/maintainer";
+  import { ENROL_COMMAND, inQuarantine, KEY_NOTICE_DAYS, keyChangeText, usableKey } from "../../lib/maintainer";
   import {
+    acknowledgeChange,
     addKey,
     cancelKey,
     enrolBootstrap,
     enrolReadiness,
     fixtureMode,
+    keyChangeNotices,
     loadMaintainer,
     maintainer,
     readiness,
@@ -46,6 +50,8 @@
   const canSign = $derived(readiness(now));
   const canEnrol = $derived(enrolReadiness());
   const bootstrapOpen = $derived(status !== null && live.length === 0);
+  const notices = $derived(keyChangeNotices(now));
+  const history = $derived((status?.key_changes ?? []).slice(0, 10));
 
   function stateText(k: Passkey): { text: string; tone: string } {
     if (k.state === "revoked") return { text: "revoked", tone: "" };
@@ -122,6 +128,19 @@
       </p>
     {/if}
 
+    {#each notices as c (`${c.at}:${c.change}:${c.credential_id}`)}
+      <div class="alert" role="alert">
+        <p>
+          <span class="alert-title">A passkey change this browser did not make:</span>
+          {keyChangeText(c)}, {fmtRelative(c.at, now)}.
+          If you did not make it, run <code class="mono">pseudolife-mcp maintainer list</code> on the daemon host and
+          revoke any key you do not know there. Whoever made it had the Console with a key, a shell on the daemon host,
+          or the database password.
+        </p>
+        <button type="button" class="btn btn-ghost btn-sm" onclick={() => acknowledgeChange(c)}>I made this change</button>
+      </div>
+    {/each}
+
     {#each quarantined as k (k.credential_id)}
       <p class="banner" role="status">
         A new passkey, {k.label}, is in quarantine until {fmtDateTime(k.active_from)}. It cannot sign anything until
@@ -184,6 +203,24 @@
         host can: <code class="mono">pseudolife-mcp maintainer revoke &lt;prefix&gt;</code>, or
         <code class="mono">pseudolife-mcp maintainer reset</code> to revoke them all and reopen enrolment.
       </p>
+    {/if}
+
+    {#if history.length}
+      <div class="history">
+        <h3 class="sub-title">Recent key changes</h3>
+        <ul class="change-list">
+          {#each history as c (`${c.at}:${c.change}:${c.credential_id}`)}
+            <li>
+              <span class="chip chip-prose {c.path === 'host' ? 'warn' : ''}">{c.path === "host" ? "daemon host" : "Console"}</span>
+              <span class="change-text">{keyChangeText(c)}</span>
+              <span class="meta" title={fmtDateTime(c.at)}>{fmtRelative(c.at, now)}</span>
+            </li>
+          {/each}
+        </ul>
+        <p class="caption">
+          From the daemon's audit log. A change this browser did not make stays a notice above for {KEY_NOTICE_DAYS} days.
+        </p>
+      </div>
     {/if}
 
     {#if bootstrapOpen}
@@ -296,6 +333,54 @@
     border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent);
     font-size: 12.5px;
     color: var(--warn);
+  }
+  .alert {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--danger-ink) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger-ink) 28%, transparent);
+    font-size: 12.5px;
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
+  }
+  .alert p {
+    flex: 1 1 32ch;
+    margin: 0;
+  }
+  .alert-title {
+    font-weight: 600;
+    color: var(--danger-ink);
+  }
+  .history {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+  }
+  .change-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12.5px;
+  }
+  .change-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    min-width: 0;
+  }
+  .change-text {
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
   }
   .key-list {
     list-style: none;

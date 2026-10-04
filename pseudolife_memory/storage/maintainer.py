@@ -18,6 +18,14 @@ flows, cancel and revoke-self (signed), the host's confirm, revoke and reset
 (board mail, repudiation, role changes), sign-count updates and the
 regression flag. No derived state.
 
+Every change to the key set (bootstrap enrol, host confirm, an added key,
+cancel, revoke from the Console or the host, reset) appends a
+``maintainer_key`` event to the board's audit log in the change's own
+transaction, naming the path and the key that signed it: anyone with a
+shell on the daemon host or the database password can reset and enrol their
+own key, which the passkey cannot stop, so a key change is at least loud.
+The Console reads them back as ``key_changes`` (``GET /api/maintainer``).
+
 The secret is a meta row (``maintainer_secret_v1``), never config; ``reset``
 rotates it, so every payload issued before is dead.
 """
@@ -42,7 +50,7 @@ from pseudolife_memory.maintainer_webauthn import (
 )
 from pseudolife_memory.storage.coordination import (
     ATTACHED_IDLE_WINDOW, COORDINATOR_PREFIX, DELEGATE_PREFIX, MAINTAINER_ORIGIN,
-    MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, RESERVED_SENDERS,
+    MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, RESERVED_SENDERS, CoordinationStore,
 )
 
 logger = logging.getLogger("pseudolife-mcp.maintainer")
@@ -63,6 +71,11 @@ SPENT_NONCE_RETENTION = 7 * 24 * 3600
 # The host's one-time bootstrap code: 10 base32 characters, 10 minutes.
 BOOTSTRAP_TTL = 600
 BOOTSTRAP_CODE_LENGTH = 10
+# Wrong-code redemptions that burn the live code; the host must then issue a
+# new one. A wrong code rolls its redemption back, so before this one
+# payload could carry unlimited guesses (security review, 2026-10-04). Five
+# leaves room for typos; a guess has 1 in 32**10 odds.
+BOOTSTRAP_MAX_FAILURES = 5
 _BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 MAX_PASSKEY_LABEL = 64
 # The payload a completing route accepts: the daemon wrote it, so anything
@@ -73,12 +86,22 @@ ROLE_PURPOSES = ("grant-delegate", "revoke-delegate", "assign-coordinator",
 CHALLENGE_PURPOSES = ("send", "enrol-approve", "enrol-bootstrap", "cancel", "revoke-self",
                       "repudiate", *ROLE_PURPOSES)
 _FULL_AGENT_ID = re.compile(r"[0-9a-f]{32}")
+# The audit event a key-set change appends, and how many the Console's
+# status reads back (newest first): a design value, enough for weeks of
+# ordinary changes.
+KEY_CHANGE_EVENT = "maintainer_key"
+KEY_CHANGE_LIMIT = 30
+KEY_CHANGE_FIELDS = ("change", "credential_id", "label", "by", "path", "revoked")
 
 
 class MaintainerError(ValueError):
     """A public error code and its HTTP status; ``check`` (the rule that
     failed) goes to the daemon log only, never to the caller. A
-    ``ValueError`` so a generic route still answers 400 with the code."""
+    ``ValueError`` so a generic route still answers 400 with the code.
+    ``public`` is the one exception, fields set deliberately for the
+    answer: which config rule ``maintainer_https_required`` broke (a
+    config rule is no verification secret; ``pseudolife-mcp doctor`` reads
+    it to tell "off" from "configured wrongly")."""
 
     STATUS = {
         "maintainer_https_required": 409, "maintainer_not_enrolled": 409,
@@ -92,10 +115,12 @@ class MaintainerError(ValueError):
         "coordination_unavailable": 503, "not_found": 404,
     }
 
-    def __init__(self, code: str, *, check: str | None = None, flag: str | None = None):
+    def __init__(self, code: str, *, check: str | None = None, flag: str | None = None,
+                 public: dict | None = None):
         self.code = code
         self.check = check
         self.flag = flag
+        self.public = public
         super().__init__(code)
 
     @property
@@ -146,11 +171,14 @@ def check_label(label) -> str:
 class MaintainerStore:
     """Runs on the board's mailbox connection, under the coordination lock."""
 
-    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time):
+    def __init__(self, storage, *, rp_id: str, origin: str, clock=time.time, principal=""):
         self.storage = storage
         self.rp_id = rp_id
         self.origin = origin
         self.clock = clock
+        # The bearer principal of a Console request, for the audit record;
+        # empty on the host.
+        self.principal = principal
 
     # -- plumbing ----------------------------------------------------------
 
@@ -176,6 +204,38 @@ class MaintainerStore:
 
     def _mac(self, payload: str) -> str:
         return hmac.new(self._secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    # -- key-change record ---------------------------------------------------
+
+    def _key_change(self, change, *, credential_id=None, label=None, by, revoked=None):
+        """Append one key-set change to the audit log, inside the change's
+        transaction. ``by`` is the signing key's credential id, ``bootstrap``
+        (a host code redeemed in the Console) or ``host`` (the CLI)."""
+        path = "host" if by == "host" else "console"
+        actor = {"host": "operator", "bootstrap": "daemon"}.get(by, "maintainer")
+        payload = {"change": change, "credential_id": credential_id, "label": label,
+                   "by": by, "path": path, "revoked": revoked}
+        board = CoordinationStore(self.storage, clock=self.clock)
+        board._append([board._event(KEY_CHANGE_EVENT, payload, actor=actor,
+                                     principal="" if path == "host" else self.principal)],
+                      self.clock())
+
+    def key_changes(self, limit: int = KEY_CHANGE_LIMIT) -> list[dict]:
+        """The recent key-set changes, newest first, as the audit log keeps
+        them (its retention window bounds how far back they reach)."""
+        out = []
+        for row in self._all("SELECT created_at,principal,payload FROM coordination_events "
+                             "WHERE event=%s ORDER BY seq DESC LIMIT %s",
+                             (KEY_CHANGE_EVENT, limit)):
+            try:
+                payload = json.loads(row["payload"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            out.append({"at": row["created_at"], "principal": row["principal"] or None,
+                        **{key: payload.get(key) for key in KEY_CHANGE_FIELDS}})
+        return out
 
     # -- challenges --------------------------------------------------------
 
@@ -383,6 +443,23 @@ class MaintainerStore:
             if exc.check:
                 logger.warning("maintainer enrol-bootstrap refused: %s", exc.check)
             raise
+        try:
+            return self._redeem(fields, label, registration, code)
+        except MaintainerError as exc:
+            if exc.code == "bootstrap_code_invalid":
+                self._count_failure()
+            raise
+
+    def _count_failure(self) -> None:
+        """One wrong guess against the live code, in a transaction of its
+        own: the redemption it failed rolled back, nonce and all."""
+        with self.storage._txn():
+            self.storage.conn.execute(
+                "UPDATE maintainer_bootstrap SET failed_attempts=failed_attempts+1 "
+                "WHERE used_at IS NULL AND expires_at>=%s AND failed_attempts<%s",
+                (self.clock(), BOOTSTRAP_MAX_FAILURES))
+
+    def _redeem(self, fields, label, registration, code) -> dict:
         with self.storage._txn():
             self._spend(fields)
             now = self.clock()
@@ -392,7 +469,8 @@ class MaintainerStore:
             self.storage.conn.execute("LOCK TABLE maintainer_passkeys IN SHARE ROW EXCLUSIVE MODE")
             row = self._one("SELECT * FROM maintainer_bootstrap WHERE code_hash=%s FOR UPDATE",
                             (code_hash(code),))
-            if row is None or row["used_at"] is not None or now > row["expires_at"]:
+            if (row is None or row["used_at"] is not None or now > row["expires_at"]
+                    or row["failed_attempts"] >= BOOTSTRAP_MAX_FAILURES):
                 raise MaintainerError("bootstrap_code_invalid")
             if self.live_keys():
                 raise MaintainerError("enrolment_closed")
@@ -401,6 +479,8 @@ class MaintainerStore:
             self.storage.conn.execute(
                 "UPDATE maintainer_bootstrap SET used_at=%s,credential_id=%s WHERE code_hash=%s",
                 (now, out["credential_id"], row["code_hash"]))
+            self._key_change("enrol", credential_id=out["credential_id"], label=label,
+                             by="bootstrap")
         return out
 
     def approve_enrol(self, payload, mac, assertion) -> dict:
@@ -435,9 +515,12 @@ class MaintainerStore:
                     or approver["active_from"] is None or now < approver["active_from"]):
                 logger.warning("maintainer enrol refused: approver")
                 raise MaintainerError("assertion_invalid", check="approver")
-            return self._insert_key(registration, label=label,
-                                    enrolled_by=approver["credential_id"], state="active",
-                                    active_from=now + QUARANTINE_SECONDS)
+            out = self._insert_key(registration, label=label,
+                                   enrolled_by=approver["credential_id"], state="active",
+                                   active_from=now + QUARANTINE_SECONDS)
+            self._key_change("add", credential_id=out["credential_id"], label=label,
+                             by=approver["credential_id"])
+            return out
 
     def cancel(self, payload, mac, assertion) -> dict:
         """An older active key cancels a newer key still in quarantine."""
@@ -455,6 +538,8 @@ class MaintainerStore:
             self.storage.conn.execute(
                 "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by=%s "
                 "WHERE credential_id=%s", (now, key["credential_id"], target["credential_id"]))
+            self._key_change("cancel", credential_id=target["credential_id"],
+                             label=target["label"], by=key["credential_id"])
             return {"credential_id": target["credential_id"], "state": "revoked"}
         return self.complete(payload, mac, "cancel", assertion, action)
 
@@ -467,6 +552,8 @@ class MaintainerStore:
                 "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by=%s "
                 "WHERE credential_id=%s", (self.clock(), key["credential_id"],
                                            key["credential_id"]))
+            self._key_change("revoke", credential_id=key["credential_id"], label=key["label"],
+                             by=key["credential_id"])
             return {"credential_id": key["credential_id"], "state": "revoked"}
         return self.complete(payload, mac, "revoke-self", assertion, action)
 
@@ -625,6 +712,12 @@ class MaintainerStore:
         return row and {"credential_id": row["credential_id"], "label": row["label"],
                         "state": row["state"]}
 
+    def bootstrap_burned(self, code) -> bool:
+        """Whether wrong guesses burned this code before it was redeemed."""
+        row = self._one("SELECT failed_attempts FROM maintainer_bootstrap WHERE code_hash=%s "
+                        "AND used_at IS NULL", (code_hash(code),))
+        return row is not None and row["failed_attempts"] >= BOOTSTRAP_MAX_FAILURES
+
     def _by_prefix(self, prefix, *, state=None):
         if (not isinstance(prefix, str) or len(prefix) < 6
                 or not re.fullmatch(r"[A-Za-z0-9_-]+", prefix)):
@@ -644,15 +737,20 @@ class MaintainerStore:
             self.storage.conn.execute(
                 "UPDATE maintainer_passkeys SET state='active',active_from=%s "
                 "WHERE credential_id=%s", (self.clock(), row["credential_id"]))
+            self._key_change("confirm", credential_id=row["credential_id"], label=row["label"],
+                             by="host")
         return {"credential_id": row["credential_id"], "label": row["label"], "state": "active"}
 
     def revoke(self, prefix) -> dict:
         """Host: revoke any key, however old."""
         with self.storage._txn():
             row = self._by_prefix(prefix)
-            self.storage.conn.execute(
-                "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,revoked_by='host' "
-                "WHERE credential_id=%s AND state<>'revoked'", (self.clock(), row["credential_id"]))
+            if self.storage.conn.execute(
+                    "UPDATE maintainer_passkeys SET state='revoked',revoked_at=%s,"
+                    "revoked_by='host' WHERE credential_id=%s AND state<>'revoked'",
+                    (self.clock(), row["credential_id"])).rowcount:
+                self._key_change("revoke", credential_id=row["credential_id"],
+                                 label=row["label"], by="host")
         return {"credential_id": row["credential_id"], "label": row["label"], "state": "revoked"}
 
     def reset(self) -> dict:
@@ -664,4 +762,5 @@ class MaintainerStore:
             self.storage.conn.execute("DELETE FROM maintainer_bootstrap")
             self.storage.conn.execute("DELETE FROM meta WHERE key=%s", (SECRET_META_KEY,))
             self._secret()
+            self._key_change("reset", by="host", revoked=revoked)
         return {"revoked": revoked}

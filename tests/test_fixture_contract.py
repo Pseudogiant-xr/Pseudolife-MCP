@@ -112,7 +112,9 @@ def test_entry_dicts_match_entry_card_contract():
 # repudiate answer and the completing routes need the database and are
 # covered by tests/test_maintainer_messages.py and test_maintainer_roles.py.
 
-_MX_STATUS_KEYS = {"available", "rp_id", "origin", "passkeys", "roles"}
+_MX_STATUS_KEYS = {"available", "rp_id", "origin", "passkeys", "roles", "key_changes"}
+_MX_KEY_CHANGE_KEYS = {"at", "principal", "change", "credential_id", "label", "by", "path",
+                       "revoked"}
 _MX_PASSKEY_KEYS = {"credential_id", "label", "state", "enrolled_by", "active_from",
                     "created_at", "last_used_at", "revoked_at", "revoked_by", "flagged_at"}
 _MX_DELEGATE_KEYS = {"agent_id", "expires_at", "granted_by"}
@@ -155,6 +157,9 @@ def _real_maintainer_store():
         "first_read_at": None, "acknowledged_at": None, "repudiated_at": None,
         "sender_agent_id": _MX_AGENT, "sender_label": "worker", "sender_principal": "laptop",
         "reply_to": "m0",
+        # audit events (key_changes)
+        "payload": '{"by":"bootstrap","change":"enrol","credential_id":"cred",'
+                   '"label":"laptop","path":"console","revoked":null}',
     }
 
     class Canned(MaintainerStore):
@@ -174,6 +179,10 @@ def _assert_status_shape(status, who):
     assert status["passkeys"], f"{who}: no passkey rows"
     for key in status["passkeys"]:
         assert set(key) == _MX_PASSKEY_KEYS, f"{who} passkey keys: {sorted(key)}"
+    assert status["key_changes"], f"{who}: no key changes"
+    for change in status["key_changes"]:
+        assert set(change) == _MX_KEY_CHANGE_KEYS, f"{who} key change keys: {sorted(change)}"
+        assert change["path"] in ("console", "host"), who
     assert status["roles"], f"{who}: no roles"
     for project, slots in status["roles"].items():
         assert set(slots) == {"delegate", "coordinator"}, f"{who} {project}: {sorted(slots)}"

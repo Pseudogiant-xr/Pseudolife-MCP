@@ -831,6 +831,14 @@ class FixtureService:
                     "active_from": now - 6 * _D, "created_at": now - 6 * _D,
                     "last_used_at": now - 2 * _H, "revoked_at": None,
                     "revoked_by": None, "flagged_at": None}],
+                # Newest first, as the audit log reads back. The host
+                # confirm did not come from a key this browser used, so the
+                # demo shows the key-change notice.
+                "key_changes": [
+                    self._mx_change("confirm", key_id, "Demo laptop (fixture)", "host",
+                                    now - 6 * _D + 300),
+                    self._mx_change("enrol", key_id, "Demo laptop (fixture)", "bootstrap",
+                                    now - 6 * _D)],
                 "roles": {self._MX_PROJECT: {
                     "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
                                  "granted_by": "maintainer"},
@@ -927,6 +935,14 @@ class FixtureService:
                 "project": self._MX_PROJECT, "task": "",
                 "last_activity": time.time() - 120, "duplicate_name": False}
 
+    @staticmethod
+    def _mx_change(change, credential_id, label, by, at, revoked=None) -> dict:
+        """One ``key_changes`` row, as ``MaintainerStore.key_changes`` builds it."""
+        path = "host" if by == "host" else "console"
+        return {"at": at, "principal": None if path == "host" else "laptop",
+                "change": change, "credential_id": credential_id, "label": label, "by": by,
+                "path": path, "revoked": revoked}
+
     def _mx_holder(self, role: str, project) -> str | None:
         """The live holder of ``<role>:<project>``, as ``role_holder`` reads it."""
         held = (self._mx()["roles"].get(project) or {}).get(role)
@@ -954,7 +970,8 @@ class FixtureService:
             out["reason"] = "maintainer_not_enrolled"
         out.update(rp_id="localhost", origin="http://localhost:8770",
                    passkeys=[dict(k) for k in self._mx()["passkeys"]],
-                   roles=self._mx_live_roles())
+                   roles=self._mx_live_roles(),
+                   key_changes=[dict(c) for c in self._mx()["key_changes"]])
         return out
 
     def maintainer_challenge(self, body: dict) -> dict:
@@ -1042,6 +1059,8 @@ class FixtureService:
                "created_at": now, "last_used_at": None, "revoked_at": None,
                "revoked_by": None, "flagged_at": None}
         self._mx()["passkeys"].append(key)
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "enrol" if by == "bootstrap" else "add", key["credential_id"], key["label"], by, now))
         return {"credential_id": key["credential_id"], "label": key["label"], "state": state}
 
     def maintainer_send(self, body: dict) -> dict:
@@ -1121,12 +1140,16 @@ class FixtureService:
             raise ValueError("assertion_invalid")
         key.update(state="revoked", revoked_at=now,
                    revoked_by=self._mx()["passkeys"][0]["credential_id"])
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "cancel", key["credential_id"], key["label"], key["revoked_by"], now))
         return {"state": "revoked"}
 
     def maintainer_revoke(self, body: dict) -> dict:
         fields = self._mx_open(body, "revoke-self")
         key = self._mx_key(fields["credential_id"])
         key.update(state="revoked", revoked_at=time.time(), revoked_by=key["credential_id"])
+        self._mx()["key_changes"].insert(0, self._mx_change(
+            "revoke", key["credential_id"], key["label"], key["credential_id"], key["revoked_at"]))
         return {"state": "revoked"}
 
     def maintainer_repudiate(self, body: dict) -> dict:

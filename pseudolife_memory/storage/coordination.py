@@ -354,10 +354,46 @@ DAEMON_NOTICE_WAKE = {"decision": "hinted", "reason": "daemon_notice"}
 MAINTAINER_PRINCIPAL = "maintainer"
 MAINTAINER_ORIGIN = "maintainer"
 RESERVED_SENDERS = frozenset({DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL})
-# Words no label may spell (NFKC-normalized, casefolded, non-alphanumerics
-# removed), except a reserved sender's own: a label is the name the digest
-# and the Console show, so ``m a i n t a i n e r`` must not pass for it.
-RESERVED_NAMES = frozenset({DAEMON_PRINCIPAL, MAINTAINER_PRINCIPAL, "passkey", "verified"})
+# Words no label may spell, except a reserved sender's own: a label is the
+# name the digest and the Console show, so ``m a i n t a i n e r`` must not
+# pass for it. Compared on a label's skeleton (``_skeleton``), and refused
+# as near to each word as its rule says (security review, 2026-10-04:
+# "Mаintainer" with a Cyrillic а, "maintainer-bot", "Maintainer (passkey)",
+# "maintainer1" and "maintaner" all registered). ``contained``: refused
+# anywhere in the label, not only as all of it; ``edits``: refused within
+# that many single-letter edits or adjacent swaps of the whole label.
+# ``maintainer`` is the name a human acts on, so it is refused inside any
+# label and one edit off. ``daemon`` is an everyday word in session labels
+# ("daemon watcher") and its notices carry no authority, so only the whole
+# label one edit off. ``passkey`` and ``verified`` are only ever spelled
+# exactly: one edit off they are ordinary words ("passkeys", "verifier").
+NAME_RULES = {MAINTAINER_PRINCIPAL: {"contained": True, "edits": 1},
+              DAEMON_PRINCIPAL: {"contained": False, "edits": 1},
+              "passkey": {"contained": False, "edits": 0},
+              "verified": {"contained": False, "edits": 0}}
+RESERVED_NAMES = frozenset(NAME_RULES)
+# Letters that render like a Latin one, folded to it before comparing: a
+# small hand-picked subset of Unicode's confusables (UTS #39 skeleton), the
+# Cyrillic and Greek look-alikes of Latin letters plus the digits 0 and 1
+# and the ``l``/``ı`` that pass for ``o`` and ``i``. Case-sensitive, applied
+# before casefolding, because some letters only look Latin in one case
+# (Greek capital Η is an H, small η is not). Fullwidth and mathematical
+# letters need no entry: NFKD folds them.
+_CONFUSABLES = str.maketrans({
+    # Cyrillic small
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+    "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "һ": "h", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+    # Cyrillic capital
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P",
+    "С": "C", "Т": "T", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S", "У": "Y",
+    # Greek small
+    "α": "a", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "υ": "u", "χ": "x",
+    # Greek capital
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M",
+    "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+    # Latin and digits
+    "ı": "i", "l": "i", "0": "o", "1": "i",
+})
 # What a recipient reads in place of a message the maintainer withdrew.
 WITHDRAWN_TEXT = "the maintainer withdrew this message; do not act on it"
 # The wake reason a maintainer message's ring is recorded under; its own
@@ -460,13 +496,47 @@ def body_commitment(salt_hex, body):
 MAX_REDACT_REASON = 240
 
 
+def _skeleton(value: str) -> str:
+    """``value`` as it reads: NFKD-normalized with combining marks dropped,
+    confusables folded (``_CONFUSABLES``), casefolded, and every
+    non-alphanumeric removed. An approximation of the UTS #39 skeleton,
+    not an implementation of it."""
+    decomposed = unicodedata.normalize("NFKD", value)
+    bare = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    folded = bare.translate(_CONFUSABLES).casefold()
+    return "".join(ch for ch in folded if ch.isalnum())
+
+
+def _edits(a: str, b: str) -> int:
+    """Edits (insert, delete, substitute, swap two adjacent letters) that
+    turn ``a`` into ``b``: the optimal-string-alignment distance."""
+    previous, row = None, list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        current = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            current[j] = min(row[j] + 1, current[j - 1] + 1,
+                             row[j - 1] + (a[i - 1] != b[j - 1]))
+            if (previous is not None and j > 1 and a[i - 1] == b[j - 2]
+                    and a[i - 2] == b[j - 1]):
+                current[j] = min(current[j], previous[j - 2] + 1)
+        previous, row = row, current
+    return row[-1]
+
+
 def reserved_name(value) -> bool:
-    """Whether ``value`` spells a reserved word (``RESERVED_NAMES``) once
-    NFKC-normalized and casefolded, with every non-alphanumeric removed."""
+    """Whether ``value`` reads as a reserved word (``RESERVED_NAMES``): its
+    skeleton contains or comes near one, as ``NAME_RULES`` says."""
     if not isinstance(value, str):
         return False
-    folded = unicodedata.normalize("NFKC", value).casefold()
-    return "".join(ch for ch in folded if ch.isalnum()) in RESERVED_NAMES
+    skeleton = _skeleton(value)
+    for word, rule in NAME_RULES.items():
+        if rule["contained"] and word in skeleton:
+            return True
+        # Lengths further apart than the allowance cannot be within it.
+        if (abs(len(skeleton) - len(word)) <= rule["edits"]
+                and _edits(skeleton, word) <= rule["edits"]):
+            return True
+    return False
 
 
 def message_origin(row) -> dict:
@@ -1259,8 +1329,10 @@ class CoordinationStore:
         digest shows a sender's label, so a session could otherwise post as
         "from daemon" (PR #456 review). Since v54 the same holds for
         ``maintainer``, ``passkey`` and ``verified``, in any spelling that
-        normalizes to one (``reserved_name``); a reserved sender keeps its
-        own name."""
+        reads as one (``reserved_name``: look-alike letters, and for
+        ``maintainer`` inside a longer label or one edit off, since the
+        2026-10-04 review); a reserved sender keeps its own name. Checked
+        only when a label is set, so an older row keeps working."""
         label = fields.get("label")
         if reserved_name(label) and not (
                 principal in RESERVED_SENDERS and label.strip().casefold() == principal):
@@ -3114,9 +3186,18 @@ class CoordinationStore:
                          (agent_id, now - 60))["n"] >= SEND_RATE:
                 raise CoordinationError("rate_limited")
             for recipient in recipients:
+                # Nothing acknowledges the maintainer's reserved row (the
+                # Console only reads its inbox, and no bearer may ack it), so
+                # a cap over all its pending mail let one session's replies
+                # refuse every other session's until they expired (review,
+                # 2026-10-04). There the cap counts the sender's own pending
+                # replies; the sender rate and MESSAGE_TTL bound the rest.
+                own = (" AND sender_agent_id=%s"
+                       if recipient["principal"] == MAINTAINER_PRINCIPAL else "")
                 if self._one("SELECT count(*) AS n FROM coordination_messages WHERE "
-                             "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s",
-                             (recipient["agent_id"], now))["n"] >= MAX_PENDING:
+                             "recipient_agent_id=%s AND acknowledged_at IS NULL AND expires_at>%s"
+                             + own, (recipient["agent_id"], now, *((agent_id,) if own else ()))
+                             )["n"] >= MAX_PENDING:
                     raise CoordinationError("queue_full", recipient["agent_id"][:12])
             self.storage.conn.execute("UPDATE coordination_agents SET last_activity=%s "
                                       "WHERE agent_id=%s", (now, agent_id))

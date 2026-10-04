@@ -108,6 +108,11 @@ def _enrol_code(store, args, out):
                   "If it does not match, someone else redeemed the code: run\n"
                   f"  pseudolife-mcp maintainer revoke {prefix}", file=out)
             return EXIT_OK
+        if store.bootstrap_burned(code):
+            print("The code was burned after too many wrong guesses in the Console. If they "
+                  "were not yours, someone else is trying to enrol: check `pseudolife-mcp "
+                  "maintainer list`, then run enrol-code again.", file=out)
+            return EXIT_REFUSED
         time.sleep(args.poll)
     print("The code expired unredeemed.", file=out)
     return EXIT_REFUSED
@@ -133,6 +138,12 @@ def main(argv=None, out=None) -> int:
     reset.add_argument("--yes", action="store_true",
                        help="confirm: every passkey stops working at once")
     actions.add_parser("list", help="print every passkey")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # A base64url id starts with '-' one time in 64; typed as `list` printed
+    # it, it is the prefix, not an option.
+    if (len(argv) == 2 and argv[0] in ("confirm", "revoke")
+            and argv[1].startswith("-") and argv[1] not in ("-h", "--help", "--")):
+        argv.insert(1, "--")
     args = parser.parse_args(argv)
     from pseudolife_memory.storage.maintainer import MaintainerError
     try:

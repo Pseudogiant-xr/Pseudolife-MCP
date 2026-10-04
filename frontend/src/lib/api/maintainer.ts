@@ -44,6 +44,27 @@ export interface ProjectRoles {
   coordinator: CoordinatorRole | null;
 }
 
+/**
+ * One change to the key set, as the daemon's audit log records it (newest
+ * first in the status). Anyone with a shell on the daemon host or the
+ * database password can change keys, so every change is shown.
+ */
+export interface KeyChange {
+  at: Epoch;
+  /** enrol (bootstrap), confirm (host), add (quarantined), cancel, revoke, reset. */
+  change: "enrol" | "confirm" | "add" | "cancel" | "revoke" | "reset" | string;
+  /** The key changed; null for a reset. */
+  credential_id: string | null;
+  label: string | null;
+  /** The signing key's credential_id, "bootstrap" (a host code) or "host" (the CLI). */
+  by: string;
+  path: "console" | "host" | string;
+  /** The bearer principal of a Console change; null on the host. */
+  principal: string | null;
+  /** A reset: how many keys it revoked. */
+  revoked: number | null;
+}
+
 /** GET /api/maintainer */
 export interface MaintainerStatus {
   available: boolean;
@@ -54,6 +75,8 @@ export interface MaintainerStatus {
   passkeys?: Passkey[];
   /** Every project with a live role lease. */
   roles?: Record<string, ProjectRoles>;
+  /** The recent key-set changes, newest first. */
+  key_changes?: KeyChange[];
 }
 
 export type RolePurpose = "grant-delegate" | "revoke-delegate" | "assign-coordinator" | "revoke-coordinator";
