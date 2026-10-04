@@ -91,7 +91,7 @@ class FakeCli:
             return self.pip_no_deps
         if rest[:3] == ["-m", "pip", "install"]:
             return self.pip_deps
-        if name.startswith("python") and rest[:1] == ["-c"] and "importlib.metadata" in rest[1]:
+        if name.startswith("python") and rest[:2] == ["-I", "-c"] and "importlib.metadata" in rest[2]:
             return 0, self.version + "\n"
         if name.startswith("python") and rest[:1] == ["-c"] and "ScriptMaker" in rest[1]:
             target, executable, body = rest[1:][1], rest[1:][2], rest[1:][3]
