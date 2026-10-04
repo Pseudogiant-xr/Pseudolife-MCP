@@ -127,16 +127,37 @@ def test_every_bulk_reap_spares_the_servers_own_workers():
     assert not unfiltered, unfiltered
 
 
+def test_every_bulk_reap_spares_other_roles_sessions():
+    """A non-superuser may terminate only its own role's backends: another
+    role's client session on the database (an admin's psql, a monitor)
+    made the reap raise under the test login (review, 2026-10-05)."""
+    import re
+
+    reap = re.compile(r'"SELECT pg_terminate_backend\(pid\) FROM pg_stat_activity "'
+                      r'(?:\s*"[^"]*")*')
+    found = []
+    for folder in ("tests", "evals"):
+        for path in sorted((ROOT / folder).rglob("*.py")):
+            for match in reap.finditer(path.read_text(encoding="utf-8")):
+                found.append((path.relative_to(ROOT).as_posix(), match.group(0)))
+    assert found
+    unfiltered = [name for name, statement in found
+                  if "usename = current_user" not in statement]
+    assert not unfiltered, unfiltered
+
+
 # -- the command against a recorded server --------------------------------------
 
 class _FakeServer:
     """Answers the command's queries the way a server would, and records them."""
 
     def __init__(self, *, superuser=True, user="pseudolife", database="pseudolife_memory",
-                 role=None, owns=(), fail_on=None, daemon=None, leftovers=()):
+                 role=None, owns=(), fail_on=None, daemon=None, leftovers=(),
+                 connected=()):
         self.superuser, self.user, self.database = superuser, user, database
         self.role, self.owns, self.fail_on = role, list(owns), fail_on
         self.daemon, self.leftovers = daemon, list(leftovers)
+        self.connected = list(connected)
         self.calls: list[tuple[str | None, list[str]]] = []
         self.applied = False
         self.vector = ""
@@ -162,7 +183,7 @@ class _FakeServer:
                 "owner_connect": True}}
             return json.dumps({"role": role, "member_of": [], "banks": banks,
                                "owns": self.owns, "others": ["pseudolife_memory_bench"],
-                               "daemon": self.daemon,
+                               "daemon": self.daemon, "connected": self.connected,
                                "template1_public_connect": not self.applied,
                                "leftovers": [] if self.applied else self.leftovers})
         if "CREATE EXTENSION" in sql:
@@ -261,6 +282,111 @@ def test_a_daemon_user_that_keeps_connect_goes_ahead(tmp_path, monkeypatch, daem
     assert code == cli.EXIT_OK, out
     assert said in out
     assert "daemon-secret-xyz" not in out
+
+
+def test_the_daemons_own_role_as_the_test_login_is_refused(tmp_path, monkeypatch):
+    """`--role` naming the daemon's database user would hand the daemon's
+    login to the test suite and close the bank to it (review, 2026-10-05:
+    the lockout check skipped exactly this case)."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", DAEMON_DSN)
+    server = _FakeServer(role={"super": False},
+                         daemon={"exists": True, "keeps": {"pseudolife_memory": False}})
+    code, out = _run(["--role", "memapp", "--rotate"], server, tmp_path)
+    assert code == cli.EXIT_REFUSED, out
+    assert "memapp" in out and "daemon" in out
+    assert not server.applied
+    assert not (tmp_path / "test-pg.env").exists()
+
+
+@pytest.mark.parametrize("with_dsn", [False, True], ids=["no-daemon-dsn", "daemon-dsn"])
+def test_a_connected_role_that_would_lose_connect_is_refused_before_any_change(
+        tmp_path, monkeypatch, with_dsn):
+    """With --admin-url against a server whose daemon reaches the bank only
+    through PUBLIC, and no PSEUDOLIFE_MCP_DATABASE_URL in the operator's
+    shell, the revoke locked the daemon out at its next connection (review,
+    2026-10-05). A role connected to the bank now is checked whatever the
+    shell holds."""
+    if with_dsn:
+        monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", DAEMON_DSN)
+    server = _FakeServer(
+        daemon={"exists": True, "keeps": {"pseudolife_memory": True}} if with_dsn else None,
+        connected=[{"user": "webapp", "db": "pseudolife_memory", "keeps": False}])
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_REFUSED, out
+    assert "webapp" in out and "connected" in out
+    assert 'GRANT CONNECT ON DATABASE "pseudolife_memory" TO "webapp"' in out
+    assert not server.applied
+    assert not (tmp_path / "test-pg.env").exists()
+    state = [s for _, statements in server.calls for s in statements if "'banks'" in s]
+    assert state and "pg_stat_activity" in state[0]
+
+
+def test_a_connected_role_that_keeps_connect_goes_ahead_and_is_named(tmp_path):
+    server = _FakeServer(connected=[{"user": "pseudolife", "db": "pseudolife_memory",
+                                     "keeps": True}])
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "pseudolife, connected to pseudolife_memory now, keeps CONNECT" in out
+
+
+def test_without_the_daemons_dsn_the_daemon_user_is_named_as_not_checked(tmp_path, monkeypatch):
+    """The configuration guide claimed the check unconditionally; without the
+    daemon's DSN only connected roles are checked, and the report says so."""
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    code, out = _run([], _FakeServer(), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "daemon user not checked" in out
+    assert "PSEUDOLIFE_MCP_DATABASE_URL" in out
+
+
+def test_a_daemon_dsn_that_names_no_user_is_not_called_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", "postgresql:///pseudolife_memory")
+    code, out = _run([], _FakeServer(), tmp_path)
+    assert code == cli.EXIT_OK, out
+    assert "daemon user not checked" in out and "names no user" in out
+
+
+def test_a_login_file_that_cannot_be_replaced_after_the_change_names_the_staged_copy(
+        tmp_path, monkeypatch):
+    """The role already holds the new password when the file is moved into
+    place; a failed move must say where that password is (review,
+    2026-10-05)."""
+    def refuse(src, dst):
+        raise PermissionError("the file is open in another process")
+
+    monkeypatch.setattr(cli.os, "replace", refuse)
+    server = _FakeServer()
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_FAILED, out
+    assert server.applied
+    staged = [p for p in tmp_path.iterdir() if p.name.endswith(".new")]
+    assert len(staged) == 1, list(tmp_path.iterdir())
+    assert staged[0].name in out and "pseudolife_test" in out and "password" in out
+
+
+def test_the_role_change_is_one_transaction():
+    """A failure part way through left the role holding a password no file
+    holds, the staged file being removed (review, 2026-10-05)."""
+    statements = cli.role_statements("pseudolife_test", "SCRAM-SHA-256$1:a$b:c",
+                                     ["pseudolife_memory"], ["pseudolife_memory_test_1"])
+    assert statements[0] == "BEGIN"
+    assert statements[-1] == "COMMIT"
+    assert statements.index("SELECT 'ok'") < len(statements) - 1
+
+
+def test_a_login_file_that_cannot_be_written_safely_fails_without_a_traceback(
+        tmp_path, monkeypatch):
+    from pseudolife_memory.private_state import PrivateStateError
+
+    def refuse(path, text):
+        raise PrivateStateError("the private state file must be a private regular file")
+
+    monkeypatch.setattr(cli, "_write_private", refuse)
+    server = _FakeServer()
+    code, out = _run([], server, tmp_path)
+    assert code == cli.EXIT_FAILED, out
+    assert "test-login:" in out and "private regular file" in out
+    assert not server.applied
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
@@ -473,11 +599,53 @@ ADMIN_ENV = "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL"
 CI_ROLE = "pseudolife_test_ci"
 
 
+# The CI job that exports ADMIN_ENV (.github/workflows/ci.yml): there a
+# missing variable is a broken workflow, not a machine without a server.
+CI_ADMIN_JOB = "test"
+
+
+def _scratch_admin_url(env) -> str:
+    """ADMIN_ENV's URL; skips without it, except in the CI job that sets it,
+    where the server half silently skipping would prove nothing (review,
+    2026-10-05)."""
+    url = env.get(ADMIN_ENV)
+    if url:
+        return url
+    if env.get("GITHUB_ACTIONS") == "true" and env.get("GITHUB_JOB") == CI_ADMIN_JOB:
+        pytest.fail(f"{ADMIN_ENV} is unset in CI's {CI_ADMIN_JOB} job, which provisions "
+                    "the test login on its service container: the server half would skip")
+    pytest.skip(f"{ADMIN_ENV} names no disposable server")
+
+
+@pytest.mark.parametrize("env,fails", [
+    ({}, False),
+    ({"GITHUB_ACTIONS": "true", "GITHUB_JOB": "test-lite-linux"}, False),
+    ({"GITHUB_ACTIONS": "true", "GITHUB_JOB": "test"}, True),
+], ids=["local", "ci-lite", "ci-pg-job"])
+def test_the_server_half_fails_rather_than_skips_in_the_ci_job_that_provisions_it(env, fails):
+    # Caught by hand: a skip escaping pytest.raises would skip this test too.
+    try:
+        _scratch_admin_url(env)
+        outcome = None
+    except BaseException as exc:  # noqa: BLE001 - pytest's outcomes are BaseException
+        outcome = type(exc)
+    assert outcome is (pytest.fail.Exception if fails else pytest.skip.Exception)
+    url = "postgresql://a@h/postgres"
+    assert _scratch_admin_url({**env, ADMIN_ENV: url}) == url
+
+
+def test_the_ci_job_that_provisions_the_login_exports_the_admin_url():
+    import re
+
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = re.search(rf"^  {CI_ADMIN_JOB}:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n)", workflow,
+                    re.MULTILINE | re.DOTALL)
+    assert job and f"{ADMIN_ENV}:" in job.group(1)
+
+
 @pytest.fixture(scope="module")
 def scratch_admin():
-    url = os.environ.get(ADMIN_ENV)
-    if not url:
-        pytest.skip(f"{ADMIN_ENV} names no disposable server")
+    url = _scratch_admin_url(os.environ)
     psycopg = pytest.importorskip("psycopg")
     from tests.pg_defaults import RedactedUrl, conninfo_with_dbname
 
@@ -597,6 +765,66 @@ def test_the_login_holds_no_privilege_beyond_createdb(provisioned):
             conn.execute("CREATE ROLE pl_test_login_escalation")
 
 
+def test_a_failed_role_change_rolls_back_the_new_password(provisioned):
+    """The role statements run as one transaction: a statement failing after
+    the ALTER ROLE leaves the password the login file holds."""
+    import psycopg
+    from tests.pg_defaults import RedactedUrl
+
+    admin = RedactedUrl(provisioned["admin"])
+
+    def verifier():
+        with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+            return conn.execute("SELECT rolpassword FROM pg_authid WHERE rolname = %s",
+                                (CI_ROLE,)).fetchone()[0]
+
+    before = verifier()
+    statements = cli.role_statements(CI_ROLE, cli.scram_verifier("not-the-files-password"),
+                                     ["pseudolife_memory", "pl_test_login_no_such_database"])
+    with pytest.raises(cli.DatabaseError, match="pl_test_login_no_such_database"):
+        cli.AdminUrl(provisioned["admin"]).query("postgres", statements)
+    assert verifier() == before
+    with psycopg.connect(RedactedUrl(_login_url(provisioned, "postgres")),
+                         connect_timeout=5) as conn:
+        assert conn.execute("SELECT current_user").fetchone() == (CI_ROLE,)
+
+
+def test_a_role_connected_through_public_alone_is_not_locked_out(provisioned, monkeypatch):
+    """A daemon that reaches the bank only through PUBLIC, with no
+    PSEUDOLIFE_MCP_DATABASE_URL in the operator's shell: its live session
+    is seen in pg_stat_activity and the command refuses before any change."""
+    import secrets
+
+    import psycopg
+    from tests.pg_defaults import RedactedUrl
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
+    admin = RedactedUrl(provisioned["admin"])
+    app, password = "pl_test_login_webapp", secrets.token_urlsafe(16)
+    with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+        conn.execute(f"DROP ROLE IF EXISTS {app}")
+        conn.execute(f"CREATE ROLE {app} LOGIN PASSWORD '{password}'")
+        conn.execute('GRANT CONNECT ON DATABASE "pseudolife_memory" TO PUBLIC')
+    try:
+        from urllib.parse import quote
+
+        app_url = (f"postgresql://{app}:{quote(password, safe='')}@"
+                   f"{provisioned['host_port']}/pseudolife_memory")
+        with psycopg.connect(RedactedUrl(app_url), connect_timeout=5):
+            out = io.StringIO()
+            code = cli.main(["create", "--role", CI_ROLE, "--file", str(provisioned["file"]),
+                             "--admin-url", provisioned["admin"]], out=out)
+            assert code == cli.EXIT_REFUSED, out.getvalue()
+            assert f'GRANT CONNECT ON DATABASE "pseudolife_memory" TO "{app}"' in out.getvalue()
+            with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+                assert conn.execute("SELECT has_database_privilege('public', "
+                                    "'pseudolife_memory', 'CONNECT')").fetchone() == (True,)
+    finally:
+        with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
+            conn.execute('REVOKE CONNECT ON DATABASE "pseudolife_memory" FROM PUBLIC')
+            conn.execute(f"DROP ROLE IF EXISTS {app}")  # its session closed with the block
+
+
 def test_the_login_runs_the_suites_database_lifecycle(provisioned):
     """What tests/pg_fixtures.py does, as the login: create a private
     database, install the schema (vector comes from template1), reap other
@@ -619,7 +847,7 @@ def test_the_login_runs_the_suites_database_lifecycle(provisioned):
             assert_disposable_database(conn)
             conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                          "WHERE datname = current_database() AND pid <> pg_backend_pid() "
-                         "AND backend_type = 'client backend'")
+                         "AND backend_type = 'client backend' AND usename = current_user")
             conn.execute("TRUNCATE " + ", ".join(BENCH_RESET_TABLES) + " CASCADE")
     finally:
         with psycopg.connect(admin, autocommit=True, connect_timeout=5) as conn:
@@ -649,9 +877,18 @@ def test_leftovers_of_an_owner_run_are_handed_over_and_refused_meanwhile(provisi
             if name != "pseudolife_memory_bench" or not bench_existed:
                 conn.execute(f'CREATE DATABASE "{name}"')
     try:
+        # The default path, as a run whose per-run name is the leftover's:
+        # an override's database is its caller's and is not checked.
+        from tests import pg_defaults
+
         monkeypatch.setattr(pg_fixtures, "_ensure_state", {})
-        monkeypatch.setenv("PSEUDOLIFE_TEST_DATABASE_URL", _login_url(provisioned, leftover))
-        monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+        monkeypatch.setattr(pg_fixtures, "_TEST_DB", leftover)
+        monkeypatch.setattr(pg_fixtures.atexit, "register", lambda *a, **k: None)
+        monkeypatch.setattr(pg_defaults, "DEV_HOST_PORT", provisioned["host_port"])
+        monkeypatch.setenv(pg_defaults.LOGIN_FILE_ENV, str(provisioned["file"]))
+        for name in ("PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_TEST_PG_PASSWORD",
+                     "PSEUDOLIFE_TEST_PG_USER"):
+            monkeypatch.delenv(name, raising=False)
         with pytest.raises(PostgresSetupError, match=f"belongs to {provisioned['admin_user']}"):
             pg_fixtures.ensure_test_db()
 

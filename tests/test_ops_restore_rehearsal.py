@@ -318,6 +318,11 @@ function global:Invoke-RestMethod {
 }
 """
 
+# The same stub, but the server refuses the REVOKE.
+_REVOKE_FAILS_PS1_STUB = _APPLY_PS1_STUB.replace(
+    '    $global:LASTEXITCODE = 0\n',
+    '    $global:LASTEXITCODE = if (($a -join " ") -cmatch "REVOKE CONNECT") { 1 } else { 0 }\n')
+
 _APPLY_SH_STUB = """
 docker() {
     echo "docker $*" >> "$SCENARIO_DIR/calls.log"
@@ -331,6 +336,18 @@ curl() {
 export -f docker curl
 export SCENARIO_DIR
 """
+
+_REVOKE_FAILS_SH_STUB = _APPLY_SH_STUB.replace(
+    '    case "$1" in inspect)',
+    '    case "$*" in *"REVOKE CONNECT"*) return 1 ;; esac\n    case "$1" in inspect)')
+
+
+# A rehearsal with every docker call logged (its row counts are empty, so
+# only the order of its calls is asserted).
+REHEARSAL_SCENARIOS = {
+    "rehearsal": {"ps1": _APPLY_PS1_STUB, "sh": _APPLY_SH_STUB},
+    "rehearsal_revoke_fails": {"ps1": _REVOKE_FAILS_PS1_STUB, "sh": _REVOKE_FAILS_SH_STUB},
+}
 
 
 @pytest.fixture(scope="module")
@@ -348,6 +365,9 @@ def apply_ps1_runs(tmp_path_factory):
     scenarios.append(Scenario("no_start_without_apply", _APPLY_PS1_STUB,
                               f'& "{_stage_apply(root, "no_start_without_apply", RESTORE_PS1)[0]}" '
                               f'-NoStart -BackupFile "{(root / "no_start_without_apply" / "pseudolife_memory-20261002-000000.sql.gz").as_posix()}"'))
+    for name, stub in REHEARSAL_SCENARIOS.items():
+        copy, backup, _state = _stage_apply(root, name, RESTORE_PS1)
+        scenarios.append(Scenario(name, stub["ps1"], f'& "{copy}" -BackupFile "{backup.as_posix()}"'))
     return run_ps1_batch(root, scenarios)
 
 
@@ -366,6 +386,10 @@ def apply_sh_runs(tmp_path_factory):
     copy, backup, _state = _stage_apply(root, "no_start_without_apply", RESTORE_SH)
     scenarios.append(Scenario("no_start_without_apply", _APPLY_SH_STUB,
                               f'bash "{copy.as_posix()}" --no-start --backup-file "{backup.as_posix()}"'))
+    for name, stub in REHEARSAL_SCENARIOS.items():
+        copy, backup, _state = _stage_apply(root, name, RESTORE_SH)
+        scenarios.append(Scenario(name, stub["sh"],
+                                  f'bash "{copy.as_posix()}" --backup-file "{backup.as_posix()}"'))
     return run_sh_batch(root, scenarios)
 
 
@@ -442,3 +466,33 @@ def test_a_real_restore_closes_the_bank_to_public_before_the_replay(applied, sce
     assert len(created) == 1 and len(revoked) == 1 and len(replayed) == 1, res.detail()
     assert created[0] < revoked[0] < replayed[0], res.detail()
     assert " -d postgres " in calls[revoked[0]] + " ", res.detail()
+
+
+REHEARSAL_DB = "pseudolife_restore_rehearsal"
+
+
+def test_a_rehearsal_closes_its_scratch_copy_to_public_before_the_replay(applied):
+    """The rehearsal restores the whole bank into a scratch database that a
+    plain CREATE DATABASE opens to PUBLIC: the test login could read it
+    there (review, 2026-10-05). Closed before the replay, as a real
+    restore closes the bank."""
+    res = applied("rehearsal")
+    calls = _docker_calls(res)
+    created = [i for i, c in enumerate(calls) if f"CREATE DATABASE {REHEARSAL_DB}" in c]
+    revoked = [i for i, c in enumerate(calls)
+               if f"REVOKE CONNECT ON DATABASE {REHEARSAL_DB} FROM PUBLIC" in c]
+    replayed = [i for i, c in enumerate(calls) if "ON_ERROR_STOP=1" in c]
+    assert len(created) == 1 and len(revoked) == 1 and len(replayed) == 1, res.detail()
+    assert created[0] < revoked[0] < replayed[0], res.detail()
+    assert " -d postgres " in calls[revoked[0]] + " ", res.detail()
+
+
+def test_a_rehearsal_whose_scratch_copy_stays_open_stops_before_the_replay(applied):
+    res = applied("rehearsal_revoke_fails")
+    calls = _docker_calls(res)
+    assert res.returncode != 0, res.detail()
+    assert any(f"REVOKE CONNECT ON DATABASE {REHEARSAL_DB}" in c for c in calls), res.detail()
+    assert not any("ON_ERROR_STOP=1" in c for c in calls), res.detail()
+    revoked = max(i for i, c in enumerate(calls) if "REVOKE CONNECT" in c)
+    assert any(f"DROP DATABASE IF EXISTS {REHEARSAL_DB}" in c
+               for c in calls[revoked + 1:]), res.detail()

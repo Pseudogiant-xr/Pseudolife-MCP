@@ -241,7 +241,10 @@ def ensure_test_db() -> None:
             ).fetchone()
             if row is None:
                 conn.execute(f'CREATE DATABASE "{db_name}"')
-            else:
+            elif not overridden:
+                # An override's database is the caller's, who may grant a
+                # login that does not own it; only a per-run name can be a
+                # dead owner run's leftover.
                 refusal = _foreign_owner_refusal(conn, db_name)
             if not overridden and refusal is None:
                 atexit.register(_drop_run_db)
@@ -439,7 +442,7 @@ def _pg_conn_session(pg_url):
             cur.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                 "WHERE datname = current_database() AND pid <> pg_backend_pid() "
-                "AND backend_type = 'client backend'"
+                "AND backend_type = 'client backend' AND usename = current_user"
             )
         conn.commit()
         ensure_schema(conn)

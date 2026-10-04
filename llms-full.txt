@@ -5167,7 +5167,10 @@ leaves the queue when it is made the delegate.
 
    For a daemon used only on this machine, `rp_id: localhost` with
    `origin: http://localhost:8765` also works. Any other plain-HTTP origin is
-   refused (`409 maintainer_https_required`).
+   refused (`409 maintainer_https_required`). Write the origin as a browser
+   does, without the scheme's default port: `https://<rp_id>:443` and
+   `http://localhost:80` are refused, since no assertion would ever match
+   them.
 
 3. Enrol your first passkey. On the daemon host run
    `pseudolife-mcp maintainer enrol-code` (in the Docker tier, inside the
@@ -7627,7 +7630,9 @@ pseudolife-mcp test-login create            # --rotate for a new password
 
 It creates the role `pseudolife_test` (`LOGIN CREATEDB`, nothing more),
 revokes `CONNECT` on the bank and on `template1` from `PUBLIC` (refusing
-first if the daemon's database user would lose it), hands it leftover
+first if a role connected to the bank now would lose it, or the daemon's
+database user when `PSEUDOLIFE_MCP_DATABASE_URL` is set in that shell;
+without it the daemon user is reported as not checked), hands it leftover
 per-run test databases so the suite can prune them, installs `vector` in
 `template1`, and writes the login to an owner-only
 `~/.pseudolife-mcp/test-pg.env`, which the suite reads before `ops/.env`
@@ -7636,8 +7641,10 @@ per-run test databases so the suite can prune them, installs `vector` in
 server, and is idempotent. The installers run it only with `-TestLogin` /
 `--test-login` (for contributors who run the suite against this server);
 `pseudolife-mcp update` never does. A bank restore keeps the bank closed
-(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it);
-re-running `test-login create` checks it. Details, and running agent
+(`ops/restore.*` revoke `CONNECT` from `PUBLIC` again after recreating it,
+and from a rehearsal's scratch copy; this runs on every restore, so a
+custom role that reached the bank only through `PUBLIC` needs its own
+`GRANT CONNECT` again afterwards); re-running `test-login create` checks it. Details, and running agent
 sessions under a separate account: [agent isolation](agent-isolation.md).
 
 ## Windows / WSL2 memory (Docker tier)
@@ -8187,7 +8194,7 @@ The milestones:
 | v51 | Forget cascade (2026-09-29). Adds `edge_evidence` for newly extracted dream edges. Forgetting an entry retires facts with no remaining current source, retires affected session digests and queues regeneration from surviving entries, and retires dream edges with no remaining current evidence. Older edges without entry provenance are unchanged. Additive/idempotent. |
 | v52 | Indexed retained coordination history (2026-10-01). Adds partial send indexes for sender, recipient, exact participant pairs and principal, plus principal timeline, expiry and per-message lifecycle indexes. History seeks each direction independently before merging bounded pages and obtains its cursor high-water mark from two indexed heads. Console reads use principal and message lookups; both read paths cap each SQL statement at five seconds while holding the board lock. Large visible histories or expiry payloads can fail with a sanitized error and be retried. Additive/idempotent; existing audit rows and retention semantics are unchanged. |
 | v53 | Principals stored in the bank (2026-10-02). A new `principals` table holds each machine invited with `pseudolife-mcp invite`: its name, the SHA-256 of its bearer token once paired (`NULL` until then), its default tier (`NULL` = the daemon's default), whether the agent board admits it, the SHA-256 of a pending pairing code with its expiry, the redeemed code's hash for ten minutes of idempotent retries, and its created/paired/revoked times. Neither a token nor a code is stored in plaintext. The daemon resolves stored principals from an in-memory snapshot refreshed every 10 s, after the environment's `PSEUDOLIFE_MCP_TOKENS` / `PSEUDOLIFE_MCP_TOKEN`, which always win. Excluded from logical exports (credentials); a physical backup carries it. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`. |
-| v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry and which credential redeemed it) and `maintainer_nonces` (spent challenge nonces, kept until their payload expires). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
+| v54 | Maintainer messages and Board roles from the Console, proven by a passkey (2026-10-04). Three new tables: `maintainer_passkeys` (each WebAuthn credential the maintainer enrolled: its id, COSE public key, algorithm, sign count, label, who enrolled it, `pending`/`active`/`revoked` state, the end of its quarantine, its times, and `flagged_at` when its sign count went backwards), `maintainer_bootstrap` (the SHA-256 of each one-time host code that admits the first passkey, its expiry, which credential redeemed it, and `failed_attempts`, the wrong-code guesses that burn it at five) and `maintainer_nonces` (spent challenge nonces, kept 7 days past their payload's expiry so a clock step back cannot reopen one). `coordination_messages` gains `origin` (`agent`, or `maintainer` for a message the daemon verified from a passkey signature), `maintainer_proof` (the signed payload, authenticatorData, clientDataJSON, signature and passkey label, so a stored message can be re-verified) and `repudiated_at`. The challenge MAC key is the meta row `maintainer_secret_v1`. All three tables and the meta key stay out of logical exports (credentials of this deployment); a physical backup carries them. Additive/idempotent: `CREATE TABLE IF NOT EXISTS`, and the message columns are added only when missing. |
 
 Later additions that write into these tables without new DDL are listed with the feature that added them rather than as schema milestones: `memory_outcome(used_ids=[...])` (2026-09-05; every in-window serving event credited since 2026-09-08) labels served entries under `used_via="outcome"` — see the memory-model guide.
 
@@ -11187,7 +11194,7 @@ anything when that connection is not a superuser. Idempotently, it:
 | What | Why |
 |---|---|
 | Creates or resets the role `pseudolife_test`: `LOGIN CREATEDB`, not superuser, no `CREATEROLE`, `REPLICATION` or `BYPASSRLS`, every role membership revoked | It can create, reset and drop the databases it creates, which is everything the suite does on the server, and nothing else |
-| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner. When `PSEUDOLIFE_MCP_DATABASE_URL` names another user that reaches the bank only through `PUBLIC`, it refuses before any change and names the `GRANT CONNECT` to run first |
+| `REVOKE CONNECT ON DATABASE pseudolife_memory FROM PUBLIC` (and from the role); also the container's `POSTGRES_DB` and any `--bank DB` | The login cannot connect to the bank. Its owner keeps `CONNECT` as owner, and on the Docker tier the daemon connects as that owner. When a role connected to the bank now, or the user `PSEUDOLIFE_MCP_DATABASE_URL` names (when that shell has it), reaches the bank only through `PUBLIC`, it refuses before any change and names the `GRANT CONNECT` to run first. Without that variable it says the daemon user was not checked: a daemon that is down and reaches the bank only through `PUBLIC` is not seen. `--role` naming that user is refused (so only when the shell has the URL). The role changes run as one transaction |
 | Installs (and updates) `vector` in `template1` | pgvector does not mark its extension trusted, so `CREATE EXTENSION vector` needs a superuser. `CREATE DATABASE` copies `template1`, so the login's databases already have it and the schema's `CREATE EXTENSION IF NOT EXISTS` skips |
 | Hands leftover run databases (`pseudolife_memory_test_<pid>`, `pseudolife_memory_bench_..._<pid>`: the names the suite's prune drops) to the role with `ALTER DATABASE ... OWNER TO`, printing each | A hard-killed run as the bank owner leaves one the login could not drop. Nothing else changes owner. Until then, a run whose name is such a leftover is refused with one line naming the `DROP DATABASE` to run as its owner |
 | `REVOKE CONNECT ON DATABASE template1 FROM PUBLIC` | A session connected to `template1` makes every `CREATE DATABASE` that copies it fail, the owner's after a restore's `DROP` included. Copying a template needs no `CONNECT` on it, so the login still creates its databases; the superuser keeps access |
@@ -11206,7 +11213,11 @@ upgrading the Postgres image, run it again to update `vector` in `template1`.
 A bank restore (`ops/restore.ps1 -Apply`, `ops/restore.sh --apply`)
 recreates the database, and a plain dump carries no database-level grants,
 so the restore scripts revoke `CONNECT` from `PUBLIC` again right after
-`CREATE DATABASE`, before the replay. Re-running `test-login create` after
+`CREATE DATABASE`, before the replay; a rehearsal does the same to its
+scratch copy, `pseudolife_restore_rehearsal`, and stops if it cannot. The
+revoke runs on every restore, with or without a test login: a custom role
+that reached the bank only through `PUBLIC` loses `CONNECT` and needs a
+`GRANT CONNECT` after the restore. Re-running `test-login create` after
 a restore is the check: it reports the bank as "already closed to PUBLIC".
 
 The installers run it only when asked: `ops/install.ps1 -TestLogin` or
@@ -11379,7 +11390,7 @@ Sign in as the agent account (or `runas /user:<agent> pwsh`) and check:
 | `Get-Content C:\Users\<maintainer>\<deployment checkout>\ops\.env` | access denied |
 | `net user <agent>` | local group memberships: `Users` only |
 | `pseudolife-mcp board-audit stats` (or any operator command that opens the bank) | fails: no database URL, and no owner password to make one |
-| `python -c "import psycopg; psycopg.connect('postgresql://pseudolife_test:<password from test-pg.env>@127.0.0.1:5433/pseudolife_memory')"` | `permission denied for database "pseudolife_memory"` |
+| `$env:PGPASSWORD = (Select-String '^PSEUDOLIFE_TEST_PG_PASSWORD=(.*)' ~\.pseudolife-mcp\test-pg.env).Matches[0].Groups[1].Value; python -c "import psycopg; psycopg.connect('host=127.0.0.1 port=5433 user=pseudolife_test dbname=pseudolife_memory')"; Remove-Item Env:PGPASSWORD` (the password goes from the file to libpq, never onto a command line) | `permission denied for database "pseudolife_memory"` |
 | `python -m pytest tests/test_pg_storage.py -q` in its checkout | passes, with no "as the bank owner" note |
 | `pwsh ops/wsl-suite.ps1` (a full suite, in WSL) | passes |
 | `pseudolife-mcp maintainer list` (once the maintainer-passkey change lands) | fails, for the same reason |

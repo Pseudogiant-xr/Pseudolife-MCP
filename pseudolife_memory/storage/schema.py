@@ -795,8 +795,10 @@ CREATE TABLE IF NOT EXISTS principals (
 SCHEMA_SQL += PRINCIPALS_SCHEMA_SQL
 
 # v54: the maintainer's passkeys, the one-time host codes that admit the
-# first one, and the spent challenge nonces, kept until their payload
-# expires (spec 2026-10-02-maintainer-wake-design.md). None holds a secret:
+# first one (with the wrong guesses against each), and the spent challenge
+# nonces, kept 7 days past their payload's expiry (SPENT_NONCE_RETENTION in
+# storage/maintainer.py), so a clock step back cannot reopen one (spec
+# 2026-10-02-maintainer-wake-design.md). None holds a secret:
 # COSE public keys, a code's SHA-256, nonces. The challenge MAC key is the
 # meta row ``maintainer_secret_v1``, never config. ``flagged_at`` marks a
 # key whose sign count went backwards, for review in the Console.

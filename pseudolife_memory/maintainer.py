@@ -66,6 +66,8 @@ _BOARD_CODES = {
 _ROLE_PREFIX = {"grant-delegate": DELEGATE_PREFIX, "revoke-delegate": DELEGATE_PREFIX,
                 "assign-coordinator": COORDINATOR_PREFIX,
                 "revoke-coordinator": COORDINATOR_PREFIX}
+# The role a grant or assignment breaks when its recipient holds it.
+_OTHER_PREFIX = {"grant-delegate": COORDINATOR_PREFIX, "assign-coordinator": DELEGATE_PREFIX}
 LIST_DEFAULT, LIST_MAX = 50, 200
 
 
@@ -321,6 +323,11 @@ def _challenge(service, board, store, body):
         # signed too (review, 2026-10-04): a session that swaps in during
         # the window is not the one the maintainer approved removing.
         fields["holder"] = store.role_holder(_ROLE_PREFIX[purpose] + fields["project"])
+    if purpose in ("grant-delegate", "assign-coordinator"):
+        # So is the other role's holder, which the change breaks when it is
+        # the recipient: a preview that said ``also_breaks: null`` must not
+        # break a role the recipient took since (review of #569, 2026-10-05).
+        fields["other_holder"] = store.role_holder(_OTHER_PREFIX[purpose] + fields["project"])
     payload, mac = store.issue(purpose, fields)
     out = {"payload": payload, "mac": mac, "publicKey": _get_options(store, payload)}
     if preview is not None:
@@ -360,6 +367,9 @@ def _role(service, board, store, body):
             if store.role_holder(_ROLE_PREFIX[purpose] + project) != fields.get("holder"):
                 raise MaintainerError("role_changed", check="holder")
             if purpose in ("grant-delegate", "assign-coordinator"):
+                if (store.role_holder(_OTHER_PREFIX[purpose] + project)
+                        != fields.get("other_holder")):
+                    raise MaintainerError("role_changed", check="other_holder")
                 _role_recipient(store, fields)
                 change = (board.grant_delegate if purpose == "grant-delegate"
                           else board.assign_coordinator)
@@ -387,6 +397,10 @@ def _repudiate(service, board, store, body):
                     service, board, to=row["recipient_agent_id"],
                     text=WITHDRAWAL_NOTICE.format(message_id=row["message_id"]),
                     urgent=False, request_id=fields["nonce"], proof=key["_proof"])
+            if row["withdrawn_now"]:
+                # Last, so the audit-chain lock is not held while the
+                # follow-up's send locks rows.
+                store.log_repudiation(row)
             return {"message_id": row["message_id"], "repudiated_at": row["repudiated_at"],
                     "follow_up": follow_up and follow_up["message_id"],
                     "_notify": [row["recipient_agent_id"]] if follow_up else []}

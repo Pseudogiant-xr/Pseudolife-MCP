@@ -50,7 +50,7 @@ from pseudolife_memory.maintainer_webauthn import (
 )
 from pseudolife_memory.storage.coordination import (
     ATTACHED_IDLE_WINDOW, COORDINATOR_PREFIX, DELEGATE_PREFIX, MAINTAINER_ORIGIN,
-    MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, RESERVED_SENDERS, CoordinationStore,
+    MAINTAINER_PRINCIPAL, MESSAGE_ORIGIN, REPUDIATE_EVENT, RESERVED_SENDERS, CoordinationStore,
 )
 
 logger = logging.getLogger("pseudolife-mcp.maintainer")
@@ -634,7 +634,9 @@ class MaintainerStore:
         Its mailbox rows (the recipient's, and ``sender_agent_id``, the
         maintainer address a follow-up is sent from) are locked first, in
         agent-id order as ``send`` locks them, then the message row: the
-        order ack and receive take (review, 2026-10-04)."""
+        order ack and receive take (review, 2026-10-04). ``withdrawn_now``
+        says whether this call withdrew it; the caller then logs it with
+        ``log_repudiation`` as its last write."""
         row = self._one("SELECT recipient_agent_id FROM coordination_messages "
                         "WHERE message_id=%s AND origin=%s AND sender_principal=%s",
                         (message_id, MAINTAINER_ORIGIN, MAINTAINER_PRINCIPAL))
@@ -646,10 +648,23 @@ class MaintainerStore:
                   "ORDER BY agent_id FOR UPDATE", (agents,))
         row = self._one("SELECT * FROM coordination_messages WHERE message_id=%s FOR UPDATE",
                         (message_id,))
-        if row["repudiated_at"] is None:
-            row = self._one("UPDATE coordination_messages SET repudiated_at=%s "
-                            "WHERE message_id=%s RETURNING *", (self.clock(), message_id))
-        return row
+        if row["repudiated_at"] is not None:
+            return {**row, "withdrawn_now": False}
+        row = self._one("UPDATE coordination_messages SET repudiated_at=%s "
+                        "WHERE message_id=%s RETURNING *", (self.clock(), message_id))
+        return {**row, "withdrawn_now": True}
+
+    def log_repudiation(self, row) -> None:
+        """Inside the completing transaction, as its last write: append the
+        withdrawal of ``row`` (from ``mark_repudiated``) to the audit log,
+        stamped with its ``repudiated_at``. History keeps a send's body for
+        the audit retention, longer than the live row, and reads this event
+        to keep withholding it once that row is pruned."""
+        board = CoordinationStore(self.storage, clock=self.clock)
+        board._append([board._event(
+            REPUDIATE_EVENT, {"message_id": row["message_id"]}, actor="maintainer",
+            principal=self.principal, recipient=row["recipient_agent_id"],
+            message_id=row["message_id"])], row["repudiated_at"])
 
     def roles(self) -> dict:
         """Every project with a live role lease: its delegate (with who
