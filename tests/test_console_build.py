@@ -12,6 +12,7 @@ rather than as a blank page. They do not compare the build with
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -86,10 +87,37 @@ def test_vendored_galaxy_bundle_ships_with_its_licences():
     assert (STATIC / "assets" / "Geist-LICENSE.txt").is_file(), "the Geist font licence must ship"
 
 
+class _ScriptScan(HTMLParser):
+    """Collects every <script> element that carries code instead of a src.
+    A parser, not a regex: end tags like ``</script >`` still close."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.inline: list[str] = []
+        self._open: tuple[bool, list[str]] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self._open = (any(name == "src" for name, _ in attrs), [])
+
+    def handle_data(self, data):
+        if self._open is not None:
+            self._open[1].append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._open is not None:
+            has_src, body = self._open
+            code = "".join(body).strip()
+            if not has_src or code:
+                self.inline.append(code or "<script> without src")
+            self._open = None
+
+
 def _inline_scripts(html: str) -> list[str]:
-    """Every <script> element that carries code instead of a src."""
-    return [m.group(0) for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", html, re.S | re.I)
-            if "src=" not in m.group(1) or m.group(2).strip()]
+    scan = _ScriptScan()
+    scan.feed(html)
+    scan.close()
+    return scan.inline
 
 
 def test_console_build_carries_no_inline_script():
