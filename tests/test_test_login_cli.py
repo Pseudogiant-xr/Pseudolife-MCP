@@ -307,7 +307,8 @@ def scratch_admin():
     url = RedactedUrl(url)
     with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
         names = {row[0] for row in conn.execute("SELECT datname FROM pg_database")}
-        if "pseudolife_memory" not in names:
+        created = "pseudolife_memory" not in names
+        if created:
             conn.execute('CREATE DATABASE "pseudolife_memory"')
     bank = RedactedUrl(conninfo_with_dbname(url, "pseudolife_memory"))
     with psycopg.connect(bank, autocommit=True, connect_timeout=5) as conn:
@@ -316,7 +317,16 @@ def scratch_admin():
     if tables:
         pytest.fail(f"{ADMIN_ENV} names a server whose pseudolife_memory holds "
                     f"{tables} tables: a real bank. Point it at a disposable server.")
-    return url
+    yield url
+    # Leave the server as found, but for vector in template1: the login and
+    # the empty production-named database this module made.
+    with psycopg.connect(url, autocommit=True, connect_timeout=5) as conn:
+        try:
+            conn.execute(f"DROP ROLE IF EXISTS {cli.DEFAULT_ROLE}")
+        except psycopg.Error:
+            pass  # it still owns a database a failed slice leaked
+        if created:
+            conn.execute('DROP DATABASE IF EXISTS "pseudolife_memory" WITH (FORCE)')
 
 
 @pytest.fixture(scope="module")

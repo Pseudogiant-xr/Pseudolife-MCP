@@ -45,7 +45,7 @@ from tests.pg_defaults import (
 MASK = "***"
 _PASSWORD_ENV = ("PSEUDOLIFE_TEST_PG_PASSWORD", "PGPASSWORD")
 _DSN_ENV = ("PSEUDOLIFE_TEST_DATABASE_URL", "PSEUDOLIFE_BENCH_ADMIN_URL",
-            "PSEUDOLIFE_MCP_DATABASE_URL")
+            "PSEUDOLIFE_MCP_DATABASE_URL", "PSEUDOLIFE_TEST_LOGIN_ADMIN_URL")
 # Published defaults, never masked by value: the compose stack's (also the
 # role and package name) and the stock ``postgres`` (CONTRIBUTING.md's test
 # URL, pg0's default for the lite CI lane). Masking either everywhere turns
