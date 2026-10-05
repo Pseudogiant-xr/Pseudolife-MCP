@@ -44,6 +44,7 @@ Configuration
 
 from __future__ import annotations
 
+import difflib
 import functools
 import logging
 import os
@@ -74,7 +75,8 @@ from mcp.types import ToolAnnotations  # noqa: E402
 # lands in ``inputSchema.properties[arg].description``. Defaults stay plain
 # signature defaults — Field carries description ONLY, so coercion and
 # optionality are untouched.
-from pydantic import Field, StrictInt  # noqa: E402
+from pydantic import ConfigDict, Field, StrictInt, ValidationError  # noqa: E402
+from pydantic_core import PydanticCustomError  # noqa: E402
 
 from pseudolife_memory.service import (  # noqa: E402
     _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
@@ -264,7 +266,55 @@ def _annotations(name: str) -> ToolAnnotations:
     )
 
 
+# Wrong names models actually sent, measured in the 2026-10-04 transcript
+# review (Claude 11,049 calls, Codex 9,626): limit on memory_search (68 +
+# 72) and memory_lesson_search (56), content on memory_store (13 + 1),
+# note/notes/text on memory_outcome (7). Consulted only when the name is not
+# a parameter of the tool and the target is; difflib covers the rest.
+_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "limit": ("top_k", "n"),
+    "content": ("text",),
+    "note": ("detail",), "notes": ("detail",), "text": ("detail",),
+}
+
+
 class _StringSafeMetadata(FuncMetadata):
+    tool_name: str = ""
+
+    def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        """Refuse an argument name the tool does not have.
+
+        Pydantic's default (``extra="ignore"``) dropped it without a word, so
+        ``memory_search(limit=3)`` answered with the default 8 hits and the
+        model never learned. A ``ValidationError`` raised here reaches the
+        client as an ``isError`` result, like any other argument mismatch.
+        """
+        accepted = [field.alias or name
+                    for name, field in self.arg_model.model_fields.items()]
+        unknown = [key for key in arguments_to_validate if key not in accepted]
+        if unknown:
+            # hide_input: a misnamed argument can carry a secret, so the
+            # refusal names the parameter and never prints its value. The
+            # accepted list closes the last entry only, once per error.
+            raise ValidationError.from_exception_data(self.tool_name or "arguments", [
+                {"type": PydanticCustomError(
+                    "unknown_parameter", "{detail}",
+                    {"detail": self._unknown_message(
+                        key, accepted, last=key == unknown[-1])}),
+                 "loc": (key,), "input": None}
+                for key in unknown], hide_input=True)
+        return super().validate_arguments(arguments_to_validate)
+
+    def _unknown_message(self, key: str, accepted: list[str], *, last: bool) -> str:
+        guess = next((a for a in _PARAM_ALIASES.get(key, ()) if a in accepted),
+                     None)
+        if guess is None:
+            close = difflib.get_close_matches(key, accepted, n=1)
+            guess = close[0] if close else None
+        hint = f"; did you mean '{guess}'?" if guess else "."
+        listed = f" Accepted: {', '.join(accepted)}" if last else ""
+        return f"unknown parameter '{key}' for {self.tool_name}{hint}{listed}"
+
     def pre_parse_json(self, data: dict[str, Any]) -> dict[str, Any]:
         """Keep text literal while retaining the SDK's list/dict compatibility.
 
@@ -285,14 +335,24 @@ class _StringSafeMetadata(FuncMetadata):
         return {**parsed, **literal}
 
 
+def _bind_arguments(name: str) -> None:
+    """Give a registered tool the string-safe, strict argument binding; its
+    schema then says ``additionalProperties: false``, matching the refusal."""
+    tool = mcp._tool_manager.get_tool(name)
+    meta = tool.fn_metadata.model_dump()
+    meta["arg_model"] = type(meta["arg_model"].__name__, (meta["arg_model"],),
+                             {"model_config": ConfigDict(extra="forbid")})
+    tool.fn_metadata = _StringSafeMetadata(**meta, tool_name=name)
+    tool.parameters = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
+
+
 def _tool(*, tier: str = "full"):
     """Record the tool's tier and register it (always — tiers gate
     visibility in tools/list, not existence)."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = tier
         mcp.tool(annotations=_annotations(fn.__name__))(_async_offload(fn))
-        tool = mcp._tool_manager.get_tool(fn.__name__)
-        tool.fn_metadata = _StringSafeMetadata(**tool.fn_metadata.model_dump())
+        _bind_arguments(fn.__name__)
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
@@ -370,6 +430,11 @@ def memory_agents(
         description="update: positive finite Unix epoch seconds, at most "
                     "now + 7 days; new parks default to now + 12 hours, "
                     "refinements keep expiry.")] = None,
+    name: Annotated[str | None, Field(
+        max_length=120,
+        description="update: the name the board shows for you, up to 120 "
+                    "chars; it overrides your harness's title. \"\" clears "
+                    "yours.")] = None,
 ) -> dict[str, Any]:
     """Coordinate agent sessions on the shared board: list peers and
     leases, update your own status or park, claim/release shared
@@ -393,7 +458,7 @@ def memory_agents(
                   lease=lease, worktree=worktree, repository_id=repository_id, path=path,
                   expect=expect, children=children, park_reason=park_reason,
                   park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
-                  park_expires=park_expires)
+                  park_expires=park_expires, name=name)
 
 
 @_tool(tier="core")
@@ -575,7 +640,9 @@ def memory_store(
     text: Annotated[str, Field(
         description="The claim to remember.")],
     source: Annotated[str, Field(
-        description="Stable per-project/topic tag for later filtering.")] = "agent",
+        description="Stable per-project/topic tag for later filtering; "
+                    '"status" for in-flight progress notes (peers see '
+                    "those; the dream skips them).")] = "agent",
     tags: Annotated[list[str] | None, Field(
         description='Optional labels, e.g. ["decision", "blocker"].')] = None,
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
@@ -774,15 +841,18 @@ def _iso_seconds(ts: float | None) -> str | None:
 # (TTL/3 — the stale flag at 2×TTL fires too late for the incident shape).
 
 CORRECTION_NOTE = (
-    "Facts flagged correct_with above are aged or contested. If one "
-    "contradicts what you observe, run its correction call NOW with the "
+    "Facts flagged correct_with above are aged or contested. If an aged "
+    "fact contradicts what you observe, run its call NOW with the "
     "verified value (re-assert the same value if it checks out) — noticing "
-    "without writing leaves the error for the next session.")
+    "without writing leaves the error for the next session. For a "
+    "contested fact, read the contenders; resolve only once the human "
+    "decides.")
 
 
 def _cortex_correct_with(f: dict[str, Any]) -> str | None:
-    """The copy-paste correction call for a cortex fact, or None when the
-    fact is fresh enough (or durable enough) not to warrant one."""
+    """The copy-paste correction call for a cortex fact (the read-then-
+    resolve path for a contested one), or None when the fact is fresh
+    enough (or durable enough) not to warrant one."""
     from pseudolife_memory.memory.freshness import needs_correction_nudge
     aged = needs_correction_nudge(
         f.get("freshness_class") or "evergreen",
@@ -801,7 +871,17 @@ def _cortex_correct_with(f: dict[str, Any]) -> str | None:
     # The active affordance at correction time is `memory_supersede`'s
     # `derived_flagged`, which names exactly the facts affected by that
     # explicit correction.
-    if not (f.get("contested") or f.get("stale") or aged):
+    if f.get("contested"):
+        # A contested slot is settled by a human decision, not a write:
+        # ``memory_fact_set`` there parks one more contender, and a
+        # prefilled ``accept`` would let a model settle it blindly
+        # (2026-10-04: a live recall served a contested slot with a
+        # ``memory_fact_set`` call). Takes precedence over aged/stale.
+        slot = f"entity={f['entity']!r}, attribute={f['attribute']!r}"
+        return (f"memory_fact_get({slot}) to read the contenders; once the "
+                f"human decides, memory_fact_resolve({slot}, "
+                f"accept=<the human's decision>) (core tier)")
+    if not (f.get("stale") or aged):
         return None
     return (f"memory_fact_set(entity={f['entity']!r}, "
             f"attribute={f['attribute']!r}, "
@@ -1049,8 +1129,9 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
                     {"pinned": True}
                     if f.get("pinned") else {}
                 ),
-                # Supersede-at-discovery: aged/stale/contested facts
-                # carry their exact correction call (see CORRECTION_NOTE).
+                # Supersede-at-discovery: aged/stale facts carry their
+                # exact correction call, contested ones the resolve path
+                # (see CORRECTION_NOTE).
                 **(
                     {"correct_with": cw}
                     if (cw := _cortex_correct_with(f)) else {}
@@ -1281,6 +1362,7 @@ async def memory_toolset(
 # body is dict ops only and cannot block the event loop.
 _TOOL_TIERS["memory_toolset"] = "minimal"
 mcp.tool(annotations=_annotations("memory_toolset"))(memory_toolset)
+_bind_arguments("memory_toolset")
 
 
 # core memory_fact_get returns source_entries ids —
@@ -1371,7 +1453,8 @@ def memory_fact_get(
     if (rec is None or is_empty_set) and not out["contenders"]:
         out["candidates"] = service.cortex_candidates(entity, attribute)
     # Supersede-at-discovery: an aged/stale record carries its exact
-    # correction call, and the response states the norm once.
+    # correction call (a contested one the resolve path), and the response
+    # states the norm once.
     if rec is not None and not is_empty_set:
         cw = _cortex_correct_with(
             {**rec, "contested": bool(out["contenders"])})
@@ -1791,11 +1874,12 @@ def memory_outcome(
     used_ids: Annotated[list[int] | str | None, Field(
         description="Ids of the search hits you actually used, e.g. "
                     "[1421, 903] — the relevance label only you can "
-                    "write. At most 50. Credits this session's searches "
-                    "from the last hour; log before that lapses.")] = None,
+                    "write. At most 50.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. The dream distils signals into next session's lessons.
+    ``used_ids`` credits this session's searches from the last hour;
+    log before that lapses.
 
     Returns ``{recorded, signal_id, task, outcome}``; needs Postgres.
     ``used_ids`` adds ``used_ids_recorded`` (credited),

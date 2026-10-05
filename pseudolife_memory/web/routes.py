@@ -97,6 +97,11 @@ class ConsoleRoutes:
 
     def _agents(self, params):
         if params.get("view") == "coordination":
+            if getattr(self.svc, "demo_board", False):
+                # The devserver's demo board (web/fixtures.py; devserver.py
+                # turns it on); no bank. Tests of the real snapshot path
+                # use a FixtureService without it.
+                return self.svc.board_snapshot(limit=_i(params, "limit", 50))
             from pseudolife_memory.coordination import console_snapshot
             return console_snapshot(self.svc, limit=_i(params, "limit", 50))
         return self.svc.coordination_awareness(limit=_i(params, "limit", 5))

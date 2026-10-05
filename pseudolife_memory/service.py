@@ -6928,10 +6928,29 @@ class MemoryService(DreamOps, MaintainerOps):
         (so it can be called up front), reopening one the idle reaper closed
         within the resume window instead of forking a second root.
         Returns ``{"ok": bool, "id": str, "title": str}`` or
-        ``{"ok": False, "reason": ...}``."""
+        ``{"ok": False, "reason": ...}``.
+
+        The coordination board rows registered under the session (their
+        ``episode`` is its session key) take the title as their name, unless
+        an agent or the harness named them (v55); that runs after the
+        service lock is released and never fails the retitle."""
+        result, root = self._retitle_session(title, episode)
+        if result.get("ok") and root is not None:
+            self._title_board_rows(root, result["title"])
+        return result
+
+    def _title_board_rows(self, root, title: str) -> None:
+        keys = [key for key in (root.session_key, root.id) if key]
+        try:
+            from pseudolife_memory.coordination import title_board_names
+            title_board_names(self, keys, title, principal=self._request_principal())
+        except Exception as exc:  # noqa: BLE001 - a board name never fails a retitle
+            logger.info("board name from session title not set (%s)", type(exc).__name__)
+
+    def _retitle_session(self, title: str, episode: str | None):
         title = (title or "").strip()
         if not title:
-            return {"ok": False, "reason": "empty title"}
+            return {"ok": False, "reason": "empty title"}, None
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
@@ -6940,13 +6959,13 @@ class MemoryService(DreamOps, MaintainerOps):
                 root = self._cms.episodes.get(resolved[0])
                 self._retitle_locked(root, title)
                 self._persist_episodes()
-                return {"ok": True, "id": root.id, "title": title}
+                return {"ok": True, "id": root.id, "title": title}, root
             if episode:
                 return {"ok": False,
-                        "reason": "unknown or closed episode handle"}
+                        "reason": "unknown or closed episode handle"}, None
             _, session_id = self._resolve_writer()
             if not session_id:
-                return {"ok": False, "reason": "no session id on this request"}
+                return {"ok": False, "reason": "no session id on this request"}, None
             em = self._cms.episodes
             root = next(
                 (e for e in em.episodes.values()
@@ -6963,7 +6982,7 @@ class MemoryService(DreamOps, MaintainerOps):
             else:
                 self._retitle_locked(root, title)
             self._persist_episodes()
-            return {"ok": True, "id": root.id, "title": title}
+            return {"ok": True, "id": root.id, "title": title}, root
 
     def _session_root_locked(self, session_key: str | None):
         """The OPEN root episode for ``session_key``, or None. Caller holds

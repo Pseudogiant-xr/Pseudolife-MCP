@@ -1,8 +1,10 @@
 <script lang="ts">
   // The message composer inside a role slot: the recent thread with that
   // session (your passkey-signed messages and its replies), then a signed
-  // send. Agent-written text renders as text.
-  import { untrack } from "svelte";
+  // send. Agent-written text renders as text. The thread scrolls in its own
+  // pane, so a long one never pushes the composer down the page.
+  import { tick, untrack } from "svelte";
+  import { nearBottom } from "../../lib/board";
   import { MAX_TEXT_BYTES, textBytes, threadFor, type RoleKind } from "../../lib/maintainer";
   import { loadThreads, maintainer, sendMessage, withdrawMessage } from "../../lib/maintainerFlow.svelte";
   import { explainError } from "../../lib/errors";
@@ -37,6 +39,20 @@
   });
 
   const thread = $derived(threadFor(agentId, maintainer.sent, maintainer.inbox));
+
+  // Newest message in view: on open and on each new message, unless the
+  // reader has scrolled up (follow is kept from their last scroll).
+  let pane: HTMLOListElement | undefined = $state();
+  let follow = true;
+  const lastId = $derived(thread.at(-1)?.id ?? null);
+  $effect(() => {
+    void lastId;
+    const el = pane;
+    if (!el || !follow) return;
+    void tick().then(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  });
   const bytes = $derived(textBytes(text));
   const tooLong = $derived(bytes > MAX_TEXT_BYTES);
   const canSend = $derived(!blocked && !sending && text.trim() !== "" && !tooLong);
@@ -61,7 +77,12 @@
   {:else if thread.length === 0}
     <p class="caption">No messages between you and {name} yet.</p>
   {:else}
-    <ol class="thread" aria-label="Recent messages with {name}">
+    <ol
+      class="thread"
+      aria-label="Recent messages with {name}"
+      bind:this={pane}
+      onscroll={(e) => (follow = nearBottom(e.currentTarget))}
+    >
       {#each thread as m (m.id)}
         <li class="msg" class:mine={m.mine} class:withdrawn={m.withdrawn}>
           <span class="msg-head">
@@ -120,10 +141,13 @@
   .thread {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 4px 0 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: min(320px, 40dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .msg {
     display: flex;

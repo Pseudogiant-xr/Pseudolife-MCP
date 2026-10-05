@@ -123,6 +123,8 @@ _REQUIRED_COLUMNS = [
                               "failed_attempts"}),
     ("maintainer_nonces", {"nonce", "expires_at"}),
     ("coordination_messages", {"origin", "maintainer_proof", "repudiated_at"}),
+    # v55 — the board name and who set it ('' = unnamed).
+    ("coordination_agents", {"name", "name_source", "name_set_at", "harness_name"}),
 ]
 
 
@@ -184,6 +186,7 @@ _NULLABLE_COLUMNS = [
     ("entity_proposals", "judged2_at"),
     ("coordination_agents", "parent_agent_id"),   # v50: NULL = no parent (yet)
     ("coordination_agents", "parent_thread"),     # v50: NULL = not a subagent
+    ("coordination_agents", "name_set_at"),       # v55: NULL = never named
     ("dream_run_slots", "chronicle_event_id"),    # v28: NULL on non-event rows
     ("entries", "authority"),                     # v35: NULL = observation
     ("entries", "distortion_tolerance"),          # v35: NULL = unlabelled
@@ -348,6 +351,16 @@ def test_edges_dst_id_index_present(pg_conn):
     ).fetchone()
     assert row is not None, "edges_dst_idx is missing"
     assert "dst_id" in row[0]
+
+
+def test_coordination_agents_episode_index_present(pg_conn):
+    """v55: a ``memory_session_title`` rename names the board rows
+    registered under that session, an UPDATE keyed by ``episode``."""
+    row = pg_conn.execute(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'coordination_agents' "
+        "AND indexname = 'coordination_agents_episode_idx'").fetchone()
+    assert row is not None, "coordination_agents_episode_idx is missing"
+    assert "episode" in row[0]
 
 
 def test_dream_run_slots_src_entry_id_carries_no_foreign_key(pg_conn):
