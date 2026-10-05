@@ -364,6 +364,11 @@ def memory_agents(
         description="update: positive finite Unix epoch seconds, at most "
                     "now + 7 days; new parks default to now + 12 hours, "
                     "refinements keep expiry.")] = None,
+    name: Annotated[str | None, Field(
+        max_length=120,
+        description="update: the name the board shows for you, up to 120 "
+                    "chars; it overrides your harness's title. \"\" clears "
+                    "yours.")] = None,
 ) -> dict[str, Any]:
     """Coordinate agent sessions on the shared board: list peers and
     leases, update your own status or park, claim/release shared
@@ -387,7 +392,7 @@ def memory_agents(
                   lease=lease, worktree=worktree, repository_id=repository_id, path=path,
                   expect=expect, children=children, park_reason=park_reason,
                   park_needs=park_needs, park_clear_by=park_clear_by, park_resume=park_resume,
-                  park_expires=park_expires)
+                  park_expires=park_expires, name=name)
 
 
 @_tool(tier="core")
