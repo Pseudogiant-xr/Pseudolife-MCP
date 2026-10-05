@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import random
 import subprocess
+import sys
 import time
 
 PINS = {'torch': '2.13.0+cpu', 'sentence-transformers': '5.6.0',
@@ -89,6 +90,8 @@ def main():
     if versions != PINS:
         raise RuntimeError(f'pin mismatch: {versions}')
     print('comparison-start', 'smoke' if args.smoke else 'full', time.time(), flush=True)
+    sys.path.insert(0, str(args.source.resolve() / 'evals'))
+    import embedder_stamp
     import numpy as np
     import torch
     import onnxruntime as ort
@@ -112,6 +115,7 @@ def main():
     sequence_cap = model.max_seq_length
     dtypes = sorted({str(p.dtype) for p in model.parameters()})
     assert dtypes == ['torch.float32']
+    torch_embedder = embedder_stamp.describe_model(model, device='cpu')
     pooling, normalization = model[1], model[2]
     features_list, identities, torch_rows = [], [], []
     unchanged_delta = None
@@ -144,6 +148,7 @@ def main():
     options.inter_op_num_threads = 1
     session = ort.InferenceSession(str(graph_path), sess_options=options, providers=['CPUExecutionProvider'])
     assert session.get_providers() == ['CPUExecutionProvider']
+    ort_embedder = embedder_stamp.describe_model(session, device='cpu', backend='onnx')
     names = [value.name for value in session.get_inputs()]
     outputs = [value.name for value in session.get_outputs()]
     assert outputs == ['last_hidden_state']
@@ -182,6 +187,8 @@ def main():
                       'torch_min_adjacent_margin': float(np.min(score_a[oa][:-1] - score_a[oa][1:])),
                       'ort_min_adjacent_margin': float(np.min(score_b[ob][:-1] - score_b[ob][1:]))})
     result = {'status': 'direct-ORT-CPU-numerical-comparison', 'smoke': args.smoke,
+              'embedder': {'torch': torch_embedder, 'ort': ort_embedder},
+              'embedder_stamp_sha256': sha256(Path(embedder_stamp.__file__)),
               'query_status': manifest['status'], 'source_commit': git(args.source, 'rev-parse', 'HEAD'),
               'instrument_sha256': sha256(script), 'committed_instrument_sha256': hashlib.sha256(committed).hexdigest(),
               'manifest_sha256': hashlib.sha256(encoded.encode()).hexdigest(), 'seed': 61003,
