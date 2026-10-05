@@ -1,0 +1,1150 @@
+{
+  "schema": 1,
+  "kind": "cli-paired-measurement-public",
+  "status": "quiet-cli-pair-final",
+  "mode": "version",
+  "layout": "installed",
+  "argv": [
+    "version"
+  ],
+  "normalizations": [],
+  "capture_platform": {
+    "os": "Windows",
+    "architecture": "AMD64"
+  },
+  "raw_receipt": {
+    "sha256": "ac932e20b96a344fcf0f8a16b8e9916e580aa7c655f78ce72154908579dc8ec6",
+    "bytes": 75276698
+  },
+  "provenance": {
+    "measured_at_utc": "2026-10-05T12:26:53Z",
+    "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "source_schema": 55,
+    "source_dirty": true,
+    "parent_runtime": {
+      "python": "3.11.9",
+      "dependencies": {
+        "psutil": "7.2.2",
+        "mcp": "2.1.1",
+        "httpx": "0.28.1",
+        "torch": "2.10.0+cu126",
+        "sentence-transformers": "5.3.0",
+        "psycopg": "3.3.4"
+      }
+    },
+    "instrument_sha256": {
+      "evals/memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+      "evals/memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+      "evals/rust_baseline/__init__.py": "b3f31d72369899c9c4c6d84fefc750c5e644c98c1318427069c93e83bea124df",
+      "evals/rust_baseline/ci.py": "b2307be414101636e33472388006877c97145e0ff827e7c7438935b202514d28",
+      "evals/rust_baseline/cli_measurement.py": "8113d7ae94124c35313dec0e16cc31e6d0cf0acadafcc277641fd19dac4f00a9",
+      "evals/rust_baseline/common.py": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+      "evals/rust_baseline/daemon.py": "e659db38d50358106f0a3967430a2fe7ec559ffd9440036b928f3e91d74dca9c",
+      "evals/rust_baseline/daemon_child.py": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+      "evals/rust_baseline/scaling.py": "8e8987b6ada5653c98b0a9cc0ba238808aa3e374412531add975f45ef5b904b1",
+      "evals/rust_baseline/scaling_child.py": "fc33e5d9780db29524c05d802d07a504efb8c98ea40e9a0168695e34ee844c5a",
+      "evals/rust_baseline/shim.py": "619c29c94b68505d5e61a1b8d03e15481eebbe77e42b05d5f4d2c41e50fe6bfd",
+      "evals/rust_baseline/shim_measurement.py": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7",
+      "evals/rust_baseline/test_baseline.py": "075fa2765e95fc9ed65a5cc44ca5a2a20e4142699775d9351783ed5e3154ae0b",
+      "evals/rust_baseline/test_cli_measurement.py": "5eb116929fe35ec02158a6ad1aa59750dccf03c5867c87564c2b6e5af1dbd522",
+      "evals/rust_baseline/test_review_fixes.py": "8e351f2501b39fd99199a060b21beb010e829316652b1b538e98f73a15025cd8",
+      "evals/rust_baseline/test_scaling.py": "985fe830767576edc25185b71db9ef547557c440d4625f74eb41d44507f573ae",
+      "evals/rust_baseline/test_shim_measurement.py": "8246ae2b4be761b5c5a2affa1bf89e60867435f3e10ed4670f23b2195703ce6c",
+      "evals/rust_baseline/transport.py": "c69e07cfed0440fe0ead0a3be7faa7400e7ffe1f376a7ee446f85eb38779380f"
+    },
+    "process_helper_sha256": {
+      "processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+      "codex_doorbell.py": "e3021d84eadf9c227866f7444069c8ed9bd9f91ce4ad74de3210ebe3cb50303c"
+    },
+    "runtime_provenance_sha256": {
+      "provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7"
+    }
+  },
+  "capture_runtime": {
+    "python": "3.11.9",
+    "executable_basename": "python.exe",
+    "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+    "environment_kind": "virtualenv",
+    "distribution_versions": {
+      "pseudolife-mcp": "0.17.0",
+      "mcp": "2.1.1",
+      "httpx": "0.28.1",
+      "torch": "2.10.0+cu126",
+      "psycopg": "3.3.4",
+      "sentence-transformers": "5.3.0"
+    },
+    "package_runtime_version": "0.17.0",
+    "source_origin_matches_selected_root": true,
+    "source_file": "pseudolife_memory/__init__.py",
+    "source_file_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c"
+  },
+  "python_oracle": {
+    "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "oracle_schema": 55,
+    "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "source_schema": 55,
+    "instrument_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "instrument_dirty": false,
+    "production_source_matches_pin": true,
+    "behavior_test_sources_match_pin": true,
+    "source_comparison_paths": [
+      "pseudolife_memory",
+      "pyproject.toml",
+      "tests/pg_defaults.py",
+      "tests/test_cli_dispatch.py",
+      "tests/conftest.py",
+      "tests/fake_embedder.py"
+    ]
+  },
+  "candidate_identity": {
+    "executable_basename": "pseudolife-stdio.exe",
+    "executable_sha256": "64193340ed20df5dc0183e761043e57616a848ee4184d352865d23680d96874b",
+    "executable_bytes": 13320192,
+    "public_cli_module": false,
+    "source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "source_tree": "ab2d84ec76db706b8dbc4e6252d822f4ada05600",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "rust/Cargo.lock": "638618e53fa3b2647b1b62a72a7790bf4e3f242e2b1ecd4423aba80457be98f5",
+      "rust/Cargo.toml": "ceec62b0e28d1eb60f69d3424b8f4477878c907afda893e8d49b1bbf3bae9bea",
+      "rust/rust-toolchain.toml": "c8ba0eb51e43051da67997376ab176715f84249f2d4182755cb7979e8249a99b",
+      "rust/shim/Cargo.toml": "027369c528c74ba67f0f2168ec233cb1fa7d94c2086a5fb91dad65c8dae78cc1",
+      "rust/shim/src/board.rs": "f114438f4eb22ba91f82d17d6e52a6882d109c1a08f4ab836dc0e24979b11a8b",
+      "rust/shim/src/board/adapter.rs": "24f9082e1fcde346d4235ccf61e6271cf71b8bb7f7c6645dfdc8455c9ecaf641",
+      "rust/shim/src/board/claims.rs": "f4761b5987afa049e4e4f6934bd5212e469310ca09311f57cd0514c2320e515e",
+      "rust/shim/src/board/delivery.rs": "fda16ae9adf849f6fc03bf762e720bb6723066d84c768385f4d640a7f5bebd0b",
+      "rust/shim/src/board/doorbell.rs": "cf11e9ee4c8afd717637c550943bf406984441c893496fcdc0660df6c9b6ff03",
+      "rust/shim/src/board/doorbell_posix.rs": "11e563ce92a833a5995a895f6e5c6ae7ccbca762b426a5b8e78c99c456df571b",
+      "rust/shim/src/board/doorbell_windows.rs": "0f6f65257c26e06e1aed4deeaf38cf063226c8ed40b871aeec15538232e39597",
+      "rust/shim/src/board/identity.rs": "4c9bab4f26a97445c2cfabc4797e237775e7d63275f1bcd60b094f2a3e487cd4",
+      "rust/shim/src/board/liveness.rs": "8684638c7f981aaeccc57e5e0313483bb377428205ae9d86330de47ebc9917ce",
+      "rust/shim/src/board/notice.rs": "b0832b18adab8b4aa727dd42cbeb778db3e57113f8512907fa6786786d1fe728",
+      "rust/shim/src/board/policy.rs": "96dbfdbb734d0985f36795db2432ff611eb4fc1b098e762934c355c12c95e353",
+      "rust/shim/src/board/state.rs": "b1682f72c61d4afdd1ded3b7fb013394dc57a56cae5de29da9d7aa7db0c4c185",
+      "rust/shim/src/board/unicode14.rs": "23d5188185cfafcea82dd6a35f2deb2da988d24a7c3fb6c6851fd5aa307e6a0e",
+      "rust/shim/src/cache.rs": "7da56abddda077d7a5ea28743d13ea5205a16e817794b0d8d6a892f34ab68cc5",
+      "rust/shim/src/cli.rs": "d4a0ebc9f441e1aa3deb6dcdb25a7beefa2dedfe8d1bf5f6c5258151dd1c8637",
+      "rust/shim/src/cli/version.rs": "33a6cc11b5d5a799a398f4c9bd132fbee3d2ee7dca2c6c301616ba1bf136bf11",
+      "rust/shim/src/credentials.rs": "671b20f292d3380ce414e7c1bf9826f183ae31ddc6734ae78c59e1a007e3be2c",
+      "rust/shim/src/daemon_url.rs": "41697fb2407ecf7a36b00ff0dd204df4b87b58cff8c365c3c99a08c5b26267a9",
+      "rust/shim/src/errors.rs": "f28fa5d4f68b08357f7837fee778a0cd20ee3a442e069db07a0ed1024492c876",
+      "rust/shim/src/lib.rs": "b76b816197bed504a2b7d6008d53d3da900e78ad88f0e836d686adb236666c2d",
+      "rust/shim/src/lifecycle.rs": "756d3b4845f8a1d45a2aec2857fa3bef119e7bce05e53fd398ba49e8637174a3",
+      "rust/shim/src/main.rs": "c5c8b00b51b628255fdba51efdca3d3785993af9866151da35c0e868ba5db907",
+      "rust/shim/src/owned_transport.rs": "bbdcf13daa7df3cd9901880c75170a7648018e0c2b3f7377218ae1a82ae04eff",
+      "rust/shim/src/raw_http.rs": "538a16bbf18b4054b72ad0cdfafbc87a53c986dd6522bef221c2e47f81615fbc",
+      "rust/shim/src/recovery.rs": "d07ecad01b4511956f4dbe38f5c9c4b0f63f8c6b1b4651e317ee6b9bb22392a4",
+      "rust/shim/src/subscriptions.rs": "0c11720ec35209f368276cf1cd403f3f6762c1e3596d7bab83209325c436b7c2",
+      "rust/shim/src/upstream.rs": "80f50ad51949d8fbb1324d63b72a7029e425b6066444e9c4f9129c060c122667",
+      "rust/shim/src/wire_compatibility.rs": "d2c4010640e7be9f9a652cc846f23d9e68a4c4a06f01f258911f16e83d2cb5d3",
+      "rust/shim/src/wire_ids.rs": "45de17ad635dbccbfe72add35f1e484370a9074ac558d5cb7965d380e54aa578",
+      "rust/shim/src/wire_json.rs": "f867f07a3ecb9015da626e907ebb568bcd8109a40f4992e07bb05431f4dceb29",
+      "rust/shim/tests/auth_credentials.rs": "d996d418a38505ee7a0191e8f57717819eecf52c420dd0cd88d8f6c3d3e7b627",
+      "rust/shim/tests/auth_fixture.rs": "27136782ed65a14cc4926222d28b1ba11e81ff7e9ebafaaa34092386ab49fc9e",
+      "rust/shim/tests/auth_lifecycle_cache.rs": "32474cd63f5cbe3f0c24df4ea7d60bac2ddf1516486e6b641dbb0279969e4e18",
+      "rust/shim/tests/auth_lifecycle_http.rs": "f0633cdc6bc3f1e8b50bb19cecfd3636fd5d71834bc46106c6b58291669ff9b5",
+      "rust/shim/tests/auth_lifecycle_runtime.rs": "1c8b6a63aae3f86ddc4e55e88ebd3659930d8271b61a4a7a4bd4fb5544dc5bbb",
+      "rust/shim/tests/auth_lifecycle_updates.rs": "84e5f0f45f453332e991502f2d3473d26e99396d8c85551d4fdb5296b01a77b8",
+      "rust/shim/tests/auth_lifecycle_url.rs": "3cbabe40f77374d044a98030f67a975302a47158b163c98a4758d350fa5fb841",
+      "rust/shim/tests/auth_windows_private_state/mod.rs": "ddce82fda7ce02cd7de12de56e77af8b32582bd8de038742a0c578425aff4133",
+      "rust/shim/tests/auth_windows_security.rs": "a86f5a8f0c7b530040c58e7f3c5a360c9b182f8eb6f6160ac318098fde32f84c",
+      "rust/shim/tests/board_bridge_contract.rs": "45532b49457fc1d4db39de2d20f4824cd7f5075503bf426834782845ee3ca542",
+      "rust/shim/tests/board_capture.rs": "fa4ddf0141edb47d17fac10a4358a0946fff678b4a7ce997fc5e30322080028f",
+      "rust/shim/tests/board_channel_contract.rs": "387d72459d3c1c74709a1afeb3c610985ff6a37c494591d6141cbbbe61b9ba67",
+      "rust/shim/tests/board_claims.rs": "80d36492f29a8e3fb1866e0c61d96ad95223987d9857a7853b25fcfaea764cc9",
+      "rust/shim/tests/board_delivery.rs": "8bda8b2a332f12b98efcbe13d51d5bcb9ffd2c2c9b2fb0b807a3bf803ff98c30",
+      "rust/shim/tests/board_doorbell.rs": "ae5dda8b1b06305f113828080bb76876d72328b1e757532196cb89886d613c10",
+      "rust/shim/tests/board_doorbell_completion.rs": "d350c37295a4db241ce301c0e7bf00fa463d83a21b759c1afdb8fa8165d203d0",
+      "rust/shim/tests/board_fixture.rs": "1fd7e541fa266f083c177b4fdcbcdee21643d14b6e89e0cc488fe659d7e756d4",
+      "rust/shim/tests/board_identity.rs": "4b2612ecb672bdd4662cf180abb91455f250687f64d62b0c7e577354497970dd",
+      "rust/shim/tests/board_network.rs": "7f7ca211b7b7a836efa29be30db9abf0293d29dcbf2b445b2aaee00b2635e48f",
+      "rust/shim/tests/board_policy.rs": "3d1543a5a6d042d02d4c1f3b439d14e1c3b357ec6400cd86dc60333670adfb58",
+      "rust/shim/tests/board_renewal.rs": "2a8b134f4418b1aa65fedd44e6625ef8b116d02b09d5cb0d4af198b9a8b1216e",
+      "rust/shim/tests/board_repository.rs": "183f5aaf8a92d179db1d985fd0c38d4495b7e7d052b3669b56bcd141afbe1b2c",
+      "rust/shim/tests/board_retry_contract.rs": "58ca075e66114c4efa9e9e099d4aff304606f9a974aa46430e343088a2665b3b",
+      "rust/shim/tests/board_ring_contract.rs": "b80c7412d714fedd94b33e44aced89547022b9c5498c2f63f6b6df75677a3bb7",
+      "rust/shim/tests/board_state.rs": "6f6d95cef327fbecd2708b639a6a471df08496f54d49806c193352b7989f1361",
+      "rust/shim/tests/claims_recovery_contract.rs": "5c73f4d34fb9f86332268c187f9b126059a00a2ac40f13a8ebb3f22114221a03",
+      "rust/shim/tests/cli_dispatch_contract.rs": "4b6dfe19b63cacfc1dfedfe3ad63bf007be0a064720821b616ca12084046ead3",
+      "rust/shim/tests/cli_version_contract.rs": "bbd2a280702fd3995b17e8d6698ffd8a1618827598b083e1aa4ffb41a5fe27ac",
+      "rust/shim/tests/common/mod.rs": "4695ddfe02bd742af506a3aea8e043febe7c044dae2a34e6ce0f36e7874ab90f",
+      "rust/shim/tests/nonboard_contract.rs": "c35dc375bb9e11747b63ebe710f46a46eec88f317e2f52652cdd545c29b101e1",
+      "rust/shim/tests/nonboard_final_assertions.rs": "ad616bf68e86be3347e57adf86ea4d1be29b0b4262a896bbf3159df51982fb2d",
+      "rust/shim/tests/nonboard_rotation.rs": "05e0a82ea9b191aed83860897ef5118bad1da43b0c325cbbc4940b5c9c977eec",
+      "rust/shim/tests/nonboard_spawn_policy.rs": "582273a7fbb56da3028c5ac331e259ebdad9bd77a58bdcbbf3986e37f9bffc1f",
+      "rust/shim/tests/nonboard_startup.rs": "5862758084de5fc17b72ff3ab05fa479a303296250cd5f103745b2bf877ebeee",
+      "rust/shim/tests/shim_contract.rs": "31a4f8ec64a7c5cbbd26bb2278c024f9839bddf85ee14c5d262f19e874d66e67",
+      "rust/shim/tests/shim_transport_recovery_contract.rs": "6dba9781d708af69b8ece1b4bac93c910fcfe4dc6f187c1f77e1b38cfc124607",
+      "rust/shim/tests/shim_wire_contract.rs": "08a44a366789951528f3d914f75a25a6252bca7d1f9c6b94cc8f46daa599c48b",
+      "rust/shim/tests/stdio_concurrent_contract.rs": "f0f3f5dff2f4feb8a827009315c4d10b2a71c7c95a1e9952e0938a92cef7105f",
+      "rust/shim/tests/stdio_eof_contract.rs": "655b9fd5d23e2d73b582afad3997bf5fce9233a876dde2d738cd87c4a3bf7379"
+    }
+  },
+  "python_executable": {
+    "executable_basename": "python.exe",
+    "executable_sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
+    "executable_bytes": 274712,
+    "public_cli_module": true
+  },
+  "instrument_binding": {
+    "source_head": "62e4f590c73a43c8bde0ae9aba55710208cccee3",
+    "source_tree": "ab2d84ec76db706b8dbc4e6252d822f4ada05600",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "evals/rust_port/cli_process.py": "84e4e508fa1917cc422d7d7a27e5b4007b204f8611997376f951f2b43cc197fd",
+      "evals/rust_port/cli_corpus.py": "1614419ccfefa13bee75e9c7d8ca0ca5db12f9ad0cc54a5aa1b135db9323bfa1",
+      "evals/rust_port/cli_public.py": "14dad03ccc5e03d714e57f9508391ec9af1c43e898364db8510f690d9da1b927",
+      "evals/rust_port/cli_version.py": "296ede717ed1b2057c42026ffac19ba93a556bdaeada5a3c608d0da64028bb6b",
+      "evals/rust_port/harness.py": "d86840e15dd195c27b0cbf33ecf9d1388bdc3ce8a820ebfbff08036b256d9541",
+      "evals/rust_port/phase1_receipts.py": "2635da836689b3f8ee04fd7ec2af69e152610e0544f16dbdefc6cfa43ebec33e",
+      "evals/rust_port/provenance.py": "8d3fb974e8a154afdf9955b562a7de7ce824eb16ef7bb461e06fbb57669cafe7",
+      "evals/rust_port/stdio_capture.py": "c7b7f31902f35064193a216b1b021244e5b94f097efabe46dde60d65250c0c12",
+      "evals/rust_port/processes.py": "700da4f1c152f1dccdabeb8b7b24fc4576fe3c281e486c33d69ee6a67a09666b",
+      "evals/rust_baseline/common.py": "4135b33aac0339e525731d632b41f9cfe95b9336974b3dd55de985f181877b82",
+      "evals/memory_policy_bench.py": "64bd7332051584eb6330be985e6892d67baa63c11d4cd51e46b510b00ef4b05c",
+      "evals/memory_policy_daemon.py": "9f342663e965d488d4d5a2354453d820e1c70a0d8e90b5b0fa6624bf797f7f72",
+      "evals/rust_baseline/daemon_child.py": "aca0a0435df2e31c4a2058c33de9bb1bbd279223fee461ba2c99321486bd1c98",
+      "evals/rust_port/stdio_daemon.py": "d3c37c023d2823d6178532946c7189d76ee5b09cc00b1b39144dd9b4149daf9e",
+      "evals/rust_baseline/cli_measurement.py": "8113d7ae94124c35313dec0e16cc31e6d0cf0acadafcc277641fd19dac4f00a9",
+      "evals/rust_baseline/shim_measurement.py": "7f67ede3125067a9f00462c6ba0eb49290b43006cb54122d4e3bc38300020af7"
+    },
+    "source_files_git_blob": {
+      "evals/rust_port/cli_process.py": "63bce99c03758ef504dbd753943dcc820369cbb3",
+      "evals/rust_port/cli_corpus.py": "8a3782e6c388d9b5410f59640313ae4a009251bb",
+      "evals/rust_port/cli_public.py": "afa29f49ceeea317a628d876afda402a82f7939f",
+      "evals/rust_port/cli_version.py": "b5612fa6d430186570e7a574dc9b454848bc2ef3",
+      "evals/rust_port/harness.py": "2c10cbeeb4ac1e20c37fca2eb9b7d33248859e82",
+      "evals/rust_port/phase1_receipts.py": "4f8f996f00485ee9cc629354cbf972fcf386a1d9",
+      "evals/rust_port/provenance.py": "041896a7d25a38d139375d7e245bdcefb46fabb2",
+      "evals/rust_port/stdio_capture.py": "32ccdabf1b14e54a14c79b64329dfb32c6f863a1",
+      "evals/rust_port/processes.py": "5484bc1404fc7c3606172b6522bf1597e2859d4f",
+      "evals/rust_baseline/common.py": "f255588f5088cd7d8b98b850db4b775f60b35569",
+      "evals/memory_policy_bench.py": "cc3104069bdead43efddcad6cfd5fdc02737e347",
+      "evals/memory_policy_daemon.py": "6569e7ddee359385bb8110ecfd50a91cf5c836fb",
+      "evals/rust_baseline/daemon_child.py": "794b41a0d37eb161858ae409bfc2b569b8836dda",
+      "evals/rust_port/stdio_daemon.py": "c72c98e7bc86a106c30320c3f4b6576575b42563",
+      "evals/rust_baseline/cli_measurement.py": "a70fef8af6c6023195fa4e12983f3f844d88e6dd",
+      "evals/rust_baseline/shim_measurement.py": "1b0f19a182cda2801377171a5adce4e8dc5db83e"
+    }
+  },
+  "production_ownership": {
+    "source_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+    "source_tree": "82f6a9687bf755fb8da23f0838bbb40dc1e5561a",
+    "source_dirty": false,
+    "source_files_sha256": {
+      "pseudolife_memory/codex_doorbell.py": "e3021d84eadf9c227866f7444069c8ed9bd9f91ce4ad74de3210ebe3cb50303c",
+      "pseudolife_memory/storage/schema.py": "86b14ae4a712c5095c4bda99a5e519aeadcffc8a35e576b31db5eeb6cc2aa3a0",
+      "tests/pg_defaults.py": "f5426849bb0ca0f0b2da5118c876be27370569b1ac85a999f205c24442e51c01",
+      "tests/fake_embedder.py": "4cce7779e5cb378d213df023dfa024f4b6cf0543abf4433f7b44a21d53113f3b"
+    },
+    "source_files_git_blob": {
+      "pseudolife_memory/codex_doorbell.py": "bbd74cfa79a0a683865428891a4b7f60084ecc6f",
+      "pseudolife_memory/storage/schema.py": "67485994544895878e5c88e3a2702ed4eb6a6db8",
+      "tests/pg_defaults.py": "0d099e0b021a1a2b70b3aed578511ab4a108231a",
+      "tests/fake_embedder.py": "852fcb8cffdc9d1d923918f78462010c776e082d"
+    }
+  },
+  "repeats": 3,
+  "samples_per_repeat": 10,
+  "runs": {
+    "python": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 156.35139995720237,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 162.16050001094118,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 175.733299984131,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 149.68790003331378,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 153.70219998294488,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 161.7740000365302,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 147.86269998876378,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 165.94330000225455,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 155.19799996400252,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 156.27919998951256,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 174.53580000437796,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 155.58989997953176,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 169.7414999944158,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 157.89090003818274,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 159.24860001541674,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 156.14169999025762,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 153.47829996608198,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 146.85060002375394,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 146.41809999011457,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 153.62120000645518,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 148.1872999574989,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 167.5513000227511,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 149.19109997572377,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 151.6084999893792,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 152.79220003867522,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 159.96120002819225,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 195.82840002840385,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 161.71429998939857,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 153.47249998012558,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 173.61019999952987,
+        "executable_bytes": 274712,
+        "files_and_environment_match_control": true
+      }
+    ],
+    "rust": [
+      {
+        "repeat": 0,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 274.74269998492673,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 266.5246999822557,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 275.37630003644153,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 281.7562000127509,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 276.66520001366735,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 274.16910004103556,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 275.4336999496445,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 309.3625000328757,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 276.08239999972284,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 0,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 286.9698000140488,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 291.3803000119515,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 301.04340001707897,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 275.3008999861777,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 266.08189998660237,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 280.5860000080429,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 269.9175999732688,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 274.2063999758102,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 272.3095000255853,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 282.2786999749951,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 1,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 295.66239996347576,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 0,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 269.3497999571264,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 1,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 281.65140002965927,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 2,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 280.1873999997042,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 3,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 269.61959997424856,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 4,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 305.27129996335134,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 5,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 280.7949999696575,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 6,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 311.1363999778405,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 7,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 264.29449999704957,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 8,
+        "arm_order": [
+          "python",
+          "rust"
+        ],
+        "cold_start_to_exit_ms": 285.91219999361783,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      },
+      {
+        "repeat": 2,
+        "sample": 9,
+        "arm_order": [
+          "rust",
+          "python"
+        ],
+        "cold_start_to_exit_ms": 294.2277999827638,
+        "executable_bytes": 13320192,
+        "files_and_environment_match_control": true
+      }
+    ]
+  },
+  "metrics": {
+    "python": {
+      "cold_start_to_exit_ms": {
+        "distribution": {
+          "n": 30,
+          "p50": 156.14169999025762,
+          "p95": 175.733299984131,
+          "median": 156.2104499898851,
+          "min": 146.41809999011457,
+          "max": 195.82840002840385
+        },
+        "median_control": {
+          "repeat_medians": [
+            156.31529997335747,
+            155.8657999848947,
+            156.7168500041589
+          ],
+          "noise_floor_abs": 0.8510500192642212,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 156.14169999025762,
+          "repeat_values": [
+            156.27919998951256,
+            155.58989997953176,
+            153.47249998012558
+          ],
+          "noise_floor_abs": 2.8067000093869865,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 175.733299984131,
+          "repeat_values": [
+            175.733299984131,
+            174.53580000437796,
+            195.82840002840385
+          ],
+          "noise_floor_abs": 21.292600024025887,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      },
+      "executable_bytes": {
+        "distribution": {
+          "n": 30,
+          "p50": 274712,
+          "p95": 274712,
+          "median": 274712.0,
+          "min": 274712,
+          "max": 274712
+        },
+        "median_control": {
+          "repeat_medians": [
+            274712.0,
+            274712.0,
+            274712.0
+          ],
+          "noise_floor_abs": 0.0,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 274712,
+          "repeat_values": [
+            274712,
+            274712,
+            274712
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 274712,
+          "repeat_values": [
+            274712,
+            274712,
+            274712
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      }
+    },
+    "rust": {
+      "cold_start_to_exit_ms": {
+        "distribution": {
+          "n": 30,
+          "p50": 276.66520001366735,
+          "p95": 309.3625000328757,
+          "median": 278.4263000066858,
+          "min": 264.29449999704957,
+          "max": 311.1363999778405
+        },
+        "median_control": {
+          "repeat_medians": [
+            275.7580499746837,
+            277.9434499971103,
+            281.2231999996584
+          ],
+          "noise_floor_abs": 5.465150024974719,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 276.66520001366735,
+          "repeat_values": [
+            275.4336999496445,
+            275.3008999861777,
+            280.7949999696575
+          ],
+          "noise_floor_abs": 5.494099983479828,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 309.3625000328757,
+          "repeat_values": [
+            309.3625000328757,
+            301.04340001707897,
+            311.1363999778405
+          ],
+          "noise_floor_abs": 10.092999960761517,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      },
+      "executable_bytes": {
+        "distribution": {
+          "n": 30,
+          "p50": 13320192,
+          "p95": 13320192,
+          "median": 13320192.0,
+          "min": 13320192,
+          "max": 13320192
+        },
+        "median_control": {
+          "repeat_medians": [
+            13320192.0,
+            13320192.0,
+            13320192.0
+          ],
+          "noise_floor_abs": 0.0,
+          "available": true,
+          "method": "max minus min of medians of identical-input repeated control blocks",
+          "interpretation": "A delta below this descriptive observed floor is not a finding; not a confidence interval."
+        },
+        "p50": {
+          "value": 13320192,
+          "repeat_values": [
+            13320192,
+            13320192,
+            13320192
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        },
+        "p95": {
+          "value": 13320192,
+          "repeat_values": [
+            13320192,
+            13320192,
+            13320192
+          ],
+          "noise_floor_abs": 0,
+          "method": "max minus min of identical-input repeat block quantiles"
+        }
+      }
+    }
+  },
+  "byte_control": {
+    "python": {
+      "exit_code": 0,
+      "stdout_bytes": 200,
+      "stdout_sha256": "cdda79ed94bc136015d5567686571047a1e73c2a765dcb0e5697d2e3764c46b0",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "rust": {
+      "exit_code": 0,
+      "stdout_bytes": 200,
+      "stdout_sha256": "cdda79ed94bc136015d5567686571047a1e73c2a765dcb0e5697d2e3764c46b0",
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "validation": {
+    "untimed_controls": 2,
+    "exact_stream_exit_controls_equal": true,
+    "timed_samples_byte_checked": 60,
+    "prepared_environment_and_files_equal": true,
+    "prepared_controls_checked": 2,
+    "recorded_private_homes_removed": true,
+    "remaining_owned_processes": 0,
+    "remaining_measure_roots": 0,
+    "cleanup_evidence": "post-capture private checker; source receipts retained"
+  },
+  "repeat_resource_checks": [
+    {
+      "checked_at_utc": "2026-10-05T12:26:05Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_checked_at_utc": "2026-10-05T12:26:02Z"
+    },
+    {
+      "checked_at_utc": "2026-10-05T12:26:24Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_checked_at_utc": "2026-10-05T12:26:02Z"
+    },
+    {
+      "checked_at_utc": "2026-10-05T12:26:39Z",
+      "local_lease_check_exit": 0,
+      "local_lock_free": true,
+      "cli_board_available": false,
+      "offline_resource_clearance_used": true,
+      "offline_resource_clearance_scope": "independent local/WSL lock and peer workload clearance",
+      "offline_resource_checked_at_utc": "2026-10-05T12:26:02Z"
+    }
+  ],
+  "limitations": [
+    "Fresh public CLI process with warm OS filesystem cache; no daemon, database or models.",
+    "UTF-8 stdout/stderr and valid Unicode scalar argv only; Windows CRLF is preserved.",
+    "Locale/default and other output encodings, non-UTF-8 or surrogate argv remain deferred.",
+    "Timing includes owned-process setup, complete output collection and clean exit; preparation/reset/file checks are untimed.",
+    "CLI exit timing is not comparable to shim first-frame or initialize-return timing.",
+    "Executable size excludes interpreter dependencies; noise floors are descriptive repeat-block ranges.",
+    "Final samples require the caller's quiet CPU window."
+  ]
+}

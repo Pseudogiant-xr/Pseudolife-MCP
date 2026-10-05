@@ -16,7 +16,7 @@ Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
 The current version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 15 routed nodes (10 public stdio and 5 CLI). The two new public refusal nodes are candidate mappings with pending runtime execution and acceptance; source-identity checks and adapter-routing unit checks do not close those gates. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
 
-The native version candidate and shared CLI fixture remain pending current-head review, both-platform public process evidence and paired measurements. Earlier 0.16.1 process captures are historical prototypes. The fixture binds loaded preparation and capture helpers to committed files; hosted artifacts contain an allowlisted summary, while raw comparison receipts remain private. These implementation changes do not advance the version parity row.
+The native version candidate and shared CLI fixture have fresh independent code approval at `62e4f590` and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](../evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
@@ -35,6 +35,21 @@ The native version candidate and shared CLI fixture remain pending current-head 
 | 5: Cutover and retirement | deferred | — | Maintainer owns merge/deploy and behavior retirement |
 
 ## Decisions and constraints
+
+Current version evidence is bound to code `62e4f590`, oracle `eb0c13e9` (0.17.0,
+schema 55), Windows Python 3.11.9 and Linux Python 3.11.15. Both local release
+corpora cover five help, ten unknown-dispatch and eleven installer-schema version
+cases, with owned database/daemon cleanup verified. Each OS/layout measurement
+has three repeats of ten alternating paired samples per arm and two exact
+untimed controls. The [packet](../evals/results/rust-phase2b-version-62e4f590/README.md)
+records native/Python mode source ratio 172/125 = 1.376 excluding tests/assets,
+the precise denominator and the Windows installed median/p95 regression.
+[Rust run 37310594788](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37310594788)
+passed both Rust jobs but failed both Parity jobs in a synthetic PYTHONPATH
+fixture before the differential judges ran. A test-only seed collaborator fix
+passes four targeted checks under ordinary and genuine-venv interpreters;
+corrected hosted acceptance remains pending. CLI-VERSION remains deferred, and the
+#546, #560 and #589 gates remain separate.
 
 - Phase 1 starts from master `0b015f92` on `codex/rust-phase1`.
   PR #546 was still open at branch creation; its branch head `31f8475e`

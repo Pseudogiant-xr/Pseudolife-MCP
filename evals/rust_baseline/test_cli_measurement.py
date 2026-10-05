@@ -234,6 +234,9 @@ def test_selected_source_guard_refuses_before_launch(tmp_path, monkeypatch):
 @pytest.mark.parametrize("key", ["PSEUDOLIFE_MCP_TOKEN_FILE", "pseudolife_lease_lock_dir", "PYTHONPATH"])
 def test_prepared_measurement_refuses_uncaptured_file_source_before_timing(tmp_path, monkeypatch, key):
     args, case, prepare, _, calls = installed_instrument(tmp_path, monkeypatch)
+    from evals.rust_port import cli_version
+    monkeypatch.setattr(cli_version, "seed_context",
+                        lambda root: {"pythonpath": str(tmp_path / "verified-source")})
     outside = tmp_path / "sibling"
     outside.mkdir()
     sentinel = outside / "sentinel"

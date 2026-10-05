@@ -6,6 +6,14 @@ Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
 
 Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values and lone Unicode surrogates are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
+
+The [local version evidence at `62e4f590`](../evals/results/rust-phase2b-version-62e4f590/README.md)
+records both-platform release corpora and bare/installed paired measurements.
+It preserves the Windows installed median/p95 regression and distinct runtime
+versions, with no aggregate speedup or causal claim. CLI-VERSION remains deferred
+until required hosted CI and the evidence/documentation successor review/checks
+pass; local evidence does not certify a later head.
+
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
 Historical phase 0b evidence remains bound to Python 0.15.0 at
