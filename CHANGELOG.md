@@ -44,6 +44,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus a partial index on `episode`) and runs on daemon start. The harness
   names need the new shim, which release-mode `pseudolife-mcp update`
   installs with the clients; nothing else to do.
+### Fixed (2026-10-05 — a contested fact's served correction no longer tells the model to write over it)
+- A cortex fact flagged `contested: true` came back from `memory_search`
+  and `memory_fact_get` with a `correct_with` call to `memory_fact_set`,
+  and the response's `correction_note` said to run it now. The standing
+  memory instructions say the opposite: a contested slot is settled with
+  `memory_fact_resolve` after checking, because re-asserting
+  `memory_fact_set` only contests it further (seen 2026-10-04 on a live
+  recall). A contested fact's `correct_with` now names
+  `memory_fact_get(entity=..., attribute=...)` to read the contenders and
+  `memory_fact_resolve(..., accept=<the human's decision>) (core tier)` for
+  once a human decides; no `accept` value is filled in and no
+  `memory_fact_set` call is served. Contested wins over aged. Aged and
+  stale facts keep their `memory_fact_set` call and the run-it-now norm.
+  The shared `correction_note` now scopes "run its call NOW" to aged facts
+  and adds one sentence for contested ones. World facts are unchanged:
+  the world cortex never parks contenders. The standing block
+  (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
+  same.
 
 ### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
 - On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's

@@ -1620,10 +1620,14 @@ entity is deliberately classified.
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.
 The read surface does nudge, though: once a fact has aged past a third
-of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+of its TTL, `memory_search`, `memory_fact_get`, and
 `memory_world_search` attach a ready-made `correct_with` call to it — a
 filled-in `memory_fact_set(...)` the reading agent can run the moment it
-verifies the value, re-asserting or correcting at the same slot. The
+verifies the value, re-asserting or correcting at the same slot. A
+contested fact's `correct_with` instead names `memory_fact_get` to read
+the contenders and `memory_fact_resolve` (core tier) to run once a human
+decides, with no `accept` value filled in: re-asserting `memory_fact_set`
+only contests the slot further. The
 `stale: true` flag is the louder, later signal (twice the TTL);
 `correct_with` fires earlier so drift gets fixed at first contact.
 
