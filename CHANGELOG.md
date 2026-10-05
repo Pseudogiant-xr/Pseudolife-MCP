@@ -46,6 +46,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   under core, and the README, configuration guide, System Atlas,
   `ops/.env.example` and the compose file give the new count.
 
+### Changed (2026-10-05 — a Claude Code session stays reachable while it is open; the Console shows whether the delegate is)
+- A maintainer message to an idle Claude Code session rang only during the
+  hour after its last turn: the plugin's Stop-hook watcher stopped at 59
+  minutes, and the documented fix, a background `wait-mail --timeout
+  14400`, never ran that long because Claude Code stops a background Bash
+  task at the tool's own timeout (30 minutes by default, 2 hours at most;
+  read in the Claude Code 2.1.286 and 2.1.287 bundles). The watcher now
+  listens for 14 days after each turn end, twice the longest delegate
+  lease, so a session is reachable for as long as it stays open without
+  arming anything. Claude Code takes a hook's `timeout` as is (no ceiling)
+  into a Node timer, so the value stays under its 24.8-day limit. After the
+  first hour the watcher polls every 30 s instead of every 5 s, checks on
+  Windows that Claude Code still runs every five minutes instead of every
+  minute, and reads the clock without spawning `date` (bash 4.2 and later),
+  so a session idle for days spawns about 0.07 processes a second (a
+  `sleep` and an `mv` every 30 s, plus `ps -W` and `awk` every five minutes
+  on Windows); a ring then fires up to 30 s after it is decided. **Codex users approve the
+  plugin's hooks once more**: the Stop entry's `timeout` changed (3600 to
+  1209600), and Codex hashes it for the Stop event.
+- Granting or extending a role (Console or `pseudolife-mcp lease
+  delegate`) now says whether the grantee has a live wake path
+  (`reachable`, and the no-path `reason`), and warns when maintainer mail
+  to it would wait for its next turn: the Console shows the warning beside
+  the success toast, the CLI prints it on stderr. The maintainer status's
+  `roles` carry the same two fields per holder, and the Roles band shows
+  "Reachable now" or "No live wake listener" under the delegate and the
+  coordinator.
+- The Console's message thread says why a maintainer message was not rung
+  (for example "no live listener (its listener lapsed)") and no longer
+  calls a nightly cap hourly.
+- The park prompt (Stop-hook gate) and the no-path fallback text no longer
+  tell Claude Code sessions to arm `wait-mail` for waits over 59 minutes.
+
 ### Added (2026-10-05 — board rows show the session's own name; the Board's session list is searchable and scrolls in its own pane)
 - Nearly every board row read `claude-code` or `codex`: the label is set
   once at registration, so the maintainer could not tell sessions apart or

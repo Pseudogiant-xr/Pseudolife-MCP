@@ -14,6 +14,7 @@
     leaseName,
     leftPercent,
     projectsOf,
+    reachText,
     rolesFor,
     timeLeft,
     type RoleHolder,
@@ -146,6 +147,10 @@
           <p class="holder-status" class:none={!delegateAgent?.status}>
             {delegateAgent ? delegateAgent.status || "No status set." : "Not in the board's recent list."}
           </p>
+          {#if reachText(h)}
+            {@const r = reachText(h)!}
+            <p class="reach" class:warn={!r.ok} role={r.ok ? undefined : "status"}>{r.text}</p>
+          {/if}
           <p class="explain">
             Acts with your authority in {project}: it can wake any session here, including sessions parked as done.
           </p>
@@ -235,6 +240,10 @@
           <p class="holder-status" class:none={!coordinatorAgent?.status}>
             {coordinatorAgent ? coordinatorAgent.status || "No status set." : "Not in the board's recent list."}
           </p>
+          {#if reachText(h)}
+            {@const r = reachText(h)!}
+            <p class="reach" class:warn={!r.ok} role={r.ok ? undefined : "status"}>{r.text}</p>
+          {/if}
           <p class="explain">
             Organises the work: hands out tasks and queues shared resources. It cannot wake sessions parked as done.
           </p>
@@ -477,6 +486,15 @@
   }
   .holder-status.none {
     color: var(--ink-4);
+  }
+  .reach {
+    font-size: 12px;
+    color: var(--ok-ink);
+    overflow-wrap: anywhere;
+  }
+  .reach.warn {
+    font-weight: 600;
+    color: var(--warn);
   }
   .explain {
     font-size: 12px;

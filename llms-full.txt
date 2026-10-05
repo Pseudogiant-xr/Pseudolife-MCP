@@ -4806,8 +4806,11 @@ at attach and heartbeat. Exit clears only the waiter's own marker, so one
 waiter's exit does not disarm another; adapter teardown leaves these records
 alone. An interrupted process's evidence expires within 60 seconds.
 
-In Claude Code, the agent arms it with the Bash or PowerShell tool and
-`run_in_background: true`. Claude Code reports the exit as a task notification,
+A Claude Code session with the plugin needs no waiter: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) listens for as
+long as the session stays open. Without the plugin's Stop hook (a hook-only
+install, or the hook turned off), the agent arms it with the Bash or
+PowerShell tool and `run_in_background: true`. Claude Code reports the exit as a task notification,
 which starts a turn even in an idle session (observed on Claude Code 2.1.280,
 2026-09-23):
 
@@ -4819,12 +4822,15 @@ which starts a turn even in an idle session (observed on Claude Code 2.1.280,
    persists, continue pull-only.
 3. Before ending a turn that waits on a peer, make sure a waiter is armed.
 
-The Stop hook alone watches for at most 59 minutes. A park record can outlive
-that watcher, so for a longer wait arm one main-session background
-`pseudolife-mcp wait-mail --timeout 14400` and re-arm after a ring or the
-four-hour timeout. Where Codex supports its doorbell, that is its durable host
-path. Where the host provides neither path, record `next-turn-only` in the
-park or status: a durable park is not evidence of a durable listener.
+Claude Code stops a `run_in_background` command at the tool's own `timeout`
+(30 minutes by default, at most 2 hours unless `BASH_MAX_TIMEOUT_MS` raises
+it, read in the 2.1.286 and 2.1.287 bundles on 2026-10-05) and re-invokes the
+session, so a four-hour `--timeout` never runs out on its own: pass the tool's
+largest timeout and a `--timeout` just under it (`--timeout 7000` with a
+7,200,000 ms tool timeout), and re-arm on that exit as on a timeout. Where
+Codex supports its doorbell, that is its durable host path. Where the host
+provides neither path, record `next-turn-only` in the park or status: a
+durable park is not evidence of a durable listener.
 
 Arm it from the main conversation: a command started by a foreground subagent
 ends with that subagent's final response, and `-p` runs end background commands
@@ -6330,15 +6336,16 @@ still rings it. Waiting on a merge click or a review that may still bring fixes?
 `needs_approval` with `park_clear_by` set to the reviewer's agent id or
 `maintainer`, or `waiting_peer`. A park records intent; automatic wake requires
 a live listener. Check the sender's wake receipt; `no_path` means mail is
-queued for receive on a later turn. For waits over 59 minutes, especially
-`needs_approval` waiting on maintainer, arm `wait-mail` in the background or
-keep the Codex doorbell active; otherwise record that you are reachable
-on your next turn. [Reopening a done park](#reopening-a-done-park) says who
+queued for receive on a later turn. Claude Code's Stop hook keeps listening
+while the session stays open, and a Codex thread needs its doorbell active;
+without either, record that you are reachable on your next turn. [Reopening a done park](#reopening-a-done-park) says who
 counts as the maintainer and the coordinator.
 
-Before parking on a dependency that may take longer than 59 minutes, keep a
-host path armed as described under [wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-or [Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
+Before parking on a long dependency, make sure a host path is armed: the
+[Stop hook](#waking-an-idle-claude-code-session-the-stop-hook) in Claude Code
+(armed at every turn end while the session stays open),
+[wait-mail](#waking-an-idle-session-pseudolife-mcp-wait-mail) without it, or the
+[Codex doorbell](#codex-doorbell). Otherwise make the `next-turn-only`
 limitation explicit. A sender checks the receipt instead of assuming that
 an installed hook wakes an idle recipient. On `no_path`, use the recipient
 host's messaging tool when available: Claude Desktop's session `send_message`
@@ -6502,7 +6509,7 @@ and the other ways to reach that client in `fallback_paths`:
 
 | Recipient | Listener the ring needs | `fallback_paths` |
 | --- | --- | --- |
-| Claude Code (CLI or Desktop Code tab) | the Stop hook's 59-minute wait, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
+| Claude Code (CLI or Desktop Code tab) | the Stop hook's watcher, armed at every turn end while the session stays open, or a background `wait-mail` | `claude_desktop_send_message` (only a Desktop Code-tab session, which the board cannot tell from a CLI one: the host's session `send_message` starts a turn without the board), `maintainer_types` |
 | Codex CLI or desktop | the [Codex doorbell](#codex-doorbell), which serves CLI and desktop threads alike | `codex_doorbell` (it re-arms at the thread's next Pseudolife call), `maintainer_types` |
 
 `capabilities.codex` on a Codex row is the optional
@@ -6691,10 +6698,9 @@ also capped (below, and by the daemon's `wake` caps under
   bring fixes? Park needs_approval with park_clear_by set to the reviewer's
   agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires
   a live listener. Check the sender's wake receipt; no_path means mail is
-  queued for receive on a later turn. For waits over 59 minutes, especially
-  needs_approval waiting on maintainer, arm wait-mail in the background or
-  keep the Codex doorbell active; otherwise record that you are reachable
-  on your next turn." as the wake text and a `gate` ledger line (its
+  queued for receive on a later turn. Claude Code's Stop hook keeps listening
+  while this session stays open, and a Codex thread needs its doorbell active;
+  without either, record that you are reachable on your next turn." as the wake text and a `gate` ledger line (its
   fifth column is the message's length in UTF-8 bytes plus one, on every
   client). Once: the continuation's Stop carries `stop_hook_active: true` and
   is not asked (Claude Code also caps stop-hook continuations at eight in a
@@ -6738,16 +6744,32 @@ also capped (below, and by the daemon's `wake` caps under
   marker and leaves the shared `.wake` ownership stamp alone; the stamp
   without a matching live marker proves no liveness. Stale evidence expires
   within 60 seconds even after an interrupted process.
-- A watcher waits at most 3540 s after the turn that armed it; the hook's
-  `timeout` is 3600 s, which Claude Code enforces on `asyncRewake` hooks.
-  `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT` (seconds) shortens it. A session idle for
-  longer needs the [background waiter](#waking-an-idle-session-pseudolife-mcp-wait-mail)
-  re-armed after a ring or its four-hour timeout; without that, its mail appears
-  on its next prompt and the ring listener expires. The watcher
-  also stops when Claude Code exits: at once on Linux and macOS, and within
-  a minute on Windows, where it lists the process through `ps -W` at arm
-  time and then once a minute (a Windows PID is invisible to `kill -0`). In
-  `claude -p` runs, Claude Code ends a waiting hook at teardown.
+- A watcher listens for as long as the session stays open: at most
+  1,209,540 s (14 days) after the turn that armed it, under the hook's
+  `timeout` of 1,209,600 s, which Claude Code enforces on `asyncRewake` hooks.
+  Fourteen days is twice the longest delegate lease, so a lease granted any
+  time in the week after a session's last turn is covered to its end
+  (maintainer requirement 2026-10-05: a session, the delegate above all, stays
+  reachable while it is open). Claude Code takes the timeout as is into a Node
+  timer (`timeout * 1000` ms, no ceiling, read in the 2.1.286 and 2.1.287
+  bundles), which fires at once above 2^31 - 1 ms, so it stays under 24.8
+  days. After its first 3540 s the watcher polls every 30 s instead of every
+  5 s, so a session idle for days does not keep starting processes every few
+  seconds; a ring then fires up to 30 s later. Before 2026-10-05 the watcher
+  stopped after 59 minutes, and a plugin from before then still does until
+  `pseudolife-mcp update` moves the clients. `PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT`
+  (seconds) shortens it. The watcher
+  also stops when Claude Code exits. A clean exit removes the shim's digest,
+  which ends the watch within one poll (5 s, or 30 s after the first hour).
+  On Linux and macOS a crash is caught by `kill -0` at the next poll. On
+  Windows it lists the process through `ps -W` at arm time, then once a
+  minute for the first hour and every five minutes after (a Windows PID is
+  invisible to `kill -0`, and `ps -W` took 1.6-3.5 s on a loaded host); a
+  crashed session whose PID is reused, or that `ps -W` never lists, keeps its
+  watcher until the digest is swept as stale, about a day later. An idle
+  watcher spawns a `sleep` and an `mv` every 30 s, plus on Windows a `ps -W`
+  and an `awk` every five minutes: about 0.07 processes a second per session.
+  In `claude -p` runs, Claude Code ends a waiting hook at teardown.
 - Codex loads the same `hooks.json` and gets only the park gate, on every
   platform: on Windows through the entry's native command
   (`lifecycle.ps1 -Event Stop`), on macOS and Linux through the same bash

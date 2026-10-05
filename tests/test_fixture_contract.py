@@ -117,8 +117,9 @@ _MX_KEY_CHANGE_KEYS = {"at", "principal", "change", "credential_id", "label", "b
                        "revoked"}
 _MX_PASSKEY_KEYS = {"credential_id", "label", "state", "enrolled_by", "active_from",
                     "created_at", "last_used_at", "revoked_at", "revoked_by", "flagged_at"}
-_MX_DELEGATE_KEYS = {"agent_id", "expires_at", "granted_by"}
-_MX_COORDINATOR_KEYS = {"agent_id", "expires_at"}
+# reachable/reason: whether maintainer mail rings the holder now (2026-10-05).
+_MX_DELEGATE_KEYS = {"agent_id", "expires_at", "granted_by", "reachable", "reason"}
+_MX_COORDINATOR_KEYS = {"agent_id", "expires_at", "reachable", "reason"}
 _MX_RECIPIENT_KEYS = {"agent_id_prefix", "name", "label", "principal", "host", "client",
                       "project", "task", "last_activity", "duplicate_name"}
 _MX_ROLE_PREVIEW_KEYS = {"role", "project", "action", "current_holder"}
@@ -147,6 +148,9 @@ def _real_maintainer_store():
         # leases (roles, role_holder)
         "name": "delegate:p", "holder_agent_id": _MX_AGENT, "expires_at": now + 3600,
         "granted_by": "maintainer",
+        # the holder's agent row, joined for reachability (roles)
+        "row_agent_id": _MX_AGENT, "attachment_id": None, "lease_until": 0,
+        "wake_enabled": False,
         # agents (recipient)
         "agent_id": _MX_AGENT, "principal": "laptop", "parent_thread": None,
         "capabilities": {}, "project": "p", "task": "", "last_activity": now,
@@ -263,6 +267,16 @@ def test_fixture_maintainer_answers_match_the_real_service():
         c = fx.maintainer_challenge({"purpose": purpose, **fields})
         return getattr(fx, f"maintainer_{route}")(
             {"payload": c["payload"], "mac": c["mac"], "assertion": _MX_DUMMY}), c
+
+    # A grant says whether its grantee is reachable, and warns when not; the
+    # demo's coordinator is the session whose listener lapsed.
+    coordinator = roles[project]["coordinator"]["agent_id"]
+    granted, _ = signed("grant-delegate", "role", project=project, agent_id=delegate, hold=3600)
+    assert (granted["reachable"], granted["reason"]) == (True, None) and "warning" not in granted
+    lapsed, _ = signed("assign-coordinator", "role", project=project, agent_id=coordinator,
+                       hold=3600)
+    assert (lapsed["reachable"], lapsed["reason"]) == (False, "listener_expired")
+    assert "next turn" in lapsed["warning"]
 
     out, _ = signed("send", "send", to=delegate, text="hi", urgent=True)
     assert set(out) == {"message_id", "wake"} and out["wake"]["decision"] == "rung"
