@@ -16,7 +16,7 @@ import type {
   Signed,
 } from "./api/maintainer";
 import type { BoardAgent, Epoch, Lease } from "./api/types";
-import { fmtDuration, shortId, words } from "./format";
+import { fmtDuration, keyPrefix, words } from "./format";
 import { readKey, writeKey } from "./storage";
 import { CeremonyError, type AssertionJSON, type Support } from "./webauthn";
 
@@ -277,7 +277,7 @@ export function signReadiness(input: {
         ok: false,
         title: "Your passkey waits for the host confirm",
         body: `Check that the prefix matches the key in Settings, then confirm it on the daemon host.`,
-        command: `pseudolife-mcp maintainer confirm ${shortId(pending.credential_id)}`,
+        command: `pseudolife-mcp maintainer confirm ${keyPrefix(pending.credential_id)}`,
       };
     }
     const q = keys.find((k) => inQuarantine(k, input.nowMs));
@@ -493,8 +493,8 @@ export function keyNotices(
 
 /** A key change in words, naming the path it came by. */
 export function keyChangeText(c: KeyChange): string {
-  const key = c.credential_id ? `${c.label ? `“${c.label}” ` : "key "}(${shortId(c.credential_id)})` : "a key";
-  const signer = `key ${shortId(c.by)}`;
+  const key = c.credential_id ? `${c.label ? `“${c.label}” ` : "key "}(${keyPrefix(c.credential_id)})` : "a key";
+  const signer = `key ${keyPrefix(c.by)}`;
   switch (c.change) {
     case "enrol":
       return `${key} was enrolled in the Console with a one-time code from the daemon host`;
