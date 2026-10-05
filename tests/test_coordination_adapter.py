@@ -1826,11 +1826,17 @@ def test_codex_authoritative_withdrawal_clears_offer_and_marker_paths(tmp_path, 
                 elif marker == "written":
                     assert (tmp_path / "digest.ring").exists()
                 else:
-                    assert coordination._ring_timer is not None
+                    timer = coordination._ring_timer
+                    assert timer is not None
                 original_ring = coordination._last_ring
                 await coordination._heartbeat()
                 assert coordination.ring_due() is None
+                assert coordination._ring_offer is None
                 assert coordination._ring_timer is None
+                if marker == "delayed":
+                    # The far-off ring never fires inside the test, so the
+                    # withdrawal's cancel is checked on the handle itself.
+                    assert timer.cancelled()
                 assert coordination._ring_unwritten is None
                 assert coordination._last_ring == original_ring
                 await asyncio.sleep(0.25)
