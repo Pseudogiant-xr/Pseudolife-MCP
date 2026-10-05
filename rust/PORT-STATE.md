@@ -693,8 +693,15 @@ explicitly deferred presentation boundary in PORTING. Earlier receipts retain
 their original candidate identities, including the corrected distinction
 between authenticated peer observations and local no-board observations.
 
-The seven native lease files contain 2625 lines against 1884 in the pinned
-Python lease module (1.39331); the Python denominator includes deferred operator
-modes. Current-master and shared-helper integration, fresh review, both-platform
-real daemon/storage and signal acceptance, CI and paired measurements remain
-pending. The CLI-LEASE parity row remains deferred.
+The seven native lease files now contain 2766 lines against 1889 in the current
+Python lease module (1.46427); the Python denominator includes deferred operator
+modes. Current-master and shared-helper source integration uses Python
+0.17.0/schema55, and committed helper admission passes. The latest review repairs
+cover run-option ambiguity and ISO holder timestamps with 25 exact byte pairs
+and 100 rejected output controls. Ten surrogate-name list observations match
+the failure exit, terminal exception and unchanged state, but their full Python
+tracebacks remain unmatched; this third case is outside the two approved
+presentation exclusions. Fresh repair review, both-platform real daemon/storage
+and signal acceptance, CI and paired measurements remain pending. Historical
+receipts retain their original source and runtime identities. The CLI-LEASE
+parity row remains deferred.

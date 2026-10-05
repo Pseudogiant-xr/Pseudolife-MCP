@@ -59,6 +59,89 @@ fn check_missing_lock_is_free_and_never_creates_the_lock_file() {
         if cfg!(windows) { 14 } else { 13 }
     );
 }
+
+#[test]
+fn ambiguous_run_options_use_the_active_subparser_without_creating_state() {
+    let home = Home::new();
+    for flag in ["--t", "--t=30", "--t="] {
+        let output = home.call(&[
+            "lease",
+            "run",
+            "sample",
+            flag,
+            "30",
+            "--no-board",
+            "--",
+            "missing-review-child",
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let expected = format!(
+            "{}pseudolife-mcp lease run: error: ambiguous option: {flag} could match --ttl, --timeout\n",
+            include_str!("../src/cli/lease/assets/run_usage.txt")
+        );
+        assert_eq!(
+            output.stderr,
+            expected
+                .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+                .as_bytes()
+        );
+        assert_eq!(fs::read_dir(&home.0).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn suite_holder_accepts_python_iso_date_time_forms() {
+    let home = Home::new();
+    fs::write(home.0.join("instance.id"), b"0123456789ab\n").unwrap();
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(home.0.join("full-suite.lock"))
+        .unwrap();
+    file.lock().unwrap();
+    for (started, clock) in [
+        ("2026-10-05", Some("00:00")),
+        ("20261005", Some("00:00")),
+        ("2026-W41-1", Some("00:00")),
+        ("2026W411", Some("00:00")),
+        ("2026-W41", Some("00:00")),
+        ("2026W41", Some("00:00")),
+        ("2026-10-05T11", Some("11:00")),
+        ("2026-10-05 11:12", Some("11:12")),
+        ("20261005x1112", Some("11:12")),
+        ("2026-10-05😀11:12:13", Some("11:12")),
+        ("2026-10-05T111213,123456+01:02:03.4", Some("11:12")),
+        ("2026-10-05T11:12:13.0001Z", Some("11:12")),
+        ("2026-10-05T11:12+0100", Some("11:12")),
+        ("2026-W41-1T11:12:13", Some("11:12")),
+        ("2026-10-05T25:00", None),
+        ("2026-10-05T11:99", None),
+        ("2026-02-30", None),
+        ("2026-10- 5", None),
+        ("9999-W52-7", None),
+        ("2026-10-05T11:12garbage", None),
+    ] {
+        fs::write(
+            home.0.join("full-suite.holder.json"),
+            serde_json::to_vec(
+                &serde_json::json!({"pid":42,"worktree":"fixture","started":started}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let output = home.call(&["lease", "check", "full-suite"]);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        let description = format!(
+            "held (pid 42, worktree fixture{})",
+            clock.map_or(String::new(), |c| format!(", since {c}"))
+        );
+        assert!(text.contains(&description), "{started:?}: {text}");
+    }
+}
 #[test]
 fn check_observes_a_real_external_handle_and_then_its_release() {
     let home = Home::new();

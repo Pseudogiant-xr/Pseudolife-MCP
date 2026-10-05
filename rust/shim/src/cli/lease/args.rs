@@ -251,9 +251,9 @@ pub fn parse(argv: &[String]) -> Result<Args, i32> {
         };
         if matches.len() > 1 {
             return Err(error(
-                "top",
+                action,
                 &format!(
-                    "ambiguous option: {flag} could match {}",
+                    "ambiguous option: {item} could match {}",
                     matches.join(", ")
                 ),
             ));

@@ -1,6 +1,6 @@
 use super::json::{Value, json};
 use super::{args::Args, board, lock};
-use chrono::{Local, TimeZone};
+use chrono::{Datelike, Local, TimeZone};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 pub fn truth(value: &Value) -> bool {
@@ -282,22 +282,127 @@ fn local_text(local: &Value) -> String {
     if local.get("pid").is_none() && local.get("worktree").is_none() {
         return "held".into();
     }
-    let started = local["started"].as_str().and_then(|s| {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .map(|d| d.format("%H:%M").to_string())
-            .ok()
-            .or_else(|| {
-                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                    .map(|d| d.format("%H:%M").to_string())
-                    .ok()
-            })
-    });
+    let started = match &local["started"] {
+        Value::String(s) => iso_clock(&s.clean()),
+        _ => None,
+    };
     format!(
         "held (pid {}, worktree {}{})",
         clean(local.get("pid").unwrap_or(&json!("?")), 120),
         clean(local.get("worktree").unwrap_or(&json!("?")), 240),
         started.map_or_else(String::new, |s| format!(", since {s}"))
     )
+}
+
+// Python's fromisoformat accepts basic/calendar/week dates, one arbitrary
+// separator, reduced-precision times and fractional seconds or UTC offsets.
+// Only the original hour and minute are displayed; no timezone conversion occurs.
+fn iso_clock(text: &str) -> Option<String> {
+    fn component(text: &str) -> Option<u32> {
+        (text.len() == 2 && text.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| text.parse().ok())
+            .flatten()
+    }
+    fn time(text: &str, offset: bool) -> Option<(u32, u32)> {
+        let (whole, fraction) = text
+            .find(['.', ','])
+            .map_or((text, None), |i| (&text[..i], Some(&text[i + 1..])));
+        if fraction.is_some_and(|f| f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
+            return None;
+        }
+        let fields: Vec<_> = if whole.contains(':') {
+            whole.split(':').collect()
+        } else if whole.len() <= 6 && whole.len() % 2 == 0 && whole.is_ascii() {
+            (0..whole.len())
+                .step_by(2)
+                .map(|i| &whole[i..i + 2])
+                .collect()
+        } else {
+            return None;
+        };
+        if fields.is_empty() || fields.len() > 3 {
+            return None;
+        }
+        let hour = component(fields[0])?;
+        let minute = if fields.len() > 1 {
+            component(fields[1])?
+        } else {
+            0
+        };
+        let second = if fields.len() > 2 {
+            component(fields[2])?
+        } else {
+            0
+        };
+        if if offset {
+            hour * 3600 + minute * 60 + second >= 86400
+        } else {
+            hour > 23 || minute > 59 || second > 59
+        } {
+            return None;
+        }
+        Some((hour, minute))
+    }
+    let year = text.get(..4)?.parse::<i32>().ok()?;
+    if !(1..=9999).contains(&year) {
+        return None;
+    }
+    let end = [
+        ("dddd-dd-dd", "%Y-%m-%d"),
+        ("dddddddd", "%Y%m%d"),
+        ("dddd-Wdd-d", "%G-W%V-%u"),
+        ("ddddWddd", "%GW%V%u"),
+    ]
+    .into_iter()
+    .find_map(|(pattern, format)| {
+        let n = pattern.len();
+        text.get(..n)
+            .filter(|date| {
+                date.bytes().zip(pattern.bytes()).all(|(c, p)| {
+                    if p == b'd' {
+                        c.is_ascii_digit()
+                    } else {
+                        c == p
+                    }
+                })
+            })
+            .filter(|date| {
+                chrono::NaiveDate::parse_from_str(date, format)
+                    .is_ok_and(|d| (1..=9999).contains(&d.year()))
+            })
+            .map(|_| n)
+    })
+    .or_else(|| {
+        let (end, week) = if text.get(4..6) == Some("-W") {
+            (8, text.get(6..8)?)
+        } else if text.get(4..5) == Some("W") {
+            (7, text.get(5..7)?)
+        } else {
+            return None;
+        };
+        chrono::NaiveDate::from_isoywd_opt(year, component(week)?, chrono::Weekday::Mon)
+            .map(|_| end)
+    })?;
+    let remaining = &text[end..];
+    if remaining.is_empty() {
+        return Some("00:00".into());
+    }
+    let remaining = &remaining[remaining.chars().next()?.len_utf8()..];
+    let (clock, zone) = remaining
+        .find(['+', '-', 'Z'])
+        .map_or((remaining, None), |i| {
+            (&remaining[..i], Some(&remaining[i..]))
+        });
+    if let Some(zone) = zone {
+        if zone != "Z" {
+            if !zone.starts_with(['+', '-']) {
+                return None;
+            }
+            time(&zone[1..], true)?;
+        }
+    }
+    let (hour, minute) = time(clock, false)?;
+    Some(format!("{hour:02}:{minute:02}"))
 }
 pub async fn check(args: &Args) -> i32 {
     let name = args.name.as_deref().unwrap_or("");
@@ -478,8 +583,15 @@ pub async fn list(args: &Args) -> i32 {
         }
     }
     for lease in &mut leases {
+        let name = match lease["name"].utf8() {
+            Ok(name) => name,
+            Err(error) => {
+                super::say(&error);
+                return 1;
+            }
+        };
         lease["local_lock"] = local
-            .get(&lock::file_name(lease["name"].as_str().unwrap_or("")))
+            .get(&lock::file_name(name))
             .cloned()
             .unwrap_or(Value::Null);
     }
@@ -547,7 +659,7 @@ pub async fn list(args: &Args) -> i32 {
     for (file, s) in &local {
         if !leases
             .iter()
-            .any(|l| lock::file_name(l["name"].as_str().unwrap_or("")) == *file)
+            .any(|l| lock::file_name(l["name"].as_str().expect("validated UTF-8 name")) == *file)
         {
             lines.push(format!(
                 "local lock {file}: {}{}",

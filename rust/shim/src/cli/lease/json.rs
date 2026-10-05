@@ -136,6 +136,35 @@ pub enum Value {
 }
 static NULL: Value = Value::Null;
 impl Value {
+    pub fn utf8(&self) -> Result<&str, String> {
+        let Self::String(text) = self else {
+            unreachable!("board lease names are strings")
+        };
+        if let Some(valid) = &text.valid {
+            return Ok(valid);
+        }
+        let start = text
+            .points
+            .iter()
+            .position(|p| (0xd800..=0xdfff).contains(p))
+            .unwrap();
+        let end = start
+            + text.points[start..]
+                .iter()
+                .take_while(|p| (0xd800..=0xdfff).contains(*p))
+                .count();
+        let detail = if end == start + 1 {
+            format!(
+                "character '\\u{:04x}' in position {start}",
+                text.points[start]
+            )
+        } else {
+            format!("characters in position {start}-{}", end - 1)
+        };
+        Err(format!(
+            "UnicodeEncodeError: 'utf-8' codec can't encode {detail}: surrogates not allowed"
+        ))
+    }
     pub fn as_str(&self) -> Option<&str> {
         if let Self::String(s) = self {
             s.valid.as_deref()

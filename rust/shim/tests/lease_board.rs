@@ -459,6 +459,58 @@ fn python_json_holder_values_never_disappear_from_the_check() {
 }
 
 #[test]
+fn surrogate_list_names_fail_before_output_without_aliasing_or_state_changes() {
+    for (name, detail) in [
+        (b"\\ud800".as_slice(), "character '\\ud800' in position 0"),
+        (b"ab\\udfff".as_slice(), "character '\\udfff' in position 2"),
+        (b"\\ud800\\ud800".as_slice(), "characters in position 0-1"),
+        (
+            b"\xed\xa0\x80\xed\xb0\x80".as_slice(),
+            "characters in position 0-1",
+        ),
+        (
+            b"emoji-\xf0\x9f\x98\x80-\\ud800".as_slice(),
+            "character '\\ud800' in position 8",
+        ),
+    ] {
+        for json in [false, true] {
+            let home = Home::new();
+            fs::write(home.0.join("lease-.lock"), b"").unwrap();
+            let before = fs::read(home.0.join("instance.id")).unwrap();
+            let mut raw = b"{\"leases\":[{\"name\":\"".to_vec();
+            raw.extend_from_slice(name);
+            raw.extend_from_slice(b"\",\"holder\":{\"label\":\"h\"}}]}");
+            let (url, peer) = server_raw(1, move |_, header, body| {
+                assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
+                assert!(body["name"].is_null());
+                (200, raw.clone())
+            });
+            let mut command = home.command(&url);
+            command.args(["lease", "list"]);
+            if json {
+                command.arg("--json");
+            }
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            let terminal = format!(
+                "UnicodeEncodeError: 'utf-8' codec can't encode {detail}: surrogates not allowed\n"
+            );
+            assert_eq!(
+                output.stderr,
+                terminal
+                    .replace('\n', if cfg!(windows) { "\r\n" } else { "\n" })
+                    .as_bytes()
+            );
+            assert_eq!(peer.join().unwrap().len(), 1);
+            assert_eq!(fs::read(home.0.join("instance.id")).unwrap(), before);
+            assert_eq!(fs::read(home.0.join("lease-.lock")).unwrap(), b"");
+            assert_eq!(fs::read_dir(&home.0).unwrap().count(), 2);
+        }
+    }
+}
+
+#[test]
 fn raw_surrogate_name_cannot_alias_a_scalar_and_discount_its_holder() {
     let home = Home::new();
     fs::write(home.0.join("lease-_-31237b17.lock"), b"").unwrap();
