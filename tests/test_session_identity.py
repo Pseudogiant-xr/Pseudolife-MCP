@@ -377,7 +377,7 @@ def test_hook_start_registers_and_advertises(pg_service):
     assert "Session episode:" in text
     # Spec 2026-08-10 (tier-2 promotion): the handle is advertised as
     # always-pass, not conditional on concurrency.
-    assert "every memory write" in text
+    assert "every memory tool that accepts it" in text
     assert "when running concurrent sessions" not in text
     assert pg_service._resolve_writer()[1] == "claudeSess1"
     # idempotent on resume
