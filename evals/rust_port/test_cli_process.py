@@ -187,6 +187,40 @@ def test_prepare_cannot_change_owned_daemon(tmp_path, monkeypatch, key, value):
                             home=tmp_path / "home", url="http://127.0.0.1:49152", prepare=prepare)
 
 
+@pytest.mark.parametrize("key", ["HOME", "USERPROFILE", "PSEUDOLIFE_LEASE_LOCK_DIR",
+    "PSEUDOLIFE_SUITE_LOCK_DIR", "PSEUDOLIFE_AGENT_STATE_DIR", "PSEUDOLIFE_DIGEST_DIR",
+    "PSEUDOLIFE_MCP_TOKEN_FILE", "PSEUDOLIFE_MCP_CONFIG", "PSEUDOLIFE_MCP_DATA_DIR",
+    "PSEUDOLIFE_MCP_DATABASE_URL", "PYTHONPATH", "PYTHONHOME", "PSEUDOLIFE_SHIM_RUNTIMES",
+    "PSEUDOLIFE_SHIM_LAUNCHER", "CUDA_VISIBLE_DEVICES", "HF_HUB_OFFLINE"])
+@pytest.mark.parametrize("alias", [False, True], ids=["canonical", "windows-alias"])
+def test_preparer_cannot_redirect_uncaptured_effective_environment(tmp_path, monkeypatch, key, alias):
+    from evals.rust_port import cli_version
+    monkeypatch.setattr(cli_version, "seed_context", lambda root: {"pythonpath": str(tmp_path / "verified-source")})
+    outside = tmp_path / "sibling"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes(b"unchanged")
+    calls = []
+    commands = {"oracle": [sys.executable]}
+
+    def prepare(spec, home, env, command, commands):
+        env[key.lower() if alias else key] = str(outside)
+        return command
+
+    def observed(*args, **kwargs):
+        calls.append(dict(kwargs["env"]))
+        return {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_process, "run_cli", observed)
+    spec = case()
+    spec["mode"] = "version"
+    with pytest.raises(ValueError):
+        cli_process.observe(spec, commands["oracle"], commands, root=tmp_path,
+                            home=tmp_path / "home", url="http://127.0.0.1:49152", prepare=prepare)
+    assert calls == []
+    assert sentinel.read_bytes() == b"unchanged"
+
+
 def test_prepare_cannot_substitute_wrong_arm(tmp_path, monkeypatch):
     candidate = tmp_path / "candidate.exe"
     candidate.write_bytes(b"distinct candidate")
@@ -196,6 +230,50 @@ def test_prepare_cannot_substitute_wrong_arm(tmp_path, monkeypatch):
         cli_process.observe(case(), commands["candidate"], commands, root=tmp_path,
                             home=tmp_path / "home", url="http://127.0.0.1:49152",
                             prepare=lambda *args: commands["oracle"])
+
+
+def test_preparer_cannot_select_same_bytes_from_uncaptured_sibling_runtime(tmp_path, monkeypatch):
+    original = tmp_path / "candidate"
+    original.write_bytes(b"native fixture")
+    outside = tmp_path / "sibling-runtime"
+    outside.mkdir()
+    sentinel = outside / "sentinel"
+    sentinel.write_bytes(b"unchanged")
+    commands = {"candidate": [str(original)]}
+    calls = []
+
+    def prepare(spec, home, env, command, commands):
+        copied = outside / "candidate"
+        shutil.copyfile(command[0], copied)
+        return [str(copied)]
+
+    def observed(*args, **kwargs):
+        calls.append(args)
+        return {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_process, "run_cli", observed)
+    with pytest.raises(ValueError, match="inside the home"):
+        cli_process.observe(case(), commands["candidate"], commands, root=tmp_path,
+                            home=tmp_path / "home", url="http://127.0.0.1:49152", prepare=prepare)
+    assert calls == []
+    assert sentinel.read_bytes() == b"unchanged"
+
+
+def test_effective_config_source_remains_inside_captured_home(tmp_path, monkeypatch):
+    spec = case()
+    spec["environment_deltas"] = {"PSEUDOLIFE_MCP_CONFIG": str(tmp_path / "sibling-config.yaml")}
+    calls = []
+
+    def observed(*args, **kwargs):
+        calls.append(args)
+        return {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_process, "run_cli", observed)
+    commands = {"oracle": [sys.executable]}
+    with pytest.raises(ValueError, match="inside the home"):
+        cli_process.observe(spec, commands["oracle"], commands, root=tmp_path,
+                            home=tmp_path / "home", url="http://127.0.0.1:49152")
+    assert calls == []
 
 
 def test_prepared_copy_records_effective_command_outside_byte_comparison(tmp_path, monkeypatch):

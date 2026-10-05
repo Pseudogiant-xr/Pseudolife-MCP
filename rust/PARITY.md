@@ -1,6 +1,7 @@
 # Behaviour parity register
 
-Phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
+Current version-branch oracle target: Python 0.17.0 at `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, schema 55; integrated-head acceptance remains pending.
+Historical phase 1 close-out oracle: Python 0.16.1 at `f709abb54f7912ae9cd767998d0926ca33df4bcd`, schema 54.
 Historical phase 1 receipts retain Python 0.16.0 at `0b015f9279a778f996e71ee78510695e5fee7196`, schema 53.
 Historical phase 0b receipts retain Python 0.15.0 at `3691f5cb75487d3fda54a6bde6fab35dcf32c681`.
 Recount at this pin: 38 MCP tools, 72 ConsoleRoutes registrations plus the
@@ -143,7 +144,7 @@ All rows share `pseudolife_memory/mcp_server.py` and the `test_mcp_server.py`/`t
 | memory_world_set | core | 4 | deferred |
 | memory_world_search | core | 3 | deferred |
 | memory_outcome | minimal | 4 | deferred |
-| memory_lesson_search | core | 3 | deferred |
+| memory_lesson_search | minimal | 3 | deferred |
 | memory_forget | full | 4 | deferred |
 | memory_dream | full | 4 | deferred |
 | memory_graph_review | full | 4 | deferred |
@@ -344,7 +345,7 @@ adapter; a function name without parameter suffixes is not a routed node claim.
 
 The Phase 0b snapshot retains 406 `tests/test_*.py` files: 68 oracle, 1 candidate and 337 internal. Its historical manifests remain `test-buckets.json` and `contract-inventory.json`; validate them with `python rust/contract_inventory.py` and the unchanged `python -m pytest rust/test_contract_inventory.py -q`.
 
-The Phase 1 pinned oracle contains 419 `tests/test_*.py` files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates, 1 public oracle CLI case and 180 internal cases. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four current 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below; full suites and final integrated-head review/CI remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
+The current Phase 1 manifest at `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` contains 423 `tests/test_*.py` files: 68 oracle, 2 candidate and 353 internal. Historical manifests at `f709abb54f7912ae9cd767998d0926ca33df4bcd` retain 419 files: 68 oracle, 2 candidate and 349 internal. Its manifests are `phase1-test-buckets.json` and `phase1-contract-inventory.json`. Candidate routing maps exactly 13 concrete nodes: 5 from `test_cli_dispatch.py` and 8 public stdio cases from `test_shim.py`; unlisted nodes stay oracle-only. The phase 1 function inventory separately classifies 189 functions as 8 candidates, 1 public oracle CLI case and 180 internal cases. Historically, at `2e628b27`, all 125 scoped internal cases named Rust equivalents with targeted Windows and Linux evidence. The current mapping has 121 completed equivalents, exactly 3 SDK cases retired-by-decision, and 1 pending postframe update-scheduling substitution with targeted evidence on both platforms at frozen tree `a4ff3236eb349aaed427d80129513fe22cf0183f`; 55 internal cases remain outside this phase's scope. Windows retains the recorded transient ConnectionReset followed by successful exact and full-file reruns; Linux check/clippy, 66 integration and 5 wire cases passed with four saved exits 0. The mapping's pending postframe row remains subject to overall acceptance g; the register separately records its authorized substitution and current runtime evidence. Four current 690bb8ac schema-2 receipts, both 3x10 paired measurements and executing CI are recorded below; full suites and final integrated-head review/CI remain pending. Run `python rust/contract_inventory.py --phase1` and `python -m pytest evals/rust_port/test_phase1_inventory.py -q`.
 
 The final Phase 1 judge always adds seven startup and six concurrent non-EOF candidate cells through `evals/rust_port/stdio_scenarios.py`. The pinned byte templates and platform-specific common-release order evidence are committed in `stdio_startup_contract.json` and `stdio_concurrent_orders.json`; each cell must bind the actual candidate executable. Separate response releases retain exact AB or BA order, while a common release permits only the observed final call pair orders. These additive checks do not establish final-head acceptance or replace the existing EOF corpus.
 
@@ -436,6 +437,7 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_BACKUP_MIRROR_KEEP` | `ops/backup.ps1`, `ops/backup.sh` |
 | `PSEUDOLIFE_BANK_VOLUME` | `ops/docker-compose.yml`, `ops/install.ps1`, `ops/install.sh`, `ops/migrate-pg18.ps1`, `pseudolife_memory/compose/docker-compose.yml` |
 | `PSEUDOLIFE_BENCH_DB` | `pseudolife_memory/storage/schema.py` |
+| `PSEUDOLIFE_BOARD_HARNESS_NAMES` | `pseudolife_memory/codex_coordination.py`, `pseudolife_memory/harness_names.py` |
 | `PSEUDOLIFE_BUILD_DIRTY` | `ops/Dockerfile.daemon`, `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py`, `pseudolife_memory/update_cli.py` |
 | `PSEUDOLIFE_BUILD_GIT_SHA` | `ops/Dockerfile.daemon`, `ops/docker-compose.yml`, `pseudolife_memory/compose/docker-compose.yml`, `pseudolife_memory/daemon.py`, `pseudolife_memory/update_cli.py` |
 | `PSEUDOLIFE_BUILD_SOURCE` | `ops/Dockerfile.daemon`, `pseudolife_memory/daemon.py`, `pseudolife_memory/web/session_hook.py` |
@@ -523,10 +525,13 @@ This conservative reader/reference inventory covers concrete PSEUDOLIFE_* variab
 | `PSEUDOLIFE_SUITE_DISPATCHED` | `ops/remote-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_ENV_FILE` | `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_GIT_COMMON` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
+| `PSEUDOLIFE_SUITE_KEEP` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_LEASE` | `ops/wsl-suite.sh`, `pseudolife_memory/lease_cli.py` |
 | `PSEUDOLIFE_SUITE_LOCK` | `ops/wsl-suite.ps1` |
 | `PSEUDOLIFE_SUITE_LOCK_DIR` | `ops/wsl-suite.sh`, `pseudolife_memory/board_audit_cli.py`, `pseudolife_memory/lease_cli.py` |
 | `PSEUDOLIFE_SUITE_NAME` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
+| `PSEUDOLIFE_SUITE_PRUNE` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
+| `PSEUDOLIFE_SUITE_PRUNE_DAYS` | `ops/remote-suite.ps1`, `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_PYTHON` | `ops/wsl-suite.ps1`, `ops/wsl-suite.sh` |
 | `PSEUDOLIFE_SUITE_REMOTE` | `ops/remote-suite.ps1` |
 | `PSEUDOLIFE_SUITE_RUN_ID` | `ops/wsl-suite.sh` |

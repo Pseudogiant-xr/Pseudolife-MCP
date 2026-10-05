@@ -14,13 +14,38 @@ import time
 import tomllib
 
 from .cli_corpus import corpus
+from .cli_public import public_summary
 from .harness import Policy, capture_platform, compare, isolated_env, run_cli, write_new
 from .phase1_receipts import candidate_identity, command_identity
-from .provenance import require_import_root, runtime_metadata
+from .provenance import require_import_root, require_instrument_binding, runtime_metadata
 from .stdio_capture import require_phase1_source
 
 STATE_POLICY = "cli-state-compared"
 BYTE_POLICY = Policy(source_text_paths=(), ignored_values=())
+
+
+def cli_binding(root, oracle_root, *, extra_helpers=None):
+    from . import cli_version, harness, processes
+    from evals.rust_baseline.common import lease_gate
+    helpers = {"evals/rust_port/cli_process.py": [Path(__file__), prepared_command, reset_home, snapshot, remove_root_link],
+               "evals/rust_port/cli_corpus.py": [corpus],
+               "evals/rust_port/cli_public.py": [public_summary],
+               "evals/rust_port/cli_version.py": [cli_version.make_prepare, cli_version.seed_context, cli_version.cases],
+               "evals/rust_port/harness.py": [capture_platform, compare, isolated_env, run_cli, write_new],
+               "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
+               "evals/rust_port/provenance.py": [require_import_root, runtime_metadata, require_instrument_binding],
+               "evals/rust_port/stdio_capture.py": [require_phase1_source],
+               "evals/rust_port/processes.py": [harness.owned_process, processes.execution_sources],
+               "evals/rust_baseline/common.py": [lease_gate]}
+    for name, loaded in (extra_helpers or {}).items():
+        helpers.setdefault(name, []).extend(loaded)
+    owners = processes.execution_sources()[1:]
+    try:
+        production = {path.resolve().relative_to(Path(oracle_root).resolve()).as_posix(): [path] for path in owners}
+    except ValueError as error:
+        raise RuntimeError("CLI ownership helper loaded from another production tree") from error
+    return {"instrument": require_instrument_binding(root, helpers),
+            "production_ownership": require_instrument_binding(oracle_root, production) if production else None}
 
 
 def is_link(metadata):
@@ -150,15 +175,30 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     """Bind relocated prefixes to the original arm and preserve owned policies."""
     original = list(command)
     original_identity = command_identity(original, root)
-    owned = {"HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "CUDA_VISIBLE_DEVICES",
-             "OMP_NUM_THREADS", "MKL_NUM_THREADS", "PYTHONIOENCODING", "PATH", "CODEX_HOME",
-             "TMP", "TEMP", "TMPDIR", "HF_HOME", "TORCH_HOME", "TORCHINDUCTOR_CACHE_DIR",
-             "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_MCP_NO_SPAWN"}
-    owned.update(key.upper() for key in env if key.upper().startswith("XDG_"))
-    before = {key: {name: value for name, value in env.items() if name.upper() == key} for key in owned}
+    original_path = Path(original[0])
+    if not original_path.is_absolute():
+        original_path = Path(shutil.which(original[0]) or root / original[0])
+    original_path = original_path.resolve(strict=True)
+    before = dict(env)
+    allowed = {"PYTHONPATH", "PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"} \
+        if case["mode"] == "version" else set()
     selected = original if prepare is None else prepare(case, home, env, list(original), copy.deepcopy(commands))
-    if any({name: value for name, value in env.items() if name.upper() == key} != before[key] for key in owned):
+    if any(not isinstance(name, str) or not isinstance(value, str) for name, value in env.items()) \
+            or {name: value for name, value in env.items() if name not in allowed} != \
+            {name: value for name, value in before.items() if name not in allowed}:
         raise ValueError("CLI preparation must retain owned daemon, isolation and CPU policies")
+    if len({name.upper() for name in env}) != len(env) or any(
+            name.upper() in allowed and name not in allowed for name in env):
+        raise ValueError("CLI preparation cannot introduce environment case aliases")
+    for name, value in env.items():
+        if name.upper().endswith(("_DIR", "_FILE", "_HOME")) or name in {
+                "PSEUDOLIFE_MCP_CONFIG", "PSEUDOLIFE_SHIM_RUNTIMES", "PSEUDOLIFE_SHIM_LAUNCHER"}:
+            if not Path(value).is_absolute() or not Path(value).resolve().is_relative_to(home.resolve()):
+                raise ValueError("CLI prepared file and directory sources must remain inside the home")
+    if "PYTHONPATH" in env:
+        from .cli_version import seed_context
+        if case["mode"] != "version" or env["PYTHONPATH"] != seed_context(root)["pythonpath"]:
+            raise ValueError("CLI preparation requires the verified oracle Python path")
     if not isinstance(selected, list) or not selected or not all(isinstance(arg, str) and arg for arg in selected):
         raise ValueError("prepared command requires a nonempty string prefix")
     invoked = Path(selected[0])
@@ -169,6 +209,9 @@ def prepared_command(case, command, commands, *, root, home, env, prepare):
     if selected[1:] != original[1:] or any(identity[key] != original_identity[key]
             for key in ("executable_sha256", "executable_bytes")):
         raise ValueError("prepared command must retain the original arm prefix and executable bytes")
+    if Path(selected[0]) != original_path \
+            and not Path(selected[0]).is_relative_to(home.resolve()):
+        raise ValueError("CLI relocated executable must remain inside the home")
     return selected, identity, original_identity
 
 
@@ -183,6 +226,7 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
     deltas = case.get("environment_deltas", {})
     protected = {"HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "CUDA_VISIBLE_DEVICES",
                  "OMP_NUM_THREADS", "MKL_NUM_THREADS", "PYTHONIOENCODING", "PATH", "CODEX_HOME",
+                 "PYTHONPATH", "PYTHONHOME",
                  "TMP", "TEMP", "TMPDIR", "HF_HOME", "TORCH_HOME", "TORCHINDUCTOR_CACHE_DIR",
                  "PSEUDOLIFE_MCP_DAEMON_URL", "PSEUDOLIFE_MCP_NO_SPAWN"}
     if protected & {key.upper() for key in deltas} or any(key.upper().startswith("XDG_") for key in deltas):
@@ -277,6 +321,7 @@ def paired_cases(spec, commands, *, root, home, url, prepare=None):
 
 
 def run(root, command, candidate_root, spec, resource, *, prepare=None):
+    from evals.rust_baseline import daemon, transport
     from evals.rust_baseline.daemon import disposable_database, launched_daemon, private_directory
     from .full_bank import private_home_overrides
     source = require_phase1_source(root)
@@ -293,6 +338,11 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
     if identities["candidate"]["public_cli_module"] or identities["candidate"]["executable_sha256"] == \
             identities["oracle"]["executable_sha256"]:
         raise ValueError("CLI candidate must be a distinct native executable")
+    helpers = {"evals/rust_baseline/daemon.py": [disposable_database, launched_daemon, private_directory],
+               "evals/rust_baseline/daemon_child.py": [Path(daemon.__file__).with_name("daemon_child.py")],
+               "evals/rust_baseline/transport.py": [Path(transport.__file__)],
+               "evals/rust_port/full_bank.py": [private_home_overrides]}
+    binding = cli_binding(candidate_root, root, extra_helpers=helpers)
     if prepare is None and any(case.get("mode") == "version" for case in spec):
         from .cli_version import make_prepare
         prepare = make_prepare(root, source["oracle_head"])
@@ -306,8 +356,11 @@ def run(root, command, candidate_root, spec, resource, *, prepare=None):
             candidate_identity(command, candidate_root) != identities["candidate"]:
         raise RuntimeError("CLI executable or candidate source changed during capture")
     require_phase1_source(root)
+    if cli_binding(candidate_root, root, extra_helpers=helpers) != binding:
+        raise RuntimeError("CLI instrument changed during corpus capture")
     return {"schema": 1, **source, "capture_platform": capture_platform(),
             "capture_runtime": runtime, "resource_check": resource, "command_identities": identities,
+            "cli_instrument_binding": binding,
             "captured_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "policy": STATE_POLICY, "normalizations": [], "daemon_cleanup": cleanup, **result,
             "coverage": {"kind": "additive-process-corpus", "modes": sorted({c["mode"] for c in spec})},
@@ -322,7 +375,8 @@ def main():
     parser.add_argument("--oracle-root", type=Path, required=True)
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--candidate-json", required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True, help="private exact raw receipt path")
+    parser.add_argument("--public-out", type=Path, help="allowlisted summary requiring complete help/version coverage")
     parser.add_argument("--corpus", type=Path)
     parser.add_argument("--modes", nargs="+", choices=("help", "version"), default=["help"])
     clearance = parser.add_mutually_exclusive_group(required=True)
@@ -337,6 +391,8 @@ def main():
     resource = lease_gate(args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at)
     result = run(args.oracle_root.resolve(), command, args.candidate_root.resolve(), spec, resource)
     write_new(args.out, result)
+    if args.public_out:
+        write_new(args.public_out, public_summary(result))
     print(json.dumps({"passed": result["passed"], "cases": len(result["records"]), "receipt": args.out.name}))
     return 0 if result["passed"] else 1
 

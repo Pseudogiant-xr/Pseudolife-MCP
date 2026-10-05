@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "oracle_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
-  "database_schema": 54,
+  "oracle_commit": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "database_schema": 55,
   "policy": "Each file has one bucket. Candidate files route only listed concrete nodes; every other node remains oracle-only. Internal equivalents marked pending establish no Rust parity.",
   "counts": {
-    "internal": 349,
+    "internal": 353,
     "oracle": 68,
     "candidate": 2
   },
@@ -578,6 +578,12 @@
     },
     {
       "path": "tests/test_coordination_multi_ack.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_coordination_names.py",
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
@@ -1157,6 +1163,12 @@
       "reason": "Unchanged Python/artifact/platform control; no candidate adapter is claimed for this file."
     },
     {
+      "path": "tests/test_harness_names.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
       "path": "tests/test_health_bank_fingerprint.py",
       "bucket": "internal",
       "equivalent": "pending",
@@ -1537,6 +1549,12 @@
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
     },
     {
+      "path": "tests/test_mcp_refusal_notes.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
       "path": "tests/test_mcp_server.py",
       "bucket": "internal",
       "equivalent": "pending",
@@ -1549,6 +1567,12 @@
     },
     {
       "path": "tests/test_mcp_string_arguments.py",
+      "bucket": "internal",
+      "equivalent": "pending",
+      "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."
+    },
+    {
+      "path": "tests/test_mcp_unknown_parameters.py",
       "bucket": "internal",
       "equivalent": "pending",
       "reason": "Python imports, fixtures or monkeypatches bind the assertions to Python internals; an explicit Rust unit or additive wire case is pending."

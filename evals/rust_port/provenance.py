@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
+import inspect
 import importlib.metadata
 import importlib.util
 from pathlib import Path
@@ -33,6 +35,48 @@ def schema_version(path):
 
 def _git(root, *arguments):
     return subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True, timeout=10)
+
+
+def require_instrument_binding(root, helpers):
+    """Bind actual loaded helpers to clean committed files in the selected tree."""
+    root = Path(root).resolve()
+
+    def git(*arguments):
+        result = _git(root, *arguments)
+        if result.returncode:
+            raise RuntimeError("CLI instrument committed helper identity unavailable")
+        return result.stdout.strip()
+
+    if not helpers or git("status", "--porcelain", "--untracked-files=all", "--", *helpers):
+        raise RuntimeError("CLI instrument helpers must be committed and clean")
+    hashes, blobs = {}, {}
+    for relative, loaded in helpers.items():
+        expected = root / relative
+        try:
+            expected = expected.resolve(strict=True)
+            if not expected.is_relative_to(root) or not loaded:
+                raise RuntimeError("CLI instrument helper path unavailable")
+            for helper in loaded:
+                if callable(helper):
+                    # contextmanager's standard wrapper lives in contextlib;
+                    # its actual generator is the ownership implementation.
+                    if inspect.getsourcefile(helper) == contextlib.__file__:
+                        helper = helper.__wrapped__
+                    helper = inspect.getsourcefile(helper)
+                if helper is None or Path(helper).resolve(strict=True) != expected:
+                    raise RuntimeError("CLI instrument loaded a helper from another tree")
+            blob = git("rev-parse", "HEAD:" + relative)
+            # Git applies this checkout's text attributes; raw file hashes are
+            # also retained, including the actual Windows checkout newlines.
+            if git("hash-object", "--path=" + relative, str(expected)) != blob:
+                raise RuntimeError("CLI instrument helper differs from committed bytes")
+            hashes[relative] = hashlib.sha256(expected.read_bytes()).hexdigest()
+            blobs[relative] = blob
+        except (OSError, TypeError) as error:
+            raise RuntimeError("CLI instrument loaded helper unavailable") from error
+    return {"source_root": str(root), "source_head": git("rev-parse", "HEAD"),
+            "source_tree": git("rev-parse", "HEAD^{tree}"), "source_dirty": False,
+            "source_files_sha256": hashes, "source_files_git_blob": blobs}
 
 
 def source_metadata(root=ROOT, *, oracle_head=ORACLE_HEAD, oracle_schema=ORACLE_SCHEMA):

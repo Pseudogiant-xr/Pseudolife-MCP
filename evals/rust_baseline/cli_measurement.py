@@ -7,14 +7,16 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import tomllib
 
 from .common import lease_gate, provenance
-from .shim_measurement import artifact_identity, metric_cells, require_pinned_source
+from .shim_measurement import artifact_identity, metric_cells
 from evals.rust_port.cli_corpus import STREAM_CONTRACT
-from evals.rust_port.cli_process import prepared_command, remove_root_link, reset_home, snapshot
+from evals.rust_port.cli_process import cli_binding, prepared_command, remove_root_link, reset_home, snapshot
 from evals.rust_port.harness import capture_platform, isolated_env, run_cli, write_new
 from evals.rust_port.phase1_receipts import candidate_identity, command_identity
 from evals.rust_port.provenance import require_import_root, runtime_metadata
+from evals.rust_port.stdio_capture import require_phase1_source
 
 
 def measure(args, resource, *, prepare=None, case=None):
@@ -24,18 +26,28 @@ def measure(args, resource, *, prepare=None, case=None):
             or argv[0] not in {mode, "--" + mode}:
         raise ValueError("measurement argv must name the selected CLI mode")
     root = args.oracle_root.resolve()
-    pin = require_pinned_source(root)
+    pin = require_phase1_source(root)
     require_import_root(root)
     runtime = runtime_metadata(root)
+    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     if sys.version_info[:2] != (3, 11) or not runtime["source_origin_matches_selected_root"] \
-            or runtime["package_runtime_version"] != "0.16.1" \
-            or runtime["distribution_versions"]["pseudolife-mcp"] != "0.16.1":
+            or runtime["package_runtime_version"] != version \
+            or runtime["distribution_versions"]["pseudolife-mcp"] != version:
         raise RuntimeError("CLI measurement requires the genuine pinned installed package runtime")
     commands = {"python": [sys.executable, "-m", "pseudolife_memory.cli"],
                 "rust": [str(args.candidate.resolve())]}
     identity = candidate_identity(commands["rust"], args.candidate_root)
     python_identity = command_identity(commands["python"], root)
     binary = artifact_identity(args.candidate, args.candidate_sha256)
+    helpers = {"evals/rust_baseline/cli_measurement.py": [Path(__file__)],
+               "evals/rust_baseline/common.py": [lease_gate, provenance],
+               "evals/rust_baseline/shim_measurement.py": [artifact_identity, metric_cells],
+               "evals/rust_port/cli_process.py": [cli_binding, prepared_command, reset_home, snapshot, remove_root_link],
+               "evals/rust_port/harness.py": [capture_platform, isolated_env, run_cli, write_new],
+               "evals/rust_port/phase1_receipts.py": [candidate_identity, command_identity],
+               "evals/rust_port/provenance.py": [require_import_root, runtime_metadata],
+               "evals/rust_port/stdio_capture.py": [require_phase1_source]}
+    instrument_binding = cli_binding(args.candidate_root, root, extra_helpers=helpers)
     layout = getattr(args, "layout", "bare")
     if layout == "installed" and prepare is None:
         if mode != "version":
@@ -126,12 +138,16 @@ def measure(args, resource, *, prepare=None, case=None):
                                       "executable_bytes": (python_identity if arm == "python" else identity)["executable_bytes"],
                                       **({"execution": binding["execution"], "files_and_environment_match_control": True}
                                          if binding is not None else {})})
-    require_pinned_source(root)
+    require_phase1_source(root)
     if candidate_identity(commands["rust"], args.candidate_root) != identity \
             or command_identity(commands["python"], root) != python_identity:
         raise RuntimeError("CLI source or executable changed during measurement")
+    measured_provenance = provenance(source_root=root)
+    if cli_binding(args.candidate_root, root, extra_helpers=helpers) != instrument_binding:
+        raise RuntimeError("CLI instrument changed during measurement capture")
     return {"schema": 1, "status": "contaminated-plumbing-smoke" if args.smoke else "quiet-cli-pair-final",
-            "capture_platform": capture_platform(), "provenance": provenance(source_root=root),
+            "capture_platform": capture_platform(), "provenance": measured_provenance,
+            "cli_instrument_binding": instrument_binding,
             "python_oracle": pin, "candidate_identity": identity,
             "candidate_executable": binary, "python_executable": python_identity,
             "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT, "capture_runtime": runtime,

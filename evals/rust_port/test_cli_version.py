@@ -105,6 +105,7 @@ def test_corpus_run_automatically_selects_installer_preparer_before_owned_launch
         "source_origin_matches_selected_root": True, "package_runtime_version": "0.16.1",
         "distribution_versions": {"pseudolife-mcp": "0.16.1"}})
     monkeypatch.setattr(cli_process, "candidate_identity", cli_process.command_identity)
+    monkeypatch.setattr(cli_process, "cli_binding", lambda *args, **kwargs: {})
     callback = lambda *arguments: arguments[3]
     selected = []
     monkeypatch.setattr(cli_version, "make_prepare", lambda root, pin: selected.append((root, pin)) or callback)

@@ -1,6 +1,8 @@
 # Rust port state
 
-The Python oracle for phase 1 is pinned to master
+The version branch targets the current Python oracle at master
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); master integration and current-head validation remain pending.
+Historical phase 1 close-out evidence retains
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
 existing receipts retain their original source identities.
@@ -12,6 +14,9 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
+The current version-branch manifests enumerate 423 test files, 189 unchanged function mappings and 13 routed nodes. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
+
+The native version candidate and shared CLI fixture remain pending current-head review, both-platform public process evidence and paired measurements. Earlier 0.16.1 process captures are historical prototypes. The fixture binds loaded preparation and capture helpers to committed files; hosted artifacts contain an allowlisted summary, while raw comparison receipts remain private. These implementation changes do not advance the version parity row.
 
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|

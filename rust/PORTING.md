@@ -1,7 +1,11 @@
 # Porting contract
 
-The phase 1 close-out behavioural oracle is Python 0.16.1 at
+The current version-branch behavioural oracle target is Python 0.17.0 at
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493`, using PostgreSQL schema 55; integrated-head acceptance remains pending.
+Historical phase 1 close-out evidence retains Python 0.16.1 at
 `f709abb54f7912ae9cd767998d0926ca33df4bcd`, using PostgreSQL schema 54.
+
+Installed-version parity covers manifests written by the runtime installer. Non-standard NaN/Infinity values and lone Unicode surrogates are explicitly deferred; their captured differences are retained separately. This scope decision applies only to version manifests, not other CLI JSON inputs or responses.
 Historical phase 1 evidence retains Python 0.16.0 at
 `0b015f9279a778f996e71ee78510695e5fee7196` and schema 53.
 Historical phase 0b evidence remains bound to Python 0.15.0 at

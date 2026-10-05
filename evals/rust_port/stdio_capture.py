@@ -13,8 +13,8 @@ from .harness import capture_platform, write_new
 from .provenance import ROOT, SOURCE_PATHS, runtime_metadata, schema_version, source_metadata
 from .stdio import capture
 
-ORACLE_HEAD = "f709abb54f7912ae9cd767998d0926ca33df4bcd"
-ORACLE_SCHEMA = 54
+ORACLE_HEAD = "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
+ORACLE_SCHEMA = 55
 BEHAVIOR_TESTS = ("tests/test_shim.py", "tests/test_shim_transport_recovery.py",
     "tests/test_shim_board_retry.py", "tests/test_version_handshake.py", "tests/test_update_offer.py",
     "tests/test_mcp_client_neutrality.py", "tests/test_mcp_stdio_errlog.py",

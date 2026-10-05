@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "oracle_commit": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
-  "database_schema": 54,
+  "oracle_commit": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "database_schema": 55,
   "config_sections": {
     "EmbeddingConfig": [
       "model_name",
@@ -392,6 +392,10 @@
     ],
     "PSEUDOLIFE_BENCH_DB": [
       "pseudolife_memory/storage/schema.py"
+    ],
+    "PSEUDOLIFE_BOARD_HARNESS_NAMES": [
+      "pseudolife_memory/codex_coordination.py",
+      "pseudolife_memory/harness_names.py"
     ],
     "PSEUDOLIFE_BUILD_DIRTY": [
       "ops/Dockerfile.daemon",
@@ -980,6 +984,11 @@
       "ops/wsl-suite.ps1",
       "ops/wsl-suite.sh"
     ],
+    "PSEUDOLIFE_SUITE_KEEP": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
     "PSEUDOLIFE_SUITE_LEASE": [
       "ops/wsl-suite.sh",
       "pseudolife_memory/lease_cli.py"
@@ -993,6 +1002,16 @@
       "pseudolife_memory/lease_cli.py"
     ],
     "PSEUDOLIFE_SUITE_NAME": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_PRUNE": [
+      "ops/remote-suite.ps1",
+      "ops/wsl-suite.ps1",
+      "ops/wsl-suite.sh"
+    ],
+    "PSEUDOLIFE_SUITE_PRUNE_DAYS": [
       "ops/remote-suite.ps1",
       "ops/wsl-suite.ps1",
       "ops/wsl-suite.sh"
@@ -1165,7 +1184,7 @@
     },
     {
       "name": "memory_lesson_search",
-      "tier": "core"
+      "tier": "minimal"
     },
     {
       "name": "memory_forget",

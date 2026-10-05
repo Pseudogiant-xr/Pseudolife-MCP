@@ -71,7 +71,7 @@ fn crate_version_matches_the_pinned_python_package() {
                 .and_then(|value| value.strip_suffix('"'))
         })
         .unwrap();
-    assert_eq!(version, "0.16.1"); // pyproject.toml at oracle f709abb54f7912ae9cd767998d0926ca33df4bcd.
+    assert_eq!(version, "0.17.0"); // pyproject.toml at oracle eb0c13e9c5036aa2b95e7fccb77f41ca1c095493.
     assert_eq!(env!("CARGO_PKG_VERSION"), version);
 }
 

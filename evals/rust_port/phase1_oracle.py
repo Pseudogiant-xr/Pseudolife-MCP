@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tomllib
 
 from .provenance import ROOT
 from .stdio_capture import ORACLE_HEAD, require_phase1_source
@@ -18,6 +19,7 @@ def prepare(destination):
     subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout", str(ROOT), str(source)], check=True)
     subprocess.run(["git", "checkout", "--quiet", "--detach", ORACLE_HEAD], cwd=source, check=True)
     checked = require_phase1_source(source)
+    version = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     # Only instruments are overlaid. Production and immutable oracle tests stay
     # at the pin, while the candidate remains an absolute caller-supplied path.
     for name in ("rust_port", "rust_baseline"):
@@ -39,8 +41,8 @@ def prepare(destination):
         "import json; from evals.rust_port.provenance import runtime_metadata; "
         "from pathlib import Path; print(json.dumps(runtime_metadata(Path.cwd())))"], cwd=source, text=True)
     metadata = json.loads(probe)
-    if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != "0.16.1" \
-            or metadata["distribution_versions"]["pseudolife-mcp"] != "0.16.1":
+    if not metadata["source_origin_matches_selected_root"] or metadata["package_runtime_version"] != version \
+            or metadata["distribution_versions"]["pseudolife-mcp"] != version:
         raise RuntimeError("prepared oracle runtime does not import the pinned checkout/version")
     return {"source": str(source), "python": str(python), **checked, "runtime": metadata}
 

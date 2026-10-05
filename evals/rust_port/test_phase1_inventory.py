@@ -16,11 +16,11 @@ def inventory():
 
 
 def test_phase1_inventory_has_all_pinned_files_and_pending_function_ownership(inventory):
-    assert inventory.PHASE1_ORACLE == "f709abb54f7912ae9cd767998d0926ca33df4bcd"
+    assert inventory.PHASE1_ORACLE == "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493"
     result = inventory.validate_phase1()
-    assert result["test_files"] == 419
+    assert result["test_files"] == 423
     assert result["candidate_nodes"] == 13
-    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 349}
+    assert result["buckets"] == {"oracle": 68, "candidate": 2, "internal": 353}
 
 
 def test_legacy_inventory_retains_its_real_pin(inventory):
@@ -31,7 +31,7 @@ def test_legacy_inventory_retains_its_real_pin(inventory):
     assert result["buckets"] == {"oracle": 68, "candidate": 1, "internal": 337}
 
 
-@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 419)])
+@pytest.mark.parametrize("phase1,count", [(False, 406), (True, 423)])
 def test_newer_checkout_test_cannot_shift_either_pin(inventory, monkeypatch, tmp_path, phase1, count):
     newer = tmp_path / "test_newer_master_surface.py"
     newer.write_text("def test_newer():\n    pass\n", encoding="utf-8")
