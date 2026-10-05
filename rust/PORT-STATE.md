@@ -468,3 +468,12 @@ machines at the final head, then obtain a fresh independent review of the diff
 since `7f890590`. Only after those gates may #560 be marked ready for the
 maintainer. The current local commits have not been pushed or accepted as the
 final head; #560 remains draft.
+
+## Phase 2b dependency fallback
+
+The default-on `codex-delivery` feature makes the `tokio-tungstenite` dependency
+and its transitive `webpki-roots` optional. The disabled dependency graph excludes
+both crates; Cargo.lock retains their entries for the default build. Windows
+check and Clippy pass for both profiles, with 9 default delivery tests and 43
+disabled-feature pull, channel and doorbell tests passing. Linux validation and
+the final integrated-head review remain pending; no parity status changes.

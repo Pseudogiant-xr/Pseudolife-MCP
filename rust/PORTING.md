@@ -100,6 +100,10 @@ mutex or a PID-file existence check. Use bounded build parallelism and respect
 the shared full-suite queue. Dependency choices remain provisional until their
 supported protocol versions and platform behaviour are demonstrated.
 
+`tokio-tungstenite` and its transitive `webpki-roots` are optional behind the
+default-on `codex-delivery` feature; disabling it retains pull coordination and
+native doorbell paths. The existing TLS feature selection is unchanged.
+
 The Phase 1 shim uses `#![deny(unsafe_code)]` with narrow module-local exceptions:
 `credentials::windows_security` validates opened credential and coordination
 state handles and sets protected owner-only access for new private state;
