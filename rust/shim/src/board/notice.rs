@@ -1,6 +1,5 @@
 //! Queue acceptance and exact prompt arrival are separate durable facts.
 use super::{identity, policy, state};
-use fs2::FileExt;
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -132,7 +131,7 @@ impl PendingNotice {
         }
         let start = Instant::now();
         loop {
-            if opened.try_lock_exclusive().is_ok() {
+            if opened.try_lock().is_ok() {
                 return Ok(opened);
             }
             if start.elapsed() >= retry {

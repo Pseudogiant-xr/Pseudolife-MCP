@@ -216,6 +216,8 @@ pinned by `rust-toolchain.toml`. The initial targets are
 selects this candidate. The dependency choices and build commands are recorded
 in `rust/README.md`.
 
+File locks use Rust 1.94's standard `File` methods instead of `fs2`, preserving exclusive contention and release behavior while removing the redundant dependency.
+
 The named `stdio-raw-compared` policy retains and compares stdout bytes on the
 capture platform. It applies `source-text-lf` only to escaped newline token
 spans at `/body/result/tools/*/description` and `/body/result/instructions`.

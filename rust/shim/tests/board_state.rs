@@ -5,6 +5,10 @@ use pseudolife_stdio::board::{
     state::{self, Reservation},
 };
 use serde_json::json;
+use std::{
+    fs::{FileTimes, TryLockError},
+    time::{Duration, SystemTime},
+};
 
 #[test]
 fn board_adapter_reservation_preserves_written_identity_and_discards_only_empty_owned_file() {
@@ -27,6 +31,33 @@ fn board_adapter_reservation_preserves_written_identity_and_discards_only_empty_
     assert_eq!(saved.unwrap()["agent_id"], "fixture");
     assert!(Reservation::load_or_reserve(&path, "http://other").is_err());
     assert!(path.exists());
+}
+#[test]
+fn board_state_stale_reservation_requires_lock_and_releases_it_on_drop() {
+    let home = Home::new();
+    let path = home.0.join("agent.json");
+    let opened = state::create(&path).unwrap();
+    opened
+        .file
+        .set_times(FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(120)))
+        .unwrap();
+    drop(opened);
+    let lock = state::create(&home.0.join("agent.json.lock")).unwrap().file;
+    lock.try_lock().unwrap();
+    assert!(matches!(
+        Reservation::load_or_reserve(&path, "http://fixture"),
+        Err("registration_in_progress")
+    ));
+    assert_eq!(state::read(&path, 128).unwrap(), b"");
+    lock.unlock().unwrap();
+    let (saved, reservation) = Reservation::load_or_reserve(&path, "http://fixture").unwrap();
+    assert!(saved.is_none());
+    assert!(reservation.is_some());
+    assert!(matches!(lock.try_lock(), Err(TryLockError::WouldBlock)));
+    drop(reservation);
+    assert!(!path.exists());
+    lock.try_lock().unwrap();
+    lock.unlock().unwrap();
 }
 #[test]
 fn board_state_inode_fence_preserves_a_replacement() {

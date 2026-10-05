@@ -1,5 +1,4 @@
 //! Private state reservations are bound to opened file identity.
-use fs2::FileExt;
 use serde_json::Value;
 use std::{
     fs::{self, File, OpenOptions},
@@ -258,8 +257,7 @@ impl Reservation {
             create(&lock_path)?.file
         };
         identity(&lock)?;
-        lock.try_lock_exclusive()
-            .map_err(|_| "registration_in_progress")?;
+        lock.try_lock().map_err(|_| "registration_in_progress")?;
         let fresh = open(path)?;
         if fresh.identity != opened.identity
             || fresh
@@ -300,7 +298,7 @@ impl Drop for Reservation {
             let _ = fs::remove_file(&self.path);
         }
         if let Some(lock) = &self._lock {
-            let _ = FileExt::unlock(lock);
+            let _ = lock.unlock();
         }
     }
 }

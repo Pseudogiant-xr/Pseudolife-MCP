@@ -5,7 +5,6 @@ use crate::{
     credentials::{CredentialError, CredentialProvider, CredentialSnapshot},
     daemon_url,
 };
-use fs2::FileExt;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -185,14 +184,14 @@ impl SpawnLock {
             .map(|file| Self { file, held: false })
     }
     fn try_acquire(&mut self) -> bool {
-        self.held = FileExt::try_lock_exclusive(&self.file).is_ok();
+        self.held = self.file.try_lock().is_ok();
         self.held
     }
 }
 impl Drop for SpawnLock {
     fn drop(&mut self) {
         if self.held {
-            let _ = FileExt::unlock(&self.file);
+            let _ = self.file.unlock();
         }
     }
 }

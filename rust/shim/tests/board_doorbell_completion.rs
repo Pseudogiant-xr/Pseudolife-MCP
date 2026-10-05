@@ -395,7 +395,6 @@ fn terminated(pid: u32) -> bool {
 }
 
 fn cleanup_evidence(value: Value) {
-    use fs2::FileExt;
     use std::io::Write;
     if let Some(path) = std::env::var_os("DOORBELL_CLEANUP_EVIDENCE") {
         let mut output = std::fs::OpenOptions::new()
@@ -404,9 +403,9 @@ fn cleanup_evidence(value: Value) {
             .read(true)
             .open(path)
             .unwrap();
-        output.lock_exclusive().unwrap();
+        output.lock().unwrap();
         output.write_all(format!("{value}\n").as_bytes()).unwrap();
-        FileExt::unlock(&output).unwrap();
+        output.unlock().unwrap();
     }
 }
 
@@ -882,13 +881,12 @@ async fn timed_offer_withdrawal_and_attention_permission_matrix() {
 
 #[tokio::test]
 async fn failed_reservation_restores_offer_without_phantom_outstanding() {
-    use fs2::FileExt;
     let rig = Harness::new(true, Duration::ZERO).await;
     state::private_dir(rig.pending.path.parent().unwrap()).unwrap();
     let lock = state::create(&rig.pending.path.with_extension("bell-lock"))
         .unwrap()
         .file;
-    lock.lock_exclusive().unwrap();
+    lock.lock().unwrap();
     let offered = view(&[1, 2], 2, 2, 1.0);
     rig.bell.observe(BANK, &offered).await;
     assert!(!rig.pending.path.exists());
@@ -898,7 +896,7 @@ async fn failed_reservation_restores_offer_without_phantom_outstanding() {
     assert_eq!(ledger[0][1], "bell_deferred");
     assert_eq!(ledger[0][4], "0");
     assert_eq!(ledger[0][5], "reservation_unavailable no_queue_attempt");
-    FileExt::unlock(&lock).unwrap();
+    lock.unlock().unwrap();
     rig.bell.observe(BANK, &offered).await;
     rig.accepted().await;
     assert_eq!(rig.calls(), 1);
