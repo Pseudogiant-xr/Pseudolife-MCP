@@ -310,7 +310,8 @@ against a slot that still holds a protected aggregate scalar — see
 [Conversion rules](#conversion-rules) below — parks as a scalar contender.
 Once a slot has actually converted to a set, this still holds: members
 themselves are never contested.) A set slot also caps at 100 concurrent
-members; further adds beyond the cap are dropped (`"member_capped"`) rather
+members; further adds beyond the cap are dropped (`"member_capped"`, with a
+`note`; see [Tool errors and refusals](#tool-errors-and-refusals)) rather
 than silently applied or queued.
 
 ### Conversion rules
@@ -843,3 +844,70 @@ freshness flags, which is what a caller acts on. The REST/Console reads
 > existing bank (back up first), and every connection still pins
 > `search_path` to `public` (asserted on startup).
 > `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+
+## Tool errors and refusals
+
+A memory tool call ends one of three ways: a result, a refusal returned as
+a tool error, or a success that changed nothing and says so in a `note`.
+
+**A refusal is a tool error.** It comes back with `isError: true`, and its
+text and structured content are the same JSON object:
+
+```json
+{
+  "error": "unknown_parameter",
+  "message": "unknown parameter 'limit' for memory_search; did you mean 'top_k'? Accepted: query, top_k, sources, ...",
+  "param": "limit",
+  "accepted": ["query", "top_k", "sources", "..."]
+}
+```
+
+`error` is a stable snake_case code and `message` one sentence naming the
+fix. `param`, `accepted` and `action` appear where the refusal knows them.
+The general codes are `invalid_argument`, `unknown_parameter`,
+`file_not_found` (`document_ingest`; paths resolve on the server's
+filesystem), `internal_error` (the cause stays in the daemon log) and
+`coordination_unavailable` (the board failed inside the call). A tool's own
+coded refusal keeps its code (`missing_parameter`, `invalid_park`, ...).
+On a write tool, `internal_error` and `coordination_unavailable` add
+`mutation: "unknown"`: the write may or may not have happened.
+
+**Arguments are checked before the tool runs.** Every tool's input schema
+says `additionalProperties: false`. An argument name the tool does not have
+is refused as `unknown_parameter`, with a did-you-mean suggestion and the
+accepted names. Before 0.17.0 such an argument was dropped without a word
+(`memory_search(limit=3)` returned the default 8 hits), so a caller that
+passed stray arguments now gets an error. Values are range-checked too:
+`top_k`, `memory_recent` `n` and the other counts must be at least 1
+(`top_k=0` and `memory_dream(limit=0)` are refused); `confidence` is within
+0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; `memory_fact_set`
+refuses a blank entity, attribute or value; and `memory_history` `as_of`
+takes an ISO-8601 date or epoch seconds, not words like "yesterday". Each
+is `invalid_argument` naming the parameter, never echoing its value.
+
+**A no-op stays a success, with a `note`.** The call returns its usual
+fields plus one sentence saying what happened and what to do:
+
+- `memory_store`: `empty`, `filtered_meta` (reads as a statement about the
+  memory system itself; rephrase as the fact), `below_surprise_threshold`
+  (a near-duplicate; no need to retry), `rejected`.
+- `memory_get` / `memory_reinforce`: `faded: true` (a wrong id, a forgotten
+  or evicted entry, or a file-mode bank).
+- `memory_set_add` / `memory_set_remove`: `member_invalid`,
+  `member_capped`, `member_not_found`, `member_remove_refused`.
+- `memory_graph_review`: `bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live` (also per result in a
+  batch).
+- `memory_forget` matching nothing (`deleted_count: 0` / `removed: 0`).
+- `memory_world_set`: `unsafe_source_url` (the fact is not stored; `source_url` must be http(s) or empty).
+- `memory_outcome` without Postgres or with lessons disabled (not kept; do
+  not retry).
+- `memory_supersede` / `memory_consolidate`: the refusal sentence is in
+  `note`, beside the code in `reason` (the REST routes keep it in `error`).
+
+**The board names what was wrong.** `memory_agents` and `memory_message`
+refusals say what to fix: `missing_parameter` what the action needs (`send
+needs request_id`), `unexpected_parameter` which parameter the action does
+not take and which action does, `unknown_coordination_action` the actions
+there are, and `invalid_text` which rule the body broke (blank, NUL, over
+8,192 UTF-8 bytes, not UTF-8).

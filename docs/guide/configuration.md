@@ -683,7 +683,10 @@ session whose urgent mail [reopens a done park](#reopening-a-done-park) in
 that project. It opens the bank the same way, grants AGENT (its id, or a
 unique prefix of 8 or more characters) the lease `delegate:<PROJECT>` for
 DURATION (default 1d, at most 7d), replacing any current delegate, and logs a
-`lease_delegate` with the operator as its actor. Leases named `delegate:` (and
+`lease_delegate` with the operator as its actor. Its JSON answer says whether
+the grantee has a live wake path (`reachable`, and the no-path `reason`), and
+when it has none, a warning on stderr says your messages to it wait for its
+next turn. Leases named `delegate:` (and
 `designated:`, their name before 0.16.1) are the operator's alone: a
 session's claim of one is refused `reserved_lease`, so a delegate cannot
 renew its own. It may release it to resign; revoke it with
@@ -719,6 +722,12 @@ current fence), but check `pseudolife-mcp lease list` before deploying and
 `lease break` any `delegate:` lease you find, so the board shows only real
 grants. The new park-gate wording in the plugin's hook fallbacks reaches
 clients only through the update's client step.
+
+**Upgrading from 0.16.x** (before schema v54): a session that held both a
+project's delegate and coordinator leases keeps renewing its coordinator
+lease after the upgrade; once that hold lapses or is released, it keeps the
+delegate role only. Revoke either role from the Console if you want one
+sooner.
 
 **Upgrading from 2026-10-03's first version**, where holding
 `coordinator:<project>` was the role: after the upgrade **no session can
@@ -869,9 +878,13 @@ chat. It rings the session when it has a live wake listener, including one
 parked as done (capped at `maintainer_per_recipient_per_hour`, default 30);
 there is no separate urgent setting, and the payload's `urgent` field changes
 nothing.
+When a message is not rung, the thread says why (for example "no live
+listener (its listener lapsed)"); it waits for the session's next turn.
 The agent replies with `reply_to` and no `to`; replies appear in the Console's
-thread. The Sent log can withdraw a message: the recipient's next receive shows
-it as withdrawn, and an already-acknowledged one gets a follow-up. The thread
+thread. Your inbox's pending-mail cap (256) counts each sender's own replies,
+so one session's replies cannot fill it for the others. The Sent log can
+withdraw a message: the recipient's next receive shows it as withdrawn, and
+an already-acknowledged one gets a follow-up. The thread
 in a role card scrolls in its own pane above the composer, so a long exchange
 never pushes the composer down the page: it opens on the newest message and
 follows each new one, unless you have scrolled up to read earlier ones.
@@ -882,8 +895,15 @@ follows each new one, unless you have scrolled up to read earlier ones.
 session whose urgent mail reopens done parks there, see
 [Leases](#leases-pseudolife-mcp-lease)) and the coordinator. Make delegate asks
 how long (1 hour to 7 days); Extend restarts the time from now; Revoke frees
-the lease. Coordinator changes are signed too, although the role grants no
-authority: otherwise any session could evict another's coordinator. A session
+the lease. Under each holder the band shows "Reachable now" or "No live wake
+listener" with the reason; a grant or extend to a session with no live
+listener shows the same warning beside its success toast. A role change
+signs the role's holder as the dialog showed it (for Make delegate and Make
+coordinator, the other role's holder too): if either changes before your
+passkey tap, the change is refused (`409 role_changed`): the dialog closes,
+and the Console reloads the board so you can look again and retry. Coordinator changes
+are signed too, although the role grants no authority: otherwise any session
+could evict another's coordinator. A session
 holds one of the two roles at most: the delegate's own claim of the
 coordinator lease is refused `already_delegate`, and a session queued for it
 leaves the queue when it is made the delegate.
@@ -913,12 +933,22 @@ before changing anything (`--yes` answers for it), then:
    config file, with a backup beside it, and restarts the daemon container
    (`docker restart`: the same container and volumes). A lite daemon is not
    restarted for you: stop `pseudolife-mcp serve` and run the command again.
-3. Prints a one-time enrolment code, valid for 10 minutes. In the Console,
-   open Settings, Your passkeys, enter the code and a label, and create the
+3. Prints a one-time enrolment code, valid for 10 minutes. Open the
+   Console at the new address (`<origin>/ui/`). A browser keeps the
+   Console's token per address, so at a new address it has none: click
+   "Set a bearer token" and paste the token your Console uses at its usual
+   address (the daemon's `PSEUDOLIFE_MCP_TOKEN`; a single-token install
+   also keeps it in `~/.pseudolife-mcp/<principal>.token`). Then open
+   Settings, Your passkeys, enter the code and a label, and create the
    passkey. The command prints the new key's id prefix and label and asks
    whether the Console shows the same: `y` activates the key, anything else
    revokes it (someone else may have redeemed the code); run the command
    again to retry.
+
+`pseudolife-mcp doctor` reports the state in its `maintainer_passkeys`
+line: `off` (not configured), `on` with the RP ID, the origin and the number
+of active keys, or `invalid` with the rule the config breaks, which fails
+the report and names the fix.
 
 Run again, it reports what is in place and changes nothing (`--check`
 only answers: exit 0 set up, 1 not), and an installer re-run asks nothing
@@ -1408,9 +1438,13 @@ own two runs differed by up to 0.6 ms. Status-update latency was too noisy there
 to read (its two control runs were 1.8 ms apart), and with one writer at a time
 the run did not measure waiting on the append lock.
 
-The log is read by an operator, never by an agent: there is no MCP tool and no
-REST route for it. `pseudolife-mcp board-audit` reaches the bank directly,
-through `PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
+The log as a whole is read by an operator, never by an agent: no MCP tool or
+REST route exports or verifies it. The one slice an agent reads is its own
+mail: `memory_message(action="history")` and `POST /api/coordination/history`
+return the calling instance's retained sent and received messages
+([Delivery and recovery](#delivery-and-recovery)).
+`pseudolife-mcp board-audit` reaches the bank directly, through
+`PSEUDOLIFE_MCP_DATABASE_URL` or the lite tier's embedded instance;
 `export` and `verify` read one read-only snapshot, so they are safe beside a
 running daemon:
 
@@ -1864,8 +1898,10 @@ mail as all of them. It refuses `memory_agents` `update`, `claim` and
 instructions, and its `memory_agents(action="list")` shows open sessions only,
 not the board. A Claude Code session makes those calls on its own per-session
 server. In the Desktop app's Code tab that works only while the two entries have
-different names: the installer registers both as `pseudolife-memory`, and
-where the names match, Desktop serves the Code tab from its app-level entry.
+different names: the installer registers the app-level entry as
+`pseudolife-desktop` and Claude Code's per-session server as
+`pseudolife-memory`, because where the names match, Desktop serves the Code
+tab from its app-level entry.
 The writer ID is operator configuration, not authentication: the guard keeps
 honestly configured clients apart, while the daemon itself refuses any board
 write that carries no instance credential.
@@ -3134,6 +3170,14 @@ is changed unless `PSEUDOLIFE_SHIM_USER_BIN` names the directory to link
 from (on POSIX it also moves the default `~/.local/bin`). A host whose Python cannot make a virtualenv falls back to the
 earlier pipx / `pip install --user` install, which does need every session
 closed to upgrade.
+
+**Upgrading from 0.16.x:** run `pseudolife-mcp update` from outside a source
+checkout. Run inside one, a 0.16.x updater can record the wrong version in the
+`runtime.json` of the runtime it installs (it reads a stale build's metadata
+from the checkout). The launcher picks a runtime by its number, not its
+label, so the right code still runs, but each rerun installs yet another
+runtime. A later update by 0.17.0 or newer installs a correctly labelled
+runtime and removes the mislabelled one once nothing runs from it.
 
 The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
 pass `--transport http` / `-Transport http` to opt out) because it's the

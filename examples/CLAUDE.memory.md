@@ -1,7 +1,9 @@
-<!-- The full standing memory-loop instructions. The SessionStart hook
-     (plugin or verified Codex hooks) does not serve this block: it serves a
-     compact core and a bounded briefing, and
-     <data_dir>/hook-instructions.md adds text after that core. For the
+<!-- The full standing memory-loop instructions. By default
+     (memory_policy.variant: compact) the SessionStart hook (plugin or
+     verified Codex hooks) does not serve this block: it serves a compact
+     core and a bounded briefing, and <data_dir>/hook-instructions.md adds
+     text after that core (the full_separate_hook variant serves this block
+     in a separate hook). For the
      full guidance, for subagents (they read CLAUDE.md, not hook output),
      or for setups without hooks, copy this block into your CLAUDE.md
      (Claude Code), AGENTS.md, or the equivalent standing-instructions file.
@@ -137,5 +139,5 @@ near-duplicates; `stored=false` is not an error). The first memory call may
 lag while the embedder loads.
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
-(this briefing arrives via a hook, not MCP) — tell the user to run
+(these instructions arrive via a hook or a standing file, not MCP) — tell the user to run
 the repo installer (`ops/install.sh` / `ops\install.ps1`), which wires it.

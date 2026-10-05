@@ -232,7 +232,8 @@ listed for review and left alone. By hand:
 - **Stop hook** (on by default since 2026-09-28; `PSEUDOLIFE_AGENT_WAKE_HOOK=0`
   turns it off, `PSEUDOLIFE_AGENT_COORDINATION=0` turns off the board) — waits
   in the background after each turn and wakes the idle session when board
-  mail that clears its declared need arrives; policy-gated and capped. See
+  mail arrives that clears its declared need, is urgent, or is a maintainer
+  message; policy-gated and capped. See
   [Configuration](../docs/guide/configuration.md#waking-an-idle-claude-code-session-the-stop-hook).
 - **Subagent board guard** (PreToolUse, since 2026-09-30; off with the board,
   `PSEUDOLIFE_AGENT_COORDINATION=0`) — a subagent runs in its parent's shim,

@@ -1934,7 +1934,7 @@ def _require_mcp_sdk_v2() -> None:
     print(
         f"[shim] this environment's MCP SDK (mcp {installed}) predates v2 — "
         f"the shim needs mcp>=2.1 (no {_SDK_V2_PROBE_MODULE}).\n"
-        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<3"\n'
+        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<2.2"\n'
         f"  (or re-run the repo installer, which registers the project "
         f"venv's shim)",
         file=sys.stderr,
