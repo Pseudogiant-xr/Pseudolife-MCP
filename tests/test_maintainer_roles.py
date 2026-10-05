@@ -16,6 +16,7 @@ import pytest
 
 from pseudolife_memory import coordination
 from pseudolife_memory.coordination import dispatch
+from pseudolife_memory.storage import coordination as coordination_store
 from pseudolife_memory.storage.maintainer import challenge_bytes
 from tests.maintainer_authenticator import SoftAuthenticator
 from tests.pg_fixtures import pg_conn, pg_service, pg_url  # noqa: F401
@@ -52,7 +53,8 @@ def test_grant_and_revoke_the_delegate(svc):
     agent, other = peer(svc), peer(svc, label="other")
     out, challenge = role(svc, auth, "grant-delegate", project="p", agent_id=agent["agent_id"],
                           hold=HOUR)
-    assert set(out) == {"name", "agent_id", "fence", "expires_at", "replaced"}
+    assert set(out) == {"name", "agent_id", "fence", "expires_at", "replaced", "reachable",
+                        "reason", "warning"}
     assert (out["name"], out["agent_id"], out["replaced"]) == ("delegate:p", agent["agent_id"],
                                                                None)
     preview = challenge["preview"]
@@ -126,7 +128,7 @@ def test_status_lists_live_roles_per_project(svc):
     assert roles["p"]["delegate"]["agent_id"] == a["agent_id"]
     assert roles["p"]["delegate"]["granted_by"] == "maintainer"
     assert roles["p"]["coordinator"]["agent_id"] == b["agent_id"]
-    assert set(roles["p"]["coordinator"]) == {"agent_id", "expires_at"}
+    assert set(roles["p"]["coordinator"]) == {"agent_id", "expires_at", "reachable", "reason"}
 
 
 def test_status_names_an_operator_grant_and_skips_an_unrecorded_hold(svc):
@@ -140,8 +142,49 @@ def test_status_names_an_operator_grant_and_skips_an_unrecorded_hold(svc):
     roles = call(svc, "status")["roles"]
     assert roles == {"q": {"delegate": {"agent_id": a["agent_id"],
                                         "expires_at": roles["q"]["delegate"]["expires_at"],
-                                        "granted_by": "operator"},
+                                        "granted_by": "operator", "reachable": False,
+                                        "reason": "wake_disabled"},
                            "coordinator": None}}
+
+
+# ── reachability: maintainer mail lands only through a live listener ──────
+
+def test_a_grant_warns_when_the_grantee_has_no_live_listener(svc):
+    """Maintainer requirement 2026-10-05: the delegate above all must be
+    reachable. A grant (and an extend, which signs a new grant) says whether
+    its grantee has a live wake path now, and warns when maintainer mail to
+    it would wait for its next turn."""
+    auth = bootstrap(svc)
+    deaf, live = peer(svc), peer(svc, wake=True, label="live")
+    out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=deaf["agent_id"], hold=HOUR)
+    assert (out["reachable"], out["reason"]) == (False, "wake_disabled")
+    assert out["warning"] == coordination_store.UNREACHABLE_WARNING.format(
+        role="delegate", reason=coordination_store.UNREACHABLE_REASONS["wake_disabled"])
+    out, _ = role(svc, auth, "grant-delegate", project="p", agent_id=live["agent_id"], hold=HOUR)
+    assert (out["reachable"], out["reason"]) == (True, None) and "warning" not in out
+    out, _ = role(svc, auth, "assign-coordinator", project="p", agent_id=deaf["agent_id"],
+                  hold=HOUR)
+    assert out["reachable"] is False and "coordinator" in out["warning"]
+
+
+def test_status_shows_whether_each_role_holder_is_reachable_now(svc):
+    """The Roles band reads this: a Claude Code Stop-hook watcher or a Codex
+    doorbell renews ``ring_armed_until`` about a minute ahead, so a holder
+    whose listener stopped shows as unreachable within a minute."""
+    store = board(svc)
+    agent = store.register(PRINCIPAL, project="p", label="claude")
+    with svc._coordination_lock:
+        attached = store.attach(PRINCIPAL, agent["agent_id"], agent["credential"],
+                                attachment_id="a1", ring=True,
+                                ring_armed_until=store.clock() + 30)
+    store.grant_delegate("p", agent["agent_id"], hold=HOUR)
+    delegate = call(svc, "status")["roles"]["p"]["delegate"]
+    assert (delegate["reachable"], delegate["reason"]) == (True, None)
+    with svc._coordination_lock:
+        store.heartbeat(PRINCIPAL, agent["agent_id"], agent["credential"], attachment_id="a1",
+                        generation=attached["generation"], ring_armed_until=0)
+    delegate = call(svc, "status")["roles"]["p"]["delegate"]
+    assert (delegate["reachable"], delegate["reason"]) == (False, "listener_expired")
 
 
 # ── one role per session ───────────────────────────────────────────────────
