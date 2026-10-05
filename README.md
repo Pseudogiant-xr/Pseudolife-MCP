@@ -599,23 +599,15 @@ or custom registrations. `-All` / `--all` and `ops/update_clients.py` do not
 create the token or migrate the registration environment. Then refresh clients
 with the **Everything at once** recipe below and restart them.
 
-**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`:** the installers
-up to 0.16.1 added it by that shorthand, which Claude Code records as a
-`github` source (`"source": "github"` for `pseudolife-mcp` in
-`~/.claude/plugins/known_marketplaces.json`) and refreshes over SSH. On a
-machine with no GitHub SSH key every refresh fails ("SSH host key is not in
-your known_hosts file") and the plugin stops updating. Move it to the HTTPS
-URL: if `~/.claude/settings.json` declares it under `extraKnownMarketplaces`,
-change that entry's `source` to
-`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-first (the CLI refuses an add that differs from a declared source), then run:
-
-```bash
-claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
-```
-
-Do not `marketplace remove` it first: removing a marketplace uninstalls its
-plugins.
+**A plugin marketplace added as `Pseudogiant-xr/Pseudolife-MCP`** (installers up
+to 0.16.1) is refreshed over SSH, which fails on a machine with no GitHub SSH
+key. `pseudolife-mcp update` and the installers move it to the HTTPS URL
+themselves, with backups. If that step reports a failure, the manual fallback
+is: in `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), set the
+`pseudolife-mcp` entry's `source` under `extraKnownMarketplaces` to
+`{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`,
+then run `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
+Never `marketplace remove` it: that uninstalls the plugin.
 
 **One command, no checkout:** the installed shim updates the whole install
 from a release:

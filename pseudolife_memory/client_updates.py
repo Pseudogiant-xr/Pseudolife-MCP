@@ -71,6 +71,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from pseudolife_memory import __version__
@@ -626,12 +627,20 @@ def tree_differs(a: Path, b: Path) -> bool:
     return _tree_files(Path(a)) != _tree_files(Path(b))
 
 
+def claude_config_dir() -> Path:
+    """Claude Code's user configuration directory: ``CLAUDE_CONFIG_DIR``
+    when set, else ``~/.claude``."""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(config_dir) if config_dir else home() / ".claude"
+
+
 def plugins_root() -> Path:
     """Claude Code's plugins directory (records, marketplace clones, cache):
-    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, else ``~/.claude/plugins``
-    (``CLAUDE_CONFIG_DIR`` is not followed here, as before)."""
+    ``CLAUDE_CODE_PLUGIN_CACHE_DIR`` when set, else ``plugins`` under the
+    configuration directory, which follows ``CLAUDE_CONFIG_DIR`` (measured
+    on Claude Code 2.1.287, 2026-10-05)."""
     override = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
-    return Path(override) if override else home() / ".claude" / "plugins"
+    return Path(override) if override else claude_config_dir() / "plugins"
 
 
 def _read_json(path: Path) -> dict:
@@ -669,7 +678,11 @@ def update_plugin(repo: Path | None = None) -> dict:
     A marketplace update that fails leaves the clone where it was, so a
     cache matching it proves nothing: the step then reports ``failed`` with
     the CLI's own line, never ``current`` or ``refreshed`` (2026-10-04: the
-    homelab box kept the previous release's hooks behind a green line)."""
+    homelab box kept the previous release's hooks behind a green line).
+
+    A marketplace still recorded with the github source the installers used
+    up to 0.16.1 is first moved to HTTPS (``migrate_marketplace``), so the
+    refresh that follows is what proves the new source works."""
     claude = which("claude")
     if not claude:
         return {"state": "no-cli", "detail": "the claude CLI is not on PATH"}
@@ -677,6 +690,18 @@ def update_plugin(repo: Path | None = None) -> dict:
     record = _plugin_record(plugins_dir)
     if not record:
         return {"state": "not-installed", "detail": f"{PLUGIN_ID} is not installed; {INSTALLER_HINT}"}
+    moved = migrate_marketplace(claude)
+    if moved["state"] == "failed":
+        return {"state": "failed", "marketplace_source": "failed",
+                "detail": f"{moved['detail']}; then {_plugin_retry(repo)}"}
+    result = _update_from_marketplace(claude, plugins_dir, record, repo)
+    result["marketplace_source"] = moved["state"]
+    if moved["state"] == "migrated":
+        result["detail"] = f"{moved['detail']}; {result['detail']}"
+    return result
+
+
+def _update_from_marketplace(claude: str, plugins_dir: Path, record: dict, repo: Path | None) -> dict:
     code, out = run_cli([claude, "plugin", "marketplace", "update", MARKETPLACE])
     failure = _marketplace_failure(code, out)
     result = _install_from_clone(claude, plugins_dir, record, repo)
@@ -719,44 +744,174 @@ def _marketplace_failure(code: int, out: str) -> str | None:
 def _marketplace_remedy(out: str) -> str:
     """What to do about a failed marketplace update. A github-source
     marketplace is cloned over SSH, which fails where github.com's host key
-    is not in known_hosts (root on the homelab box, 2026-10-04). Adding it
-    again from its HTTPS URL re-points the existing entry, and the installed
-    plugin follows it (measured on Claude Code 2.1.287, 2026-10-04).
-
-    Claude Code refuses that add while settings.json declares the
-    marketplace under ``extraKnownMarketplaces`` with another source (the
-    box's settings did, 2026-10-04), so the entry is changed first; that
-    step is named only where such a declaration exists. Never ``marketplace
-    remove``: it uninstalls the plugin."""
+    is not in known_hosts (root on the homelab box, 2026-10-04). The source
+    the installers used up to 0.16.1 is moved to HTTPS before the update
+    (``migrate_marketplace``); one somebody pointed elsewhere (a fork, a
+    pinned ref) is theirs to move. Never ``marketplace remove``: it
+    uninstalls the plugin."""
     if "known_hosts" not in out and "Host key verification failed" not in out:
         return f"fix that and run claude plugin marketplace update {MARKETPLACE}"
-    settings, declared = _declared_marketplace()
-    https = {"source": "git", "url": MARKETPLACE_HTTPS}
-    first = ""
-    if declared is not None and declared != https:
-        first = (f"{settings} declares the marketplace under extraKnownMarketplaces with another source, which "
-                 f"refuses that add, so first change that entry's source to {json.dumps(https)}, then run ")
     return ("Claude Code clones this marketplace over SSH and github.com's host key is not in known_hosts: "
             "add it after checking its fingerprint against the ones GitHub publishes (ssh -T git@github.com "
             "shows it), or point the marketplace at HTTPS, which the installed plugin follows: "
-            f"{first}claude plugin marketplace add {MARKETPLACE_HTTPS} (the README's Updating section has the "
-            "steps)")
+            f"claude plugin marketplace add {MARKETPLACE_HTTPS} (the README's Updating section has the steps)")
 
 
-def _declared_marketplace() -> tuple[Path, object]:
-    """Claude Code's user settings file (``$CLAUDE_CONFIG_DIR/settings.json``,
-    else ``~/.claude/settings.json``) and the source it declares for this
-    marketplace under ``extraKnownMarketplaces``; None when it declares
-    none or cannot be read."""
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    settings = (Path(config_dir) if config_dir else home() / ".claude") / "settings.json"
-    try:
-        data = json.loads(settings.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        return settings, None
-    declared = data.get("extraKnownMarketplaces") if isinstance(data, dict) else None
-    entry = declared.get(MARKETPLACE) if isinstance(declared, dict) else None
-    return settings, entry.get("source") if isinstance(entry, dict) else None
+# The owner/repo shorthand the installers added the marketplace by up to
+# 0.16.1. Claude Code records it as this github source and refreshes it over
+# SSH, which fails on a host with no GitHub SSH key (homelab box, 2026-10-04).
+_SHORTHAND_REPO = "pseudogiant-xr/pseudolife-mcp"
+_HTTPS_SOURCE = {"source": "git", "url": MARKETPLACE_HTTPS}
+
+
+def _source_kind(source: object) -> str:
+    """``none``; ``github`` for exactly the source the shorthand recorded;
+    ``https`` for a git source fetched over HTTPS; ``other`` for anything
+    somebody chose (a fork, a local directory, a pinned ref)."""
+    if source is None:
+        return "none"
+    if not isinstance(source, dict):
+        return "other"
+    if (source.get("source") == "github" and set(source) == {"source", "repo"}
+            and str(source.get("repo", "")).lower() == _SHORTHAND_REPO):
+        return "github"
+    if source.get("source") == "git" and str(source.get("url", "")).startswith("https://"):
+        return "https"
+    return "other"
+
+
+def _entry_source(data: object) -> object:
+    entry = data.get(MARKETPLACE) if isinstance(data, dict) else None
+    return entry.get("source") if isinstance(entry, dict) else None
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Replace ``path`` with ``data`` in one rename, so a reader (a Claude
+    Code session) sees the old file or the new one, never half of either."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _restore(backup: Path, path: Path) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.restore")
+    shutil.copy2(backup, tmp)
+    os.replace(tmp, path)
+
+
+def migrate_marketplace(claude: str | None = None) -> dict:
+    """Move this marketplace from the github source the installers recorded
+    up to 0.16.1 to its HTTPS git URL, the way it was done by hand on the
+    homelab box (2026-10-04), whether or not a refresh is failing yet.
+
+    Claude Code refuses ``claude plugin marketplace add <url>`` while
+    settings.json declares the marketplace under ``extraKnownMarketplaces``
+    with another source, so that entry's source is changed first (one
+    rename, every other key kept); the add then re-points
+    known_marketplaces.json and re-clones over HTTPS, leaving the plugin
+    record as it was (measured on 2.1.287, 2026-10-05). settings.json,
+    known_marketplaces.json and installed_plugins.json are copied to a
+    backup folder first. A refused add, or a record the add did not move,
+    restores settings.json, so a failure leaves nothing half-done. Nothing
+    else is touched: another marketplace, or this one recorded from any
+    other source, is left as it is. Never ``marketplace remove``: it
+    uninstalls the plugin.
+
+    Returns ``{"state", "detail"}``: ``absent`` (nothing recorded),
+    ``current`` (already HTTPS), ``kept`` (somebody's own source),
+    ``migrated`` or ``failed``."""
+    settings = claude_config_dir() / "settings.json"
+    plugins_dir = plugins_root()
+    known_file = plugins_dir / "known_marketplaces.json"
+    data: dict | None = None
+    if settings.is_file():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict):
+            return {"state": "failed",
+                    "detail": f"{settings} is not valid JSON, so the {MARKETPLACE} marketplace's source could not "
+                              "be checked; nothing was changed. Fix that file, then run this again"}
+    declared_marketplaces = (data or {}).get("extraKnownMarketplaces")
+    declared = _entry_source(declared_marketplaces)
+    known = _entry_source(_read_json(known_file))
+    kinds = {_source_kind(declared), _source_kind(known)}
+    if kinds == {"none"}:
+        return {"state": "absent", "detail": f"no {MARKETPLACE} plugin marketplace is recorded"}
+    if "other" in kinds:
+        shown = json.dumps(known if _source_kind(known) == "other" else declared)
+        return {"state": "kept", "detail": f"the {MARKETPLACE} plugin marketplace is recorded from {shown}; "
+                                           "left as it is"}
+    if "github" not in kinds:
+        return {"state": "current", "detail": f"the {MARKETPLACE} plugin marketplace already fetches over HTTPS; "
+                                              "nothing to change"}
+    claude = claude or which("claude")
+    if not claude:
+        return {"state": "failed",
+                "detail": f"the {MARKETPLACE} plugin marketplace is recorded as a github source, which updates "
+                          "over SSH, and the claude CLI is not on PATH to move it to HTTPS; nothing was changed"}
+    backup = plugins_dir / f"backup-{time.strftime('%Y%m%d-%H%M%S')}-marketplace-https"
+    counter = 0
+    while backup.exists():
+        counter += 1
+        backup = backup.with_name(f"{backup.name.rsplit('.', 1)[0]}.{counter}")
+    backup.mkdir(parents=True)
+    for path in (settings, known_file, plugins_dir / "installed_plugins.json"):
+        if path.is_file():
+            shutil.copy2(path, backup / path.name)
+    record = _plugin_record(plugins_dir)
+    edited = _source_kind(declared) == "github"
+    if edited:
+        declared_marketplaces[MARKETPLACE]["source"] = dict(_HTTPS_SOURCE)
+        _write_json_atomic(settings, data)
+
+    def undo(why: str) -> dict:
+        if edited:
+            _restore(backup / settings.name, settings)
+            why += f"; {settings} was restored from {backup}"
+        return {"state": "failed", "detail": f"the {MARKETPLACE} plugin marketplace could not be moved from its "
+                                             f"github source (SSH) to HTTPS: {why}"}
+
+    code, out = run_cli([claude, "plugin", "marketplace", "add", MARKETPLACE_HTTPS])
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
+    said = next((line for line in lines if "Failed" in line), lines[-1] if lines else f"exit {code}")
+    if code != 0:
+        return undo(f"claude plugin marketplace add {MARKETPLACE_HTTPS} failed ({said})")
+    now = _entry_source(_read_json(known_file))
+    if _source_kind(now) != "https":
+        return undo(f"claude plugin marketplace add {MARKETPLACE_HTTPS} exited 0 ({said}) but {known_file} still "
+                    f"records {json.dumps(now)}")
+    # The add rewrites the declared entry as just its source, dropping keys
+    # such as autoUpdate (measured on 2.1.287, 2026-10-05): put them back.
+    kept = {k: v for k, v in ((declared_marketplaces or {}).get(MARKETPLACE) or {}).items() if k != "source"}
+    if kept:
+        try:
+            after = json.loads(settings.read_text(encoding="utf-8-sig"))
+            entry = after["extraKnownMarketplaces"][MARKETPLACE]
+        except (OSError, ValueError, KeyError, TypeError):
+            entry = None
+        if isinstance(entry, dict) and any(k not in entry for k in kept):
+            entry.update({k: v for k, v in kept.items() if k not in entry})
+            _write_json_atomic(settings, after)
+    if record and not _plugin_record(plugins_dir):
+        return {"state": "failed",
+                "detail": f"the {MARKETPLACE} plugin marketplace now fetches over HTTPS, but {PLUGIN_ID} is no "
+                          f"longer recorded as installed; run claude plugin install {PLUGIN_ID} (backups in "
+                          f"{backup})"}
+    return {"state": "migrated",
+            "detail": f"the {MARKETPLACE} plugin marketplace moved from its github source (SSH) to HTTPS, "
+                      f"{MARKETPLACE_HTTPS} (backups in {backup})"}
+
+
+def marketplace_main() -> int:
+    """``ops/plugin_marketplace.py``, the installers' step: one line for a
+    marketplace moved, current or kept, nothing when none is recorded, exit
+    1 only on a failure."""
+    result = migrate_marketplace()
+    if result["state"] != "absent":
+        print(result["detail"][:1].upper() + result["detail"][1:] + ".")
+    return 1 if result["state"] == "failed" else 0
 
 
 def _plugin_retry(repo: Path | None) -> str:

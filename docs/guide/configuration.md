@@ -3258,18 +3258,23 @@ its own and an update never replaces a folder a session is using:
   cache matching it proves nothing: the step reports `failed`, never
   `current`, quoting the CLI's line, and the run exits with the client-step
   code. Claude Code clones a GitHub-source marketplace over SSH, which fails
-  on a host with no github.com key in `known_hosts`. Add the key after
-  checking its fingerprint against GitHub's published ones, or point the
-  marketplace at HTTPS with
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`
-  (it replaces the existing entry's source, and the installed plugin
-  follows it), then run the update again; the README's Updating section
-  has the same steps. Claude Code refuses that add while
-  `settings.json` declares `pseudolife-mcp` under `extraKnownMarketplaces`
-  with another source: change that entry's source to
-  `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-  first (the step names the file when it finds one). Do not use
-  `claude plugin marketplace remove`, which uninstalls the plugin.
+  on a host with no github.com key in `known_hosts`.
+- Before the refresh, a marketplace still recorded with the `github` source
+  the installers used up to 0.16.1 is moved to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` (the installers do
+  the same on a rerun, through `ops/plugin_marketplace.py`). The step copies
+  `settings.json`, `known_marketplaces.json` and `installed_plugins.json`
+  to `plugins/backup-<time>-marketplace-https/`. It changes only the
+  `pseudolife-mcp` entry's source under `extraKnownMarketplaces` (Claude
+  Code refuses the add while that entry names another source), runs
+  `claude plugin marketplace add` with the HTTPS URL, and checks that
+  `known_marketplaces.json` followed. A refused add restores
+  `settings.json` and fails the step. An HTTPS source, a fork, a local
+  directory or a pinned ref is left as it is. Both files are read under
+  `CLAUDE_CONFIG_DIR` when it is set. For any other github-source
+  marketplace, add github.com's key after checking its fingerprint against
+  GitHub's published ones, or follow the README's Updating section. Do not
+  use `claude plugin marketplace remove`, which uninstalls the plugin.
 - Sessions already running keep the copy they loaded. A session started
   afterwards runs the new one. `/plugin marketplace update pseudolife-mcp`
   then `/plugin update pseudolife-memory@pseudolife-mcp` inside Claude Code

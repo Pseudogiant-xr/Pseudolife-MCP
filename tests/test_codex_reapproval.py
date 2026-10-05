@@ -109,7 +109,7 @@ def test_check_names_the_files_through_the_plugin_cache_without_a_checkout(cli):
     """In release mode there is no checkout: the daemon's scripts are read
     from the Claude plugin cache when its digest is the daemon's."""
     _clone(cli, change="hooks.json")
-    plugins = cli.home / ".claude" / "plugins"
+    plugins = uc.plugins_root()
     cache = plugins / "cache" / "pseudolife-memory"
     shutil.copytree(ROOT / "plugin", cache)
     plugins.mkdir(parents=True, exist_ok=True)
