@@ -202,10 +202,21 @@ small. Reject unlisted normalization and non-finite values.
 
 The same-ONNX-graph embedding tolerance is **not yet established**. The current
 configuration guide documents torch fallback for the default Qwen model because
-it lacks a supplied ONNX artifact. Phase 3 must first produce and identify the
-same graph and tokenizer inputs, compare it with the Python oracle, and record
-the observed error before accepting a tolerance. No bit-identical or embedding
-equivalence claim follows from comparator support alone.
+it lacks a supplied ONNX artifact. The [CPU prerequisite receipt](../evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
+identifies a disposable fp32 graph and compares Torch fp32 with direct ORT CPU
+over 1,000 seeded documents and 25 **PROPOSED** topic queries: maximum absolute
+embedding difference `5.401670932769775e-7`, minimum cosine
+`0.9999999999933409`, identical full stored-vector rankings for 5/25 queries and
+identical top-eight rankings for 25/25. Proposed, unaccepted numerical bounds
+for this recorded graph/runtime/corpus are max absolute `6e-7` and minimum
+cosine `0.999999999993`, rounding the observed absolute error upward to the
+next `1e-7` and cosine loss upward to the next `1e-12`; no ID or ranking tolerance
+is proposed. The stock SentenceTransformers ONNX wrapper fails on missing
+`position_ids`, so this direct-input proof does not establish shipped-backend
+parity. Optimum's hidden-state validation warned that `6.67572021484375e-5`
+exceeded `1e-5`. The query proposal and packaging/docs decision require the
+maintainer before any tolerance is accepted; no bit identity or speed claim
+follows from this receipt.
 
 ## Phase 1 stdio comparison
 

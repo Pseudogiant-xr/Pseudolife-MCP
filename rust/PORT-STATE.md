@@ -78,10 +78,19 @@ Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate clos
   Both remain unchanged here. Phase 3 requires maintainer docs resolution and a
   named same-graph/tokenizer comparison with measured error before a tolerance
   or embedding-equivalence claim is accepted.
-- The requested ONNX CPU comparison still needs an identified fixed 25-query
-  input and an isolated runtime matching `ops/requirements.lock.txt` to export
-  and verify the same fp32 Qwen graph/tokenizer. The Phase 0b 25-case full-bank
-  corpus is not 25 queries; no export or equivalence proof is claimed here.
+- ONNX-PREREQUISITE remains **deferred**. The [CPU receipt](../evals/results/rust-onnx-cpu-prerequisite-20d0e75d.json)
+  binds committed instrument `20d0e75d`, the pinned stack, exported fp32 Qwen
+  graph/tokenizer and 1,000 seeded texts plus 25 **PROPOSED** topic queries.
+  Maximum absolute difference was `5.401670932769775e-7`, minimum cosine
+  `0.9999999999933409`; full order matched for 5/25 queries and top eight for
+  25/25 against the original 2k stored-vector definition. The stock ST ONNX
+  wrapper fails on missing `position_ids`; direct ORT input/pooling is a
+  numerical proof, not shipped-backend or daemon parity. The receipt preserves
+  the exporter warning and per-query ranking hashes, disagreements and margins.
+  Next: the maintainer identifies or accepts the query input and resolves the
+  packaging/docs disagreement, then reviews the proposed, unaccepted numerical
+  bounds in PORTING.md. The 25-case full-bank corpus is not 25 queries; no ID,
+  rank-order, bit-identity or speed acceptance follows from this result.
 - Historically, `2e628b27` named targeted Rust equivalents for all 125 scoped
   internal cases. The current mapping has 121 completed equivalents, 3 SDK
   retirements and 1 pending postframe substitution with targeted evidence on
@@ -416,8 +425,13 @@ commit with exact tree `ed24dba033ef74d399b6cb5493a76763978a506c` matching the
 local executed head. CI receipt SHA256 is
 `6df550424f8d0a9b6ae6b4b6f5306bd1046af64b512f97ce7146c6baa73ed2b7` on Windows
 and `cac498457bc943559ae36a34c60731800512d1a8ecdee98aae7df7320a492836` on Linux.
-All nine reported PR checks passed at `779c588c`; the documentation successor has
-not yet been published or checked.
+All nine reported PR checks passed at `779c588c`. The documentation successor
+`6cbb6cac` was published and checked in [run 37248938171](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37248938171):
+both Rust jobs and Windows Parity passed; Linux Parity failed on a real-bank
+startup stderr mismatch, so its additive CLI lane was skipped. A focused
+four-arm replay returned empty stderr for both Python and Rust in both eras
+without reproducing or resolving the hosted cause. Current-head acceptance
+remains blocked; the earlier green run is not a substitute.
 
 Help and CLI-DISPATCH remain ported only for help aliases/trailing arguments and
 the documented unknown-command cases with UTF-8 stdout/stderr, valid Unicode
