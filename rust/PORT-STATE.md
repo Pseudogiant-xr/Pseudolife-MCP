@@ -44,6 +44,17 @@ Historical receipts remain unchanged. This is not a new complete twenty-six-row
 gate; CLI-VERSION, required hosted CI/evidence-successor review, the separate
 merge gates and the unapproved derived-name substitution policy remain unchanged.
 
+A subsequent disposable-child probe reproduced a fixture receipt defect: a
+callback could change the captured environment after launch, and the returned
+receipt aliased that mutable dictionary. Observation now retains an independent
+launch snapshot and refuses whole-environment changes after capture and poststate
+collection. Eleven watched regressions fail before the repair on each platform;
+the repaired focused and compatibility checks pass 138 tests on Linux and 131
+tests with seven Unix-only skips on Windows. The three-value preparation API and
+original/selected executable checks remain intact. This fixture repair does not
+rerun or replace the historical parity and timing receipts, and does not close
+the outstanding hosted CI or CLI-VERSION acceptance gates.
+
 | Phase / item | Status | PR | Evidence |
 |---|---|---|---|
 | 0: Inventory, rulebook and disposable trial | Complete; phase 0b closes the historical gaps | [#540](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/540), [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Historical source pin 136a34ae; trial corrections retained in PORTING.md; current-pin gap evidence below |

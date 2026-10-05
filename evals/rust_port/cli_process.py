@@ -287,15 +287,20 @@ def observe(case, command, commands, *, root, home, url, prepare=None):
                 or Path(selected[0]).resolve(strict=True) != resolved_executable \
                 or original_executable.resolve(strict=True) != original_resolved_executable:
             raise ValueError("CLI command changed before process launch")
+        launch_env = copy.deepcopy(env)
         response = run_cli(selected, arguments, cwd=root, env=env,
                            timeout=case.get("timeout_seconds", 10),
                            stdin=base64.b64decode(case.get("stdin_b64", ""), validate=True))
+        if env != launch_env:
+            raise ValueError("CLI effective environment changed during capture")
         response["post_files_b64"] = snapshot(home)
+        if env != launch_env:
+            raise ValueError("CLI effective environment changed during poststate collection")
         if command_identity(selected, root) != identity or command_identity(original, root) != original_identity \
                 or Path(selected[0]).resolve(strict=True) != resolved_executable \
                 or original_executable.resolve(strict=True) != original_resolved_executable:
             raise RuntimeError("CLI executable changed during capture")
-        return {"request": copy.deepcopy(case), "environment": env,
+        return {"request": copy.deepcopy(case), "environment": launch_env,
                 "pre_files_b64": before, "response": response,
                 "execution": {"original_prefix": original, "selected_prefix": selected,
                               "invoked_executable": selected[0], "resolved_executable": str(resolved_executable),
