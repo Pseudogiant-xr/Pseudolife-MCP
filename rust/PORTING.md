@@ -167,6 +167,11 @@ pinned CPython 3.11 runtime. Sanitization still compacts, limits to 60 character
 filters punctuation and falls back to `unknown`; the separate `reason14.rs`
 asset remains deleted.
 
+The original shim/channel CLI keeps its valid-argument dispatch. OS arguments
+are read without Unicode conversion panics; an invalid-Unicode mode follows
+Python's unknown-mode repr and exit 2, using surrogateescape on Unix and unpaired
+UTF-16 surrogate escapes on Windows.
+
 ## HTTP and authentication
 
 Preserve constant-time bearer comparison for both byte encodings, fail-closed

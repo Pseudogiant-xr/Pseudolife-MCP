@@ -387,3 +387,16 @@ fix. Both restored contract tests passed in the isolated Windows targeted run.
 Implementation item c is closed; the row's earlier Rust-predicate substitution
 is withdrawn, with final integrated-head acceptance still pending before a
 `ported` status.
+
+## Phase 2b item d: invalid OS arguments
+
+`main.rs` now reads `args_os`; an invalid-Unicode mode uses Python-compatible
+unknown-mode repr and exit 2 instead of panicking. Valid shim/channel argument
+behavior is unchanged. One corpus case is defined for each OS: invalid UTF-8
+with Unix surrogateescape, and an unpaired UTF-16 surrogate on Windows.
+
+[Local proof summary](phase2b-fixes-evidence.json) binds watched RED
+`fixes-red-d.log` (Windows exit 101 instead of 2) and the isolated Windows
+GREEN case. Implementation item d is closed. The Unix corpus is implemented
+but unexecuted locally; current-head both-platform validation remains pending.
+The broader Phase 2 CLI dispatcher is not part of this item.

@@ -1,12 +1,20 @@
 #![forbid(unsafe_code)]
+mod argv;
 use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(mode) = arguments.first().filter(|mode| mode.to_str().is_none()) {
+        pseudolife_stdio::stderrln!(
+            "unknown mode {}; see: pseudolife-mcp --help",
+            argv::python_repr(mode)
+        );
+        return ExitCode::from(2);
+    }
     let channel = match arguments.as_slice() {
         [] => false,
-        [mode] if mode == "shim" => false,
-        [mode] if mode == "channel" => true,
+        [mode] if mode.to_str() == Some("shim") => false,
+        [mode] if mode.to_str() == Some("channel") => true,
         _ => {
             pseudolife_stdio::stderrln!("usage: pseudolife-stdio [shim|channel]");
             return ExitCode::FAILURE;

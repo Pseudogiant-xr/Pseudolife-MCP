@@ -66,6 +66,32 @@
         "CPython 3.11.9 unicodedata version 14.0.0 was verified; expected digest is f4a77aec4b67a7770e67e22fe029b97d93300d0eafcf13b0968a885d2b9ff2fe.",
         "Current integrated-head parity acceptance pending."
       ]
+    },
+    "d": {
+      "implemented_source_blobs": {
+        "rust/shim/src/main.rs": "c2898ba371a9f3615163ba20c231344816db49ec",
+        "rust/shim/src/argv.rs": "c8d8f9c9f01a9e0b57b63f302a00672704748711",
+        "rust/shim/tests/cli_invalid_argv.rs": "1b155a39ef4d210e85e01f8cc364f409214b0f0e"
+      },
+      "watched_red": [
+        {
+          "reference": "fixes-red-d.log",
+          "sha256": "5fdb4c2c02624bec04934dd11427b6d4cb64c33ac53a9279a3d3b09bf543eeab",
+          "observed": "Invalid Windows UTF-16 mode exited 101 rather than 2; one failing corpus case."
+        }
+      ],
+      "green": [
+        {
+          "reference": "fixes-green-targeted.log",
+          "sha256": "bb58b903ef234be026da22f806601d3a6c5c5725cc0134d5d1124fef6bdfe679",
+          "observed": "Windows invalid_unicode_mode_matches_python_repr_and_exit passed; Python repr unit assertions passed. This batch preceded the final startup-only narrowing."
+        }
+      ],
+      "limitations": [
+        "The Unix invalid UTF-8 corpus is implemented but was not executed locally.",
+        "Valid shim/channel argument behavior is preserved; broader Phase 2 dispatcher integration remains separate.",
+        "Original argv production and test blobs are unchanged by the later startup-only correction; current integrated-head acceptance pending."
+      ]
     }
   },
   "remaining_gates": [
