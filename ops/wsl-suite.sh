@@ -31,7 +31,7 @@
 #   PSEUDOLIFE_SUITE_PRUNE_DAYS  remove other checkouts' test copies and
 #                                environments unused this many days (default 3)
 #   PSEUDOLIFE_SUITE_KEEP        and keep at most this many of each (default 8)
-#   PSEUDOLIFE_SUITE_PRUNE       off: remove nothing
+#   PSEUDOLIFE_SUITE_PRUNE       off (or 0, false, no): remove nothing
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -149,7 +149,10 @@ fi
 # the two roots this script owns, checked after resolving it. It removes a
 # copy or an environment only while holding its lock (taken without
 # waiting: a held lock means a run is using it) and never this run's own.
-# An environment also stays while any process runs from it, and goes only
+# Either also stays while a process works in it or runs from it (its
+# working directory or argv[0] lies inside: a shell cd'd into a copy by
+# hand), and nothing is pruned while a root is itself a symlink, which
+# could point it at something broad. An environment goes only
 # while the lock of the copy it belongs to is held here too: a commit
 # dispatched from before this pruner takes no environment lock, but it does
 # take its copy's. A copy's lock file outlives the copy (a run from before
@@ -158,9 +161,14 @@ fi
 # before it is deleted, so an interrupted delete never leaves a half copy a
 # later run would take for whole; later runs finish such leftovers. Mirrors
 # are shared by every copy of a repository and are left alone.
+#
+# Not covered: a run of an older commit, or a worktree-mode run, holds no
+# environment lock, so while uv installs into its environment (argv[0] is
+# uv, not the environment's python) only its copy's lock, if any, keeps
+# that environment. Pruning it then fails that one run; nothing else.
 prune_suite_cache() {
     set +eu
-    [[ "${PSEUDOLIFE_SUITE_PRUNE:-}" == off ]] && return 0
+    case "${PSEUDOLIFE_SUITE_PRUNE,,}" in off|0|false|no) return 0 ;; esac
     local days="${PSEUDOLIFE_SUITE_PRUNE_DAYS:-3}" keep="${PSEUDOLIFE_SUITE_KEEP:-8}"
     if [[ ! "$days" =~ ^[0-9]+$ || ! "$keep" =~ ^[0-9]+$ ]]; then
         echo "wsl-suite: PSEUDOLIFE_SUITE_PRUNE_DAYS and PSEUDOLIFE_SUITE_KEEP take whole numbers; not pruning" >&2
@@ -170,6 +178,10 @@ prune_suite_cache() {
     command -v flock >/dev/null 2>&1 || return 0
     local work_dir="$HOME/.cache/pseudolife-suite/work"
     local work_root="" env_root="" now max_age
+    if [[ -L "${work_dir%/work}" || -L "$work_dir" || -L "$venv_root" ]]; then
+        echo "wsl-suite: not pruning: ${work_dir%/work}, $work_dir or $venv_root is a symlink; only real directories are pruned" >&2
+        return 0
+    fi
     [[ -d "$work_dir" ]] && work_root="$(realpath -e -- "$work_dir")"
     [[ -d "$venv_root" ]] && env_root="$(realpath -e -- "$venv_root")"
     [[ -n "$work_root$env_root" ]] || return 0
@@ -232,16 +244,21 @@ prune_suite_cache() {
         exec {fd}>&-
         return 1
     }
-    # Whether any process runs from directory $1 (resolved) or $2 (as a run
-    # names it): its argv[0] is inside either. Read without forking; nothing
-    # to read where there is no /proc.
-    runs_from() {
-        local dir arg0
+    # Whether any process uses directory $1 (resolved) or $2 (as a run names
+    # it): its argv[0], or its working directory, lies inside either. One
+    # find reads every working directory; nothing to read where there is
+    # no /proc.
+    in_use() {
+        local dir arg0 cwd
         for dir in /proc/[0-9]*; do
             arg0=""
             IFS= read -r -d '' arg0 2>/dev/null < "$dir/cmdline"
             [[ "$arg0" == "$1"/* || "$arg0" == "$2"/* ]] && return 0
         done
+        while IFS= read -r cwd; do
+            [[ "$cwd" == "$1" || "$cwd" == "$1"/* || "$cwd" == "$2" || "$cwd" == "$2"/* ]] \
+                && return 0
+        done < <(find /proc/[0-9]*/cwd -maxdepth 0 -printf '%l\n' 2>/dev/null)
         return 1
     }
     # The environment a copy's run uses: keyed, as above, by the copy's
@@ -289,7 +306,8 @@ prune_suite_cache() {
             if may_go "${line%% *}" && try_lock "$path.lock"; then
                 # A run may have finished with it since it was read.
                 t="$(last_use "$path.lock" "$path" "$path/.git/HEAD" "$path/.git/index")"
-                if may_go "$t" && remove_owned "$path" "$work_root"; then
+                if may_go "$t" && ! in_use "$path" "$work_dir/${path##*/}" \
+                        && remove_owned "$path" "$work_root"; then
                     copies+=1
                     count=$(( count - 1 ))
                     removed=1
@@ -327,7 +345,7 @@ prune_suite_cache() {
             fi
             if try_lock "$path.lock"; then
                 t="$(last_use "$path.lock" "$path" "$path/pyvenv.cfg" "$path"/lib/python*/site-packages)"
-                if may_go "$t" && ! runs_from "$path" "$venv_root/${path##*/}" \
+                if may_go "$t" && ! in_use "$path" "$venv_root/${path##*/}" \
                         && remove_owned "$path" "$env_root"; then
                     rm -f -- "$path.lock"
                     envs+=1

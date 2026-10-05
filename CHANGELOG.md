@@ -18,14 +18,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   then the least recently used past `PSEUDOLIFE_SUITE_KEEP` of each
   (default 8), and lock files whose directory is gone once they are as old,
   and prints one line saying what went and how much it freed.
-  `PSEUDOLIFE_SUITE_PRUNE=off` turns it off; `ops/remote-suite.ps1`
+  `PSEUDOLIFE_SUITE_PRUNE=off` (or `0`, `false`, `no`) turns it off; `ops/remote-suite.ps1`
   forwards all three to the second machine. It removes a copy or
   environment only while holding its lock (taken without waiting, so one a
-  run is using stays), never the run's own, never an environment a process
-  runs from, and an environment only while also holding its copy's lock
-  (which runs of older commits still take). It removes only real
-  directories directly inside the two roots it owns, checked after
-  resolving them, and renames each out of the way before deleting it, so an
+  run is using stays), never the run's own, never one a process works in
+  or runs from (its working directory or argv[0] inside), and an
+  environment only while also holding its copy's lock (which runs of older
+  commits still take). It removes only real directories directly inside
+  the two roots it owns, checked after resolving them, prunes nothing while
+  a root is itself a symlink, and renames each out of the way before deleting it, so an
   interrupted prune leaves nothing a later run would reuse half-deleted.
   Mirrors are left alone. A run now holds a shared lock on its environment
   (`<env>.lock` beside it) for its whole length, and reopens a lock file

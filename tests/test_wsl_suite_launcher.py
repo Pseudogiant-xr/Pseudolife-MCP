@@ -493,6 +493,73 @@ def test_pruning_spares_an_environment_a_process_runs_from(tmp_path):
 
 
 @_LINUX_ONLY
+def test_pruning_spares_a_copy_a_process_works_in(tmp_path):
+    """A copy with no lock held stays while a process's working directory
+    lies inside it (a shell cd'd into it by hand), and goes once none does."""
+    home = tmp_path / "home"
+    copy = _copy(home, "e36d1995-debugging", days=10)
+    (copy / "sub").mkdir()
+    _age_tree(copy, 10)
+    shell = subprocess.Popen(["sleep", "300"], cwd=copy / "sub")
+    try:
+        proc = _launch(tmp_path)
+        assert proc.returncode == 0, proc.stderr
+        assert copy.exists(), proc.stderr
+    finally:
+        shell.kill()
+        shell.wait(timeout=10)
+    proc = _launch(tmp_path)
+    assert not copy.exists(), proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_spares_an_environment_whose_lock_a_run_holds(tmp_path):
+    """A run holds its environment's lock shared for its whole length; an
+    environment so held stays, though old and with no copy of its own."""
+    import fcntl
+
+    home = tmp_path / "home"
+    env = _env(home, "worktree-run-0badf00d", days=10, lock=True)
+    with open(home / VENVS / "worktree-run-0badf00d.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE_DAYS="0", PSEUDOLIFE_SUITE_KEEP="0")
+    assert proc.returncode == 0, proc.stderr
+    assert env.exists(), proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_takes_names_with_spaces_and_glob_characters_literally(tmp_path):
+    """A stale copy named with a space and glob characters goes with its
+    environment; a recent copy its name would match as a pattern stays."""
+    home = tmp_path / "home"
+    odd = _copy(home, "e36d1995-a b[1]*", days=10)
+    odd_env = _env(home, _env_of(home, "e36d1995-a b[1]*"), days=10)
+    match = _copy(home, "e36d1995-a b1x", days=0)
+    match_env = _env(home, _env_of(home, "e36d1995-a b1x"), days=10)
+    proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert not odd.exists() and not odd_env.exists(), proc.stderr
+    assert match.exists() and match_env.exists(), proc.stderr
+    assert "pruned 1 test copy and 1 environment " in proc.stderr, proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_refuses_a_symlinked_root(tmp_path):
+    """A root that is itself a symlink could point at something broad, so
+    nothing is pruned through it, and one line says why."""
+    home = tmp_path / "home"
+    elsewhere = tmp_path / "elsewhere"
+    _env(elsewhere, "old-0badf00d", days=10)
+    real = elsewhere / VENVS
+    (home / VENVS).parent.mkdir(parents=True)
+    (home / VENVS).symlink_to(real, target_is_directory=True)
+    proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert (real / "old-0badf00d").exists(), proc.stderr
+    assert "not pruning" in proc.stderr and "is a symlink" in proc.stderr, proc.stderr
+
+
+@_LINUX_ONLY
 def test_pruning_never_follows_a_symlink_out_of_its_root(tmp_path):
     """A stale entry or lock file that is a symlink stays, and so does what
     it points at: only real directories inside the two roots are removed."""
@@ -535,9 +602,10 @@ def test_pruning_finishes_what_an_interrupted_prune_left(tmp_path):
 
 
 @_LINUX_ONLY
-def test_pruning_can_be_turned_off(tmp_path):
+@pytest.mark.parametrize("value", ["off", "OFF", "0", "False", "no"])
+def test_pruning_can_be_turned_off(tmp_path, value):
     stale = _copy(tmp_path / "home", "e36d1995-stale", days=10)
-    proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE="off")
+    proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE=value)
     assert proc.returncode == 0, proc.stderr
     assert stale.exists() and not _pruned_lines(proc.stderr), proc.stderr
 
