@@ -95,6 +95,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   credential, never its text. The codes are unchanged, so callers keyed on
   them keep working; the REST API carries the new sentences in its existing
   `detail` field.
+
 ### Changed (2026-10-05 — each memory tool says which sibling fits instead, and marks tools your tier hides)
 - A model reading one tool's description now learns when another tool is
   the right call. `memory_fact_set` sends a narrative, decision or
