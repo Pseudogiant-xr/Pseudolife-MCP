@@ -693,8 +693,8 @@ explicitly deferred presentation boundary in PORTING. Earlier receipts retain
 their original candidate identities, including the corrected distinction
 between authenticated peer observations and local no-board observations.
 
-The seven native lease files now contain 2882 lines against 1889 in the current
-Python lease module (1.52567); the Python denominator includes deferred operator
+The seven native lease files now contain 2951 lines against 1889 in the current
+Python lease module (1.56220); the Python denominator includes deferred operator
 modes. Current-master and shared-helper source integration uses Python
 0.17.0/schema55, and committed helper admission passes. The latest review repairs
 cover run-option ambiguity and ISO holder timestamps with 25 exact byte pairs
@@ -761,3 +761,55 @@ combined targeted checks pass on Linux (129) and Windows (121, with eight
 Unix-only skips). R1 remains pending fresh successor review; no additional
 daemon proof or affected help-row recapture has run on this repair. CLI-LEASE
 and the third traceback scope decision remain deferred.
+
+The lease candidate now integrates the reviewed version dependency `804e829e`,
+including its startup contract, historical evidence packet and runtime erratum.
+The three-value preparation API, secure token writer, complete helper inventory,
+process context and original/selected target checks are retained. Both sets of
+invocation regressions remain: four lease context/owned-copy refusals and the
+version snapshot, preparation, prelaunch and postcapture refusals. The aligned
+targeted selection passes 133 checks on Linux and 121 on Windows, with twelve
+Unix-only skips; it includes the existing measurement API tests. The version
+invocation repair has scoped independent approval at `804e829e`; fresh review of
+this aligned lease tree remains pending. These checks do not establish whole-mode
+acceptance, recapture the affected Linux help rows, extend the two approved
+traceback exclusions or provide new daemon/timing evidence.
+
+At `b1359c8f`, a bounded Linux proof against the disposable Python 0.17.0/schema55
+daemon passes one basic check pair with four controls and three FIFO process
+pairs. Both arms observe waiter one and then waiter two queued behind a holder,
+and execute holder, waiter one, waiter two in that order. Process streams, exits
+and home-file bytes match; raw queue identities and enqueue times are retained
+without cross-arm equality claims. Post-release checks show no holder or queued
+waiter, and owned processes, database and homes are cleaned up. This is a
+point-in-time Linux FIFO proof, not Windows, timeout, capacity, renewal, signal
+or timing acceptance. Independent review of the complete candidate at that head
+then found three blocking defects: mutable environment receipts, host timestamp
+formatting and non-ASCII registration headers. Their successor repair is below;
+the historical proof does not establish acceptance of that successor.
+
+The successor repairs the original counterexamples. The fixture retains an independent
+launch environment and refuses changes after capture and context exit/poststate
+collection; eleven watched regressions fail before repair on each platform.
+Focused fixture and compatibility checks pass 144 tests on Linux and 132 on
+Windows, with twelve Unix-only skips. Native timestamp formatting now uses each
+host's CRT conversion and formatting, including its actual range and year
+padding. Registration retains JSON string codepoints and refuses non-ASCII
+instance headers before sending, including unpaired surrogates. Thirty-five
+owned-peer public pairs match exactly per platform, including the original five
+review counterexamples, two surrogate-header cases and 28 timestamp boundaries.
+Native lease checks pass 36 tests on Linux and 37 on Windows; fmt and locked
+builds pass on both. These are bounded repair checks with actual matching request
+traffic, not a new real-daemon proof or complete mode acceptance. Fresh combined
+review, committed successor proofs, current CI and measurements remain pending;
+the third traceback exclusion remains unapproved and CLI-LEASE stays deferred.
+
+Independent successor review closes the environment-receipt finding but retains
+two code blockers. On Linux, a successful host time conversion can yield a year
+that Python rejects when converting its tuple for formatting; check must return
+the exact exit-70 error without a partial report. Python also transmits ASCII
+DEL in a malformed registration reply's instance fields, while the native HTTP
+header type refuses it before transport, changing requests, exit and lock state.
+Raw counterexamples from both platforms remain retained. A proposed DEL-case
+deferral is unapproved; no unchecked header construction or comparison exception
+is adopted. This candidate remains local pending repair and fresh review.

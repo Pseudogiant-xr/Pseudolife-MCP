@@ -134,6 +134,101 @@ fn has_header(header: &str, key: &str, value: &str) -> bool {
 }
 
 #[test]
+fn timestamp_clocks_match_host_cpython_boundaries() {
+    let grid: Value = serde_json::from_str(include_str!(
+        "fixtures/lease_timestamp_clock_cpython311.json"
+    ))
+    .unwrap();
+    for case in grid["cases"].as_array().unwrap() {
+        let stamp = case["stamp"].clone();
+        let expected = case[if cfg!(windows) { "windows" } else { "linux" }]
+            .as_str()
+            .unwrap();
+        let home = Home::new();
+        let (url, peer) = server(1, move |_, header, _| {
+            assert!(header.starts_with("POST /api/coordination/leases "));
+            assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
+            (
+                200,
+                json!({"leases":[{"name":"resource","holder":{"label":"holder"},
+                    "expected_end":stamp,"queued":1,
+                    "queue":[{"label":"waiter","enqueued_at":stamp}]}]}),
+            )
+        });
+        let output = home
+            .command(&url)
+            .env("TZ", "UTC0")
+            .args(["lease", "check", "resource"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains(&format!(", expected end {expected}")),
+            "timestamp {}: {text:?}",
+            case["stamp"]
+        );
+        assert!(text.contains(&format!("waiter since {expected}")));
+        assert!(!home.0.join("lease-resource.lock").exists());
+        assert_eq!(peer.join().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn nonascii_registration_headers_fall_back_before_lease_or_release() {
+    for (field, surrogate) in [
+        ("agent_id", false),
+        ("credential", false),
+        ("agent_id", true),
+        ("credential", true),
+    ] {
+        let home = Home::new();
+        let (url, peer) = server_raw(1, move |_, header, _| {
+            assert!(header.starts_with("POST /api/coordination/register "));
+            assert!(has_header(header, "Authorization", "Bearer fixture-bearer"));
+            let mut reply = registered();
+            reply[field] = json!("nonascii-é");
+            let raw = if surrogate {
+                // A Python string can contain an unpaired JSON surrogate.
+                if field == "agent_id" {
+                    br#"{"agent_id":"agent-\ud800","credential":"fixture-key"}"#.to_vec()
+                } else {
+                    br#"{"agent_id":"fixture-agent","credential":"key-\ud800"}"#.to_vec()
+                }
+            } else {
+                serde_json::to_vec(&reply).unwrap()
+            };
+            (200, raw)
+        });
+        let output = home
+            .command(&url)
+            .args([
+                "lease",
+                "run",
+                "resource",
+                "--timeout",
+                "0",
+                "--",
+                "missing-review-child",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(127));
+        assert!(output.stdout.is_empty());
+        let newline = if cfg!(windows) { "\r\n" } else { "\n" };
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            format!(
+                "lease: board skipped: the board failed unexpectedly (UnicodeEncodeError); waiting on the local lock for 'resource' alone (not FIFO){newline}lease: command not found: missing-review-child{newline}"
+            )
+        );
+        assert!(home.0.join("lease-resource.lock").exists());
+        assert_eq!(peer.join().unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn queued_timeout_leaves_its_ticket_without_starting_a_child() {
     let home = Home::new();
     let (url, peer) = server(3, |index, header, body| {

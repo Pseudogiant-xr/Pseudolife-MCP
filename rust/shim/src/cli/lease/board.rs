@@ -1,4 +1,4 @@
-use super::json::{Value, json};
+use super::json::{Text, Value, json};
 use std::{
     sync::{
         Arc,
@@ -24,8 +24,8 @@ impl Failure {
     }
 }
 struct Session {
-    agent: Option<String>,
-    credential: Option<String>,
+    agent: Option<Text>,
+    credential: Option<Text>,
     answered: bool,
 }
 pub struct Board {
@@ -49,9 +49,21 @@ impl Board {
             .body(body.to_string())
             .timeout(Duration::from_secs(timeout));
         if instance && let (Some(agent), Some(key)) = (&session.agent, &session.credential) {
+            // httpx encodes each instance header as ASCII before sending.
+            // Registration retains the address, so cleanup fails the same way.
+            if agent
+                .codepoints()
+                .iter()
+                .chain(key.codepoints())
+                .any(|&c| c > 127)
+            {
+                return Err(Failure::refused(
+                    "the board failed unexpectedly (UnicodeEncodeError)",
+                ));
+            }
             request = request
-                .header("X-PL-Agent", agent)
-                .header("X-PL-Agent-Key", key);
+                .header("X-PL-Agent", agent.clean())
+                .header("X-PL-Agent-Key", key.clean());
         }
         let failure = |e: reqwest::Error| Failure {
             text: format!(
@@ -82,12 +94,15 @@ impl Board {
             return Ok(());
         }
         let reply=self.post("register",json!({"label":"lease-run","project":project,"task":task,"status":"","capabilities":json!({"resumable":false}),"wake_enabled":false}),false,10).await?;
-        let agent = reply["agent_id"].as_str().filter(|s| !s.is_empty());
-        let key = reply["credential"].as_str().filter(|s| !s.is_empty());
-        let (Some(agent), Some(key)) = (agent, key) else {
-            return Err(Failure::refused(
-                "the daemon's registration reply carried no address",
-            ));
+        let (agent, key) = match (&reply["agent_id"], &reply["credential"]) {
+            (Value::String(agent), Value::String(key)) if !agent.is_empty() && !key.is_empty() => {
+                (agent, key)
+            }
+            _ => {
+                return Err(Failure::refused(
+                    "the daemon's registration reply carried no address",
+                ));
+            }
         };
         let mut session = self.session.lock().await;
         session.agent = Some(agent.to_owned());

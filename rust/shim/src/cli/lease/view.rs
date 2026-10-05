@@ -1,6 +1,6 @@
 use super::json::{Text, Value, json};
 use super::{args::Args, board, lock};
-use chrono::{Datelike, Local, TimeZone};
+use chrono::Datelike;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 pub fn truth(value: &Value) -> bool {
@@ -74,20 +74,74 @@ pub fn span(seconds: f64) -> String {
 fn number(value: &Value) -> Option<f64> {
     value.as_f64().filter(|n| n.is_finite())
 }
+// CPython 3.11 uses the host CRT's localtime and strftime, whose timestamp
+// domains, time-zone rules and year formatting differ from Chrono's.
+#[allow(unsafe_code)]
 fn clock(stamp: f64) -> String {
-    if !stamp.is_finite() || stamp.abs() > i64::MAX as f64 {
+    if !stamp.is_finite() || stamp < i64::MIN as f64 || stamp >= -(i64::MIN as f64) {
         return "?".into();
     }
-    let Some(local) = Local.timestamp_opt(stamp.floor() as i64, 0).single() else {
+    #[cfg(unix)]
+    use libc::{strftime, tm as Tm};
+    #[cfg(windows)]
+    #[repr(C)]
+    // UCRT <corecrt_wtime.h>: struct tm has nine C ints; __time64_t is i64.
+    struct Tm {
+        tm_sec: i32,
+        tm_min: i32,
+        tm_hour: i32,
+        tm_mday: i32,
+        tm_mon: i32,
+        tm_year: i32,
+        tm_wday: i32,
+        tm_yday: i32,
+        tm_isdst: i32,
+    }
+    #[cfg(windows)]
+    unsafe extern "C" {
+        fn _localtime64_s(local: *mut Tm, stamp: *const i64) -> i32;
+        fn strftime(
+            out: *mut std::ffi::c_char,
+            size: usize,
+            format: *const std::ffi::c_char,
+            local: *const Tm,
+        ) -> usize;
+    }
+    let convert = |stamp: i64| {
+        // SAFETY: both CRT tm layouts permit zero initialization. The source
+        // and output pointers stay valid for the call; only success is read.
+        let mut local: Tm = unsafe { std::mem::zeroed() };
+        #[cfg(windows)]
+        let success = unsafe { _localtime64_s(&mut local, &stamp) == 0 };
+        #[cfg(unix)]
+        let success = {
+            let stamp: libc::time_t = stamp.try_into().ok()?;
+            unsafe { !libc::localtime_r(&stamp, &mut local).is_null() }
+        };
+        success.then_some(local)
+    };
+    let Some(local) = convert(stamp.floor() as i64) else {
         return "?".into();
     };
-    local
-        .format(if local.date_naive() == Local::now().date_naive() {
-            "%H:%M"
-        } else {
-            "%Y-%m-%d %H:%M"
-        })
-        .to_string()
+    let today = convert(now().floor() as i64).is_some_and(|today| {
+        (local.tm_year, local.tm_mon, local.tm_mday) == (today.tm_year, today.tm_mon, today.tm_mday)
+    });
+    let format = if today { c"%H:%M" } else { c"%Y-%m-%d %H:%M" };
+    let mut output = [0u8; 64];
+    // SAFETY: the CRT receives a valid tm, a NUL-terminated static format,
+    // and the writable buffer's exact length. Its count excludes the NUL.
+    let count = unsafe {
+        strftime(
+            output.as_mut_ptr().cast(),
+            output.len(),
+            format.as_ptr(),
+            &local,
+        )
+    };
+    if count == 0 || count >= output.len() {
+        return "?".into();
+    }
+    String::from_utf8(output[..count].to_vec()).unwrap_or_else(|_| "?".into())
 }
 pub fn now() -> f64 {
     std::time::SystemTime::now()
