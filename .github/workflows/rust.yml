@@ -16,6 +16,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 4
+  CUDA_VISIBLE_DEVICES: '-1'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
 
 jobs:
   rust:
@@ -116,6 +119,8 @@ jobs:
       - name: Build candidate
         working-directory: rust
         run: cargo build --locked --release --bin pseudolife-stdio -j 4
+      - name: Run CLI process fixture and help drift guards
+        run: python -m pytest -q evals/rust_port/test_cli_dispatch_lane.py evals/rust_port/test_cli_process.py evals/rust_baseline/test_cli_measurement.py
       - name: Run unchanged candidates and differential judges
         shell: pwsh
         run: |
@@ -158,6 +163,29 @@ jobs:
           $phase2Evidence = Join-Path $env:RUNNER_TEMP 'phase2-cli-tests'
           $phase2Receipt = Join-Path $checkoutRoot "evals/results/rust-phase2-ci-$env:RUNNER_OS.json"
           & $oraclePython -c $phase2Bootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --evidence-directory $phase2Evidence --out $phase2Receipt --offline-resource-checked-at $resourceCheckedAt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $processBootstrap = @'
+          import os, pathlib, subprocess, sys, tempfile
+          from psycopg.conninfo import conninfo_to_dict, make_conninfo
+          from pseudolife_memory.storage.embedded_pg import attach_or_start
+          from evals.rust_port.provenance import module_command
+          root = pathlib.Path(sys.argv[1]).resolve()
+          with tempfile.TemporaryDirectory(prefix="cli-corpus-postgres-") as directory:
+              dsn, owned = attach_or_start(pathlib.Path(directory))
+              if owned is None:
+                  raise RuntimeError("fresh corpus PostgreSQL unexpectedly attached")
+              try:
+                  options = conninfo_to_dict(dsn)
+                  options["dbname"] = "postgres"
+                  env = dict(os.environ, PSEUDOLIFE_BENCH_ADMIN_URL=make_conninfo(**options))
+                  command = module_command("evals.rust_port.cli_process", root, sys.argv[2:])
+                  result = subprocess.run(command, cwd=root, env=env)
+              finally:
+                  owned.stop()
+          raise SystemExit(result.returncode)
+          '@
+          $processReceipt = Join-Path $env:RUNNER_TEMP 'phase2b-cli-process.json'
+          & $oraclePython -c $processBootstrap $oracleSource --oracle-root $oracleSource --candidate-json $candidateCommand --candidate-root $checkoutRoot --out $processReceipt --offline-resource-checked-at $resourceCheckedAt
           exit $LASTEXITCODE
       - name: Retain comparison summary
         if: always()
@@ -167,4 +195,5 @@ jobs:
           path: |
             evals/results/rust-phase1-ci-*.json
             evals/results/rust-phase2-ci-*.json
+            ${{ runner.temp }}/phase2b-cli-process.json
           if-no-files-found: warn

@@ -47,8 +47,8 @@ def process_tests(command, root, directory, label):
             "cleanup": dict(process.owned_cleanup)}
 
 
-def graded_controls(records):
-    """Change only actual observations; each CLI field must be load-bearing."""
+def judge_sensitivity_controls(records):
+    """Oracle self-record mutations check the judge, not candidate behavior."""
     controls = []
     for record in records:
         expected = record["response"]
@@ -87,7 +87,7 @@ def run(root, command, candidate_root, evidence_directory, resource):
                          cwd=root, home=directory / "self-replay")
         candidate = replay(transcript, cli_prefix=command, base_url=None,
                            cwd=root, home=directory / "candidate")
-    controls = graded_controls(records)
+    controls = judge_sensitivity_controls(records)
     evidence_directory.mkdir(parents=True, exist_ok=True)
     tests = {name: process_tests(prefix, root, evidence_directory, name) for name, prefix in (
         ("python", python), ("candidate", command))}
@@ -102,7 +102,7 @@ def run(root, command, candidate_root, evidence_directory, resource):
             "policy": "ordinary exit and exact UTF-8 stdout/stderr bytes for valid Unicode scalar argv; "
                       "Windows CRLF, LF elsewhere; no normalization",
             "transcript": transcript, "python_self_replay": control,
-            "candidate_replay": candidate, "graded_controls": controls,
+            "candidate_replay": candidate, "judge_sensitivity_controls": controls,
             "process_tests": tests, "unchanged_sources_sha256": before,
             "passed": control["passed"] and candidate["passed"]
                       and all(cell["rejected"] for cell in controls)

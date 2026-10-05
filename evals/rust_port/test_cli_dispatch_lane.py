@@ -21,6 +21,37 @@ def test_cli_environment_selector_and_explicit_override(monkeypatch):
     assert config._port_cli_prefix == ["explicit-candidate"]
 
 
+def test_public_cli_subprocess_adapter_routes_only_public_entrypoints():
+    import sys
+    assert pytest_plugin.public_cli_arguments([sys.executable, "-m", "pseudolife_memory.cli", "doctor"]) == ["doctor"]
+    assert pytest_plugin.public_cli_arguments(["pseudolife-mcp", "lease", "list"]) == ["lease", "list"]
+    assert pytest_plugin.public_cli_arguments([sys.executable, "-m", "pseudolife_memory.doctor_cli"]) is None
+    assert pytest_plugin.boundary("tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes") is None
+    assert pytest_plugin.boundary("tests/test_cli_dispatch.py::test_version_from_a_runtime_names_its_directory_and_commit") is None
+
+
+def test_global_cli_selector_refuses_deferred_doctor(monkeypatch):
+    doctor = "tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not dispatch doctor"))
+    config = SimpleNamespace(_port_cli_prefix=["candidate"], getoption=lambda name: False)
+    with pytest.raises(pytest.UsageError, match="no process adapter"):
+        pytest_plugin.pytest_collection_finish(SimpleNamespace(config=config, items=[SimpleNamespace(nodeid=doctor)]))
+    request = SimpleNamespace(config=config, node=SimpleNamespace(nodeid=doctor))
+    with pytest.raises(pytest.UsageError, match="not implemented"):
+        pytest_plugin._port_selected_boundary.__wrapped__(request)
+
+
+def test_stdio_full_suite_leaves_doctor_in_python(monkeypatch):
+    doctor = "tests/test_shim.py::test_doctor_checks_registered_runtime_handshake_without_bank_writes"
+    stdio = next(node for node, mode in pytest_plugin.MANIFEST["mapped"].items() if mode == "stdio-shim-process")
+    config = SimpleNamespace(_port_stdio_prefix=["candidate"], getoption=lambda name: True,
+                             pluginmanager=SimpleNamespace(getplugin=lambda name: None))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not dispatch doctor"))
+    pytest_plugin.pytest_collection_finish(SimpleNamespace(config=config, items=[
+        SimpleNamespace(nodeid=doctor), SimpleNamespace(nodeid=stdio)]))
+    pytest_plugin._port_selected_boundary.__wrapped__(SimpleNamespace(config=config, node=SimpleNamespace(nodeid=doctor)))
+
+
 @pytest.mark.parametrize("value", ["invalid", "[]", '[""]', '[3]', '{}'])
 def test_cli_environment_selector_fails_closed(monkeypatch, value):
     monkeypatch.setenv("PSEUDOLIFE_PORT_CLI_JSON", value)
