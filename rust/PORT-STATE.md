@@ -693,12 +693,23 @@ explicitly deferred presentation boundary in PORTING. Earlier receipts retain
 their original candidate identities, including the corrected distinction
 between authenticated peer observations and local no-board observations.
 
-The seven native lease files now contain 2766 lines against 1889 in the current
-Python lease module (1.46427); the Python denominator includes deferred operator
+The seven native lease files now contain 2882 lines against 1889 in the current
+Python lease module (1.52567); the Python denominator includes deferred operator
 modes. Current-master and shared-helper source integration uses Python
 0.17.0/schema55, and committed helper admission passes. The latest review repairs
 cover run-option ambiguity and ISO holder timestamps with 25 exact byte pairs
-and 100 rejected output controls. Ten surrogate-name list observations match
+and 100 rejected output controls. A subsequent CPython grammar comparison fixes
+signed-year refusal and numeric week-date separator selection: 2059 sampled
+holder strings, six lease units and the affected process test pass. Its 30
+focused public pairs match exactly, with 120 output controls rejected; the
+previous binary differs in 14 of those pairs. Independent review then found
+seven UTC-marker/NUL counterexamples. The focused repair passes 2113 sampled
+strings, six lease units and the affected process test; all 22 focused public
+pairs match, including those seven failures, with 88 output controls rejected.
+These are focused Windows results, not complete grammar or cross-platform
+acceptance. Original integration preparation retained 230 passed, one failed and
+two deselected checks before the separate committed helper-admission repair.
+Ten surrogate-name list observations match
 the failure exit, terminal exception and unchanged state, but their full Python
 tracebacks remain unmatched; this third case is outside the two approved
 presentation exclusions. Fresh repair review, both-platform real daemon/storage

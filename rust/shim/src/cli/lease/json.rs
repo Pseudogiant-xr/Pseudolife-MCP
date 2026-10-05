@@ -15,6 +15,9 @@ impl Text {
         let valid = points.iter().copied().map(char::from_u32).collect();
         Self { points, valid }
     }
+    pub(super) fn codepoints(&self) -> &[u32] {
+        &self.points
+    }
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }

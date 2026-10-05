@@ -1,4 +1,4 @@
-use super::json::{Value, json};
+use super::json::{Text, Value, json};
 use super::{args::Args, board, lock};
 use chrono::{Datelike, Local, TimeZone};
 use std::{collections::BTreeMap, fs, path::PathBuf};
@@ -283,7 +283,7 @@ fn local_text(local: &Value) -> String {
         return "held".into();
     }
     let started = match &local["started"] {
-        Value::String(s) => iso_clock(&s.clean()),
+        Value::String(s) => iso_clock(s),
         _ => None,
     };
     format!(
@@ -297,112 +297,193 @@ fn local_text(local: &Value) -> String {
 // Python's fromisoformat accepts basic/calendar/week dates, one arbitrary
 // separator, reduced-precision times and fractional seconds or UTC offsets.
 // Only the original hour and minute are displayed; no timezone conversion occurs.
-fn iso_clock(text: &str) -> Option<String> {
-    fn component(text: &str) -> Option<u32> {
-        (text.len() == 2 && text.bytes().all(|b| b.is_ascii_digit()))
-            .then(|| text.parse().ok())
-            .flatten()
+fn iso_clock(text: &Text) -> Option<String> {
+    // CPython sanitizes a surrogate only at the first possible date separator;
+    // every other surrogate must still fail UTF-8 admission.
+    let separator = [7, 8, 10].into_iter().find(|&i| {
+        text.codepoints()
+            .get(i)
+            .is_some_and(|c| (0xd800..=0xdfff).contains(c))
+    });
+    let sanitized: String = text
+        .codepoints()
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            if separator == Some(i) {
+                Some('T')
+            } else {
+                char::from_u32(c)
+            }
+        })
+        .collect::<Option<_>>()?;
+    let text = sanitized.as_str();
+    fn digits(bytes: &[u8]) -> Option<u32> {
+        bytes.iter().try_fold(0, |value, byte| {
+            byte.is_ascii_digit()
+                .then(|| value * 10 + u32::from(byte - b'0'))
+        })
     }
-    fn time(text: &str, offset: bool) -> Option<(u32, u32)> {
-        let (whole, fraction) = text
-            .find(['.', ','])
-            .map_or((text, None), |i| (&text[..i], Some(&text[i + 1..])));
-        if fraction.is_some_and(|f| f.is_empty() || !f.bytes().all(|b| b.is_ascii_digit())) {
+    // Follow CPython 3.11's separator selection before validating the date.
+    // A digit separator is ambiguous with an ISO weekday; the digit-run
+    // parity and extended-week dash rule select the boundary, not date validity.
+    fn date_end(bytes: &[u8]) -> Option<usize> {
+        if bytes.len() < 7 {
             return None;
         }
-        let fields: Vec<_> = if whole.contains(':') {
-            whole.split(':').collect()
-        } else if whole.len() <= 6 && whole.len() % 2 == 0 && whole.is_ascii() {
-            (0..whole.len())
-                .step_by(2)
-                .map(|i| &whole[i..i + 2])
-                .collect()
-        } else {
-            return None;
-        };
-        if fields.is_empty() || fields.len() > 3 {
-            return None;
+        if bytes.len() == 7 {
+            return Some(7);
         }
-        let hour = component(fields[0])?;
-        let minute = if fields.len() > 1 {
-            component(fields[1])?
+        if bytes[4] == b'-' {
+            if bytes[5] != b'W' {
+                return Some(10);
+            }
+            if bytes.len() > 8 && bytes[8] == b'-' {
+                if bytes.len() == 9 {
+                    return None;
+                }
+                return Some(if bytes.get(10).is_some_and(u8::is_ascii_digit) {
+                    8
+                } else {
+                    10
+                });
+            }
+            Some(8)
+        } else if bytes[4] == b'W' {
+            let end = (7..bytes.len())
+                .find(|&i| !bytes[i].is_ascii_digit())
+                .unwrap_or(bytes.len());
+            Some(if end < 9 {
+                end
+            } else if end % 2 == 0 {
+                7
+            } else {
+                8
+            })
         } else {
-            0
-        };
-        let second = if fields.len() > 2 {
-            component(fields[2])?
-        } else {
-            0
-        };
-        if if offset {
-            hour * 3600 + minute * 60 + second >= 86400
-        } else {
-            hour > 23 || minute > 59 || second > 59
-        } {
-            return None;
+            Some(8)
         }
-        Some((hour, minute))
     }
-    let year = text.get(..4)?.parse::<i32>().ok()?;
+    // The C parser reads a separator after each two-digit component and can
+    // treat surplus digits after seconds as a fraction without a decimal mark.
+    // Its nonnegative trailing marker is allowed for the clock when a timezone
+    // follows, but rejected for a timezone or a clock without a timezone.
+    fn time(bytes: &[u8], end: usize) -> Option<([u32; 3], bool)> {
+        let mut fields = [0; 3];
+        let mut pos = 0;
+        let mut separated = false;
+        for (i, field) in fields.iter_mut().enumerate() {
+            *field = digits(bytes.get(pos..pos + 2)?)?;
+            pos += 2;
+            let separator = bytes.get(pos).copied().unwrap_or(0);
+            pos += 1;
+            if i == 0 {
+                separated = separator == b':';
+            }
+            if pos >= end {
+                return Some((fields, separator != 0));
+            }
+            if separated && separator == b':' {
+                continue;
+            }
+            if matches!(separator, b'.' | b',') {
+                break;
+            }
+            if separated {
+                return None;
+            }
+            pos -= 1;
+        }
+        let fraction_end = end.min(pos + 6);
+        digits(bytes.get(pos..fraction_end)?)?;
+        pos = fraction_end;
+        while bytes.get(pos).is_some_and(u8::is_ascii_digit) {
+            pos += 1;
+        }
+        Some((fields, bytes.get(pos).copied().unwrap_or(0) != 0))
+    }
+    let bytes = text.as_bytes();
+    let year = digits(bytes.get(..4)?)? as i32;
     if !(1..=9999).contains(&year) {
         return None;
     }
-    let end = [
-        ("dddd-dd-dd", "%Y-%m-%d"),
-        ("dddddddd", "%Y%m%d"),
-        ("dddd-Wdd-d", "%G-W%V-%u"),
-        ("ddddWddd", "%GW%V%u"),
-    ]
-    .into_iter()
-    .find_map(|(pattern, format)| {
-        let n = pattern.len();
-        text.get(..n)
-            .filter(|date| {
-                date.bytes().zip(pattern.bytes()).all(|(c, p)| {
-                    if p == b'd' {
-                        c.is_ascii_digit()
-                    } else {
-                        c == p
-                    }
-                })
-            })
-            .filter(|date| {
-                chrono::NaiveDate::parse_from_str(date, format)
-                    .is_ok_and(|d| (1..=9999).contains(&d.year()))
-            })
-            .map(|_| n)
-    })
-    .or_else(|| {
-        let (end, week) = if text.get(4..6) == Some("-W") {
-            (8, text.get(6..8)?)
-        } else if text.get(4..5) == Some("W") {
-            (7, text.get(5..7)?)
+    let end = date_end(bytes)?;
+    let date = text.get(..end)?;
+    let separated = bytes[4] == b'-';
+    let pos = 4 + usize::from(separated);
+    let valid = if bytes.get(pos) == Some(&b'W') {
+        let week = digits(bytes.get(pos + 1..pos + 3)?)?;
+        let weekday = if end > pos + 3 {
+            let day_pos = pos + 3 + usize::from(separated);
+            if separated && bytes.get(pos + 3) != Some(&b'-') {
+                return None;
+            }
+            digits(bytes.get(day_pos..day_pos + 1)?)?
         } else {
-            return None;
+            1
         };
-        chrono::NaiveDate::from_isoywd_opt(year, component(week)?, chrono::Weekday::Mon)
-            .map(|_| end)
-    })?;
+        let weekday = match weekday {
+            1 => chrono::Weekday::Mon,
+            2 => chrono::Weekday::Tue,
+            3 => chrono::Weekday::Wed,
+            4 => chrono::Weekday::Thu,
+            5 => chrono::Weekday::Fri,
+            6 => chrono::Weekday::Sat,
+            7 => chrono::Weekday::Sun,
+            _ => return None,
+        };
+        chrono::NaiveDate::from_isoywd_opt(year, week, weekday)
+            .is_some_and(|date| (1..=9999).contains(&date.year()))
+    } else {
+        let pattern = if separated { "dddd-dd-dd" } else { "dddddddd" };
+        date.len() == pattern.len()
+            && date.bytes().zip(pattern.bytes()).all(|(c, p)| {
+                if p == b'd' {
+                    c.is_ascii_digit()
+                } else {
+                    c == p
+                }
+            })
+            && chrono::NaiveDate::parse_from_str(
+                date,
+                if separated { "%Y-%m-%d" } else { "%Y%m%d" },
+            )
+            .is_ok()
+    };
+    if !valid {
+        return None;
+    }
     let remaining = &text[end..];
     if remaining.is_empty() {
         return Some("00:00".into());
     }
     let remaining = &remaining[remaining.chars().next()?.len_utf8()..];
-    let (clock, zone) = remaining
-        .find(['+', '-', 'Z'])
-        .map_or((remaining, None), |i| {
-            (&remaining[..i], Some(&remaining[i..]))
-        });
-    if let Some(zone) = zone {
-        if zone != "Z" {
-            if !zone.starts_with(['+', '-']) {
+    let zone_pos = remaining.find(['+', '-', 'Z']).unwrap_or(remaining.len());
+    let (fields, trailing) = time(remaining.as_bytes(), zone_pos)?;
+    if fields[0] > 23 || fields[1] > 59 || fields[2] > 59 {
+        return None;
+    }
+    if zone_pos == remaining.len() {
+        if trailing {
+            return None;
+        }
+    } else {
+        let zone = &remaining[zone_pos..];
+        if zone.starts_with('Z') {
+            // CPython checks the byte after Z for NUL, including the implicit
+            // terminator. Whole-string surrogate admission already ran above.
+            if zone.as_bytes().get(1).is_some_and(|&byte| byte != 0) {
                 return None;
             }
-            time(&zone[1..], true)?;
+        } else {
+            let zone = &zone[1..];
+            let (fields, trailing) = time(zone.as_bytes(), zone.len())?;
+            if trailing || fields[0] * 3600 + fields[1] * 60 + fields[2] >= 86400 {
+                return None;
+            }
         }
     }
-    let (hour, minute) = time(clock, false)?;
-    Some(format!("{hour:02}:{minute:02}"))
+    Some(format!("{:02}:{:02}", fields[0], fields[1]))
 }
 pub async fn check(args: &Args) -> i32 {
     let name = args.name.as_deref().unwrap_or("");
@@ -675,4 +756,36 @@ pub async fn list(args: &Args) -> i32 {
         lines.push(format!("test-suite lock: {}", pystr(&suite)));
     }
     list_output(&(lines.join("\n") + "\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn holder_iso_clock_matches_cpython_311_grammar_grid() {
+        // Expectations captured with datetime.fromisoformat, including its
+        // week-date separator disambiguation and rejected lexical forms.
+        let grid = super::super::json::from_str(include_str!(
+            "../../../tests/fixtures/lease_iso_clock_cpython311.json"
+        ))
+        .unwrap();
+        let failures: Vec<_> = grid["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|case| {
+                let super::super::json::Value::String(input) = &case["input"] else {
+                    panic!("expected string input");
+                };
+                let expected = case["clock"].as_str();
+                let actual = super::iso_clock(input);
+                (actual.as_deref() != expected).then(|| {
+                    format!(
+                        "{}: expected {expected:?}, got {actual:?}",
+                        case["input"].python(false)
+                    )
+                })
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 }
