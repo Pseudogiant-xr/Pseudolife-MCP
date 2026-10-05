@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)
+- Installs from 0.16.1 and earlier recorded the Claude Code plugin
+  marketplace as a `github` source (the `Pseudogiant-xr/Pseudolife-MCP`
+  shorthand), which Claude Code refreshes over SSH. On a host with no
+  GitHub SSH key the plugin stops updating. The 2026-10-04 fix changed new
+  installs only and left existing ones to a manual edit, which held the
+  0.17.0 release.
+- The plugin step of `pseudolife-mcp update` (release and checkout modes,
+  `--clients-only`, `ops/update_clients.py`) now moves that source to
+  `https://github.com/Pseudogiant-xr/Pseudolife-MCP.git` before it
+  refreshes the plugin, whether or not the refresh is failing yet. The
+  installers do the same on a rerun, through the new
+  `ops/plugin_marketplace.py`, before their plugin step; `--claude-plugin
+  skip` / `-ClaudePlugin skip` leaves it alone.
+- How it moves: it copies `settings.json`, `known_marketplaces.json` and
+  `installed_plugins.json` to `plugins/backup-<time>-marketplace-https/`.
+  It changes only the `pseudolife-mcp` entry's source under
+  `extraKnownMarketplaces` in `settings.json`, in one rename, keeping every
+  other key. Then it runs `claude plugin marketplace add <https url>`, and
+  reads `known_marketplaces.json` back to check the record moved.
+  Claude Code refuses that add while settings declares the old source. The
+  add rewrites the entry as just its source, dropping keys such as
+  `autoUpdate`, so those are put back. The plugin record stays as it was
+  (all measured on Claude Code 2.1.287 in a throwaway `CLAUDE_CONFIG_DIR`).
+- A refused add (for example, managed settings still declaring the old
+  source), or a record that did not move, puts this marketplace's
+  `settings.json` entry back as it was (the add writes that declaration
+  itself), keeping anything else written to the file meanwhile, and fails
+  the step with the CLI's line. The refresh still runs after a failed
+  move, since it changed nothing and SSH works on some hosts. A file that
+  cannot be backed up or written is a `failed` line, not a crash. A
+  symlinked `settings.json` is edited at its target, and the file keeps its
+  permission bits. An add that moved the record and then failed or timed
+  out (it is bounded at 300 s, with git's credential prompt off) leaves
+  `settings.json` on HTTPS to match the record. A `settings.json` that is
+  not valid JSON fails the step only where a move needs it, not on a host
+  already on HTTPS. An HTTPS source is left untouched
+  and reported current in one line. A fork, a local directory or a pinned
+  ref is somebody's choice and is left as it is, as is every other
+  marketplace. It never runs `marketplace remove`, which uninstalls the
+  plugin.
+- With `CLAUDE_CONFIG_DIR` set, the client update now reads Claude Code's
+  settings and plugins directory there, as Claude Code does; before, the
+  plugin step read `~/.claude/plugins` regardless.
+
 ### Fixed (2026-10-05 — two served texts named the wrong fix or delivery path)
 - The shim's "MCP SDK predates v2" message told the user to run `pip install
   -U "mcp>=2.1,<3"`, which can install an SDK the package's own pin
@@ -710,13 +755,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   remote-bank guide, the translated READMEs, and the client step's advice
   when the marketplace clone is missing. `tests/test_plugin_packaging.py`
   fails while any of them names the shorthand.
-- **Existing installs** keep the `github` source until it is moved; the
-  README's Updating section gives the steps. If `~/.claude/settings.json`
-  declares `pseudolife-mcp` under `extraKnownMarketplaces`, change its
-  `source` to `{"source": "git", "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP.git"}`
-  (the CLI refuses an add that differs from a declared source), then run
-  `claude plugin marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`.
-  Do not remove the marketplace first: that uninstalls its plugins.
+- **Existing installs** keep the `github` source until it is moved.
+  `pseudolife-mcp update` and the installers now move it themselves (the
+  2026-10-05 entry above); the README's Updating section keeps the manual
+  steps as a fallback.
 
 ### Fixed (2026-10-04 — a plugin step whose marketplace update failed no longer reports the plugin current)
 - The client update's plugin step (`pseudolife-mcp update`, `--clients-only`,
@@ -735,11 +777,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fingerprint, or point the marketplace at HTTPS with `claude plugin
   marketplace add https://github.com/Pseudogiant-xr/Pseudolife-MCP.git`,
   which re-points the existing entry in place (measured on Claude Code
-  2.1.287). Claude Code refuses that add while `settings.json` declares the
-  marketplace under `extraKnownMarketplaces` with another source, as the
-  box's did, so where such a declaration exists the detail names the file
-  and says to change the entry's source to the HTTPS git URL first; it
-  never suggests `marketplace remove`, which uninstalls the plugin. The step
+  2.1.287). It never suggests `marketplace remove`, which uninstalls the
+  plugin. (The detail also named a `settings.json` declaration to change
+  first; since 2026-10-05 the step moves the installers' old source to
+  HTTPS itself, so that advice was retired.) The step
   still installs a clone that differs from the cache,
   since that is progress, but it reports `failed` and says the clone may be
   behind, not `refreshed`. A successful marketplace update behaves as

@@ -1292,7 +1292,8 @@ if (-not $ClientOnly) {
 # here gives a fresh machine the session briefing and per-turn hooks from
 # the plugin (section 9 then skips the settings.json hooks). Idempotent: an
 # installed plugin is left alone - its cache moves through /plugin update,
-# and the daemon's session briefing says when it is behind.
+# and the daemon's session briefing says when it is behind - except that a
+# marketplace recorded with the old github source is moved to HTTPS.
 $claudePluginId = "pseudolife-memory@pseudolife-mcp"
 $claudePluginMarketplace = "pseudolife-mcp"
 # The HTTPS git URL, not the owner/repo shorthand: Claude Code records the
@@ -1316,8 +1317,36 @@ function Get-ClaudePluginInstalledVersion {
     } catch {}
     return ""
 }
+function Move-ClaudeMarketplaceToHttps {
+    # Up to 0.16.1 the marketplace was added by the owner/repo shorthand,
+    # which Claude Code records as a github source and refreshes over SSH:
+    # on a host with no GitHub SSH key the plugin stops updating (2026-10-04).
+    # ops/plugin_marketplace.py moves it to the HTTPS URL through Claude
+    # Code's own CLI (settings.json backed up and edited first), prints one
+    # line, and prints nothing when no marketplace is recorded.
+    $python = Get-InstallerPython
+    if (-not $python) {
+        $configDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
+        try {
+            $known = Get-Content (Join-Path $configDir "plugins\known_marketplaces.json") -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($known.$claudePluginMarketplace.source.source -eq "github") {
+                Write-Warning "the $claudePluginMarketplace plugin marketplace is recorded as a github source, which updates over SSH, and there is no Python 3.10+ here to move it to HTTPS; the README's Updating section has the steps"
+            }
+        } catch {}
+        return
+    }
+    $out = [string](& $python (Join-Path $repo "ops\plugin_marketplace.py") | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning $(if ($out) { $out } else { "ops/plugin_marketplace.py failed" })
+    } elseif ($out) {
+        Step $out
+    }
+}
 function Install-ClaudePlugin {
     if ($clients -notcontains "claude") { return }
+    if (($ClaudePlugin -ne "skip") -and (Get-Command claude -ErrorAction SilentlyContinue)) {
+        Move-ClaudeMarketplaceToHttps
+    }
     # An installed plugin is reported as such even under skip: the ladder
     # line must agree with the hook-ownership lines section 9 derives from
     # the same record.

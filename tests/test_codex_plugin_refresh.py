@@ -290,7 +290,7 @@ def test_release_mode_refreshes_against_the_daemons_scripts(cli, monkeypatch):
     """``pseudolife-mcp update`` has no checkout: the daemon's scripts are
     read from the Claude plugin cache when its digest is the daemon's."""
     _installed(cli)
-    plugins = cli.home / ".claude" / "plugins"
+    plugins = uc.plugins_root()
     cache = plugins / "cache" / "pseudolife-memory"
     shutil.copytree(ROOT / "plugin", cache)
     (plugins / "installed_plugins.json").write_text(json.dumps({"plugins": {
