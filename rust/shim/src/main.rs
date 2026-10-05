@@ -2,6 +2,18 @@
 use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    let first = std::env::args_os().nth(1);
+    if let Some(mode) = first.as_deref().and_then(|mode| {
+        if mode == "briefing" {
+            Some("briefing")
+        } else if mode == "prompt-hook" {
+            Some("prompt-hook")
+        } else {
+            None
+        }
+    }) {
+        return pseudolife_stdio::cli::dispatch(Some(mode)).unwrap();
+    }
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if let Some(code) = pseudolife_stdio::cli::dispatch(arguments.first().map(String::as_str)) {
         return code;

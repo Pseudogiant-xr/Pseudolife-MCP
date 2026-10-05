@@ -3,6 +3,8 @@ use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+mod briefing_hook;
+mod python_json;
 mod version;
 
 const HELP: &str = include_str!("cli_help.txt");
@@ -11,8 +13,6 @@ const DEFERRED_MODES: &[&str] = &[
     "embedded",
     "coordination-recovery",
     "board-audit",
-    "briefing",
-    "prompt-hook",
     "doorbell-prompt-seen",
     "doctor",
     "connect",
@@ -94,6 +94,9 @@ pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
     if matches!(mode, "shim" | "channel") {
         return None;
+    }
+    if matches!(mode, "briefing" | "prompt-hook") {
+        return Some(briefing_hook::run(mode));
     }
     if matches!(mode, "help" | "-h" | "--help") {
         return Some(

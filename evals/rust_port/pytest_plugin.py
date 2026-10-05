@@ -14,7 +14,26 @@ from evals.rust_port.harness import isolated_env, run_cli
 MANIFEST = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
 # Admit subprocess nodes only when their candidate modes are supported.
 # Doctor remains deferred; the global CLI selector must fail closed for it.
-CLI_SUBPROCESS_NODES = set()
+CLI_SUBPROCESS_NODES = {
+    "tests/test_memory_changes_hook.py::test_prompt_hook_prints_only_changes_and_advances_its_cursor[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer[-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_keeps_its_cursor_on_an_empty_or_malformed_answer[not-a-cursor\\nnote\\n-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_prints_nothing_when_it_cannot_save_its_cursor[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_is_silent_and_keeps_its_cursor_when_the_daemon_is_down[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[bad id-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_prompt_hook_asks_nothing_for_a_missing_or_unsafe_session_id[a/b-cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_a_sessions_first_note_clears_marks_idle_for_a_month[cli]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_refuses_a_redirect_and_keeps_its_cursor": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_sends_the_bearer_and_prefers_the_token_file": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[not json]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[[]]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[{\"session_id\": 7}]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_asks_nothing_without_a_top_level_session_id[{\"prompt\": \"\\\\\"session_id\\\\\": \\\\\"sess-1\\\\\"\"}]": ["prompt-hook"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_is_a_listed_mode": ["--help"],
+    "tests/test_memory_changes_hook.py::test_cli_prompt_hook_reads_its_payload_as_utf8": ["prompt-hook"],
+}
 
 
 def boundary(node):
@@ -123,6 +142,8 @@ def _port_selected_boundary(request):
             modes = public_cli_arguments(command)
             if modes is None:
                 return original(command, *args, **kwargs)
+            if modes != CLI_SUBPROCESS_NODES[request.node.nodeid]:
+                raise pytest.UsageError("CLI subprocess adapter observed unsupported argv: " + repr(modes))
             env = dict(kwargs.get("env") or os.environ)
             env["CUDA_VISIBLE_DEVICES"] = "-1"
             routed.append(modes)

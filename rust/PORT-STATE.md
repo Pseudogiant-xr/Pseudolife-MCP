@@ -1,5 +1,58 @@
 # Rust port state
 
+## Briefing and prompt-hook candidate
+
+The native `briefing` and `prompt-hook` leaves target the
+`eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` Python oracle and remain deferred.
+Independent review requested changes. The repair preserves argparse prescan
+priority, spaced unknown values, COLUMNS-dependent formatting, body inactivity
+budgets, and measured buffered/unbuffered output behavior. Response-header
+inactivity still differs: reqwest applies a deadline across the response head.
+Ordinary large or unbuffered output failures still differ in Python traceback
+prefixes. Three configured bearer-header cases and the original nonstring and
+lone-surrogate traceback cases remain mismatches; none has an approved exception.
+
+The completed repair matrix is exact in 77/83 Windows and 78/87 Linux pairs;
+its 50/53 core corpus and 13/15 focused corpus are bound to the preceding binary.
+The 32 signed-zero digit pairs and one independent positive request/cursor pair
+per host remain attributed to the preceding formatter binary. The subsequent
+COLUMNS grammar and narrow-help whitespace repair passes all eight review cells
+and six relevant parser-limit cells on each current binary, with no requests
+and 56 rejected output/file controls per host. Five focused helper checks, one
+public formatter process check, formatting and warning-denied clippy pass on
+both hosts. Earlier native checks retain their original binary attribution. These are scripted-peer diagnostics;
+real-daemon acceptance, persistent multi-turn sequencing, hosted CI and
+performance evidence remain outstanding. Existing Python tests and the generic
+CLI fixture remain unchanged; daemon-backed routing is not claimed.
+
+The external subprocess adapter now admits 18 collected existing prompt-hook
+nodes (17 hook cases and the help-listing case), with an exact argv allowlist
+per node. They pass unchanged on Python and on each native binary on Windows
+and Linux; each routed selection makes 21 actual candidate calls, including
+three sequential cursor advances. Of 19 eligible baseline nodes, Windows
+passes 18 and skips the symlink case because the host cannot create symlinks;
+Linux passes all 19; an additional private adapter run passes the symlink
+node on Linux. That node remains outside the tracked admission.
+This scripted-peer coverage does not establish full-mode acceptance.
+
+Automatic CLI receipt selection includes the five historical dispatcher nodes
+and all 18 current subprocess admissions, sorted without duplicates. Runtime
+validation derives the exact expected version from the selected pinned
+pyproject while retaining source-origin and installed-distribution equality.
+The prepared dispatcher component passes all 23 nodes on Python and native
+Windows and Linux, with 26 actual CLI calls per arm. These uncommitted-candidate
+proofs are preparatory: the full runner still requires committed clean Rust
+source before it can emit an acceptance receipt.
+
+Dedicated hook production is 1,029 lines plus a 76-line JSON caller wrapper;
+the reused JSON data module has 706 production lines. These physical counts
+exclude test modules, public process tests and the help asset.
+
+The first credential-file proof refused an unprotected Windows token file and
+is rejected as positive-path evidence. Later env-token proofs establish actual
+GETs and cursor effects after implementation began, without repairing the
+required proof-before-implementation sequence. Follow-up review is pending.
+
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains
