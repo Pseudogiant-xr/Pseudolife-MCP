@@ -4,13 +4,17 @@ import type { BoardAgent, BoardEvent, BoardSnapshot, Lease } from "./api/types";
 import boardLibSrc from "./board.ts?raw";
 import {
   adapterText,
+  agentName,
   childSource,
   eventSentence,
   expectedBy,
   isParked,
   leaseState,
   leaseTone,
+  matchesQuery,
   nameResolver,
+  nearBottom,
+  orderRoster,
   parkExpired,
   pendingText,
   stateChip,
@@ -221,5 +225,69 @@ describe("timeline sentences", () => {
     expect(eventSentence(event({ event: "expire", expired_count: 2 }), name)).toBe("2 unread messages expired");
     expect(eventSentence(event({ event: "expire", expired_count: 1 }), name)).toBe("One unread message expired");
     expect(eventSentence(event({ event: "send", recipient_agent_id: "zzzzzzzzzz" }), name)).toBe("Worker sent mail to zzzzzzzz");
+  });
+});
+
+describe("finding a session", () => {
+  const named = agent({
+    agent_id: "3f9a1c2eaaaa4bbbbcccc0000dddd111",
+    label: "claude-code",
+    name: "Docs review and bulk merge",
+    name_source: "harness",
+    project: "example-project",
+    task: "Review open PRs",
+    status: "merging the green ones",
+  });
+
+  it("shows the session's own name, else the label, else a short id", () => {
+    expect(agentName(named)).toBe("Docs review and bulk merge");
+    // A v55 daemon fills name with "label shortid" for an unnamed row; an
+    // older one sends no name at all.
+    expect(agentName(agent({ label: "codex" }))).toBe("codex");
+    expect(agentName(agent({ agent_id: "abcdef0123456789", label: "" }))).toBe("abcdef01");
+  });
+
+  it("matches the name, the short or full id, task, status and project, ignoring case", () => {
+    for (const q of ["docs review", "3F9A1C2E", "3f9a1c2eaaaa4bbbbcccc0000dddd111", "open prs", "GREEN", "example-project", "claude-code"]) {
+      expect(matchesQuery(named, q), q).toBe(true);
+    }
+    expect(matchesQuery(named, "")).toBe(true);
+    expect(matchesQuery(named, "   ")).toBe(true);
+    expect(matchesQuery(named, "nightly eval")).toBe(false);
+  });
+
+  it("needs every word of the query, in any field", () => {
+    expect(matchesQuery(named, "bulk 3f9a")).toBe(true);
+    expect(matchesQuery(named, "bulk 2cc0")).toBe(false);
+  });
+
+  it("pins the delegate, then the coordinator, then sessions with unread mail, and keeps the rest in order", () => {
+    const rows = [
+      agent({ agent_id: "r1" }),
+      agent({ agent_id: "mail", pending_count: 2 }),
+      agent({ agent_id: "coord" }),
+      agent({ agent_id: "r2", pending_count: 0 }),
+      agent({ agent_id: "del", pending_count: 1 }),
+    ];
+    const role = (a: BoardAgent) => (a.agent_id === "del" ? "delegate" : a.agent_id === "coord" ? "coordinator" : null);
+    const ordered = orderRoster(rows, role);
+    expect(ordered.map((r) => [r.agent.agent_id, r.pin])).toEqual([
+      ["del", "delegate"],
+      ["coord", "coordinator"],
+      ["mail", "mail"],
+      ["r1", null],
+      ["r2", null],
+    ]);
+  });
+});
+
+describe("a message thread's scroll pane", () => {
+  it("follows new messages only while the reader is at the bottom", () => {
+    // A fresh pane, or one scrolled to the end, follows the newest message.
+    expect(nearBottom({ scrollTop: 0, clientHeight: 320, scrollHeight: 320 })).toBe(true);
+    expect(nearBottom({ scrollTop: 680, clientHeight: 320, scrollHeight: 1000 })).toBe(true);
+    expect(nearBottom({ scrollTop: 660, clientHeight: 320, scrollHeight: 1000 })).toBe(true); // within the slack
+    // Scrolled up to read history: leave it there.
+    expect(nearBottom({ scrollTop: 200, clientHeight: 320, scrollHeight: 1000 })).toBe(false);
   });
 });

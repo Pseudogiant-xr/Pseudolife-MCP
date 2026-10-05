@@ -219,6 +219,33 @@ def test_store_and_search_roundtrip(daemon):
     assert "9931" in _result_text(found)
 
 
+def test_unknown_parameter_is_refused_over_http(daemon):
+    """Over the daemon's streamable-HTTP transport (what every shim forwards
+    to), an unknown argument name is an isError result naming the right one,
+    and the served schema says so up front."""
+    from mcp.client.session import ClientSession
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
+
+    result = asyncio.run(_call(
+        daemon["url"], "memory_search", {"query": "vextra", "limit": 3}))
+    assert result.is_error, _result_text(result)
+    assert "did you mean 'top_k'?" in _result_text(result)
+
+    async def _schema():
+        headers = {"Authorization": f"Bearer {_TOKEN}"}
+        async with create_mcp_http_client(headers=headers) as http:
+            async with streamable_http_client(
+                    daemon["url"] + "/mcp", http_client=http) as (r, w):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    tools = (await s.list_tools()).tools
+                    return {t.name: t.input_schema for t in tools}
+
+    schemas = asyncio.run(_schema())
+    assert schemas["memory_search"]["additionalProperties"] is False
+
+
 def test_daemon_serves_a_bank_of_its_own(daemon):
     """A test daemon never takes the writer lease on the run's database.
 
