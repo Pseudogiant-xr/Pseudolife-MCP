@@ -1,5 +1,6 @@
 """Executable byte checks preserve the declared Python runtime invocation."""
 import base64
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -190,3 +191,27 @@ def test_owned_copy_keeps_original_target_bound_through_capture(tmp_path, monkey
         cli_process.observe(spec(), commands["candidate"], commands, root=tmp_path,
                             home=tmp_path / "home", url="http://127.0.0.1:49152", prepare=prepare)
     assert len(launched) == (0 if boundary == "prelaunch" else 1)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix executable symlink")
+def test_context_cannot_retarget_equal_byte_invocation_before_launch(tmp_path, monkeypatch):
+    original = tmp_path / "original-runtime/python"
+    other = tmp_path / "other-runtime/python"
+    original.parent.mkdir()
+    other.parent.mkdir()
+    original.write_bytes(b"native fixture")
+    other.write_bytes(original.read_bytes())
+    link = tmp_path / "invoked"
+    link.symlink_to(original)
+    commands = {"candidate": [str(link)]}
+
+    @contextmanager
+    def retarget(case, home):
+        link.unlink()
+        link.symlink_to(other)
+        yield
+
+    monkeypatch.setattr(cli_process, "run_cli", lambda *a, **k: pytest.fail("must not launch"))
+    with pytest.raises(ValueError, match="command changed"):
+        cli_process.observe(spec(), commands["candidate"], commands, root=tmp_path,
+                            home=tmp_path / "home", url="http://127.0.0.1:49152", process_scope=retarget)

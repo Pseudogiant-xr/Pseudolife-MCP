@@ -736,3 +736,14 @@ APIs while preserving that lint and the test assertions. Linux fmt and all-targe
 compilation pass, followed by six lease units, 13 lease-board tests and 15
 lease-CLI tests. The real-daemon proof on a committed successor remains pending.
 Both original compiler failures are retained.
+
+At `961d60e5`, the Linux TOKEN_FILE proof records four mismatching pairs:
+the fixture resolves the virtualenv executable symlink and invokes base Python,
+which lacks httpx and falls back locally while native board access succeeds.
+Raw counterexamples and complete owned cleanup are retained. This fixture repair
+preserves the invocation path and checks resolved bytes and ownership separately.
+A disposable process roundtrip observes the intended 0.17 runtime and exact raw
+streams and file effects. Targeted checks pass on Linux (147) and Windows (143,
+with four POSIX-only skips). Committed real-daemon recapture and the fifteen
+affected Linux help/unknown-command rows remain pending. Comparison policy and
+traceback scope are unchanged; CLI-LEASE remains deferred.
