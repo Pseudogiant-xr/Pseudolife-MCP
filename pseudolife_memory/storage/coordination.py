@@ -1402,7 +1402,7 @@ class CoordinationStore:
         _string(name, MAX_NAME, "name")
         if any(unicodedata.category(c)[0] == "C" for c in name) or reserved_name(name):
             raise CoordinationError("invalid_name")
-        _refuse_secret(name)
+        _refuse_secret(name, "name")
         return name.strip()
 
     @staticmethod
