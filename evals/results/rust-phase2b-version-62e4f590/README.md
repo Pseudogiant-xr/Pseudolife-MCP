@@ -100,3 +100,17 @@ fixture's intended rejection; differential judges were skipped. A test-only
 seed collaborator repair passes four targeted checks in both ordinary and
 genuine-venv interpreters. Corrected hosted acceptance remains pending.
 Historical refusals and earlier captures retain their original identities.
+
+[Rust run 37315503446](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37315503446)
+at `ac0c64a1` passed both Rust jobs and 151 CLI fixture checks per platform.
+Both Parity jobs then failed the Phase 1 judge with six differences each:
+two stale 0.16.1 startup stderr expectations against both 0.17.0 arms, and
+four generated registration-name differences between Python replay arms.
+All ten selected public stdio nodes passed per platform; the later version
+judge was skipped. The new [startup proof](../rust-phase2b-startup-eb0c13e9/windows.json)
+and [Linux startup proof](../rust-phase2b-startup-eb0c13e9/linux.json) bind a
+literal 0.17.0 contract to complete storage-free captures, with the frozen
+f709/0.16.1 contract retained separately. Derived-name identity substitution
+remains unapproved and its comparison policy is unchanged. Hosted acceptance
+and fresh independent review of the repair remain pending; CLI-VERSION stays
+deferred. The earlier run and local measurement records above remain historical.

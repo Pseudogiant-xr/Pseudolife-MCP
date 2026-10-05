@@ -1,122 +1,160 @@
 {
-  "schema": 1,
-  "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
-  "package_version": "0.16.1",
+  "schema": 2,
+  "oracle_head": "eb0c13e9c5036aa2b95e7fccb77f41ca1c095493",
+  "package_version": "0.17.0",
   "template_rule": "Only exact owned fixture URL and credential-file parameters replaced; expected newline generated for capture platform. Actual streams remain raw.",
+  "oracle_schema": 55,
+  "historical_contract": {
+    "file": "stdio_startup_contract.f709.json",
+    "oracle_head": "f709abb54f7912ae9cd767998d0926ca33df4bcd",
+    "package_version": "0.16.1",
+    "git_blob": "36168a19025347626eaefb689a1d12f2c1c51b39",
+    "git_blob_sha256": "bee1db0cad4cc2e10b3e5069e0165d9f418b9151314d079d6cde28e41ebf0cdd"
+  },
   "cases": [
     {
       "case": "degraded-200",
       "exit_code": 0,
       "stdout_frame_count": 1,
-      "stderr_lf_template": "[shim] note: the daemon at {fixture_url} reports status=degraded (db: synthetic unavailable)\n",
-      "raw_proofs": {
-        "windows": "f98b688c443f00ab23d03f8d92e12c555ac1e25e7d1faab99492f7d6980818bc",
-        "linux": "c53fe94427080ac4c83222e76d8fc2498da0e3b395baced1f279ad2b3d2f6066"
-      }
+      "stderr_lf_template": "[shim] note: the daemon at {fixture_url} reports status=degraded (db: synthetic unavailable)\n"
     },
     {
       "case": "auth-invalid",
       "exit_code": 1,
       "stdout_frame_count": 0,
-      "stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and the configured credential file cannot be used: credential file contains an invalid bearer token\n  PSEUDOLIFE_MCP_TOKEN_FILE={credential_file}\n  The file must exist, be owner-only, and hold only the token. Re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set in the environment so the installer (re)writes it, or fix the file by hand.\n",
-      "raw_proofs": {
-        "windows": "57a1206d2b863eb4a0b82f22aaa3ff4a6df5520a7ba3566aa4515ee260629b0c",
-        "linux": "9c0dbcd1746acfc33eae8d2132ab56e3de25c158f75ed9b1a070927e15e2a9ab"
-      }
+      "stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and the configured credential file cannot be used: credential file contains an invalid bearer token\n  PSEUDOLIFE_MCP_TOKEN_FILE={credential_file}\n  The file must exist, be owner-only, and hold only the token. Re-run ops/install.* --client <client> with PSEUDOLIFE_MCP_TOKEN set in the environment so the installer (re)writes it, or fix the file by hand.\n"
     },
     {
       "case": "auth-missing",
       "exit_code": 1,
       "stdout_frame_count": 0,
-      "stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and this shim has no credential configured \u2014 every call would be rejected with 401.\n  Give the MCP registration one of these in its env block:\n    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file holding the token>   (preferred; reloaded per call)\n    PSEUDOLIFE_MCP_TOKEN=<the token>\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it \u2014 the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\n",
-      "raw_proofs": {
-        "windows": "c5bbc1d32233e67f4de5ac67bb5bcb49bcb1fd0a459e85786216775d5b3e4de9",
-        "linux": "1133239ba770fb3fb3ffe31043965d3c5ca7211d156615263fba8e6c8eba6d69"
-      }
+      "stderr_lf_template": "[shim] the daemon at {fixture_url} requires bearer authentication (/health reports auth=true) and this shim has no credential configured \u2014 every call would be rejected with 401.\n  Give the MCP registration one of these in its env block:\n    PSEUDOLIFE_MCP_TOKEN_FILE=<absolute path to a private file holding the token>   (preferred; reloaded per call)\n    PSEUDOLIFE_MCP_TOKEN=<the token>\n  Claude Desktop launches MCP servers with a sanitized environment, so a token exported in the OS env (setx / shell profile) does NOT reach it \u2014 the entry in claude_desktop_config.json must carry the setting itself (ops/install.* --client claude-desktop writes it; then fully quit and relaunch Desktop).\n"
     },
     {
       "case": "version-mismatch",
       "exit_code": 0,
       "stdout_frame_count": 1,
-      "stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.16.1 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n",
-      "raw_proofs": {
-        "windows": "658fff013611544cfbf5106fa9666610cbff906bb5fd018ebd2d4af85910c4bf",
-        "linux": "aa5bc31b325b76e350de75207bc56c5f9fc2ce47c9340dfb07db06cadac0f9c0"
-      }
+      "stderr_lf_template": "[shim] this shim is pseudolife-mcp 0.17.0 but the daemon at {fixture_url} is 99.0.0 \u2014 run pseudolife-mcp update --clients-only --tag 99.0.0 (installs the daemon's release as a new shim runtime beside this one and refreshes the plugin cache; from a checkout: python ops/update_clients.py --only shim), or update the daemon (pseudolife-mcp update); then start a new session.\n"
     },
     {
       "case": "preframe-refusal",
       "exit_code": 1,
       "stdout_frame_count": 0,
-      "stderr_lf_template": "[shim] the daemon at {fixture_url} is up but refusing to serve:\n  synthetic initialization refusal\n",
-      "raw_proofs": {
-        "windows": "defcef66b667dd96688fc6299dcb2f67d5b283c6477addc1a170bb654198cec2",
-        "linux": "d5f46ae36eaadd1dce658eb8d38f5d7aa52a49c4de264a293640f699654c4edf"
-      }
+      "stderr_lf_template": "[shim] the daemon at {fixture_url} is up but refusing to serve:\n  synthetic initialization refusal\n"
     },
     {
       "case": "loopback-no-spawn",
       "exit_code": 0,
       "stdout_frame_count": 1,
-      "stderr_lf_template": "[shim] no daemon at {fixture_url} and PSEUDOLIFE_MCP_NO_SPAWN is set \u2014 waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)...\n[shim] no answer from the memory daemon at {fixture_url}.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n  Pip tiers:    pseudolife-mcp serve   (run it in a terminal \u2014 the daemon logs to its own stderr, so this shows why it died)\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
-      "raw_proofs": {
-        "windows": "3618fad4b18a125b0107b87558794ced332163716a70c7fe40e66f4d47a424f9",
-        "linux": "89e52f76c1bc84da7039df8804a2c32e76436772b2199a235f466f54a8c8c56d"
-      }
+      "stderr_lf_template": "[shim] no daemon at {fixture_url} and PSEUDOLIFE_MCP_NO_SPAWN is set \u2014 waiting up to 5s for it instead of spawning a fallback (Docker may still be starting)...\n[shim] no answer from the memory daemon at {fixture_url}.\n  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was spawned.)\n  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n  Pip tiers:    pseudolife-mcp serve   (run it in a terminal \u2014 the daemon logs to its own stderr, so this shows why it died)\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n"
     },
     {
       "case": "remote-origin",
       "exit_code": 0,
       "stdout_frame_count": 1,
-      "stderr_lf_template": "[shim] no daemon answering at {fixture_url} (another machine) \u2014 waiting up to 5s for it; this shim never starts a local daemon for a remote URL...\n[shim] no answer from the memory daemon at {fixture_url}.\n  That address is another machine, so no local daemon was started:\n  a daemon spawned here could never be that one.\n  Check the link to the daemon host (tailnet up? LAN route?), that\n  the host exposes the port to this machine (e.g. `tailscale serve status` there), and that the daemon is running there (GET /health).\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n",
-      "raw_proofs": {
-        "windows": "096055e2d7d50bcd666240d45ea348d88089d099f30f30632b7c588a0c46fd9e",
-        "linux": "b60c14424ed7aba41aad37ca75913c1cc480ea279937a9220bfb53482f28ed9e"
-      }
+      "stderr_lf_template": "[shim] no daemon answering at {fixture_url} (another machine) \u2014 waiting up to 5s for it; this shim never starts a local daemon for a remote URL...\n[shim] no answer from the memory daemon at {fixture_url}.\n  That address is another machine, so no local daemon was started:\n  a daemon spawned here could never be that one.\n  Check the link to the daemon host (tailnet up? LAN route?), that\n  the host exposes the port to this machine (e.g. `tailscale serve status` there), and that the daemon is running there (GET /health).\n  This session starts without it: the shim serves the last tool list it\n  saw from that daemon, retries the daemon on every call and in the\n  background, and has the client re-list tools once it answers.\n"
     }
   ],
   "source_binding": {
-    "pyproject.toml": {
-      "git_blob_sha256": "a2c96ecbb901143a48dbea253b6509020bf4f9cbd43a87ce1b592be6a975d0ea",
-      "archive_bytes_sha256": "7a684271df572f3b5a72378baca5ee8e6a527a104b9761c639eca5225a33ea1f",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 144
+    "windows": {
+      "pyproject.toml": {
+        "git_blob": "a4add026b5398c958df774516e71c3a816068bb9",
+        "git_blob_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
+        "selected_bytes_sha256": "0218a1d741fef4621f735fe6ef8f85dbc79753b7ed89409c0ebaa9fb803840f0",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/__init__.py": {
+        "git_blob": "9048d8dec7366db531c886a246784823d2312c2a",
+        "git_blob_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+        "selected_bytes_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/cli.py": {
+        "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+        "git_blob_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+        "selected_bytes_sha256": "2febebd662ee521fd2937dcf6455bf4e7823d9a24651bd962061d2e3682afbf2",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/shim.py": {
+        "git_blob": "660a5e0890c26b7a083e6b65c91d8634a7906b2a",
+        "git_blob_sha256": "d073589552504f50e41e75aa3dfdcf1071333f07dbf24d7797f23a1127e1750c",
+        "selected_bytes_sha256": "b647ea4c5ea275806beaa1c97a049be29acbf951f691a637cc0cbc86446d24d0",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/daemon_url.py": {
+        "git_blob": "915c8f87e89be78ec68d0fa1d143b22c9f686f9d",
+        "git_blob_sha256": "c4fc8f7a7a50be3853bf093197abaa24a65b35e08d161a541bf33183c1893197",
+        "selected_bytes_sha256": "a1a74d8da2ad6ef35fa6428955c69522e675494a210f0df8ed7882b914d76b58",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/credentials.py": {
+        "git_blob": "fa286e25028b3dfbfab1bd0fc7e4cf382dd380a5",
+        "git_blob_sha256": "3f2f1b1a341bc7cf21547dbc86ba9d7404e3c6d28121ca84dc4ef45c6699ec96",
+        "selected_bytes_sha256": "797808d6a4448b63c5eb998b9d1d802476fe3ac2cba284d3c0c2234d659fe1dd",
+        "selected_source_lf_matches_pin": true
+      }
     },
-    "pseudolife_memory/__init__.py": {
-      "git_blob_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
-      "archive_bytes_sha256": "f3eb2e61117aeedd57f0517bab440fc977d26763d57e09f4d0bac3fe7cfd1a4c",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 19
+    "linux": {
+      "pyproject.toml": {
+        "git_blob": "a4add026b5398c958df774516e71c3a816068bb9",
+        "git_blob_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
+        "selected_bytes_sha256": "025d0a199c1d46226f84396400d7e704c85711017011fb5c9d8bc82eab90d699",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/__init__.py": {
+        "git_blob": "9048d8dec7366db531c886a246784823d2312c2a",
+        "git_blob_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+        "selected_bytes_sha256": "e0808788a0ea2b076173e0154274a037de08f8b6cf158f6a2c7d3e508193593b",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/cli.py": {
+        "git_blob": "80d778afd7fd79d0d1cd31aedf9be9a2bbbffa0f",
+        "git_blob_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+        "selected_bytes_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/shim.py": {
+        "git_blob": "660a5e0890c26b7a083e6b65c91d8634a7906b2a",
+        "git_blob_sha256": "d073589552504f50e41e75aa3dfdcf1071333f07dbf24d7797f23a1127e1750c",
+        "selected_bytes_sha256": "d073589552504f50e41e75aa3dfdcf1071333f07dbf24d7797f23a1127e1750c",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/daemon_url.py": {
+        "git_blob": "915c8f87e89be78ec68d0fa1d143b22c9f686f9d",
+        "git_blob_sha256": "c4fc8f7a7a50be3853bf093197abaa24a65b35e08d161a541bf33183c1893197",
+        "selected_bytes_sha256": "c4fc8f7a7a50be3853bf093197abaa24a65b35e08d161a541bf33183c1893197",
+        "selected_source_lf_matches_pin": true
+      },
+      "pseudolife_memory/credentials.py": {
+        "git_blob": "fa286e25028b3dfbfab1bd0fc7e4cf382dd380a5",
+        "git_blob_sha256": "3f2f1b1a341bc7cf21547dbc86ba9d7404e3c6d28121ca84dc4ef45c6699ec96",
+        "selected_bytes_sha256": "3f2f1b1a341bc7cf21547dbc86ba9d7404e3c6d28121ca84dc4ef45c6699ec96",
+        "selected_source_lf_matches_pin": true
+      }
+    }
+  },
+  "proofs": {
+    "windows": {
+      "public_receipt": "../results/rust-phase2b-startup-eb0c13e9/windows.json",
+      "public_receipt_sha256": "0cc90afd08214e16f6ecc7577c066d22df252d608c30a2bcac7498b79c8788be",
+      "raw_receipt_sha256": "db5bd10ddba3475e45715f31380d30f7c5979c0fcf76cfc5b2bdd2929f9a528b",
+      "raw_receipt_bytes": 56011,
+      "captured_at_utc": "2026-10-05T13:51:39.883927+00:00",
+      "runtime_python": "3.11.9",
+      "case_count": 7,
+      "arm_cell_count": 14,
+      "cleanup_verified": true
     },
-    "pseudolife_memory/cli.py": {
-      "git_blob_sha256": "7e157e27997dbea3728ce2c1976595a46d3318534c4bcbbd880b16507d03a299",
-      "archive_bytes_sha256": "2febebd662ee521fd2937dcf6455bf4e7823d9a24651bd962061d2e3682afbf2",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 223
-    },
-    "pseudolife_memory/shim.py": {
-      "git_blob_sha256": "ec6b913936190fae9ffa26920f51c8f73f0f04a325e794469b57173797300aa7",
-      "archive_bytes_sha256": "79d8c3e261fbacd9add3329f32e437488332d4af916942af6405f99e3f2b3060",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 2374
-    },
-    "pseudolife_memory/daemon_url.py": {
-      "git_blob_sha256": "c4fc8f7a7a50be3853bf093197abaa24a65b35e08d161a541bf33183c1893197",
-      "archive_bytes_sha256": "a1a74d8da2ad6ef35fa6428955c69522e675494a210f0df8ed7882b914d76b58",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 75
-    },
-    "pseudolife_memory/credentials.py": {
-      "git_blob_sha256": "3f2f1b1a341bc7cf21547dbc86ba9d7404e3c6d28121ca84dc4ef45c6699ec96",
-      "archive_bytes_sha256": "797808d6a4448b63c5eb998b9d1d802476fe3ac2cba284d3c0c2234d659fe1dd",
-      "exact_byte_match": false,
-      "checkout_lf_matches_pin": true,
-      "checkout_crlf_count": 398
+    "linux": {
+      "public_receipt": "../results/rust-phase2b-startup-eb0c13e9/linux.json",
+      "public_receipt_sha256": "20bb1d2dd03fef305ece786188531a1792089b7ee8a14ce4de5135f5199feeac",
+      "raw_receipt_sha256": "fe07117dbb1f07d95a2ecdce8fb1dad0aea6602305245d042cffaeaa6dba0e6c",
+      "raw_receipt_bytes": 54583,
+      "captured_at_utc": "2026-10-05T13:52:27.161716+00:00",
+      "runtime_python": "3.11.15",
+      "case_count": 7,
+      "arm_cell_count": 14,
+      "cleanup_verified": true
     }
   }
 }

@@ -14,7 +14,7 @@ Phase 0 is complete. All five phase 0b gaps are closed with verified evidence in
 The final appendix review and all ten CI checks passed at `9a62ed02`.
 Subsequent PR updates require fresh review and current-merge-ref CI.
 Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate close-out ledger below; current documentation PR-head gates remain required before ready status.
-The current version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 15 routed nodes (10 public stdio and 5 CLI). The two new public refusal nodes are candidate mappings with pending runtime execution and acceptance; source-identity checks and adapter-routing unit checks do not close those gates. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
+The current version-branch manifests enumerate 423 test files, all 191 current-pin function mappings in the nine scoped files and 15 routed nodes (10 public stdio and 5 CLI). The two new public refusal nodes passed as part of the ten selected stdio nodes per platform in run 37315503446 at ac0c64a1; the later Phase 1 judge failed and acceptance remains pending. The #560 after-#546 merge gate remains separate; existing receipts retain their original pins, and the new target claims no acceptance.
 
 The native version candidate and shared CLI fixture have fresh independent code approval at `62e4f590` and local release evidence on both platforms: 26 passing public cases and 104 rejected controls per OS, plus 240 paired timing samples and eight untimed controls across bare/installed layouts. Windows installed timing regressed beyond the observed floors; the full measurements retain that result. The [version evidence packet](../evals/results/rust-phase2b-version-62e4f590/README.md) preserves exact code/oracle/runtime/binary/helper identities and cleanup. Required hosted CI and independent review/checks of the evidence/documentation successor remain pending; CLI-VERSION stays deferred. Earlier 0.16.1 captures remain historical prototypes. Raw comparison receipts stay private and hosted artifacts use allowlisted projections.
 
@@ -50,6 +50,20 @@ fixture before the differential judges ran. A test-only seed collaborator fix
 passes four targeted checks under ordinary and genuine-venv interpreters;
 corrected hosted acceptance remains pending. CLI-VERSION remains deferred, and the
 #546, #560 and #589 gates remain separate.
+
+[Rust run 37315503446](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37315503446)
+at `ac0c64a1` passed both Rust jobs and 151 CLI fixture checks per platform.
+Both Parity jobs then failed the Phase 1 judge with six differences each:
+two stale 0.16.1 startup stderr expectations against both 0.17.0 arms, and
+four generated registration-name differences between Python replay arms.
+All ten selected public stdio nodes passed per platform; the later version
+judge was skipped. The new [startup proof](../evals/results/rust-phase2b-startup-eb0c13e9/windows.json)
+and [Linux startup proof](../evals/results/rust-phase2b-startup-eb0c13e9/linux.json) bind a
+literal 0.17.0 contract to complete storage-free captures, with the frozen
+f709/0.16.1 contract retained separately. Derived-name identity substitution
+remains unapproved and its comparison policy is unchanged. Hosted acceptance
+and fresh independent review of the repair remain pending; CLI-VERSION stays
+deferred. The earlier run and local measurement records above remain historical.
 
 - Phase 1 starts from master `0b015f92` on `codex/rust-phase1`.
   PR #546 was still open at branch creation; its branch head `31f8475e`

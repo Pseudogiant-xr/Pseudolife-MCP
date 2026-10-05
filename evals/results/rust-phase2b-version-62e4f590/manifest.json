@@ -129,5 +129,122 @@
       "untimed_controls": 2,
       "original_metrics_recomputed": true
     }
-  ]
+  ],
+  "hosted_ci_followup": {
+    "run_id": 37315503446,
+    "url": "https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37315503446",
+    "head": "ac0c64a1a5f2b727cde892146302feae666af086",
+    "conclusion": "failure",
+    "rust_jobs": "passed-both-platforms",
+    "cli_version_judge": "skipped",
+    "platforms": [
+      {
+        "platform": "Linux",
+        "status": "failed",
+        "sha256": "a5989508892ce0216589152277959e5e94f99629276a530c70cabff20a8f0539",
+        "process_nodes": 10,
+        "process_all_passed": true,
+        "fixture_passed": 151,
+        "differences": [
+          {
+            "case": "version-mismatch",
+            "arm": "oracle",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "case": "version-mismatch",
+            "arm": "candidate",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          }
+        ],
+        "generic_cases": 25,
+        "identity_proxy_validation": "failed",
+        "raw_streams_retained": false
+      },
+      {
+        "platform": "Windows",
+        "status": "failed",
+        "sha256": "3464033bc17cb3040c5a0e2c97df543a1576ad307b4f0a5d0f8c4f7696e6c83f",
+        "process_nodes": 10,
+        "process_all_passed": true,
+        "fixture_passed": 151,
+        "differences": [
+          {
+            "case": "version-mismatch",
+            "arm": "oracle",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "case": "version-mismatch",
+            "arm": "candidate",
+            "path": "/stderr",
+            "reason": "startup_stderr_bytes"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 1,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-sender",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          },
+          {
+            "surface": "generic",
+            "case": "register-recipient",
+            "arm": 2,
+            "path": "/body/name",
+            "reason": "value"
+          }
+        ],
+        "generic_cases": 25,
+        "identity_proxy_validation": "failed",
+        "raw_streams_retained": false
+      }
+    ],
+    "pending_gate": "Derived-name identity substitution is not approved; comparison policy unchanged."
+  }
 }
