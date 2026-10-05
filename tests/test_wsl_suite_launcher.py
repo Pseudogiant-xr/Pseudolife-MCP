@@ -1,5 +1,6 @@
-"""ops/wsl-suite.sh: its guard for runs dispatched to a second machine, and
-its sweep of the processes a run leaves behind.
+"""ops/wsl-suite.sh: its guard for runs dispatched to a second machine, its
+sweep of the processes a run leaves behind, and its pruning of the test
+copies and environments earlier runs left on disk.
 
 ops/remote-suite.ps1 runs a commit's own ops/wsl-suite.sh on another
 machine with PSEUDOLIFE_SUITE_DISPATCHED=1. On the maintainer's homelab box
@@ -13,7 +14,9 @@ naming another server, and only under that machine's own suite lease
 
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -278,3 +281,246 @@ def test_ctrl_c_on_a_terminal_interrupts_pytest_once(tmp_path):
             launcher.wait(timeout=10)
         os.close(master)
         reader.join(timeout=10)
+
+
+# --- the launcher prunes the test copies and environments runs leave behind
+#
+# Nothing removed them until 2026-10-05, when the second machine's disk had
+# gone from 62% to 88% in one day (13 copies of ~600 MB, 2.9 GB of
+# environments) and WSL here held 18 copies (11 GB). Each run now removes
+# the stale ones itself, under the locks the runs already take.
+
+DAY = 86400
+WORK = Path(".cache") / "pseudolife-suite" / "work"
+VENVS = Path(".venvs") / "pseudolife"
+
+
+def _sha8(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+def _age(path: Path, days: float) -> None:
+    stamp = time.time() - days * DAY
+    os.utime(path, (stamp, stamp), follow_symlinks=False)
+
+
+def _copy(home: Path, entry: str, days: float) -> Path:
+    """A test copy as a run leaves it: a .git, some files, and its lock."""
+    path = home / WORK / entry
+    (path / ".git").mkdir(parents=True)
+    (path / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="ascii")
+    (path / "payload").write_bytes(b"x" * 300_000)
+    lock = home / WORK / f"{entry}.lock"
+    lock.touch()
+    for p in (path / ".git" / "HEAD", path / ".git", path, lock):
+        _age(p, days)
+    return path
+
+
+def _env(home: Path, key: str, days: float, lock: bool = False) -> Path:
+    """An environment as uv leaves it, with a lock file if a run made one."""
+    path = home / VENVS / key
+    (path / "bin").mkdir(parents=True)
+    (path / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="ascii")
+    (path / "bin" / "python").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    (path / "bin" / "python").chmod(0o755)
+    for p in (path / "pyvenv.cfg", path / "bin", path):
+        _age(p, days)
+    if lock:
+        (home / VENVS / f"{key}.lock").touch()
+        _age(home / VENVS / f"{key}.lock", days)
+    return path
+
+
+def _env_of(home: Path, entry: str) -> str:
+    """The environment key a run of copy ``entry`` uses (ops/wsl-suite.sh)."""
+    name = entry.split("-", 1)[1]
+    return f"{name}-{_sha8(f'{home}/{WORK.as_posix()}/{entry}')}"
+
+
+def _stub(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    path.chmod(0o755)
+
+
+def _launch(tmp_path: Path, **env: str | None) -> subprocess.CompletedProcess:
+    """A worktree-mode run whose pytest and uv are stubs that exit 0, with
+    its own environment outside the pruned root."""
+    _stub(tmp_path / "venv" / "bin" / "python")
+    _stub(tmp_path / "stubs" / "uv")
+    base = {"HOME": str(tmp_path / "home"),
+            "PATH": f"{tmp_path / 'stubs'}{os.pathsep}{os.environ['PATH']}",
+            "PSEUDOLIFE_SUITE_VENV": str(tmp_path / "venv"),
+            "PSEUDOLIFE_SUITE_COMMIT": None, "PSEUDOLIFE_SUITE_DISPATCHED": None,
+            "PSEUDOLIFE_SUITE_PRUNE": None, "PSEUDOLIFE_SUITE_PRUNE_DAYS": None,
+            "PSEUDOLIFE_SUITE_KEEP": None}
+    base.update(env)
+    return subprocess.run([BASH, str(SCRIPT)], capture_output=True, text=True,
+                          timeout=120, env=hermetic_env(**base))
+
+
+def _pruned_lines(stderr: str) -> list[str]:
+    return [ln for ln in stderr.splitlines() if ln.startswith("wsl-suite: pruned")]
+
+
+@_LINUX_ONLY
+def test_a_run_prunes_stale_copies_and_environments(tmp_path):
+    """Stale copies go with their environments; a recent copy, a copy whose
+    lock is held (a run is using it), and their environments stay, and one
+    line says what went and how much it freed."""
+    import fcntl
+
+    home = tmp_path / "home"
+    stale = _copy(home, "e36d1995-stale", days=10)
+    stale_env = _env(home, _env_of(home, "e36d1995-stale"), days=10)
+    fresh = _copy(home, "e36d1995-fresh", days=0.5)
+    # A recent copy keeps its environment even when that looks stale.
+    fresh_env = _env(home, _env_of(home, "e36d1995-fresh"), days=10)
+    busy = _copy(home, "e36d1995-busy", days=10)
+    busy_env = _env(home, _env_of(home, "e36d1995-busy"), days=10)
+    loose_env = _env(home, "gone-checkout-0badf00d", days=10, lock=True)
+    recent_env = _env(home, "other-checkout-12345678", days=1)
+    with open(home / WORK / "e36d1995-busy.lock", "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    for gone in (stale, stale_env, loose_env):
+        assert not gone.exists(), f"{gone.name} was not pruned: {proc.stderr}"
+    for kept in (fresh, fresh_env, busy, busy_env, recent_env):
+        assert kept.exists(), f"{kept.name} was pruned: {proc.stderr}"
+    assert not (home / WORK / "e36d1995-stale.lock").exists()
+    assert not (home / VENVS / "gone-checkout-0badf00d.lock").exists()
+    assert (home / WORK / "e36d1995-busy.lock").exists()
+    lines = _pruned_lines(proc.stderr)
+    assert len(lines) == 1, proc.stderr
+    assert "pruned 1 test copy and 2 environments" in lines[0], lines[0]
+    assert "freeing 0.0 MB" not in lines[0], lines[0]  # 300 KB of payload
+
+
+@_LINUX_ONLY
+def test_pruning_keeps_the_newest_copies_past_the_cap(tmp_path):
+    """Past PSEUDOLIFE_SUITE_KEEP the least recently used copies go, even
+    when none is stale."""
+    home = tmp_path / "home"
+    copies = [_copy(home, f"e36d1995-c{i}", days=i * 0.1) for i in range(5)]
+    proc = _launch(tmp_path, PSEUDOLIFE_SUITE_KEEP="2")
+    assert proc.returncode == 0, proc.stderr
+    assert [c.exists() for c in copies] == [True, True, False, False, False], proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_removes_orphaned_locks_but_not_held_ones(tmp_path):
+    """A lock file whose copy is gone is removed, unless a run holds it: a
+    run takes the lock before it clones the copy."""
+    import fcntl
+
+    home = tmp_path / "home"
+    (home / WORK).mkdir(parents=True)
+    (home / VENVS).mkdir(parents=True)
+    orphans = [home / WORK / "e36d1995-gone.lock", home / VENVS / "gone-0badf00d.lock"]
+    held_path = home / WORK / "e36d1995-cloning.lock"
+    for lock in (*orphans, held_path):
+        lock.touch()
+    with open(held_path, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert not any(o.exists() for o in orphans), proc.stderr
+    assert held_path.exists()
+    assert "removed 2 orphaned lock files" in proc.stderr, proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_spares_an_environment_a_process_runs_from(tmp_path):
+    """An environment with no lock (a run from before the pruner) stays
+    while any process's argv[0] lies inside it, and goes once none does."""
+    home = tmp_path / "home"
+    env = _env(home, "old-run-0badf00d", days=10)
+    runner = subprocess.Popen(
+        [BASH, "-c", f'exec -a "{env}/bin/python" "{BASH}" -c "sleep 300; :"'],
+        start_new_session=True)
+    try:
+        deadline = time.monotonic() + 30
+        while not Path(f"/proc/{runner.pid}/cmdline").read_bytes().startswith(
+                str(env).encode()):
+            assert time.monotonic() < deadline, "the stand-in run never started"
+            time.sleep(0.05)
+        proc = _launch(tmp_path)
+        assert proc.returncode == 0, proc.stderr
+        assert env.exists(), proc.stderr
+    finally:
+        os.killpg(runner.pid, signal.SIGKILL)
+        runner.wait(timeout=10)
+    proc = _launch(tmp_path)
+    assert not env.exists(), proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_never_follows_a_symlink_out_of_its_root(tmp_path):
+    """A stale entry that is a symlink stays, and so does what it points
+    at: only real directories inside the two roots are removed."""
+    home = tmp_path / "home"
+    outside = tmp_path / "outside"
+    (outside / ".git").mkdir(parents=True)
+    (outside / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="ascii")
+    (outside / "keep").write_text("data", encoding="ascii")
+    links = []
+    for root, name in ((WORK, "e36d1995-link"), (VENVS, "link-0badf00d")):
+        (home / root).mkdir(parents=True, exist_ok=True)
+        link = home / root / name
+        link.symlink_to(outside, target_is_directory=True)
+        _age(link, 10)
+        links.append(link)
+    _age(outside, 10)
+    proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE_DAYS="0", PSEUDOLIFE_SUITE_KEEP="0")
+    assert proc.returncode == 0, proc.stderr
+    assert (outside / "keep").read_text(encoding="ascii") == "data"
+    assert all(link.is_symlink() for link in links), proc.stderr
+    assert not _pruned_lines(proc.stderr), proc.stderr
+
+
+@_LINUX_ONLY
+def test_pruning_can_be_turned_off(tmp_path):
+    stale = _copy(tmp_path / "home", "e36d1995-stale", days=10)
+    proc = _launch(tmp_path, PSEUDOLIFE_SUITE_PRUNE="off")
+    assert proc.returncode == 0, proc.stderr
+    assert stale.exists() and not _pruned_lines(proc.stderr), proc.stderr
+
+
+@_LINUX_ONLY
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
+def test_a_copy_mode_run_never_prunes_its_own_copy_or_environment(tmp_path):
+    """With nothing to keep (0 days, a cap of 0) a copy-mode run still keeps
+    the copy it tests and the environment it runs, and prunes the rest."""
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q", str(repo)], check=True)
+    (repo / "README").write_text("x", encoding="ascii")
+    subprocess.run([*git, "-C", str(repo), "add", "README"], check=True)
+    subprocess.run([*git, "-C", str(repo), "commit", "-qm", "init"], check=True)
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                         capture_output=True, text=True).stdout.strip()
+    common = str(repo / ".git")
+    entry = f"{_sha8(common)}-mine"
+    own_env = _env(home, _env_of(home, entry), days=10, lock=True)
+    (home / WORK).mkdir(parents=True, exist_ok=True)
+    (home / WORK / f"{entry}.lock").touch()
+    _age(home / WORK / f"{entry}.lock", 10)
+    other = _copy(home, "e36d1995-other", days=0)
+    other_env = _env(home, _env_of(home, "e36d1995-other"), days=0)
+    _stub(tmp_path / "stubs" / "uv")
+    proc = subprocess.run(
+        [BASH, str(SCRIPT)], capture_output=True, text=True, timeout=120,
+        env=hermetic_env(HOME=str(home),
+                         PATH=f"{tmp_path / 'stubs'}{os.pathsep}{os.environ['PATH']}",
+                         PSEUDOLIFE_SUITE_COMMIT=sha, PSEUDOLIFE_SUITE_GIT_COMMON=common,
+                         PSEUDOLIFE_SUITE_NAME="mine", PSEUDOLIFE_SUITE_VENV=None,
+                         PSEUDOLIFE_SUITE_DISPATCHED=None, PSEUDOLIFE_SUITE_PRUNE=None,
+                         PSEUDOLIFE_SUITE_PRUNE_DAYS="0", PSEUDOLIFE_SUITE_KEEP="0"))
+    assert proc.returncode == 0, proc.stderr
+    assert (home / WORK / entry / "README").exists(), proc.stderr
+    assert (own_env / "bin" / "python").exists(), proc.stderr
+    assert not other.exists() and not other_env.exists(), proc.stderr
+    assert "pruned 1 test copy and 1 environment " in proc.stderr, proc.stderr

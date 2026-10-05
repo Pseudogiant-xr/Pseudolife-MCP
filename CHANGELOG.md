@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-10-05 — suite runs clean up the test copies and environments earlier runs left)
+- The WSL and second-machine full-suite runners (`ops/wsl-suite.sh`, behind
+  `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`) kept a test copy (~600 MB)
+  and a uv environment (~220 MB) per checkout and never removed them: on
+  2026-10-05 the second machine's disk went from 62% to 88% in one day (13
+  copies, 7.8 GB, plus 2.9 GB of environments; it had filled on
+  2026-10-04), and WSL on the maintainer's host held 18 copies (11 GB) and
+  3.3 GB. Each run now prunes them before it clones: copies and
+  environments unused for `PSEUDOLIFE_SUITE_PRUNE_DAYS` days (default 3),
+  then the least recently used past `PSEUDOLIFE_SUITE_KEEP` of each
+  (default 8), and lock files whose directory is gone, and prints one line
+  saying what went and how much it freed. `PSEUDOLIFE_SUITE_PRUNE=off`
+  turns it off. It removes a copy or environment only while holding its
+  lock (taken without waiting, so one a run is using stays), never the
+  run's own, never an environment a process runs from or whose copy's
+  lock is held, and only real directories directly inside the two roots it
+  owns, checked after resolving them. Mirrors are left alone. A run now
+  holds a shared lock on its environment (`<env>.lock` beside it) for its
+  whole length, and reopens a lock file the pruner removed while it waited.
+  Pruning never fails a run.
+
 ### Changed (2026-10-05 — a Claude Code session stays reachable while it is open; the Console shows whether the delegate is)
 - A maintainer message to an idle Claude Code session rang only during the
   hour after its last turn: the plugin's Stop-hook watcher stopped at 59

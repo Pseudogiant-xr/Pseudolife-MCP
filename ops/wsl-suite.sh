@@ -28,6 +28,10 @@
 #   PSEUDOLIFE_SUITE_VENV        the environment to use (default: one per
 #                                checkout under ~/.venvs/pseudolife)
 #   PSEUDOLIFE_SUITE_PYTHON      the interpreter version (default 3.11, as CI)
+#   PSEUDOLIFE_SUITE_PRUNE_DAYS  remove other checkouts' test copies and
+#                                environments unused this many days (default 3)
+#   PSEUDOLIFE_SUITE_KEEP        and keep at most this many of each (default 8)
+#   PSEUDOLIFE_SUITE_PRUNE       off: remove nothing
 #
 # The run is offline (HF_HUB_OFFLINE=1) and WSL has its own Hugging Face
 # cache, so a fresh distribution needs the embedders CI warms
@@ -98,11 +102,236 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     # would check out and clean under the first. This shell holds the
     # descriptor until pytest has exited and its leftovers are stopped;
     # Python's subprocesses close it, so a leaked test daemon cannot keep it.
-    exec 9>"$root.lock"
-    if ! flock -n 9; then
-        echo "wsl-suite: another run is using the test copy of $name; waiting" >&2
-        flock 9
+    # Opening it truncates the file, which stamps its mtime: the pruner below
+    # reads that as the copy's last use. The pruner deletes a lock file only
+    # while holding it, so one deleted while this run waited is opened again.
+    while :; do
+        exec 9>"$root.lock"
+        if ! flock -n 9; then
+            echo "wsl-suite: another run is using the test copy of $name; waiting" >&2
+            flock 9
+        fi
+        [[ "$root.lock" -ef /dev/fd/9 ]] && break
+    done
+fi
+
+key="$name-$(printf '%s' "$root" | sha256sum | cut -c1-8)"
+venv_root="$HOME/.venvs/pseudolife"
+venv="${PSEUDOLIFE_SUITE_VENV:-$venv_root/$key}"
+if [[ -z "${PSEUDOLIFE_SUITE_VENV:-}" ]] && command -v flock >/dev/null 2>&1; then
+    # Held shared for the whole run (two runs of one worktree may share an
+    # environment, as before); the pruner deletes an environment only while
+    # holding this lock exclusively. Its mtime is the environment's last use.
+    mkdir -p "$venv_root"
+    while :; do
+        exec 7>"$venv.lock"
+        flock -s 7
+        [[ "$venv.lock" -ef /dev/fd/7 ]] && break
+    done
+fi
+
+# Removes the test copies and environments earlier runs left behind: those
+# unused for PSEUDOLIFE_SUITE_PRUNE_DAYS days (default 3), then the least
+# recently used past PSEUDOLIFE_SUITE_KEEP of each (default 8), and lock
+# files whose directory is gone. PSEUDOLIFE_SUITE_PRUNE=off turns it off.
+# Measured 2026-10-05: nothing removed them, and at ~600 MB a copy and
+# ~220 MB an environment the second machine's disk went from 62% to 88% in
+# one day (13 copies, 7.8 GB, plus 2.9 GB of environments; it had filled
+# once on 2026-10-04), while WSL here held 18 copies (11 GB) and 3.3 GB.
+#
+# It never fails the run, and it removes only a direct, non-symlink child of
+# the two roots this script owns, checked after resolving it. It removes a
+# copy or an environment only while holding its lock (taken without
+# waiting: a held lock means a run is using it) and never this run's own.
+# An environment also stays while any process runs from it, or while the
+# lock of the copy it belongs to is held: a commit dispatched from before
+# this pruner takes no environment lock, but it does hold its copy's.
+# Mirrors are shared by every copy of a repository and are left alone.
+prune_suite_cache() {
+    set +eu
+    [[ "${PSEUDOLIFE_SUITE_PRUNE:-}" == off ]] && return 0
+    local days="${PSEUDOLIFE_SUITE_PRUNE_DAYS:-3}" keep="${PSEUDOLIFE_SUITE_KEEP:-8}"
+    if [[ ! "$days" =~ ^[0-9]+$ || ! "$keep" =~ ^[0-9]+$ ]]; then
+        echo "wsl-suite: PSEUDOLIFE_SUITE_PRUNE_DAYS and PSEUDOLIFE_SUITE_KEEP take whole numbers; not pruning" >&2
+        return 0
     fi
+    [[ "$HOME" == /?* ]] || return 0
+    local work_dir="$HOME/.cache/pseudolife-suite/work"
+    local work_root="" env_root="" now max_age
+    [[ -d "$work_dir" ]] && work_root="$(realpath -e -- "$work_dir")"
+    [[ -d "$venv_root" ]] && env_root="$(realpath -e -- "$venv_root")"
+    [[ -n "$work_root$env_root" ]] || return 0
+    now="$(date +%s)"
+    max_age=$(( 10#$days * 86400 ))
+    keep=$(( 10#$keep ))
+    local own_copy own_env
+    own_copy="$(realpath -m -- "$root")"
+    own_env="$(realpath -m -- "$venv")"
+
+    # Newest mtime among the paths given that exist, else 0.
+    last_use() {
+        local t
+        t="$(stat -c %Y -- "$@" 2>/dev/null | sort -n | tail -n 1)"
+        printf '%s' "${t:-0}"
+    }
+    # Whether $1 is a directory directly inside root $2 (both resolved),
+    # and not reached through a symlink.
+    owned_child() {
+        [[ -n "$2" && -d "$1" && ! -L "$1" ]] || return 1
+        local real
+        real="$(realpath -e -- "$1")" || return 1
+        [[ "$real" == "$1" && "$(dirname -- "$real")" == "$2" ]]
+    }
+    # Removes owned directory $1 of root $2; adds its size to `freed`.
+    remove_owned() {
+        owned_child "$1" "$2" || return 1
+        local kib
+        kib="$(du -sk -- "$1" 2>/dev/null | cut -f1)"
+        rm -rf --one-file-system -- "$1" || return 1
+        freed=$(( freed + ${kib:-0} ))
+    }
+    # Opens lock file $1 on a new descriptor, stored in `fd`, and takes it
+    # exclusively without waiting. Appending keeps its mtime; one created
+    # here is dated 1970, so it never reads as a recent use.
+    try_lock() {
+        local made=0
+        [[ -e "$1" ]] || made=1
+        exec {fd}>>"$1" || return 1
+        (( made )) && touch -m -d @0 -- "$1" 2>/dev/null
+        flock -n "$fd" && return 0
+        exec {fd}>&-
+        return 1
+    }
+    # Whether any process runs from directory $1 (resolved) or $2 (as a run
+    # names it): its argv[0] is inside either. Read without forking; nothing
+    # to read where there is no /proc.
+    runs_from() {
+        local dir arg0
+        for dir in /proc/[0-9]*; do
+            arg0=""
+            IFS= read -r -d '' arg0 2>/dev/null < "$dir/cmdline"
+            [[ "$arg0" == "$1"/* || "$arg0" == "$2"/* ]] && return 0
+        done
+        return 1
+    }
+    # The environment a copy's run uses: keyed, as above, by the copy's
+    # unresolved path and the checkout name the copy is named after.
+    env_of() {
+        local entry="${1##*/}"
+        local copy_name="$entry"
+        [[ "$entry" =~ ^[0-9a-f]{8}-(.+)$ ]] && copy_name="${BASH_REMATCH[1]}"
+        printf '%s/%s-%s' "$env_root" "$copy_name" \
+            "$(printf '%s' "$work_dir/$entry" | sha256sum | cut -c1-8)"
+    }
+
+    local -i copies=0 envs=0 locks=0 freed=0 fd=0
+    local path t line
+    local -i count=0
+    local -a order=()
+    local -A kept_env=()
+
+    # Test copies, oldest first. A copy holds a .git; anything else here is
+    # not one this script made and stays.
+    if [[ -n "$work_root" ]]; then
+        order=()
+        for path in "$work_root"/*; do
+            [[ -d "$path/.git" ]] || continue
+            [[ "$path" == "$own_copy" ]] && continue
+            order+=("$(last_use "$path.lock" "$path" "$path/.git/HEAD" "$path/.git/index") $path")
+        done
+        count=${#order[@]}
+        [[ "$own_copy" == "$work_root"/* ]] && count+=1  # kept, and counted
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            path="${line#* }"
+            if (( count <= keep )) && (( now - ${line%% *} <= max_age )); then
+                kept_env["$(env_of "$path")"]=1
+                continue
+            fi
+            if ! try_lock "$path.lock"; then
+                kept_env["$(env_of "$path")"]=1
+                continue
+            fi
+            # A run may have finished with it since it was read.
+            t="$(last_use "$path.lock" "$path" "$path/.git/HEAD" "$path/.git/index")"
+            if (( count <= keep )) && (( now - t <= max_age )); then
+                exec {fd}>&-
+                kept_env["$(env_of "$path")"]=1
+                continue
+            fi
+            if remove_owned "$path" "$work_root"; then
+                rm -f -- "$path.lock"
+                copies+=1
+                count=$(( count - 1 ))
+            else
+                kept_env["$(env_of "$path")"]=1
+            fi
+            exec {fd}>&-
+        done < <(printf '%s\n' "${order[@]}" | sort -n)
+        [[ "$own_copy" == "$work_root"/* ]] && kept_env["$(env_of "$own_copy")"]=1
+        # A held lock with no copy yet is a run about to clone one: its
+        # environment stays too. A free one is removed below.
+        for path in "$work_root"/*.lock; do
+            [[ -f "$path" && ! -e "${path%.lock}" ]] || continue
+            if try_lock "$path"; then exec {fd}>&-; else kept_env["$(env_of "${path%.lock}")"]=1; fi
+        done
+    fi
+
+    # Environments, oldest first; those of kept copies stay with them.
+    if [[ -n "$env_root" ]]; then
+        order=()
+        for path in "$env_root"/*; do
+            [[ -f "$path/pyvenv.cfg" ]] || continue
+            [[ "$path" == "$own_env" ]] && continue
+            order+=("$(last_use "$path.lock" "$path" "$path/pyvenv.cfg" "$path"/lib/python*/site-packages) $path")
+        done
+        count=${#order[@]}
+        [[ "$own_env" == "$env_root"/* ]] && count+=1
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            path="${line#* }"
+            [[ -n "${kept_env[$path]:-}" ]] && continue
+            (( count <= keep )) && (( now - ${line%% *} <= max_age )) && continue
+            try_lock "$path.lock" || continue
+            t="$(last_use "$path.lock" "$path" "$path/pyvenv.cfg" "$path"/lib/python*/site-packages)"
+            if { (( count <= keep )) && (( now - t <= max_age )); } \
+                    || runs_from "$path" "$venv_root/${path##*/}"; then
+                exec {fd}>&-
+                continue
+            fi
+            if remove_owned "$path" "$env_root"; then
+                rm -f -- "$path.lock"
+                envs+=1
+                count=$(( count - 1 ))
+            fi
+            exec {fd}>&-
+        done < <(printf '%s\n' "${order[@]}" | sort -n)
+    fi
+
+    # Lock files whose copy or environment is gone (removed by hand, or by
+    # a run that stopped between the two removals).
+    local lock_root
+    for lock_root in "$work_root" "$env_root"; do
+        [[ -n "$lock_root" ]] || continue
+        for path in "$lock_root"/*.lock; do
+            [[ -f "$path" && ! -L "$path" && ! -e "${path%.lock}" ]] || continue
+            [[ "${path%.lock}" == "$own_copy" || "${path%.lock}" == "$own_env" ]] && continue
+            try_lock "$path" || continue
+            [[ -e "${path%.lock}" ]] || { rm -f -- "$path" && locks+=1; }
+            exec {fd}>&-
+        done
+    done
+
+    (( copies + envs + locks )) || return 0
+    printf 'wsl-suite: pruned %d test cop%s and %d environment%s (unused %d+ days, or past the %d kept), freeing %s; removed %d orphaned lock file%s\n' \
+        "$copies" "$( (( copies == 1 )) && echo y || echo ies)" \
+        "$envs" "$( (( envs == 1 )) || echo s)" "$((10#$days))" "$keep" \
+        "$(awk -v k="$freed" 'BEGIN { if (k >= 1048576) printf "%.1f GB", k / 1048576; else printf "%.1f MB", k / 1024 }')" \
+        "$locks" "$( (( locks == 1 )) || echo s)" >&2
+}
+( prune_suite_cache ) || true
+
+if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     if [[ ! -d "$root/.git" ]]; then
         git clone --quiet --shared --no-checkout "$mirror" "$root"
     fi
@@ -120,8 +349,6 @@ if [[ -n "${PSEUDOLIFE_SUITE_COMMIT:-}" ]]; then
     echo "wsl-suite: testing $(git -C "$root" rev-parse --short HEAD) in $root"
 fi
 
-key="$name-$(printf '%s' "$root" | sha256sum | cut -c1-8)"
-venv="${PSEUDOLIFE_SUITE_VENV:-$HOME/.venvs/pseudolife/$key}"
 if [[ ! -x "$venv/bin/python" ]]; then
     # --seed: the installer tests ask the run's Python for pip, which a bare
     # uv environment lacks.
