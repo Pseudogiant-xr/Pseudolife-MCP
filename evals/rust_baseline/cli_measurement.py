@@ -15,6 +15,11 @@ from evals.rust_port.provenance import require_import_root, runtime_metadata
 
 
 def measure(args, resource):
+    mode = getattr(args, "mode", "help")
+    argv = json.loads(args.argv_json) if getattr(args, "argv_json", None) else [mode]
+    if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) for arg in argv) \
+            or argv[0] not in {mode, "--" + mode}:
+        raise ValueError("measurement argv must name the selected CLI mode")
     root = args.oracle_root.resolve()
     pin = require_pinned_source(root)
     require_import_root(root)
@@ -33,11 +38,11 @@ def measure(args, resource):
     with tempfile.TemporaryDirectory(prefix="rust-port-cli-measure-") as temporary:
         directory = Path(temporary)
         # The untimed exact-byte control must pass before any timing is recorded.
-        controls = {arm: run_cli(command, ["help"], cwd=root,
+        controls = {arm: run_cli(command, argv, cwd=root,
                                 env=isolated_env(directory / f"control-{arm}"), timeout=10)
                     for arm, command in commands.items()}
         if controls["python"] != controls["rust"] or controls["python"]["exit_code"] != 0:
-            raise RuntimeError("help byte control failed; measurement not comparable")
+            raise RuntimeError("CLI byte control failed; measurement not comparable")
         for repeat in range(args.repeats):
             resource_checks.append(resource if repeat == 0 or args.smoke else lease_gate(
                 args.board_checked_at, offline_resource_checked_at=args.offline_resource_checked_at))
@@ -46,7 +51,7 @@ def measure(args, resource):
                 for arm in order:
                     env = isolated_env(directory / f"{repeat}-{sample}-{arm}")
                     started = time.perf_counter()
-                    response = run_cli(commands[arm], ["help"], cwd=root, env=env, timeout=10)
+                    response = run_cli(commands[arm], argv, cwd=root, env=env, timeout=10)
                     elapsed = (time.perf_counter() - started) * 1000
                     if response != controls[arm]:
                         raise RuntimeError("CLI bytes changed during measurement")
@@ -61,7 +66,7 @@ def measure(args, resource):
             "capture_platform": capture_platform(), "provenance": provenance(source_root=root),
             "python_oracle": pin, "candidate_identity": identity,
             "candidate_executable": binary, "python_executable": python_identity,
-            "mode": "help", "argv": ["help"], "stream_contract": STREAM_CONTRACT,
+            "mode": mode, "argv": argv, "stream_contract": STREAM_CONTRACT,
             "resource_check": resource,
             "repeat_resource_checks": resource_checks, "repeats": args.repeats,
             "samples_per_repeat": args.samples, "runs": runs,
@@ -83,6 +88,8 @@ def main():
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256")
+    parser.add_argument("--mode", choices=("help", "version"), default="help")
+    parser.add_argument("--argv-json", help="Optional argv for the selected mode (bare layout only)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--samples", type=int, default=10)

@@ -205,9 +205,9 @@ def _ordinary_cli_exit(value):
     return type(value) is int and 0 <= value <= 255
 
 
-def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float) -> dict:
+def run_cli(prefix, argv, *, cwd: Path, env: dict, timeout: float, stdin: bytes = b"") -> dict:
     with owned_process([*prefix, *argv], cwd=cwd, env=env, stdin=subprocess.PIPE) as proc:
-        stdout, stderr = proc.communicate(input=b"", timeout=timeout)
+        stdout, stderr = proc.communicate(input=stdin, timeout=timeout)
     if not _ordinary_cli_exit(proc.returncode):
         raise AbnormalTermination()
     return {"exit_code": proc.returncode,

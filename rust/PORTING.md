@@ -238,6 +238,16 @@ The stderr message allowlist is currently empty, so every stderr byte is
 compared. Exit codes are exact. This policy does not change the phase 0b
 daemon HTTP/MCP `raw-mcp-retained-not-compared` policy.
 
+The named `cli-state-compared` policy compares ordinary exit status, raw UTF-8
+stdout/stderr and the presence and bytes of every post-state file under the
+isolated CLI home. Both arms reuse the same home path after a reset; paths and
+newlines remain exact. The initial corpus admits no normalizations. Future
+PID, timestamp or port normalization requires a named rule at specific file
+and byte spans here before a case may opt in. Locale output including cp1252
+remains deferred. Candidate-output controls mutate the captured candidate
+exit, each stream and a post-state file; oracle self-record mutations are
+reported separately as judge-sensitivity controls.
+
 The named `eof-observed-final-pair-orders` rule admits only the final two connection-closed error
 frames in orders actually observed in the frozen Python capture set. Both
 orders occurred in five repeats per protocol era; all preceding frames, error

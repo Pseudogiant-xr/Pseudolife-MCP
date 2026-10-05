@@ -5,12 +5,32 @@ from pathlib import Path
 import sys
 from contextlib import asynccontextmanager
 import os
+import subprocess
 
 import pytest
 
 from evals.rust_port.harness import isolated_env, run_cli
 
 MANIFEST = json.loads(Path(__file__).with_name("oracle_tests.json").read_text(encoding="utf-8"))
+# Admit subprocess nodes only when their candidate modes are supported.
+# Doctor remains deferred; the global CLI selector must fail closed for it.
+CLI_SUBPROCESS_NODES = set()
+
+
+def boundary(node):
+    if node in CLI_SUBPROCESS_NODES:
+        return "cli-main-process"
+    return MANIFEST["mapped"].get(node)
+
+
+def public_cli_arguments(command):
+    if not isinstance(command, (list, tuple)) or not command:
+        return None
+    if command[0] == sys.executable and list(command[1:3]) == ["-m", "pseudolife_memory.cli"]:
+        return list(command[3:])
+    if Path(command[0]).name.lower() in {"pseudolife-mcp", "pseudolife-mcp.exe"}:
+        return list(command[1:])
+    return None
 
 
 def pytest_addoption(parser):
@@ -60,7 +80,7 @@ def pytest_collection_finish(session):
             reporter.write_line(f"Rust shim routing: {routed} candidate nodes; "
                                 f"{len(session.items) - routed} Python oracle nodes")
         return
-    unmapped = [item.nodeid for item in session.items if MANIFEST["mapped"].get(item.nodeid) not in boundaries]
+    unmapped = [item.nodeid for item in session.items if boundary(item.nodeid) not in boundaries]
     if unmapped:
         # No silent skip/deselection: an explicit supported selection is required.
         raise pytest.UsageError("selected tests have no process adapter: " + ", ".join(unmapped))
@@ -92,9 +112,25 @@ def _port_selected_boundary(request):
     prefix = getattr(request.config, "_port_cli_prefix", None)
     if prefix is None:
         return
-    if MANIFEST["mapped"].get(request.node.nodeid) != "cli-main-process":
+    if boundary(request.node.nodeid) != "cli-main-process":
         raise pytest.UsageError("selected boundary is not implemented")
     monkeypatch = request.getfixturevalue("monkeypatch")
+    if request.node.nodeid in CLI_SUBPROCESS_NODES:
+        original = subprocess.run
+        routed = []
+
+        def candidate_run(command, *args, **kwargs):
+            modes = public_cli_arguments(command)
+            if modes is None:
+                return original(command, *args, **kwargs)
+            env = dict(kwargs.get("env") or os.environ)
+            env["CUDA_VISIBLE_DEVICES"] = "-1"
+            routed.append(modes)
+            return original([*prefix, *modes], *args, **{**kwargs, "env": env})
+
+        monkeypatch.setattr(subprocess, "run", candidate_run)
+        request.addfinalizer(lambda: routed or pytest.fail("CLI subprocess adapter observed no public CLI call"))
+        return
     tmp_path = request.getfixturevalue("tmp_path")
 
     def main():
