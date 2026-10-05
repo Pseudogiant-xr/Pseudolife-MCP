@@ -143,6 +143,7 @@ services:
       PSEUDOLIFE_MCP_HOST: 0.0.0.0
       PSEUDOLIFE_MCP_PORT: "8765"
       PSEUDOLIFE_MCP_DATA_DIR: /data
+      PSEUDOLIFE_RE_EVIDENCE_ARCHIVE_ROOT: ${PSEUDOLIFE_RE_EVIDENCE_ARCHIVE_ROOT:-/data/re_evidence_archives}
       # Local timezone for daemon-generated episode titles (the container is
       # UTC by default). Set TZ in ops/.env to your zone (e.g. Australia/Sydney)
       # so "session - YYYY-MM-DD HH:MM" titles read in local time.
@@ -160,8 +161,8 @@ services:
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
       # Default toolset tier: "minimal" (10 tools: recall/capture loop incl.
-      # lesson search, the set-slot pair + the memory_toolset gate), "core" (24: + graph/
-      # recall/world/docs/episodes/coordination), or "full" (all 38). Since 2026-07-11 this sets per-session
+      # lesson search, the set-slot pair + the memory_toolset gate), "core" (25: + graph/
+      # recall/world/docs/episodes/coordination/RE evidence), or "full" (all 39). Since 2026-07-11 this sets per-session
       # VISIBILITY, not registration — hidden tools stay callable, and any
       # session can step its own tier up/down via memory_toolset. Shipped
       # default: core.

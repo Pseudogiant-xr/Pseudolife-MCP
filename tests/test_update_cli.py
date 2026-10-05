@@ -338,7 +338,9 @@ def test_the_env_file_falls_back_to_the_working_directorys(world, clients, tmp_p
 
 def test_bundled_compose_files_match_the_checkouts():
     for name in ("docker-compose.yml", "docker-compose.ghcr.yml"):
-        assert (up.BUNDLED_COMPOSE / name).read_bytes() == (ROOT / "ops" / name).read_bytes(), name
+        source = (ROOT / "ops" / name).read_bytes()
+        assert b"\r" not in source, f"{name} must check out LF on every platform"
+        assert (up.BUNDLED_COMPOSE / name).read_bytes() == source, name
 
 
 def test_a_projects_own_backup_script_is_used_when_its_checkout_still_exists(world, clients, tmp_path):

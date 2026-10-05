@@ -1,23 +1,20 @@
 <script lang="ts">
   // Replays the bank's growth: a cut in time hides every star and relation
   // newer than it. Visibility only; the layout is never re-simulated.
-  // Play is off under reduced motion (no auto-animation).
+  // Explicit replay remains available under reduced motion; it changes only visibility.
   import Icon from "../Icon.svelte";
   import { fmtDate } from "../../lib/format";
   import { SCRUB_MAX, sliderCut, type TimeSpan } from "../../lib/graph";
+  import { createTimeReplay } from "../../lib/time_replay";
 
   let {
     span,
-    reduceMotion,
     oncut,
-  }: { span: TimeSpan; reduceMotion: boolean; oncut: (t: number | null) => void } = $props();
-
-  const STEP = 12;
-  const TICK_MS = 100;
+  }: { span: TimeSpan; oncut: (t: number | null) => void } = $props();
 
   let v = $state(SCRUB_MAX);
   let playing = $state(false);
-  let timer: ReturnType<typeof setInterval> | undefined;
+  const replay = createTimeReplay(apply, (active) => (playing = active));
 
   const cut = $derived(sliderCut(v, span));
   const dateLabel = $derived(cut === null ? "Now" : fmtDate(cut));
@@ -28,36 +25,12 @@
     oncut(sliderCut(next, span));
   }
 
-  function stop() {
-    clearInterval(timer);
-    timer = undefined;
-    playing = false;
-  }
-
   function onInput(e: Event) {
-    stop();
+    replay.stop();
     apply(Number((e.currentTarget as HTMLInputElement).value));
   }
 
-  function togglePlay() {
-    if (reduceMotion) return;
-    if (playing) {
-      stop();
-      return;
-    }
-    playing = true;
-    let x = 0;
-    timer = setInterval(() => {
-      x += STEP;
-      if (x >= SCRUB_MAX) {
-        x = SCRUB_MAX;
-        stop();
-      }
-      apply(x);
-    }, TICK_MS);
-  }
-
-  $effect(() => () => clearInterval(timer));
+  $effect(() => () => replay.stop());
 </script>
 
 <div class="scrub">
@@ -67,8 +40,7 @@
     aria-pressed={playing}
     aria-label={playLabel}
     title={playLabel}
-    disabled={reduceMotion}
-    onclick={togglePlay}
+    onclick={replay.toggle}
   >
     <Icon name={playing ? "pause" : "play"} size={14} />
   </button>
@@ -107,10 +79,6 @@
   }
   .play[aria-pressed="true"] {
     background: var(--selected);
-  }
-  .play:disabled {
-    color: var(--ink-4);
-    cursor: not-allowed;
   }
   input[type="range"] {
     flex: 1 1 auto;

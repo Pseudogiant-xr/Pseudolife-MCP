@@ -169,7 +169,7 @@
   {#if span && status === "ready" && handle}
     {@const h = handle}
     <div class="scrubber">
-      <TimeScrubber {span} {reduceMotion} oncut={(t) => h.setTimeCut(t)} />
+      <TimeScrubber {span} oncut={(t) => h.setTimeCut(t)} />
     </div>
   {/if}
 
