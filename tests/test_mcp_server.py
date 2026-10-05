@@ -916,9 +916,11 @@ def test_memory_get_on_a_superseded_entry_without_replacement_text(
 
 def test_memory_get_faded_payload_is_unchanged(
         tmp_path: Path, monkeypatch) -> None:
+    """The service payload is unchanged; the MCP result adds the note that
+    names the possible causes (2026-10-05, refusal notes)."""
     mod = _reload_mod(tmp_path, monkeypatch)
     assert _invoke("memory_get", {"entry_id": 123}) == {
-        "found": False, "faded": True}
+        "found": False, "faded": True, "note": mod._FADED_NOTE}
     assert mod.service.get_entry(123) == {"found": False, "faded": True}
 
 

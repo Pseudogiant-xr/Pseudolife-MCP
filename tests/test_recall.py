@@ -698,7 +698,8 @@ def test_memory_get_and_reinforce_roundtrip(bench_pg, tmp_path, monkeypatch):
     assert srv.memory_reinforce(eid)["reinforced"] is True
     after = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
     assert after == before + 1
-    assert srv.memory_get(9_000_001) == {"found": False, "faded": True}
+    assert srv.memory_get(9_000_001) == {"found": False, "faded": True,
+                                         "note": srv._FADED_NOTE}
 
 
 def test_reinforcements_loads_into_entry(bench_pg, tmp_path):

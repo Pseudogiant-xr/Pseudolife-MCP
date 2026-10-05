@@ -82,6 +82,13 @@ from pydantic_core import PydanticCustomError  # noqa: E402
 
 from pseudolife_memory.service import (  # noqa: E402
     _SLOT_KEY_PIPE, MemoryService, _parse_slot_key)
+from pseudolife_memory.memory.cortex import MAX_CURRENT_MEMBERS  # noqa: E402
+from pseudolife_memory.memory.meta_filter import is_meta_statement  # noqa: E402
+
+# Checks beyond Field's own bounds (ge/le/min_length) also run while the
+# arguments are bound, so a bad value is refused with a readable message
+# before the tool body runs.
+from pydantic import AfterValidator  # noqa: E402
 
 # Log to stderr so MCP's JSON-RPC chatter on stdout stays clean.
 logging.basicConfig(
@@ -246,8 +253,12 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
     daemon log: the model learned nothing from them and retried blindly
     (review 2026-10-04, M1)."""
     if isinstance(exc, FileNotFoundError):
-        return {"error": "file_not_found",
-                "message": f"{exc}: paths are resolved on the server's filesystem"}
+        # document_ingest's own message already says whose filesystem, with
+        # the Docker hint the Console's REST route shows too: say it once.
+        text = str(exc)
+        if "server's filesystem" not in text:
+            text += ": paths are resolved on the server's filesystem"
+        return {"error": "file_not_found", "message": text}
     if not isinstance(exc, (ValueError, TypeError)):
         payload = {"error": "internal_error",
                    "message": "The server failed while running this call (the cause is in "
@@ -643,6 +654,119 @@ def memory_message(
         "urgent": urgent or None, "limit": limit, "peer": peer}.items() if v is not None})
 
 
+# ── Refusal notes and argument checks ─────────────────────────────────────
+# A refusal or no-op that still returns success (nothing changed) carries a
+# one-sentence ``note`` beside its code, saying what happened and what to do,
+# so a model neither misses it nor retries blind (2026-10-04 tool-description
+# review, M2). The codes are unchanged; a note is added only where none is.
+
+
+def _noted(out: Any, notes: dict[str, str], key: str = "reason") -> Any:
+    code = out.get(key) if isinstance(out, dict) else None
+    if isinstance(code, str) and code in notes:
+        out.setdefault("note", notes[code])
+    return out
+
+
+_STORE_NOTES = {
+    "empty": "Not stored: the text was empty.",
+    "filtered_meta": "Not stored: reads as a statement about the memory "
+                     "system itself. Rephrase as the fact.",
+    "below_surprise_threshold": "Not stored: a near-duplicate of a memory "
+                                "already held; no need to retry.",
+    "rejected": "Not stored: the admission gate refused it; nothing was "
+                "written.",
+}
+_EXACT_DUPLICATE_NOTE = ("Not stored: it repeats a memory already held word "
+                         "for word; no need to retry.")
+
+
+def _store_noted(out: Any, text: str, source: str) -> Any:
+    """``service.store`` reports every drop at surprise 0.0 as
+    ``filtered_meta``. With ``surprise_threshold`` above 0 (default 0, which
+    stores duplicates) that includes an exact duplicate, whose novelty is
+    0.0 at the gate; the meta filter's own check tells the two apart."""
+    if isinstance(out, dict) and out.get("reason") == "filtered_meta":
+        memory = service.config.memory
+        meta = memory.meta_filter.enabled and is_meta_statement(
+            (text or "").strip(), role=source)
+        if memory.surprise_threshold > 0 and not meta:
+            out.setdefault("note", _EXACT_DUPLICATE_NOTE)
+    return _noted(out, _STORE_NOTES)
+# Keyed on the service's reason text, which is a sentence for these two.
+_OUTCOME_NOTES = {
+    "signals require Postgres storage": "Outcome not kept: this bank runs "
+        "without Postgres, so signals are dropped. Do not retry.",
+    "lessons disabled": "Outcome not kept: lessons are disabled in this "
+        "bank's config. Do not retry.",
+}
+_FADED_NOTE = ("No entry with this id: a wrong id, a forgotten or evicted "
+               "entry, or a bank without Postgres (file mode cannot read "
+               "ids). Search again for a current id.")
+_SET_NOTES = {
+    "member_invalid": "Not added: the member is blank; pass a non-empty "
+                      "value.",
+    "member_capped": f"Not added: the slot already holds "
+                     f"{MAX_CURRENT_MEMBERS} current members, the cap; "
+                     f"retract one with memory_set_remove first.",
+    "member_not_found": "Nothing removed: no current member matches "
+                        "(case-insensitive); read the slot with "
+                        "memory_fact_get.",
+    "member_remove_refused": "Not removed: an assistant-origin retraction "
+                             "cannot remove a member another source added; "
+                             "ask the human.",
+}
+_REVIEW_NOTES = {
+    "bad_pair": "Nothing dismissed: src and dst are blank or name the same "
+                "entity or slot; pass two distinct ones.",
+    "bad_store": 'Nothing dismissed: store must be "lesson" or "world".',
+    "not_pending": "Nothing settled: no pending proposal has this id "
+                   "(already decided or unknown); list again for current "
+                   "ids.",
+    "stale_review": "Not applied: the finding changed after it was listed; "
+                    "list again and decide afresh.",
+    "nothing_retired": "Nothing restored: no retired slot matches this key "
+                       "or entity.",
+    "slot_live": "Nothing restored: the slot already holds a live value.",
+}
+_WORLD_NOTES = {
+    "unsafe_source_url": "Not stored: source_url must be an http(s) URL or "
+                         "empty; other schemes are refused.",
+}
+
+
+def _correction_noted(out: Any) -> Any:
+    """The correction services return their refusal code in ``reason`` and
+    its sentence in ``error`` (the Console's REST routes read ``error``).
+    On the MCP surface the sentence moves to ``note``, the shape every other
+    success-shaped refusal has."""
+    if isinstance(out, dict) and "reason" in out and "error" in out:
+        out["note"] = out.pop("error")
+    return out
+
+
+def _non_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value
+
+
+def _check_as_of(value: str | float | None) -> str | float | None:
+    """Refuse an ``as_of`` the history read cannot parse, at binding
+    (``"yesterday"`` used to reach the service as "Invalid isoformat
+    string")."""
+    if value is None:
+        return value
+    try:
+        MemoryService._parse_as_of(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(
+            "as_of takes an ISO-8601 date or date-time (2026-10-01, "
+            "2026-10-01T12:00:00+00:00) or epoch seconds, not relative "
+            "words like 'yesterday'") from None
+    return value
+
+
 @_tool(tier="minimal")
 def memory_store(
     text: Annotated[str, Field(
@@ -682,9 +806,10 @@ def memory_store(
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
-    return service.store(
+    return _store_noted(service.store(
         text=text, source=source, tags=tags, origin=origin, episode=episode,
-        authority=authority, distortion_tolerance=distortion_tolerance)
+        authority=authority, distortion_tolerance=distortion_tolerance),
+        text, source)
 
 
 def _restates_fact(entry_text: str, value: str) -> bool:
@@ -922,10 +1047,11 @@ def memory_search(
     # 2026-09-23 review's ~90.5% for 6 read a width-6 list as a prefix of
     # the width-8 one, which the dense pool's cosine cut makes untrue.
     top_k: Annotated[int, Field(
-        description="Direct entry hits to retrieve, default 8; documents "
-                    "and neighbors may add a few. Compact payloads cap "
-                    "cortex facts at min(5, top_k). Use top_k, not "
-                    "limit.")] = 8,
+        ge=1,
+        description="Direct entry hits to retrieve, a positive integer "
+                    "(default 8); documents and neighbors may add a few. "
+                    "Compact payloads cap cortex facts at min(5, top_k). "
+                    "Use top_k, not limit.")] = 8,
     sources: Annotated[list[str] | None, Field(
         description="Source tags of direct entry hits; null or [] means "
                     "no source filter.")] = None,
@@ -1178,7 +1304,8 @@ def _project_search(result: dict[str, Any], facts: list[dict[str, Any]], *,
 @_tool()
 def memory_recent(
     n: Annotated[int, Field(
-        description="How many entries to return.")] = 10,
+        ge=1,
+        description="How many entries to return; positive integer.")] = 10,
     sources: Annotated[list[str] | None, Field(
         description="Keep only entries with one of these source tags.")] = None,
     episodes: Annotated[list[str] | None, Field(
@@ -1228,7 +1355,8 @@ def memory_supersede(
     ``derived_flagged_total`` say when a correction reached further than
     the cap.
     """
-    return service.supersede(old_text=old_text, new_text=new_text, entry_id=entry_id)
+    return _correction_noted(service.supersede(
+        old_text=old_text, new_text=new_text, entry_id=entry_id))
 
 
 @_tool()
@@ -1383,6 +1511,8 @@ def memory_get(
     ``{found: false, faded: true}`` once forgotten.
     """
     out = service.get_entry(entry_id)
+    if out.get("faded"):
+        out.setdefault("note", _FADED_NOTE)
     if out.get("superseded"):
         # Same projection as a compact search hit: the pointer, never the
         # uncapped replacement text (2026-09-23), so dereferencing
@@ -1403,7 +1533,10 @@ def memory_reinforce(
     it genuinely useful — a deliberate "this mattered" signal that helps it
     resist forgetting. Read first, then reinforce.
     """
-    return service.reinforce(entry_id)
+    out = service.reinforce(entry_id)
+    if out.get("faded"):
+        out.setdefault("note", _FADED_NOTE)
+    return out
 
 
 # ── Cortex — canonical facts ──────────────────────────────────────────────
@@ -1545,18 +1678,22 @@ def _lean_fact_record(rec: Any) -> Any:
 @_tool(tier="minimal")
 def memory_fact_set(
     entity: Annotated[str, Field(
+        min_length=1,
         description="The slot's subject; the (entity, attribute) match "
-                    "is case- and separator-insensitive.")],
+                    "is case- and separator-insensitive."),
+        AfterValidator(_non_blank)],
     attribute: Annotated[str, Field(
-        description="The slot's attribute.")],
+        min_length=1, description="The slot's attribute."),
+        AfterValidator(_non_blank)],
     value: Annotated[str, Field(
-        description="The value that is canonical NOW.")],
+        min_length=1, description="The value that is canonical NOW."),
+        AfterValidator(_non_blank)],
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
         description='Who asserted it: "user" = the human told you; '
                     'otherwise "action"/"agent". Omitted records '
                     '"agent".')] = None,
     confidence: Annotated[float, Field(
-        description="How sure you are, 0..1.")] = 0.8,
+        ge=0, le=1, description="How sure you are, 0..1.")] = 0.8,
     episode: Annotated[str | None, Field(
         description="Episode handle for attribution.")] = None,
     freshness_class: Annotated[
@@ -1609,7 +1746,8 @@ def memory_set_add(
 
     Returns: {action, entity, attribute, member, members_count}.
     """
-    return service.set_add(entity, attribute, member)
+    return _noted(service.set_add(entity, attribute, member), _SET_NOTES,
+                  key="action")
 
 
 @_tool(tier="minimal")
@@ -1624,7 +1762,8 @@ def memory_set_remove(
 
     Returns: {action, entity, attribute, member, members_count}.
     """
-    return service.set_remove(entity, attribute, member)
+    return _noted(service.set_remove(entity, attribute, member), _SET_NOTES,
+                  key="action")
 
 
 @_tool(tier="core")
@@ -1653,8 +1792,10 @@ def memory_history(
     attribute: Annotated[str | None, Field(
         description="The fact slot to read; omit for chain mode.")] = None,
     as_of: Annotated[str | float | None, Field(
-        description="Slot mode only: ISO-8601 or epoch seconds; returns "
-                    "only versions written by then.")] = None,
+        description="Slot mode only: ISO-8601 date or epoch seconds, not "
+                    "relative words like 'yesterday'; returns only "
+                    "versions written by then."),
+        AfterValidator(_check_as_of)] = None,
 ) -> dict[str, Any]:
     """Read an entity's past. SLOT mode (``attribute`` given): every
     version of that canonical fact slot, oldest→newest, each with
@@ -1691,7 +1832,7 @@ def memory_world_set(
                         "never decays, ``slow`` is months, ``volatile`` is "
                         "weeks.")] = "volatile",
     confidence: Annotated[float, Field(
-        description="Source confidence, 0..1.")] = 0.85,
+        ge=0, le=1, description="Source confidence, 0..1.")] = 0.85,
     retrieved_at: Annotated[float | None, Field(
         description="Epoch seconds the source was fetched.")] = None,
     content_hash: Annotated[str | None, Field(
@@ -1704,11 +1845,11 @@ def memory_world_set(
 
     Returns: ``{action: inserted|confirmed|superseded|rejected, ...record}``.
     """
-    return service.world_write(
+    return _noted(service.world_write(
         entity, attribute, value, confidence=confidence, source_url=source_url,
         source_quote=source_quote, freshness_class=freshness_class,
         retrieved_at=retrieved_at, content_hash=content_hash,
-    )
+    ), _WORLD_NOTES)
 
 
 @_tool(tier="core")
@@ -1716,7 +1857,8 @@ def memory_world_search(
     query: Annotated[str, Field(
         description="Natural-language description of the external fact "
                     "needed.")],
-    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max entries returned; positive integer.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full provenance metadata; default entries are "
                     "compact.")] = False,
@@ -1856,7 +1998,7 @@ def memory_outcome(
         description="The tool or approach concerned; aids traversal.")] = None,
     detail: Annotated[str | None, Field(
         description="What worked, or what the dead-end was.")] = None,
-    polarity: Annotated[str | None, Field(
+    polarity: Annotated[Literal["+", "-"] | None, Field(
         description='"+" do-this or "-" avoid; usually omit — it is '
                     "inferred from the outcome.")] = None,
     episode: Annotated[str | None, Field(
@@ -1880,9 +2022,9 @@ def memory_outcome(
     landed).
     """
     ids, ignored, truncated = _parse_used_ids(used_ids)
-    out = service.record_outcome(
+    out = _noted(service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity,
-        episode=episode, used_ids=ids or None)
+        episode=episode, used_ids=ids or None), _OUTCOME_NOTES)
     if ignored:
         out["used_ids_ignored"] = ignored
     if truncated:
@@ -1906,7 +2048,8 @@ def memory_lesson_search(
     query: Annotated[str, Field(
         description="The task at hand, described the way it would have "
                     "been logged.")],
-    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max entries returned; positive integer.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full provenance metadata; default entries are "
                     "compact.")] = False,
@@ -1980,18 +2123,27 @@ def memory_forget(
         if not any((text, substring, source, episode, tag)):
             return {"error": "filter_required",
                     "filters": ["text", "substring", "source", "episode", "tag"]}
-        return service.delete(
+        out = service.delete(
             text=text, substring=substring, source=source,
             episode=episode, tag=tag, confirm_bulk=bool(confirm_bulk),
         )
+        if out.get("deleted_count") == 0 and "error" not in out:
+            out.setdefault("note", "Nothing deleted: no entry matched every "
+                                   "filter (filters AND-combine).")
+        return out
     if scope in ("fact", "world", "lesson"):
         if not entity:
             return {"error": "entity_required", "scope": scope}
         if scope == "fact":
-            return service.cortex_forget(entity, attribute)
-        if scope == "world":
-            return service.world_forget(entity, attribute, decided_by="agent")
-        return service.lesson_forget(entity, attribute, decided_by="agent")
+            out = service.cortex_forget(entity, attribute)
+        elif scope == "world":
+            out = service.world_forget(entity, attribute, decided_by="agent")
+        else:
+            out = service.lesson_forget(entity, attribute, decided_by="agent")
+        if out.get("removed") == 0 and "error" not in out:
+            out.setdefault("note", "Nothing removed: no slot matches this "
+                                   "entity/attribute.")
+        return out
     return {"error": "unknown_scope",
             "scopes": ["memory", "fact", "world", "lesson"]}
 
@@ -2001,9 +2153,10 @@ def memory_dream(
     action: Literal["status", "pull", "commit", "run", "deep", "runs",
                     "rollback"],
     limit: Annotated[int | None, Field(
+        ge=1,
         description="pull/run: how many memories to process (pull defaults "
                     "to 40). runs: how many passes to list (defaults to "
-                    "10).")] = None,
+                    "10). Positive integer.")] = None,
     commit_token: Annotated[str | None, Field(
         description="commit: token returned by pull.")] = None,
     cursor: Annotated[float | None, Field(
@@ -2198,7 +2351,8 @@ def memory_graph_review(
     if action == "dismiss_pair":
         if not src or not dst:
             return {"error": "src_dst_required"}
-        return service.graph_dismiss_duplicate(src, dst)
+        return _noted(service.graph_dismiss_duplicate(src, dst),
+                      _REVIEW_NOTES)
     if action == "dismiss_slot_pair":
         # Listed keys spell a literal "|" in a name as "%7C" (service._slot_key),
         # so a key has exactly one bare "|"; decode it rather than re-split it.
@@ -2209,7 +2363,8 @@ def memory_graph_review(
                     "detail": "store='lesson'|'world'; src/dst are "
                               "'entity|attribute' keys from the deep response "
                               "(a literal '|' in a name is spelled %7C)"}
-        return service.curation_dismiss_duplicate(store, *a, *b)
+        return _noted(service.curation_dismiss_duplicate(store, *a, *b),
+                      _REVIEW_NOTES)
     if action == "restore_slot":
         key = _parse_slot_key(src) if src and "|" in src else None
         if store not in ("lesson", "world") or not src or (
@@ -2222,7 +2377,8 @@ def memory_graph_review(
         ent, attr = key or (src.replace(_SLOT_KEY_PIPE, "|"), None)
         fn = (service.lesson_restore if store == "lesson"
               else service.world_restore)
-        return fn(ent, attr or None, decided_by="agent")
+        return _noted(fn(ent, attr or None, decided_by="agent"),
+                      _REVIEW_NOTES)
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
@@ -2241,7 +2397,7 @@ def memory_graph_review(
                             "accept_merge", "accept_junk", "reject_entity"]}
     batch = _coerce_id_list(proposal_ids)
     if batch:
-        results = [handler(pid) for pid in batch]
+        results = [_noted(handler(pid), _REVIEW_NOTES) for pid in batch]
         # Every id handler reports success under "accepted" or "rejected";
         # a stale id yields {"...": False} (or reason=not_pending) and must
         # not count as settled.
@@ -2250,7 +2406,7 @@ def memory_graph_review(
         return {"action": action, "settled": ok, "results": results}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
-    return handler(proposal_id)
+    return _noted(handler(proposal_id), _REVIEW_NOTES)
 
 
 # ── Episodes + consolidation ──────────────────────────────────────────────
@@ -2336,14 +2492,16 @@ def memory_consolidation_candidates(
         description="Consider only entries carrying one of these "
                     "tags.")] = None,
     top_k: Annotated[int, Field(
-        description="How many candidate entries to cluster over.")] = 20,
+        ge=1, description="How many candidate entries to cluster over; "
+                          "positive integer.")] = 20,
     min_cohesion: Annotated[float, Field(
         description="Minimum intra-cluster cosine — raise it to flag only "
                     "near-duplicates.")] = 0.6,
     min_cluster_size: Annotated[int, Field(
-        description="Drop clusters with fewer members than this.")] = 2,
+        ge=1, description="Drop clusters with fewer members than this; "
+                          "positive integer.")] = 2,
     max_clusters: Annotated[int, Field(
-        description="Max clusters returned.")] = 10,
+        ge=1, description="Max clusters returned; positive integer.")] = 10,
 ) -> dict[str, Any]:
     """Find clusters of near-duplicate memories ripe for consolidation —
     the same thing phrased five ways across five sessions. Anchor with a
@@ -2390,10 +2548,10 @@ def memory_consolidate(
 
     Returns: ``{superseded_count, superseded_texts, superseded_ids, new_memory_stored}``.
     """
-    return service.consolidate(
+    return _correction_noted(service.consolidate(
         replaces=replaces, new_text=new_text, source=source, tags=tags,
         entry_ids=entry_ids,
-    )
+    ))
 
 
 # ── Knowledge graph ───────────────────────────────────────────────────────
@@ -2412,7 +2570,7 @@ def memory_graph_relate(
     origin: Annotated[str | None, Field(
         description="Who asserted the edge.")] = None,
     confidence: Annotated[float, Field(
-        description="How sure you are, 0..1.")] = 0.8,
+        ge=0, le=1, description="How sure you are, 0..1.")] = 0.8,
     src_type: Annotated[str | None, Field(
         description="Entity kind for ``src``: set when the node is "
                     "created, or filled in on an existing node that has "
@@ -2697,7 +2855,9 @@ def memory_recall(
     hops: Annotated[int, Field(
         description="Max graph hops. Clamped to 1..5.")] = 3,
     top_k: Annotated[int, Field(
-        description="Bounds only the SEED search (the initial hits that "
+        ge=1,
+        description="Positive integer. Bounds only the SEED search (the "
+                    "initial hits that "
                     "name the walk's start entities), not the result, which "
                     "is capped separately; up to 3 ``texts`` slots go to "
                     "seed hits.")] = 5,
@@ -2828,7 +2988,8 @@ def document_search(
     query: Annotated[str, Field(
         description="Natural-language description of the passage "
                     "wanted.")],
-    top_k: Annotated[int, Field(description="Max chunks returned.")] = 5,
+    top_k: Annotated[int, Field(
+        ge=1, description="Max chunks returned; positive integer.")] = 5,
 ) -> dict[str, Any]:
     """Search the reference bank only — ingested documents, no
     conversational memories mixed in. For docs AND memories together, use

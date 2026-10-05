@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-10-05 — refusals that look like successes now say why, and bad numbers are refused up front)
+- Several tools answered a refusal or a no-op as a plain success with only
+  a code, so a model often missed it or retried blind. Each such result now
+  carries a one-sentence `note` saying what happened and what to do, and
+  stays a success: `memory_store` (`empty`, `filtered_meta` — "reads as a
+  statement about the memory system itself. Rephrase as the fact." —
+  `below_surprise_threshold`, `rejected`; the service also reports an
+  exact duplicate as `filtered_meta` when `surprise_threshold` is above 0,
+  and that one's note says it repeats a held memory word for word, with no
+  need to retry); `memory_outcome` without
+  Postgres or with lessons disabled (the outcome is not kept; do not
+  retry); `memory_get` / `memory_reinforce` `faded: true` (a wrong id, a
+  forgotten or evicted entry, or a file-mode bank); `memory_set_add` /
+  `memory_set_remove` (`member_invalid`, `member_capped` with the
+  100-member cap, `member_not_found`, `member_remove_refused`);
+  `memory_graph_review` (`bad_pair`, `bad_store`, `not_pending`,
+  `stale_review`, `nothing_retired`, `slot_live`, also per result in a
+  batch); `memory_forget` matching nothing (`deleted_count: 0` /
+  `removed: 0`); and `memory_world_set` `unsafe_source_url` (http(s)
+  required). The service payloads, and so the Console's REST routes, are
+  unchanged.
+- `memory_supersede` and `memory_consolidate` put their refusal sentence in
+  `error` beside the code in `reason`, the reverse of every other tool. On
+  the MCP surface the sentence is now `note`, with `reason` and
+  `target_errors` unchanged; the REST routes keep `error` for the Console.
+- Out-of-range numbers are refused when the arguments are bound, before
+  the tool runs, as an `invalid_argument` tool error naming the parameter:
+  `memory_search(top_k=-3)` used to fail deep in retrieval with "selected
+  index k out of range". `top_k` on the search tools, `memory_recent` `n`,
+  `memory_dream` `limit` and the `memory_consolidation_candidates` counts
+  must be positive. Zero used to be accepted (`top_k=0`, and
+  `memory_dream(limit=0)`, which meant the default) and is now refused
+  too; `confidence` on
+  `memory_fact_set`, `memory_world_set` and `memory_graph_relate` must be
+  within 0..1; `memory_outcome` `polarity` is `"+"` or `"-"`; and
+  `memory_fact_set` refuses a blank entity, attribute or value, which it
+  used to store. The ranges are also written in the parameter text, since
+  Codex drops `minimum`/`maximum` from the schema it shows the model.
+- `memory_history` `as_of` says it takes an ISO-8601 date or epoch
+  seconds, not relative words, and refuses `"yesterday"` with that message
+  instead of "Invalid isoformat string". `document_ingest`'s not-found
+  error now says, once, that the path was looked up on the server's
+  filesystem, inside the container under Docker.
+
 ### Fixed (2026-10-05 — a refused tool call is a tool error that says what to fix)
 - When a tool refused a call, the model got a success-shaped result such as
   `{"error": "CoordinationRefused", "message": "missing_parameter"}`: a
