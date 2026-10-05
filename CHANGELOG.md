@@ -62,6 +62,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the world cortex never parks contenders. The standing block
   (`examples/CLAUDE.memory.md`) and `docs/guide/memory-model.md` say the
   same.
+### Fixed (2026-10-05 — the standing texts teach what the server actually does)
+- The per-turn memory-change note told sessions to "`memory_store` a status
+  note" without naming the source, so a session following it literally
+  stored progress under the default source `agent`, which other sessions'
+  change notes never report and the dream mines. It now says
+  `memory_store(source="status")`, and `memory_store`'s `source` parameter
+  says that `"status"` marks in-flight progress notes, which peers see and
+  the dream skips.
+- `memory_outcome` states that `used_ids` credits only this session's
+  searches from the last hour in its first lines, instead of at the end of
+  the `used_ids` parameter text, which drops the rule.
+- The Claude Code plugin's subagent board guard now lets a subagent read
+  `memory_message(action="history")`, which is read-only (no ack, delivery
+  or wake); it used to be refused with the board writes. The refusal text,
+  `plugin/README.md` and the configuration guide list it with the allowed
+  reads. A plugin change: it reaches clients through the client update step
+  (`pseudolife-mcp update`, or `--all` / `python ops/update_clients.py` for
+  a checkout deploy); `plugin/hooks/hooks.json` is unchanged, so Codex users
+  approve nothing again.
+- Docs drift: README's `memory_history` row names its `as_of` parameter;
+  the providers guide's September Codex check notes today's tier counts
+  (full 38 tools, core 24); the configuration guide gives the minimal tier's
+  manifest as about 16 KB for 9 tools (it said ~1.5k tokens) and the full
+  memory-loop block as about 8 KB (it said 7.5 KB).
 
 ### Fixed (2026-10-05 — operator commands work from the daemon host's own shell on the Docker tier)
 - On a Docker-tier host, `pseudolife-mcp lease delegate` run from the host's

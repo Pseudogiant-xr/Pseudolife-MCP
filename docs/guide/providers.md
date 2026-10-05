@@ -554,8 +554,9 @@ to discover one tool. A bearer principal takes precedence over writer identity;
 check which identity the registration actually uses.
 
 A September 2026 Codex check expanded core to full: the server listed 35 tools
-and sent `list_changed`, but the running turn retained its initial 22 callable
-tools. That verifies a current-turn limit only. After expansion, check a fresh
+(the full tier then; 38 today) and sent `list_changed`, but the running turn
+retained its initial 22 callable tools (the core tier then; 24 today). That
+verifies a current-turn limit only. After expansion, check a fresh
 task/reconnection's actual callable catalog; do not infer success from the
 server inventory or notification. Client `enabled_tools`/`disabled_tools`
 filters can narrow it further.
