@@ -201,7 +201,10 @@ prune_suite_cache() {
         [[ "$real" == "$1" && "$(dirname -- "$real")" == "$2" ]]
     }
     # Deletes owned directory $1 of root $2, renamed out of the way first;
-    # adds its size to `freed`.
+    # adds what that frees to `freed`: files with no other link, since uv
+    # hardlinks an environment's packages from its cache. du counted those
+    # too and reported 20.8 GB for a first prune in WSL that freed 7 GB
+    # (2026-10-05).
     remove_owned() {
         owned_child "$1" "$2" || return 1
         local trash="$1" kib
@@ -210,7 +213,8 @@ prune_suite_cache() {
             [[ ! -e "$trash" ]] || return 1
             mv -- "$1" "$trash" || return 1
         fi
-        kib="$(du -sk -- "$trash" 2>/dev/null | cut -f1)"
+        kib="$(find "$trash" -links 1 -printf '%b\n' 2>/dev/null \
+            | awk '{ s += $1 } END { printf "%d", s / 2 }')"
         rm -rf --one-file-system -- "$trash"
         freed=$(( freed + ${kib:-0} ))
     }

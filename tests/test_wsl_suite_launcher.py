@@ -408,6 +408,25 @@ def test_a_run_prunes_stale_copies_and_environments(tmp_path):
 
 
 @_LINUX_ONLY
+def test_the_freed_space_leaves_out_files_linked_from_elsewhere(tmp_path):
+    """uv hardlinks an environment's packages from its cache, so deleting the
+    environment frees only what it alone holds. Counting those links, the
+    first prune in WSL reported 20.8 GB where the disk gained 7 GB."""
+    home = tmp_path / "home"
+    env = _env(home, "gone-checkout-0badf00d", days=10)
+    cache = tmp_path / "uv-cache"
+    cache.mkdir()
+    (cache / "package.so").write_bytes(os.urandom(4 << 20))
+    os.link(cache / "package.so", env / "package.so")
+    (env / "own").write_bytes(os.urandom(2 << 20))
+    _age_tree(env, 10)
+    proc = _launch(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert not env.exists() and (cache / "package.so").exists(), proc.stderr
+    assert "freeing 2.0 MB" in proc.stderr, proc.stderr
+
+
+@_LINUX_ONLY
 def test_pruning_keeps_the_newest_copies_past_the_cap(tmp_path):
     """Past PSEUDOLIFE_SUITE_KEEP the least recently used copies go, even
     when none is stale; a recent copy's lock file stays behind it."""
