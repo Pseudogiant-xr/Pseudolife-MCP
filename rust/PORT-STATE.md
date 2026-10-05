@@ -457,6 +457,11 @@ b–f are integrated as separate local commits with the original isolated proof
 [summary](phase2b-fixes-evidence.json); these runs keep tree
 `a83878bfa389c0e009d18a3c6d28387267fb1fb5` and do not become final-head proof.
 
+A follow-up corrects the old Rust-only doorbell reason assertion to the pinned
+Python 3.11 Unicode 14 expression: U+001C becomes a space and U+0345 is removed.
+The unchanged input now passes its targeted Windows check with delivery enabled
+and disabled; this assertion correction does not establish final-head parity.
+
 Next: after #546 lands, merge current master forward and re-pin the oracle; run
 Rust and both Parity CI jobs plus candidate-routed committed suites on both
 machines at the final head, then obtain a fresh independent review of the diff
