@@ -409,6 +409,7 @@ deep material lives in the user guide:
 | [Sharing one bank across machines](docs/guide/remote-bank.md) | Exposing the daemon over Tailscale, a LAN or a proxy; per-machine principals; client-only installs |
 | [Secure MCP Tunnels](docs/guide/tunnels.md) | Guided ChatGPT developer-app setup, private keys, cloud verification and optional autostart |
 | [Agent isolation](docs/guide/agent-isolation.md) | The test suite's own Postgres login, and running agent sessions under a separate account that cannot reach the bank's keys |
+| [Coordination recovery](docs/guide/coordination-recovery.md) | Agent mailboxes, maintainer passkeys and the board's audit log after a database restore |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -810,8 +811,9 @@ Claude Code do it:
 ```
 
 The plugin replaces the settings.json hook, and the daemon serves a compact
-memory core and a live briefing as session context. The full CLAUDE.md block
-below is not served; append it if you want the complete guidance.
+memory core and a live briefing as session context. By default
+(`memory_policy.variant: compact`) the full CLAUDE.md block below is not
+served; append it if you want the complete guidance.
 It deliberately does **not** bundle the MCP server: Claude Code loads a
 plugin server alongside any user-registered one with no deduplication, which
 doubled every session's tool namespace next to the installer's registration
@@ -1033,9 +1035,11 @@ guidance remains in the bundled standing block. Hooks add per-prompt reminders
 and session bookkeeping; neither delivery method
 guarantees that the model performs every requested memory operation.
 
-Hooks serve at most that short guide; the detailed block reaches an agent
-only as a standing copy. For the complete guidance, for subagent
-visibility (subagents read `CLAUDE.md` but not hook output), or in place of
+By default (`memory_policy.variant: compact`) hooks serve at most that
+short guide, and the detailed block reaches an agent only as a standing copy
+(the `full_separate_hook` variant serves it in a separate hook; see
+[Startup memory policy](docs/guide/configuration.md#startup-memory-policy-memory_policy)).
+For the complete guidance, for subagent visibility (subagents read `CLAUDE.md` but not hook output), or in place of
 hooks, append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
 global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
 per-project `CLAUDE.md` / `AGENTS.md`:
@@ -1377,7 +1381,7 @@ pseudolife-mcp-daemon`).
   and the MCP SDK v2 migration set an `mcp>=2.1` floor — an older SDK in
   that environment crashes the shim on start. The shim detects this and
   prints the interpreter path and the exact fix on stderr: `pip install -U
-  "mcp>=2.1,<3"` in that interpreter, or re-run the installer (which
+  "mcp>=2.1,<2.2"` in that interpreter, or re-run the installer (which
   registers the project venv's shim).
 - **Claude Desktop says "Couldn't start for Cowork and Code sessions. Error:
   unhandled errors in a TaskGroup (1 sub-exception)"**: the real exception
@@ -1457,8 +1461,10 @@ rotated password can never produce a green run by accident. Full dev setup: [CON
 - **Reflection via MCP sampling** — would let the dream borrow *Claude
   itself* as the extractor;
   [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
-- **Cross-machine sync** — memory lives on one PC's disk; syncing via
-  rclone / syncthing is left as an exercise.
+- **Replication / offline copies** — one daemon owns one bank; other
+  machines use it over the network
+  ([remote bank](docs/guide/remote-bank.md)), but there is no replica or
+  offline mode.
 - **Automated world-knowledge ingestion** — populating the world cortex
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today

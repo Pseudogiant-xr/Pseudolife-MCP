@@ -9,8 +9,9 @@
 #   docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 #
 # Images are published by the release workflow (releases >= 0.14.0).
-# PSEUDOLIFE_IMAGE_TAG pins the daemon to a release (default: latest);
-# updates on this path are `pull` + `up -d`, not ops/update.ps1. The
+# PSEUDOLIFE_IMAGE_TAG pins the daemon to a release (default: latest).
+# Update this path with `pseudolife-mcp update` (backup, the newest
+# release's tag, a rollback tag), not a bare `pull` + `up -d`. The
 # extractor sidecar is not published — it builds locally as before.
 services:
   pseudolife-pg:

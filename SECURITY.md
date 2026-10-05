@@ -46,6 +46,15 @@ The shipped configuration is deliberately conservative:
   rebinding) is rejected. That is a browser-facing guard, not
   authentication — anything that can make a loopback-looking request to a
   tokenless daemon can read the bank.
+  The maintainer actions under `/api/maintainer` (a board message sent as
+  the maintainer, withdrawing a sent message, a delegate or coordinator
+  role change, adding a passkey (after the first, which the one-time
+  enrolment code admits), cancelling or revoking one) need more than the bearer: each is
+  signed with the maintainer's WebAuthn passkey, user verification
+  required, and a tokenless daemon refuses them all. Every `/ui/`
+  response carries a strict `Content-Security-Policy` (no inline or
+  foreign script, no framing), so script injected inline or from another
+  origin cannot run to request its own maintainer challenge.
 - **`/health` is unauthenticated and verbose.** It is an open liveness probe
   by design, and it reports more than "ok": package version, schema version,
   storage backend, whether a token is set, the `bank` fingerprint (16 hex

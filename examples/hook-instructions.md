@@ -12,7 +12,7 @@ The full test suite (the conftest lock, one slot) and the GPU are the shared thi
 
 ## Pre-flight before a full run
 
-Check that the worktree's `ops/.env` carries the bench Postgres password; a run without it fails every database test with an auth error and still holds the lock for its whole length. Check no holder file exists under the locks directory and no status shows `suite=running`. A run with the lock switched off leaves no holder file, so the board check is not optional.
+Check that the test login exists (`~/.pseudolife-mcp/test-pg.env`, from `pseudolife-mcp test-login create`); without it a run logs in as the bank owner from the worktree's `ops/.env`; without that a full run is refused, and a targeted one fails every database test. Check no holder file exists under the locks directory and no status shows `suite=running`. A run with the lock switched off leaves no holder file, so the board check is not optional.
 
 ## Host-shaped symptoms
 

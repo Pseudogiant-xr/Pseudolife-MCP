@@ -46,6 +46,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   settings and plugins directory there, as Claude Code does; before, the
   plugin step read `~/.claude/plugins` regardless.
 
+### Fixed (2026-10-05 — two served texts named the wrong fix or delivery path)
+- The shim's "MCP SDK predates v2" message told the user to run `pip install
+  -U "mcp>=2.1,<3"`, which can install an SDK the package's own pin
+  (`mcp>=2.1,<2.2`) refuses. It now prints `"mcp>=2.1,<2.2"`, as the README
+  does.
+- The standing memory-loop block (`MEMORY_LOOP_BLOCK`, and
+  `examples/CLAUDE.memory.md` beside it) said "this briefing arrives via a
+  hook, not MCP", although the block also reaches agents as a standing file.
+  It now says "these instructions arrive via a hook or a standing file, not
+  MCP".
+
 ### Changed (2026-10-05 — suite runs clean up the test copies and environments earlier runs left)
 - The WSL and second-machine full-suite runners (`ops/wsl-suite.sh`, behind
   `ops/wsl-suite.ps1` and `ops/remote-suite.ps1`) kept a test copy (~600 MB)
