@@ -1,5 +1,63 @@
 # Rust port state
 
+## Wait-mail leaf candidate
+
+Native `wait-mail` is implemented before shim attachment on dependency
+`db0d59cb`, against immutable Python `eb0c13e9` (0.17.0/schema 55). The first
+candidate's diagnostic corpus matched 54/54 Windows pairs and 52/54 Linux pairs,
+with 216 rejected candidate-output controls per host; two Linux clock differences
+remain raw failures. These counts describe that earlier source, not a new full
+corpus run after the focused repairs.
+
+The repaired candidate refuses opaque session bytes before filesystem access,
+matches the UnicodeEncodeError terminal detail and exit, and uses the pinned
+eight-character temporary-name format with exclusive creation and collision
+retries. Focused process captures retain unmatched Python traceback frames,
+independent random suffixes and wall-clock values. No comparison normalization
+or exclusion has been adopted. Owned homes, listeners and processes were cleaned.
+Targeted native tests, locked clippy and format checks pass on both platforms;
+existing Python tests remain unchanged and in-process.
+
+Fresh independent review found seven further defects. The follow-up candidate
+uses interruptible POSIX reads and non-restarting SIGINT handling, restores
+private listener mode 0600, aborts on failed diagnostics, distinguishes buffered
+stdout flush failures from direct write failures, propagates help write failures,
+pre-scans ambiguous optional tokens, and preserves opaque parser-error escapes.
+The previous reviewed source captures matched 55/55 Windows corpus pairs and
+51/55 Linux pairs, with 220 rejected candidate-output controls per host. The four Linux
+failures retain clock differences; separate focused captures still retain random
+temporary suffix and Python traceback differences. A subsequent independent
+review accepted those fixes and found terminal-width,
+unbuffered-output and opaque digest-path differences. The previous candidate renders
+help/usage for COLUMNS, honors the selected interpreter's PYTHONUNBUFFERED flag
+semantics, and preserves surrogateescape in setup paths. Focused public probes
+match 19/19 Windows and 21/21 Linux pairs. Its 61-case corpus matches 60/61 Windows
+and 59/61 Linux pairs, with 244 rejected mutation controls per host; all three
+remaining corpus failures retain clock fields. These counts belong to the binary
+before the later description-width repair, not a rerun of the current source.
+Follow-up review accepted those changes and found the help description's missing
+minimum width of 11 at narrow COLUMNS values. The current repair applies that
+minimum only to the description, with additive public cases at widths 1, 2, 3, 7,
+12 and 13; usage and option layout retain their separate rules. Current focused
+results match 9/9 public pairs on each host, with two formatter tests and six
+additive cases passing per host (24 rejected candidate mutations each). The full
+corpus has not been rerun for this single clamp. Fresh review and the remaining
+byte-policy decisions are pending.
+
+The initial pre-code proof used a wrong-source console launcher and is rejected.
+Later public module invocations have child source/blob/bytecode bindings and a
+deterministic delivery proof, but do not retroactively satisfy that sequencing
+requirement. The generic process fixture is unchanged. The dedicated Rust
+production sections contain 1,036 + 424 = 1,460 physical lines before their test
+modules, versus 306 in the Python leaf (4.77124). Test modules, the test-only help
+constant and help assets are excluded; the shared CLI and main files separately
+add 14 lines and remove one. This is a
+size observation, not coverage.
+
+Follow-up review, committed-source acceptance, routed/additive CI integration,
+measurements and the remaining byte-policy decisions are pending. The mode
+remains deferred in the parity register.
+
 The version branch targets the current Python oracle at master
 `eb0c13e9c5036aa2b95e7fccb77f41ca1c095493` (0.17.0, schema 55); that master commit is integrated locally, while final current-head acceptance remains pending.
 Historical phase 1 close-out evidence retains

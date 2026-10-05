@@ -2,6 +2,14 @@
 use std::process::ExitCode;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|mode| mode == "wait-mail")
+    {
+        return ExitCode::from(pseudolife_stdio::cli::wait_mail::run(
+            std::env::args_os().skip(2).collect(),
+        ));
+    }
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if let Some(code) = pseudolife_stdio::cli::dispatch(arguments.first().map(String::as_str)) {
         return code;

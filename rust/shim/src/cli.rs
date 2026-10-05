@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 
 mod version;
+pub mod wait_mail;
 
 const HELP: &str = include_str!("cli_help.txt");
 const DEFERRED_MODES: &[&str] = &[
@@ -28,7 +29,6 @@ const DEFERRED_MODES: &[&str] = &[
     "import",
     "episode-start",
     "episode-end",
-    "wait-mail",
     "lease",
     "maintainer",
 ];
@@ -92,6 +92,11 @@ fn mode_repr(mode: &str) -> String {
 /// Handle leaves before daemon attachment; default/shim/channel keep the proxy path.
 pub fn dispatch(mode: Option<&str>) -> Option<ExitCode> {
     let mode = mode.unwrap_or("shim");
+    if mode == "wait-mail" {
+        return Some(ExitCode::from(wait_mail::run(
+            std::env::args_os().skip(2).collect(),
+        )));
+    }
     if matches!(mode, "shim" | "channel") {
         return None;
     }
