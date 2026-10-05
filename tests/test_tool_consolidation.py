@@ -687,6 +687,28 @@ def test_message_description_names_the_maintainers_delegate(
     assert "coordinator" not in d["memory_message"]
 
 
+def test_store_and_outcome_teach_status_notes_and_the_credit_window(
+        tmp_path: Path, monkeypatch) -> None:
+    """Peers' memory-change notes and the dream's exclusion both key on
+    ``source="status"`` (``memory_changes_since``, ``DreamConfig
+    .exclude_sources``), but ``memory_store``'s ``source`` never named it, so
+    a session following the per-turn tail stored progress under the default
+    ``agent``. And ``used_ids`` credits only this session's searches from the
+    last hour (``use_window_seconds``), a rule that sat at the end of a
+    parameter description while 43% of Codex outcomes in the 2026-10-04
+    review carried no ``used_ids``: it leads the docstring now."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
+    tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
+    source = tools["memory_store"].input_schema["properties"]["source"]["description"]
+    assert '"status"' in source and "dream skips" in source
+    outcome = " ".join(tools["memory_outcome"].description.split())
+    lead = outcome.split("Returns")[0]
+    assert "used_ids" in lead and "last hour" in lead
+    used = tools["memory_outcome"].input_schema["properties"]["used_ids"]["description"]
+    assert "hour" not in used
+
+
 def test_board_tools_describe_every_parameter_with_its_cap(
         tmp_path: Path, monkeypatch) -> None:
     """The 2026-10-04 cross-model review (Claude + Codex, both reading the

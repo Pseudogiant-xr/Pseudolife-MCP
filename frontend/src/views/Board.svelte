@@ -8,6 +8,7 @@
   import Icon from "../components/Icon.svelte";
   import RoleButtons from "../components/board/RoleButtons.svelte";
   import RolesBand from "../components/board/RolesBand.svelte";
+  import SearchField from "../components/SearchField.svelte";
   import type { BoardAgent } from "../lib/api/types";
   import {
     adapterText,
@@ -19,7 +20,9 @@
     isParked,
     leaseState,
     leaseTone,
+    matchesQuery,
     nameResolver,
+    orderRoster,
     parkExpired,
     pendingText,
     scopeLine,
@@ -31,6 +34,7 @@
   import { roleOf } from "../lib/maintainer";
   import { loadMaintainer, maintainer } from "../lib/maintainerFlow.svelte";
   import { fmtAgeShort, fmtClock, fmtDateTime, fmtDuration, fmtNum, fmtRelative, plural, shortId, words } from "../lib/format";
+  import { toast } from "../lib/overlay.svelte";
   import { loadBoard, refresh, setSubtitle, store, ui } from "../lib/state.svelte";
 
   const AUTO_REFRESH_MS = 30_000;
@@ -102,12 +106,69 @@
     { id: "parked", label: "Parked", test: (a) => isParked(a, snap?.snapshot_at) },
     { id: "overdue", label: "Overdue", test: (a) => a.status_overdue },
   ];
-  const shown = $derived(agents.filter(FILTERS.find((f) => f.id === filter)!.test));
+  // The search narrows within the filter; the delegate, the coordinator and
+  // sessions with unread mail stay pinned at the top of whatever is shown.
+  let query = $state("");
+  const filtered = $derived(agents.filter(FILTERS.find((f) => f.id === filter)!.test));
+  const rows = $derived(
+    orderRoster(
+      filtered.filter((a) => matchesQuery(a, query)),
+      (a) => roleOf(a, maintainer.status, leases),
+    ),
+  );
+  const pinnedCount = $derived(rows.filter((r) => r.pin).length);
+  const emptyText = $derived.by(() => {
+    if (agents.length === 0) return "No peer has been active recently. Idle addresses are counted, not listed.";
+    const q = query.trim();
+    if (!q) return `No peer matches the ${filter} filter.`;
+    return filter === "all" ? `No session matches "${q}".` : `No session matches "${q}" under the ${filter} filter.`;
+  });
 
   let selectedId = $state<string | null>(null);
   const selected = $derived(
-    agents.find((a) => a.agent_id === selectedId) ?? shown[0] ?? null,
+    agents.find((a) => a.agent_id === selectedId) ?? rows[0]?.agent ?? null,
   );
+
+  // The roster ends at the bottom of the window when the page is at the
+  // top, so a long list scrolls inside its pane while the Roles band stays
+  // in view. Refitted when the window or anything above it (an open
+  // composer, a notice) changes size; the one-column layout keeps its CSS
+  // height.
+  let rosterEl: HTMLElement | undefined = $state();
+  let rosterHeight = $state<number | null>(null);
+  $effect(() => {
+    const el = rosterEl;
+    if (!el) return;
+    // A new snapshot or maintainer status can add a notice above the pane.
+    void store.board.data;
+    void maintainer.status;
+    void maintainer.error;
+    const fit = () => {
+      if (window.matchMedia("(max-width: 860px)").matches) {
+        rosterHeight = null;
+        return;
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      rosterHeight = Math.max(360, Math.round(window.innerHeight - top - 16));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el.closest(".board") ?? document.body);
+    window.addEventListener("resize", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  });
+
+  async function copyId(a: BoardAgent) {
+    try {
+      await navigator.clipboard.writeText(a.agent_id);
+      toast(`Copied the id of ${agentName(a)}: ${a.agent_id}`);
+    } catch {
+      toast(`Copying failed; the id is ${a.agent_id}`, "warn", 8000);
+    }
+  }
 
   let detailEl: HTMLElement | undefined = $state();
   function pick(a: BoardAgent) {
@@ -192,50 +253,70 @@
     {/if}
     <div class="grid">
       <!-- roster -->
-      <section class="panel roster" aria-label="Peers">
-        {#if shown.length === 0}
-          <p class="empty">
-            {agents.length === 0
-              ? "No peer has been active recently. Idle addresses are counted, not listed."
-              : `No peer matches the ${filter} filter.`}
+      <section
+        class="panel roster"
+        aria-label="Peers"
+        bind:this={rosterEl}
+        style:height={rosterHeight ? `${rosterHeight}px` : undefined}
+      >
+        <div class="roster-head">
+          <SearchField bind:value={query} label="Find a session" placeholder="Name, id, task, status or project" debounce={0} />
+          <p class="caption roster-count" role="status" aria-live="polite">
+            {#if query.trim()}{fmtNum(rows.length)} of {plural(filtered.length, "session")} match{:else}{plural(rows.length, "session")}{/if}{#if pinnedCount}, {fmtNum(pinnedCount)} pinned{/if}
           </p>
-        {/if}
-        <ul class="peer-list">
-          {#each shown as a (a.agent_id)}
-            {@const chip = stateChip(a, snap?.snapshot_at)}
-            {@const isSel = selected?.agent_id === a.agent_id}
-            {@const role = roleOf(a, maintainer.status, leases)}
-            <li class="peer-item" class:selected={isSel} class:delegate={role === "delegate"} class:coordinator={role === "coordinator"}>
-              <button type="button" class="peer" aria-pressed={isSel} onclick={() => pick(a)}>
-                <span class="peer-head">
-                  <span class="dot {agentTone(a, snap?.snapshot_at)}" aria-hidden="true"></span>
-                  <span class="peer-name">{agentName(a)}</span>
-                  <span class="age">{fmtAgeShort(a.last_activity, now)}</span>
-                </span>
-                {#if scopeLine(a)}<span class="peer-scope">{scopeLine(a)}</span>{/if}
-                <span class="peer-status" class:none={!a.status}>{a.status || "No status set"}</span>
-                <span class="chips">
-                  {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Delegate</span>{/if}
-                  {#if role === "coordinator"}<span class="chip role-chip lav chip-prose">Coordinator</span>{/if}
-                  <span class="chip {chip.tone}">{chip.text}</span>
-                  {#if a.subagent}<span class="chip">subagent</span>{/if}
-                  {#if a.children.length}<span class="chip">{plural(a.children.length, "subagent")}</span>{/if}
-                  {#if a.status_stale}<span class="chip warn">status stale</span>{/if}
-                  {#if a.pending_count}<span class="chip mail">{fmtNum(a.pending_count)} unread</span>{/if}
-                </span>
-              </button>
-              {#if !a.subagent}
-                <div class="peer-roles"><RoleButtons agent={a} {leases} {nameOf} /></div>
+        </div>
+        <div class="roster-scroll">
+          {#if rows.length === 0}
+            <p class="empty">{emptyText}</p>
+          {/if}
+          <ul class="peer-list">
+            {#each rows as { agent: a, pin }, i (a.agent_id)}
+              {@const chip = stateChip(a, snap?.snapshot_at)}
+              {@const isSel = selected?.agent_id === a.agent_id}
+              {@const role = pin === "delegate" || pin === "coordinator" ? pin : null}
+              {#if pinnedCount && pinnedCount < rows.length && (i === 0 || i === pinnedCount)}
+                <li class="group-label caption">{i === 0 ? "Pinned: roles and unread mail" : "Other sessions"}</li>
               {/if}
-            </li>
-          {/each}
-        </ul>
-        {#if snap.idle_omitted || snap.truncated}
-          <p class="roster-foot caption">
-            {#if snap.idle_omitted}{plural(snap.idle_omitted, "idle peer is", "idle peers are")} counted but not listed.{/if}
-            {#if snap.truncated}The list stops at {fmtNum(agents.length)} peers.{/if}
-          </p>
-        {/if}
+              <li class="peer-item" class:selected={isSel} class:delegate={role === "delegate"} class:coordinator={role === "coordinator"}>
+                <button type="button" class="peer" aria-pressed={isSel} onclick={() => pick(a)}>
+                  <span class="peer-head">
+                    <span class="dot {agentTone(a, snap?.snapshot_at)}" aria-hidden="true"></span>
+                    <span class="peer-name">{agentName(a)}</span>
+                    <span class="age">{fmtAgeShort(a.last_activity, now)}</span>
+                  </span>
+                  {#if scopeLine(a)}<span class="peer-scope">{scopeLine(a)}</span>{/if}
+                  <span class="peer-status" class:none={!a.status}>{a.status || "No status set"}</span>
+                  <span class="chips">
+                    {#if role === "delegate"}<span class="chip role-chip gold chip-prose">Delegate</span>{/if}
+                    {#if role === "coordinator"}<span class="chip role-chip lav chip-prose">Coordinator</span>{/if}
+                    <span class="chip {chip.tone}">{chip.text}</span>
+                    {#if a.subagent}<span class="chip">subagent</span>{/if}
+                    {#if a.children.length}<span class="chip">{plural(a.children.length, "subagent")}</span>{/if}
+                    {#if a.status_stale}<span class="chip warn">status stale</span>{/if}
+                    {#if a.pending_count}<span class="chip mail">{fmtNum(a.pending_count)} unread</span>{/if}
+                  </span>
+                </button>
+                <!-- Beside the card's button, not inside it: one button may not hold another. -->
+                <button
+                  type="button"
+                  class="id-copy corner mono"
+                  title="Copy the full id {a.agent_id}"
+                  aria-label="Copy the id of {agentName(a)}"
+                  onclick={() => copyId(a)}>{shortId(a.agent_id)}</button
+                >
+                {#if !a.subagent}
+                  <div class="peer-foot"><RoleButtons agent={a} {leases} {nameOf} /></div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+          {#if snap.idle_omitted || snap.truncated}
+            <p class="roster-foot caption">
+              {#if snap.idle_omitted}{plural(snap.idle_omitted, "idle peer is", "idle peers are")} counted but not listed.{/if}
+              {#if snap.truncated}The list stops at {fmtNum(agents.length)} peers.{/if}
+            </p>
+          {/if}
+        </div>
       </section>
 
       <!-- selected peer -->
@@ -247,7 +328,13 @@
             <div class="detail-head">
               <span class="dot big {agentTone(selected, snap?.snapshot_at)}" aria-hidden="true"></span>
               <h2 class="detail-name">{agentName(selected)}</h2>
-              <span class="mono meta" title={selected.agent_id}>{shortId(selected.agent_id)}</span>
+              <button
+                type="button"
+                class="id-copy mono"
+                title="Copy the full id {selected.agent_id}"
+                aria-label="Copy the id of {agentName(selected)}"
+                onclick={() => copyId(selected)}>{shortId(selected.agent_id)}</button
+              >
             </div>
             {#if scopeLine(selected)}<p class="detail-scope">{scopeLine(selected)}</p>{/if}
             {#if !selected.subagent}<RoleButtons agent={selected} {leases} {nameOf} wide />{/if}
@@ -417,7 +504,7 @@
                   <span class="chip {tone}">{leaseState(l)}</span>
                 </div>
                 {#if l.holder}
-                  <p class="lease-line"><span class="caption">Holder</span> {l.holder.label || "unlabelled"} <span class="mono meta">{shortId(l.holder.agent_id)}</span></p>
+                  <p class="lease-line"><span class="caption">Holder</span> {l.holder.name || l.holder.label || "unlabelled"} <span class="mono meta">{shortId(l.holder.agent_id)}</span></p>
                   {#if l.holder.purpose}<p class="lease-line"><span class="caption">Purpose</span> {l.holder.purpose}</p>{/if}
                   <p class="lease-nums mono">
                     {#if l.expected_end}<span>expected {fmtClock(l.expected_end, now)}</span>{/if}
@@ -433,7 +520,7 @@
                   <p class="queue caption">
                     {fmtNum(l.queued)} queued, first in line first{#if l.queue.length}: {l.queue
                         .map((w) =>
-                          [w.label || shortId(w.agent_id), w.purpose, w.enqueued_at ? `waiting ${fmtAgeShort(w.enqueued_at, now)}` : ""]
+                          [w.name || w.label || shortId(w.agent_id), w.purpose, w.enqueued_at ? `waiting ${fmtAgeShort(w.enqueued_at, now)}` : ""]
                             .filter(Boolean)
                             .join(", "),
                         )
@@ -526,7 +613,7 @@
   }
   .grid {
     display: grid;
-    grid-template-columns: 300px minmax(0, 1fr) 280px;
+    grid-template-columns: 316px minmax(0, 1fr) 280px;
     gap: 14px;
     align-items: start;
   }
@@ -536,9 +623,33 @@
     font-size: 12.5px;
   }
 
-  /* roster */
+  /* roster: its own fixed-height pane, so finding a session never scrolls
+     the page, and the Roles band with it, out of view */
   .roster {
+    display: flex;
+    flex-direction: column;
+    height: clamp(360px, calc(100dvh - 360px), 900px);
     padding: 4px;
+  }
+  .roster-head {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 10px 8px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .roster-count {
+    padding-left: 4px;
+  }
+  .roster-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .group-label {
+    padding: 10px 14px 4px;
+    color: var(--ink-4);
   }
   .peer-list {
     list-style: none;
@@ -546,6 +657,7 @@
     padding: 0;
   }
   .peer-item {
+    position: relative;
     border-radius: 14px;
     border-top: 1px solid transparent;
   }
@@ -578,8 +690,33 @@
     font-size: 13px;
     cursor: pointer;
   }
-  .peer-roles {
+  .peer-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     padding: 0 14px 12px;
+  }
+  .id-copy {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    background: var(--fill);
+    color: var(--ink-3);
+    font-size: 11px;
+    cursor: copy;
+  }
+  .id-copy:hover {
+    color: var(--ink);
+  }
+  .id-copy.corner {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+  }
+  .peer-head {
+    padding-right: 76px;
   }
   .role-chip.gold {
     color: var(--on-accent);
@@ -887,7 +1024,7 @@
 
   @media (max-width: 1240px) {
     .grid {
-      grid-template-columns: 280px minmax(0, 1fr);
+      grid-template-columns: 300px minmax(0, 1fr);
     }
     .leases {
       grid-column: 2;
@@ -900,6 +1037,9 @@
     .leases {
       grid-column: auto;
       order: -1;
+    }
+    .roster {
+      height: clamp(320px, 70dvh, 640px);
     }
     .fresh {
       margin-left: 0;
@@ -914,6 +1054,16 @@
     .segmented.small button {
       height: 36px;
       padding: 0 14px;
+    }
+    .id-copy {
+      height: 32px;
+      padding: 0 10px;
+    }
+    .id-copy.corner {
+      top: 6px;
+    }
+    .peer-head {
+      padding-right: 88px;
     }
   }
 </style>

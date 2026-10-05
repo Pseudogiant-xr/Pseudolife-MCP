@@ -17,8 +17,9 @@
 # pseudolife-memory, the Desktop Code tab also pseudolife-desktop), and the
 # name is checked again here. For a subagent it denies memory_agents update,
 # claim and release and memory_message send and ack; memory_agents list (the
-# default action) and memory_message receive pass, and so does every other
-# tool. The parent's calls always pass.
+# default action) and memory_message receive and history (read-only: no ack,
+# delivery or wake) pass, and so does every other tool. The parent's calls
+# always pass.
 #
 # It fails open: a payload it cannot read, or a coordination opt-out
 # (PSEUDOLIFE_AGENT_COORDINATION set to anything but a yes), allows the call,
@@ -92,7 +93,7 @@ ARGS="{${BASH_REMATCH[1]}"
 ACTION=""
 [[ $ARGS =~ $ACTION_RE ]] && ACTION=${BASH_REMATCH[1]}
 case "$NAME:$ACTION" in
-    memory_agents:|memory_agents:list|memory_message:receive) exit 0 ;;
+    memory_agents:|memory_agents:list|memory_message:receive|memory_message:history) exit 0 ;;
 esac
 
 # The reason is what the subagent reads ("PreToolUse:<tool> hook error:
@@ -105,5 +106,5 @@ case "$ACTION" in
     *) CALL="$NAME(action=$ACTION)" ;;
 esac
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' \
-    "Pseudolife board: refused $CALL from a subagent. A subagent shares its parent session's board address, so it may only read the board (memory_agents list, memory_message receive without ack, memory_search). Ask your parent session to update status, ack or send."
+    "Pseudolife board: refused $CALL from a subagent. A subagent shares its parent session's board address, so it may only read the board (memory_agents list, memory_message receive without ack or history, memory_search). Ask your parent session to update status, ack or send."
 exit 0
