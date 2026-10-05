@@ -215,3 +215,56 @@ def test_context_cannot_retarget_equal_byte_invocation_before_launch(tmp_path, m
     with pytest.raises(ValueError, match="command changed"):
         cli_process.observe(spec(), commands["candidate"], commands, root=tmp_path,
                             home=tmp_path / "home", url="http://127.0.0.1:49152", process_scope=retarget)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix executable symlink")
+@pytest.mark.parametrize("boundary", ["prepare", "context-entry", "capture", "context-exit"])
+def test_owned_copy_does_not_allow_original_target_change(tmp_path, monkeypatch, boundary):
+    original = tmp_path / "original-runtime/python"
+    other = tmp_path / "other-runtime/python"
+    original.parent.mkdir()
+    other.parent.mkdir()
+    original.write_bytes(b"native fixture")
+    other.write_bytes(original.read_bytes())
+    link = tmp_path / "invoked"
+    link.symlink_to(original)
+    commands = {"candidate": [str(link)]}
+    launches = []
+
+    def retarget():
+        link.unlink()
+        link.symlink_to(other)
+
+    def prepare(case, home, env, command, all_commands):
+        copied = home / "installed/python"
+        copied.parent.mkdir()
+        shutil.copyfile(original, copied)
+        if boundary == "prepare":
+            retarget()
+        return [str(copied)]
+
+    @contextmanager
+    def scope(case, home):
+        if boundary == "context-entry":
+            retarget()
+        yield
+        if boundary == "context-exit":
+            retarget()
+
+    def capture(command, *args, **kwargs):
+        launches.append(command)
+        assert Path(command[0]).is_relative_to(tmp_path / "home")
+        assert Path(command[0]).read_bytes() == original.read_bytes()
+        if boundary == "capture":
+            retarget()
+        return {"exit_code": 0, "stdout_b64": "", "stderr_b64": ""}
+
+    monkeypatch.setattr(cli_process, "run_cli", capture)
+    error = ValueError if boundary in {"prepare", "context-entry"} else RuntimeError
+    message = {"prepare": "original executable target", "context-entry": "command changed"}.get(
+        boundary, "executable changed during capture")
+    with pytest.raises(error, match=message):
+        cli_process.observe(spec(), commands["candidate"], commands, root=tmp_path,
+                            home=tmp_path / "home", url="http://127.0.0.1:49152",
+                            prepare=prepare, process_scope=scope)
+    assert len(launches) == (0 if boundary in {"prepare", "context-entry"} else 1)

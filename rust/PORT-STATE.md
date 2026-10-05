@@ -747,3 +747,17 @@ streams and file effects. Targeted checks pass on Linux (147) and Windows (143,
 with four POSIX-only skips). Committed real-daemon recapture and the fifteen
 affected Linux help/unknown-command rows remain pending. Comparison policy and
 traceback scope are unchanged; CLI-LEASE remains deferred.
+
+At `f4bf8a83`, the committed Linux token-file path matches four real-daemon
+pairs and rejects 16 output controls, with the installed 0.17 virtualenv,
+httpx, board access and owned cleanup observed. This point-in-time proof does
+not close independent review R1: preparation could select an owned copy while
+retargeting the original executable symlink to equal bytes. This candidate
+retains the original resolved target independently through preparation, context
+entry and capture. All four new refusal cases fail on the preceding helper and
+pass after repair. A changed helper return shape initially broke four existing
+measurement tests; restoring its three-value API closes those failures. The
+combined targeted checks pass on Linux (129) and Windows (121, with eight
+Unix-only skips). R1 remains pending fresh successor review; no additional
+daemon proof or affected help-row recapture has run on this repair. CLI-LEASE
+and the third traceback scope decision remain deferred.
