@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-05 — maintainer messages signed with a passkey, tool errors that say what to fix, and sessions that stay reachable
+
 ### Fixed (2026-10-05 — updates and installers move an old plugin marketplace to HTTPS themselves)
 - Installs from 0.16.1 and earlier recorded the Claude Code plugin
   marketplace as a `github` source (the `Pseudogiant-xr/Pseudolife-MCP`
