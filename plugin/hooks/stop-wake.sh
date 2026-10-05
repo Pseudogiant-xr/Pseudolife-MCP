@@ -81,21 +81,32 @@
 # and an older watcher that finds another token there exits quietly at its
 # next poll, so the newest turn end always owns the wait.
 #
-# Budget: hooks.json sets "timeout": 3600, which Claude Code enforces on
-# asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. An hour
-# covers twice the p90 acknowledgement latency (1,740 s) that sessions
-# without a watcher showed in the 2026-09-23 10-session messageboard trial;
-# The arm expires after 59 minutes; longer waits need a background wait-mail
-# arm (four hours by default), or their mail surfaces on the next prompt.
-# PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT shortens the
-# wait, never lengthens it.
-MAX_WAIT=3540
+# Budget: hooks.json sets "timeout": 1209600, which Claude Code enforces on
+# asyncRewake hooks, and the wait ends at MAX_WAIT, before the kill. A
+# session stays reachable for as long as it is open (maintainer requirement
+# 2026-10-05): fourteen days is twice the longest delegate lease, so a lease
+# granted any time in the week after the session's last turn is covered to
+# its end. Claude Code takes the timeout as is (timeout * 1000 ms, no
+# ceiling, in the 2.1.286 and 2.1.287 bundles read 2026-10-05) into a Node
+# timer, which fires at once above 2**31 - 1 ms (24.8 days). Until then the
+# hook stopped after 59 minutes and a longer wait needed wait-mail, which a
+# background Bash task cannot hold past two hours (the Bash tool stops one
+# at its own timeout: 30 minutes by default). PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT
+# shortens the wait, never lengthens it.
+MAX_WAIT=1209540
 # Matches the board's 60 s listener lease ceiling; renew every poll so a
 # killed watcher is no longer advertised as armed after one minute.
 LISTENER_LEASE=60
 # The shim rewrites the digest on its 20 s heartbeat, so a 5 s poll adds
-# little latency; each poll spawns one sleep.
+# little latency; each poll spawns a sleep, a date and a mv.
 POLL=5
+# After FAST_WAIT seconds (the hour the hook used to stop at) the watcher
+# polls every IDLE_POLL seconds. A session idle for days would otherwise keep
+# spawning three processes every 5 s; under Git Bash, bursts of 10-32 spawns
+# a second stalled mouse input on the maintainer's host (2026-10-02). Half
+# the listener lease keeps the record renewed with room for a slow spawn.
+FAST_WAIT=3540
+IDLE_POLL=30
 # At most MAX_WAKES wakes in any WAKE_WINDOW seconds. Two opted-in sessions
 # can keep waking each other, and every wake is an unattended model turn;
 # mail over the cap waits for the window, delayed but never dropped. The
@@ -104,8 +115,13 @@ POLL=5
 MAX_WAKES=20
 WAKE_WINDOW=3600
 # Under Git Bash the parent is a Windows PID that only `ps -W` lists; it is
-# checked at arm time and then this often (seconds), not at every poll.
+# checked at arm time and then this often (seconds), not at every poll, and
+# every IDLE_PARENT_CHECK seconds after FAST_WAIT. `ps -W` took 1.6-3.5 s on
+# the loaded 2026-09-23 test machine, and with ~30 sessions open a minute's
+# checks add up (delegate review of #585, 2026-10-05); a clean exit removes
+# the digest, which ends the watch within a poll anyway.
 PARENT_CHECK=60
+IDLE_PARENT_CHECK=300
 
 # Read the two settings the way the shim and doctor do: trimmed and
 # lower-cased, blank meaning unset. Only a non-empty value costs a spawn.
@@ -426,7 +442,7 @@ if [ -z "$ACTIVE" ] && [ -f "$AGENT" ] && [ ! -L "$AGENT" ]; then
                 MESSAGE=""
                 case "$ANSWER" in *$'\n'*) MESSAGE=${ANSWER#*$'\n'} ;; esac
                 while [ "${MESSAGE%$'\n'}" != "$MESSAGE" ]; do MESSAGE=${MESSAGE%$'\n'}; done
-                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected; urgent mail from the maintainer, the maintainer's delegate for the project or your named clearer still rings it. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires a live listener. Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. For waits over 59 minutes, especially needs_approval waiting on maintainer, arm wait-mail in the background or keep the Codex doorbell active; otherwise record that you are reachable on your next turn."
+                DEFAULT_MESSAGE="Before ending: update your board status with why you stopped and what you need (memory_agents update park_reason=... park_needs=... park_clear_by=... park_resume=...). Use done only when no follow-up is expected; urgent mail from the maintainer, the maintainer's delegate for the project or your named clearer still rings it. Waiting on a merge click or a review that may still bring fixes? Park needs_approval with park_clear_by set to the reviewer's agent id or maintainer, or waiting_peer. A park records intent; automatic wake requires a live listener. Check the sender's wake receipt; no_path means mail is queued for receive on a later turn. Claude Code's Stop hook keeps listening while this session stays open, and a Codex thread needs its doorbell active; without either, record that you are reachable on your next turn."
                 [ -n "$MESSAGE" ] || MESSAGE=$DEFAULT_MESSAGE
                 if [ -n "$CODEX_HOOK_CONTEXT" ]; then
                     # Codex reads the decision from stdout (exit 0).
@@ -453,7 +469,7 @@ fi
 
 WAIT=${PSEUDOLIFE_AGENT_WAKE_HOOK_WAIT:-$MAX_WAIT}
 case "$WAIT" in ''|*[!0123456789]*) WAIT=$MAX_WAIT ;; esac
-[ "${#WAIT}" -le 5 ] || WAIT=$MAX_WAIT
+[ "${#WAIT}" -le 7 ] || WAIT=$MAX_WAIT
 WAIT=$((10#$WAIT))
 [ "$WAIT" -le "$MAX_WAIT" ] || WAIT=$MAX_WAIT
 
@@ -466,10 +482,18 @@ still_owner() {
     IFS= read -r current < "$LEASE"
     [ "$current" = "$TOKEN" ]
 }
+# Sets NOW_EPOCH to the time in epoch seconds: bash's own printf from bash
+# 4.2 (Git Bash, Linux), a date spawn only on macOS's bash 3.2.
+if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2))); then
+    epoch_now() { printf -v NOW_EPOCH '%(%s)T' -1; }
+else
+    epoch_now() { NOW_EPOCH=$(date +%s); }
+fi
 renew_listener() {
     local now expiry remaining
     still_owner || return 1
-    now=$(date +%s)
+    epoch_now
+    now=$NOW_EPOCH
     remaining=$((WAIT - SECONDS))
     [ "$remaining" -gt 0 ] || return 1
     [ "$remaining" -le "$LISTENER_LEASE" ] || remaining=$LISTENER_LEASE
@@ -502,19 +526,25 @@ case "${CLAUDE_PID:-}" in
     ''|*[!0123456789]*) ;;
     *)  case "${OSTYPE:-}" in
             msys*|cygwin*)
+                # No listing to judge by (2) is checked again each minute.
                 windows_pid_listed "$CLAUDE_PID"
-                [ $? -eq 0 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
+                [ $? -ne 1 ] && PARENT=$CLAUDE_PID && WINDOWS_PARENT=1
                 ;;
             *) kill -0 "$CLAUDE_PID" && PARENT=$CLAUDE_PID ;;
         esac ;;
 esac
+# With no Claude Code process to watch, only the digest's removal would end
+# the watch: keep the hour the hook had before it listened for 14 days.
+[ -n "$PARENT" ] || [ "$WAIT" -le "$FAST_WAIT" ] || WAIT=$FAST_WAIT
 # True while the parent is (as far as this host can tell) still running.
 parent_alive() {
     if [ -z "$WINDOWS_PARENT" ]; then
         kill -0 "$PARENT"
         return
     fi
-    [ $((SECONDS - PARENT_CHECKED)) -ge "$PARENT_CHECK" ] || return 0
+    local every=$PARENT_CHECK
+    [ "$SECONDS" -lt "$FAST_WAIT" ] || every=$IDLE_PARENT_CHECK
+    [ $((SECONDS - PARENT_CHECKED)) -ge "$every" ] || return 0
     PARENT_CHECKED=$SECONDS
     windows_pid_listed "$PARENT"
     [ $? -ne 1 ]
@@ -579,8 +609,9 @@ wake_budget_ok() {
 # (a crash that takes the shim down with Claude Code leaves it, which the
 # parent check above catches), so the watch ends rather than fire
 # into a later session. `pseudolife-mcp wait-mail` (wait_mail_cli.py)
-# applies the same ring rule and fire-and-mark contract for waits longer
-# than this hook's; this loop keeps the lease, parent and cap checks.
+# applies the same ring rule and fire-and-mark contract where this hook does
+# not run (an install without the plugin's Stop hook); this loop keeps the
+# lease, parent and cap checks.
 wait_for_mail() {
     # SECONDS counts from the start of the script, spawns included.
     local deadline=$WAIT snapshot present=0
@@ -610,7 +641,7 @@ wait_for_mail() {
             esac
         fi
         [ "$SECONDS" -lt "$deadline" ] || return 3
-        sleep "$POLL"
+        if [ "$SECONDS" -lt "$FAST_WAIT" ]; then sleep "$POLL"; else sleep "$IDLE_POLL"; fi
     done
 }
 

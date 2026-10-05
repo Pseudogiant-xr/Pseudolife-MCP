@@ -232,9 +232,10 @@ WITHHELD_RETRY = "urgent=true, or clears=<its park_needs>, rings this park"
 # Codex: the doorbell (``codex queue``) serves CLI and desktop threads alike
 # but watches a thread only from the thread's first Pseudolife call after the
 # MCP server starts, and turns itself off after a failed queue. Claude Code:
-# the Stop hook's 59-minute wait or a background wait-mail; a Claude Desktop
-# Code-tab session also takes its host's session send_message, which needs
-# neither the board nor a listener.
+# the Stop hook's watcher, armed at every turn end for as long as the session
+# stays open (14 days; 59 minutes before 2026-10-05), or a background
+# wait-mail; a Claude Desktop Code-tab session also takes its host's session
+# send_message, which needs neither the board nor a listener.
 FALLBACK_CODEX = (
     "Mail is queued for receive on the thread's next turn and rings once its Codex "
     "doorbell re-arms (the shim watches a thread from its first Pseudolife call after "
@@ -242,9 +243,22 @@ FALLBACK_CODEX = (
     "session's window.")
 FALLBACK_CLAUDE = (
     "Mail is queued for receive on the session's next turn and rings once its Stop-hook "
-    "wait or wait-mail re-arms. Only if it is a Claude Desktop Code-tab session (the "
+    "listener re-arms at a turn end. Only if it is a Claude Desktop Code-tab session (the "
     "board cannot tell) does its host's session send_message reach it now; a Claude Code "
     "CLI session is reached by the maintainer typing into its window.")
+# What a role grant tells the maintainer or operator when the holder has no
+# live wake path now (maintainer requirement 2026-10-05: the delegate above
+# all must be reachable). Keyed by ``_listener_path``'s reasons.
+UNREACHABLE_REASONS = {
+    "listener_expired": "its listener lapsed",
+    "listener_unknown": "its listener has not reported yet",
+    "wake_disabled": "it has no wake listener",
+}
+UNREACHABLE_WARNING = (
+    "The new {role} has no live wake path now ({reason}): maintainer mail to it "
+    "waits for its next turn. A Claude Code session listens again when its turn "
+    "ends, a Codex thread once its doorbell re-arms; a client older than the "
+    "always-listening plugin stops 59 minutes after a turn until it is updated.")
 # ``claude_desktop_send_message`` applies only to a Desktop Code-tab session;
 # the board cannot tell one from a CLI session, so the text says so.
 FALLBACK_PATHS_CODEX = ("codex_doorbell", "maintainer_types")
@@ -2377,6 +2391,19 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
+        return {**out, **self.reachability(agent, now, role="delegate")}
+
+    @classmethod
+    def reachability(cls, agent, now, *, role=None):
+        """Whether maintainer mail rings ``agent`` (an agent row, or None for
+        a holder with no board row) now: ``reachable`` and the no-path
+        ``reason`` a send would carry, plus, given ``role``, the ``warning``
+        a grant shows when it is not."""
+        reason = "wake_disabled" if agent is None else cls._listener_path(agent, now)
+        out = {"reachable": reason is None, "reason": reason}
+        if role is not None and reason is not None:
+            out["warning"] = UNREACHABLE_WARNING.format(
+                role=role, reason=UNREACHABLE_REASONS.get(reason, reason))
         return out
 
     def assign_coordinator(self, project, agent_id, *, hold, actor="operator"):
@@ -2424,7 +2451,7 @@ class CoordinationStore:
                "expires_at": row["expires_at"], "replaced": replaced}
         if also:
             out["also_broken"] = also
-        return out
+        return {**out, **self.reachability(agent, now, role="coordinator")}
 
     def _pending_count(self, agent_id):
         return self._one("SELECT count(*) AS n FROM coordination_messages WHERE recipient_agent_id=%s "

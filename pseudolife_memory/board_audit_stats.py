@@ -38,12 +38,13 @@ WAKE_DECISIONS = ("rung", "nudged", "hinted", "withheld", "no_path", "capped", "
 # The decisions that rang a shim, and so have a row in ``coordination_wakes``.
 RING_DECISIONS = ("rung", "nudged")
 # How soon after a ring the recipient must act on the board for the ring to
-# count as precise: the Stop hook fires under a second after the marker, and
+# count as precise: the Stop hook fires within one poll of the marker (5 s,
+# 30 s once a session has been idle an hour, since 2026-10-05), and
 # the woken turn's first board call (receive) follows within its first tool
 # calls; two minutes covers a slow start and excludes the next natural turn.
 PRECISION_WINDOW = 120.0
 # A woke marker later than this after a ring was served answers some other
-# ring: the hook waits at most an hour.
+# ring: the hook's wake cap (20 an hour) holds a ring back at most an hour.
 WOKE_WINDOW = 3600.0
 # The model's own board actions: what a woken session does when the wake
 # landed. The adapter's own attach, detach, delivery reads (a live channel

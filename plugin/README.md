@@ -94,8 +94,10 @@ reads the process identity SessionStart recorded instead of measuring it,
 while that record says it still holds (`ps -W` prints a process's start
 time differently after its first 24 hours, and a DST change shifts it);
 and the Stop hook (on by default) checks that Claude Code is still running through
-`ps -W` at arm time and once a minute (a Windows PID is invisible to
-`kill -0`), so a watcher orphaned by a crash ends within the minute.
+`ps -W` at arm time, once a minute for the first hour and every five minutes
+after (a Windows PID is invisible to `kill -0`), so a watcher orphaned by a
+crash usually ends within that interval; if the PID is reused, or `ps -W`
+never lists it, it lasts until its digest is swept as stale, about a day.
 
 ## Startup check-in and per-turn coordination
 

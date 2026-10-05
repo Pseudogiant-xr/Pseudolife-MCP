@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pseudolife_memory.storage.coordination import CoordinationStore
 from pseudolife_memory.utils.config import AppConfig
 
 _NOW = time.time()
@@ -841,8 +842,11 @@ class FixtureService:
                                     now - 6 * _D)],
                 "roles": {self._MX_PROJECT: {
                     "delegate": {"agent_id": relay, "expires_at": now + 22 * _H,
-                                 "granted_by": "maintainer"},
-                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H},
+                                 "granted_by": "maintainer", "reachable": True,
+                                 "reason": None},
+                    # Shows the band's no-listener line.
+                    "coordinator": {"agent_id": roles_session, "expires_at": now + 20 * _H,
+                                    "reachable": False, "reason": "listener_expired"},
                 }},
                 "sent": [{
                     "message_id": "f1c0ffee00000000000000000000000a",
@@ -1224,14 +1228,23 @@ class FixtureService:
             # One role per session: the other role's lease breaks too.
             slots[other] = None
             also_broken = f"{other}:{project}"
-        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"]}
+        # The demo's second session is the one whose listener lapsed.
+        reach = ({"reachable": True, "reason": None}
+                 if agent_id != list(self._MX_SESSIONS)[1]
+                 else CoordinationStore.reachability(
+                     {"attachment_id": None, "lease_until": 0, "wake_enabled": False,
+                      "capabilities": {"ring": True, "ring_armed_until": 0}},
+                     now, role=role))
+        entry = {"agent_id": agent_id, "expires_at": now + fields["hold"],
+                 "reachable": reach["reachable"], "reason": reach["reason"]}
         if role == "delegate":
             entry["granted_by"] = "maintainer"
         slots[role] = entry
         self._mx()["fence"] += 1
         out = {"name": name, "agent_id": agent_id, "fence": self._mx()["fence"],
                "expires_at": entry["expires_at"],
-               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None}
+               "replaced": held["agent_id"] if held and held["agent_id"] != agent_id else None,
+               **reach}
         if also_broken:
             out["also_broken"] = also_broken
         return out
