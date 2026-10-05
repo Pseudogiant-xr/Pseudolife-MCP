@@ -269,6 +269,10 @@ def _error_payload(tool: str, exc: Exception) -> dict[str, Any]:
         value = getattr(exc, key, None)
         if value is not None:
             payload[key] = value
+    # The board's boundary turns an unexpected failure into this code, a
+    # ValueError like any refusal, though the write may have happened.
+    if code == "coordination_unavailable" and tool not in _READ_ONLY_TOOLS:
+        payload["mutation"] = "unknown"
     return payload
 
 
@@ -277,7 +281,10 @@ def _tool_error(tool: str, exc: Exception) -> CallToolResult:
     and structured content are the same JSON object, so Claude Code (text)
     and Codex (structured) read one shape. No-ops are not refusals and stay
     successes with their own fields."""
-    payload = _error_payload(tool, exc)
+    return _error_result(_error_payload(tool, exc))
+
+
+def _error_result(payload: dict[str, Any]) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text",
                              text=json.dumps(payload, indent=2, ensure_ascii=False))],
@@ -327,19 +334,68 @@ _PARAM_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+class _BindingRefusal(dict):
+    """What ``validate_arguments`` returns for arguments it refused: no
+    arguments, and the tool error ``call_fn`` answers with in place of the
+    tool body."""
+
+    def __init__(self, result: CallToolResult):
+        super().__init__()
+        self.result = result
+
+
 class _StringSafeMetadata(FuncMetadata):
     tool_name: str = ""
 
     def validate_arguments(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
+        """Bind the arguments, or refuse them in the body's error shape.
+
+        The SDK turns a ``ValidationError`` into pydantic's own text, which
+        echoes each value passed (``input_value``) and a docs URL, so a
+        binding refusal read nothing like a body refusal (review of
+        #587/#588, 2026-10-05). It becomes the same JSON tool error instead,
+        naming each refused argument and never its value.
+        """
+        try:
+            return self._bind(arguments_to_validate)
+        except ValidationError as exc:
+            return _BindingRefusal(_error_result(self._binding_payload(exc)))
+
+    async def call_fn(self, fn, fn_is_async, arguments, arguments_to_pass_directly=None):
+        if isinstance(arguments, _BindingRefusal):
+            return arguments.result
+        return await super().call_fn(fn, fn_is_async, arguments, arguments_to_pass_directly)
+
+    def _accepted(self) -> list[str]:
+        return [field.alias or name for name, field in self.arg_model.model_fields.items()]
+
+    def _binding_payload(self, exc: ValidationError) -> dict[str, Any]:
+        """``{error, message, param, accepted?}`` from the refused arguments'
+        names and pydantic's per-error sentences, which carry no value."""
+        errors = exc.errors(include_url=False, include_input=False, include_context=False)
+        names = [".".join(str(part) for part in err["loc"]) or "arguments" for err in errors]
+        unknown = all(err["type"] == "unknown_parameter" for err in errors)
+        if unknown:
+            message = " ".join(err["msg"] for err in errors)
+        else:
+            message = "; ".join(f"{name}: {err['msg']}" for name, err in zip(names, errors))
+        payload: dict[str, Any] = {
+            "error": "unknown_parameter" if unknown else "invalid_argument",
+            "message": message}
+        if errors and errors[0]["loc"]:
+            payload["param"] = str(errors[0]["loc"][0])
+        if unknown:
+            payload["accepted"] = self._accepted()
+        return payload
+
+    def _bind(self, arguments_to_validate: dict[str, Any]) -> dict[str, Any]:
         """Refuse an argument name the tool does not have.
 
         Pydantic's default (``extra="ignore"``) dropped it without a word, so
         ``memory_search(limit=3)`` answered with the default 8 hits and the
-        model never learned. A ``ValidationError`` raised here reaches the
-        client as an ``isError`` result, like any other argument mismatch.
+        model never learned.
         """
-        accepted = [field.alias or name
-                    for name, field in self.arg_model.model_fields.items()]
+        accepted = self._accepted()
         unknown = [key for key in arguments_to_validate if key not in accepted]
         if unknown:
             # hide_input: a misnamed argument can carry a secret, so the

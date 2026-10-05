@@ -437,7 +437,8 @@ def test_shim_passes_a_tool_refusal_through_unchanged(shared_daemon):
     """A refusal raised inside a tool body reaches the client through the
     shim as the daemon's MCP tool error: ``isError`` with the JSON
     ``{error, message}`` contract, not a success-shaped dict carrying a
-    Python class name (review 2026-10-04, M1)."""
+    Python class name (review 2026-10-04, M1). A call refused at argument
+    binding, before any tool body runs, arrives in the same shape."""
     import asyncio
 
     env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
@@ -454,16 +455,31 @@ def test_shim_passes_a_tool_refusal_through_unchanged(shared_daemon):
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
                 await s.initialize()
-                # Valid arguments by the schema; the body refuses the date.
-                res = await s.call_tool("memory_history", {
-                    "entity": "shim-error-probe", "attribute": "x",
-                    "as_of": "yesterday"})
+                # Valid arguments by the schema; the body refuses a scalar
+                # write to a set-valued slot.
+                await s.call_tool("memory_set_add", {
+                    "entity": "shim-error-probe", "attribute": "tags",
+                    "member": "rust"})
+                res = await s.call_tool("memory_fact_set", {
+                    "entity": "shim-error-probe", "attribute": "tags",
+                    "value": "go"})
                 text = res.content[0].text
                 assert res.is_error, f"refusal came back success-shaped: {text}"
                 payload = json.loads(text)
                 assert payload["error"] == "invalid_argument", payload
-                assert "yesterday" in payload["message"]
+                assert "memory_set_add" in payload["message"]
                 assert "ValueError" not in text
+                # Refused at binding: same shape, the parameter named, no
+                # echo of the value or pydantic's framing.
+                res = await s.call_tool("memory_search", {
+                    "query": "probe", "top_k": "PROBE" + "VALUE"})
+                text = res.content[0].text
+                assert res.is_error, text
+                payload = json.loads(text)
+                assert payload["error"] == "invalid_argument", payload
+                assert payload["param"] == "top_k", payload
+                for leak in ("PROBEVALUE", "input_value", "errors.pydantic.dev"):
+                    assert leak not in text, text
 
     asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 

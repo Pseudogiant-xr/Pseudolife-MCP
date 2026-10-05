@@ -1267,11 +1267,13 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
     fed the FULL registry, not the filtered view. v2: the transport filter
     never touches the MCPServer tool registry, so a hidden tool's call-time
     input validation must still fire after a filtered list."""
-    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
     asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
-    with pytest.raises(ToolError, match="valid integer"):
-        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    result = asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument" and out["param"] == "n"
+    assert "valid integer" in out["message"]
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:

@@ -123,14 +123,85 @@ def test_tool_exceptions_become_structured_errors(tmp_path: Path, monkeypatch) -
 
 def test_prose_value_errors_become_invalid_argument(tmp_path: Path, monkeypatch) -> None:
     """A ValueError whose text is a sentence keeps the sentence as the
-    message under the stable code ``invalid_argument``."""
-    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    message under the stable code ``invalid_argument``. The call binds
+    cleanly and the tool body refuses it, so this tests the body path."""
     mod = _reload(tmp_path, monkeypatch)
-    out = _tool_error(mod, "memory_history",
-                      {"entity": "a", "attribute": "b", "as_of": "yesterday"})
+    asyncio.run(mod.mcp.call_tool(
+        "memory_set_add", {"entity": "probe", "attribute": "tags", "member": "rust"}))
+    out = _tool_error(mod, "memory_fact_set",
+                      {"entity": "probe", "attribute": "tags", "value": "go"})
     assert out["error"] == "invalid_argument"
-    assert "yesterday" in out["message"]
+    assert "memory_set_add" in out["message"]
     assert "ValueError" not in json.dumps(out)
+
+
+# Pydantic's own framing: what a binding refusal must never carry.
+_BINDING_LEAKS = ("input_value", "input_type", "errors.pydantic.dev", "validation error")
+
+
+def test_binding_rejections_share_the_error_shape(tmp_path: Path, monkeypatch) -> None:
+    """An argument the schema refuses (wrong type here) never reaches the
+    tool body, yet comes back as the same JSON tool error as a body
+    refusal: ``invalid_argument`` naming the parameter, with neither the
+    value passed nor pydantic's framing (review of #587/#588, 2026-10-05)."""
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(mod.service, "search", lambda *a, **k: calls.append(k))
+    value = "PROBE" + "VALUE" * 3  # built at runtime: must not be echoed
+    out = _tool_error(mod, "memory_search", {"query": "q", "top_k": value})
+    assert out["error"] == "invalid_argument"
+    assert out["param"] == "top_k"
+    assert "top_k" in out["message"] and "integer" in out["message"]
+    text = json.dumps(out)
+    for leak in (value, *_BINDING_LEAKS):
+        assert leak not in text, text
+    assert set(out) <= {"error", "message", "param"}
+    assert calls == []
+
+
+def test_binding_rejections_name_every_argument(tmp_path: Path, monkeypatch) -> None:
+    """Several refused arguments are each named in the message; ``param``
+    is the first of them."""
+    mod = _reload(tmp_path, monkeypatch)
+    out = _tool_error(mod, "memory_search", {"top_k": "many"})
+    assert out["error"] == "invalid_argument"
+    assert out["param"] in {"query", "top_k"}
+    assert "query" in out["message"] and "top_k" in out["message"]
+    assert "many" not in out["message"]
+
+
+def test_unknown_parameter_is_its_own_code(tmp_path: Path, monkeypatch) -> None:
+    """A misnamed argument keeps #584's sentence and gains the shape's
+    fields: ``error: unknown_parameter``, the name, and what is accepted."""
+    mod = _reload(tmp_path, monkeypatch)
+    out = _tool_error(mod, "memory_search", {"query": "q", "limit": 3})
+    assert out["error"] == "unknown_parameter"
+    assert out["param"] == "limit"
+    assert "top_k" in out["accepted"] and "query" in out["accepted"]
+    assert "limit" not in out["accepted"]
+    assert out["message"].startswith(
+        "unknown parameter 'limit' for memory_search; did you mean 'top_k'?")
+    assert out["message"].count("Accepted:") == 1
+    for leak in _BINDING_LEAKS:
+        assert leak not in json.dumps(out)
+
+
+def test_an_unavailable_board_leaves_a_write_in_doubt(tmp_path: Path, monkeypatch) -> None:
+    """``coordination_unavailable`` is what an unexpected failure inside a
+    board call becomes. It is a ValueError like any refusal, but the write
+    may have happened, so a write tool says so; a read-only one does not."""
+    from pseudolife_memory.coordination import CoordinationRefused
+
+    mod = _reload(tmp_path, monkeypatch)
+    out = mod._error_payload("memory_message",
+                             CoordinationRefused("coordination_unavailable"))
+    assert out["error"] == "coordination_unavailable"
+    assert out["mutation"] == "unknown"
+    refused = mod._error_payload("memory_message", CoordinationRefused("missing_parameter"))
+    assert "mutation" not in refused
+    read = mod._error_payload("memory_search",
+                              CoordinationRefused("coordination_unavailable"))
+    assert "mutation" not in read
 
 
 def test_coded_value_errors_keep_their_code(tmp_path: Path, monkeypatch) -> None:

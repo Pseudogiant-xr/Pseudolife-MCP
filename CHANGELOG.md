@@ -24,6 +24,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `withheld` or `no_path` wake receipt) stay successes, and success
   payloads are unchanged. Refusals tools return as `{"error": ...}` dicts
   (`unknown_action`, `bulk_confirm_required`, ...) are unchanged.
+  `invalid_argument` carries no `mutation` field, so it is meant for raises
+  that come before any write; `coordination_unavailable`, which the board
+  reports for an unexpected failure inside its call, says
+  `mutation: "unknown"` on a write tool.
+- Arguments refused before the tool runs (a wrong type, a value outside an
+  enum, a missing required argument, an unknown argument name) come back in
+  the same shape. Before, the client got pydantic's text: `1 validation
+  error for memory_searchArguments`, the value passed (`input_value=...`)
+  and a pydantic docs link. Now it is `invalid_argument` with `param` (the
+  first refused argument) and a message naming each refused argument and
+  what was wrong with it (`top_k: Input should be a valid integer, ...`),
+  never the value. An unknown argument name is `unknown_parameter`, with
+  the same sentence as before (`unknown parameter 'limit' for
+  memory_search; did you mean 'top_k'?`) and `accepted` listing the tool's
+  parameters.
 - The board names what was wrong: `missing_parameter` says what the action
   needs (`send needs request_id`), `unexpected_parameter` names the
   parameter, what the action takes and which action takes it instead, and
