@@ -1,7 +1,9 @@
 # Rust port state
 
-The Python oracle for phase 1 is pinned to master
+The historical phase 1 close-out oracle is
 `f709abb54f7912ae9cd767998d0926ca33df4bcd` (0.16.1, schema 54).
+Phase 2b master integration and a new oracle pin remain pending after #546 lands;
+the current source constants retain this historical pin until then.
 The historical phase 1 pin is `0b015f9279a778f996e71ee78510695e5fee7196` (0.16.0, schema 53);
 existing receipts retain their original source identities.
 The historical phase 0b oracle remains
@@ -23,7 +25,7 @@ Phase 1 implementation acceptance at `8b7a6c95` is recorded in the separate clos
 | 0b / 2.4: Representative daemon baseline and noise floor | Implemented; Linux matrix and hosted CI measurements verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | evals/results/rust-phase0b-daemon-scaling-linux.json; 12 fresh-bank runs, eight cells, three repeats; source reconstruction manifest and preserved helper; rust-phase0b-ci-same-head.json: successful attempts 1/3/4, five jobs, job-span noise 86 seconds |
 | 0b / 2.5: Housekeeping and rulebook corrections | Implemented; evidence verified | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | PORTING.md; evals/rust_port/README.md historical pointer; retained R6 selfcheck and full-bank R5; R4/R5 selfchecks removed from current tree |
 | 0b: Independent review and CI | Complete at 9a62ed02; code and final appendix approved, all ten checks passed | [#546](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546) | Integrated selection: 178 passed, 11 subtests passed; independent reviews at c317adc4 and 9a62ed02, no blocking code findings; [PR checks](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/546/checks) |
-| 1: Stdio shim | ready-for-review | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current PR-head suites, integrated CI and final review must pass before #560 is marked ready. |
+| 1: Stdio shim | Phase 2b final acceptance pending | [#560](https://github.com/Pseudogiant-xr/Pseudolife-MCP/pull/560) (draft) | Implementation acceptance at 8b7a6c95 is recorded in `evals/results/rust-phase1-closeout-8b7a6c95.json`. Measurements and four local judges retain their executed 690bb8ac identities. Current PR-head suites, integrated CI and final review must pass before #560 is marked ready. |
 | 2: Client CLI leaves | deferred | — | CLI rows and 26-mode checklist in PARITY.md |
 | 3: Daemon read path | deferred | — | HTTP/read/ranking rows and ONNX prerequisite in PARITY.md |
 | 4: Daemon writes and background duties | deferred | — | Mutation/durability/dream/coordination/hook rows in PARITY.md |
@@ -422,3 +424,42 @@ isolated Windows targeted run passed the updater sentinel and cancellation
 checks; the native doorbell group passed 10/10. The callback proof is positive
 only: production callback wiring was already correct and is unchanged.
 Implementation item e is closed; final integrated-head validation is pending.
+
+## Phase 2b first retention-only CI read
+
+[Run 37281778651](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/runs/37281778651),
+attempt 1, passed all four Rust/Parity jobs on exact head
+`d3f0022bc1b74a4fd8ab5649b39e7dc2abde3fb8` (tree
+`1f327c52f07105e94fba765e91c7452619b7a1d5`). Both retained receipts have
+complete 32-cell binding coverage, all eight selected process nodes passing
+once, zero actual Rust-candidate differences, and complete expected rejection
+evidence. The stderr control retained the empty oracle arm and all 38 candidate
+bytes untruncated on both OSes; the frame-rejection control also retained both
+stderr arms. Raw bytes remain in the run artifacts, not this register.
+
+[Diagnostic summary](phase2b-retention-first-ci.json) binds the artifact IDs,
+receipt hashes, exact head, job outcomes and limits. The read verifies the
+retention control rather than assuming coverage from green jobs. No daemon
+emitter mismatch was reproduced; the earlier intermittent stderr mismatch
+remains unexplained. No readiness capture condition is justified by this run,
+and no allowlist or stderr policy changed. The first-commit/CI-read barrier was
+released after this read; the diagnostic does not validate the b–f fixes or a master-integrated
+final head.
+
+## Phase 2b item f and resume point
+
+The lifecycle register separates explicit spawn substitution from installer
+client updates deferred to the Phase 5 install-path decision. The wake-reason
+row describes restored Unicode 14 behavior, with final parity acceptance still
+pending. PORTING records schema 54 at the historical close-out pin; historical
+receipts retain their original source/schema identities. Implementation items
+b–f are integrated as separate local commits with the original isolated proof
+[summary](phase2b-fixes-evidence.json); these runs keep tree
+`a83878bfa389c0e009d18a3c6d28387267fb1fb5` and do not become final-head proof.
+
+Next: after #546 lands, merge current master forward and re-pin the oracle; run
+Rust and both Parity CI jobs plus candidate-routed committed suites on both
+machines at the final head, then obtain a fresh independent review of the diff
+since `7f890590`. Only after those gates may #560 be marked ready for the
+maintainer. The current local commits have not been pushed or accepted as the
+final head; #560 remains draft.
