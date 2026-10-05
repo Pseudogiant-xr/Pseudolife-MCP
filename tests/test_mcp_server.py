@@ -168,17 +168,18 @@ def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
 
 
 _EXPECTED_MINIMAL = sorted([
-    # The 9-tool eager surface for minimal-tier clients (Claude Desktop).
+    # The 10-tool eager surface for minimal-tier clients (Claude Desktop).
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
     "memory_set_add", "memory_set_remove",
-    "memory_outcome", "memory_session_title", "memory_toolset",
+    "memory_outcome", "memory_lesson_search", "memory_session_title",
+    "memory_toolset",
 ])
 
 _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
     "memory_agents", "memory_message",
     "memory_fact_resolve", "memory_graph", "memory_recall",
     "memory_graph_relate", "memory_world_search", "memory_world_set",
-    "memory_lesson_search", "document_search", "document_ingest",
+    "document_search", "document_ingest",
     "memory_stats", "memory_get", "memory_episode_start", "memory_episode_end",
 ])
 
@@ -199,6 +200,16 @@ def test_visible_tool_names_per_tier() -> None:
     assert sorted(mod._visible_tool_names("minimal")) == _EXPECTED_MINIMAL
     assert sorted(mod._visible_tool_names("core")) == _EXPECTED_CORE
     assert mod._visible_tool_names("full") == set(mod._TOOL_TIERS)
+
+
+def test_lesson_search_is_visible_at_minimal() -> None:
+    """The served session-start rule says to recall with memory_search AND
+    memory_lesson_search, and memory_outcome (minimal) writes the lessons,
+    yet minimal-tier sessions could not read them back without an expand.
+    Moved to minimal by maintainer decision, 2026-10-05."""
+    from pseudolife_memory import mcp_server as mod
+    assert mod._TOOL_TIERS["memory_lesson_search"] == "minimal"
+    assert "memory_lesson_search" in mod._visible_tool_names("minimal")
 
 
 def test_tier_map_env_parsed(tmp_path: Path, monkeypatch) -> None:
@@ -372,7 +383,8 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
     leak the store's own add_member/remove_member vocabulary at the MCP
     boundary — service.cortex_write remaps it to name memory_set_add /
     memory_set_remove (Task 4), and the generic async-offload wrapper turns
-    the ValueError into this surface's uniform {error, message} shape."""
+    the ValueError into this surface's MCP tool error: ``isError`` with
+    ``{error: invalid_argument, message}``, never the Python class name."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
@@ -380,9 +392,11 @@ def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
 
     _invoke("memory_set_add",
            {"entity": "project", "attribute": "tags", "member": "rust"})
-    out = _invoke("memory_fact_set",
-                 {"entity": "project", "attribute": "tags", "value": "go"})
-    assert out["error"] == "ValueError"
+    result = asyncio.run(mod.mcp.call_tool(
+        "memory_fact_set", {"entity": "project", "attribute": "tags", "value": "go"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument"
     assert out["message"] == (
         "slot holds a set; use memory_set_add / memory_set_remove")
 
@@ -913,9 +927,11 @@ def test_memory_get_on_a_superseded_entry_without_replacement_text(
 
 def test_memory_get_faded_payload_is_unchanged(
         tmp_path: Path, monkeypatch) -> None:
+    """The service payload is unchanged; the MCP result adds the note that
+    names the possible causes (2026-10-05, refusal notes)."""
     mod = _reload_mod(tmp_path, monkeypatch)
     assert _invoke("memory_get", {"entry_id": 123}) == {
-        "found": False, "faded": True}
+        "found": False, "faded": True, "note": mod._FADED_NOTE}
     assert mod.service.get_entry(123) == {"found": False, "faded": True}
 
 
@@ -1264,11 +1280,13 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
     fed the FULL registry, not the filtered view. v2: the transport filter
     never touches the MCPServer tool registry, so a hidden tool's call-time
     input validation must still fire after a filtered list."""
-    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
     asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
-    with pytest.raises(ToolError, match="valid integer"):
-        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    result = asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
+    assert result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["error"] == "invalid_argument" and out["param"] == "n"
+    assert "valid integer" in out["message"]
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:

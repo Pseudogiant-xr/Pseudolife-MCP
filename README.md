@@ -467,7 +467,7 @@ keep their write `date`), and `memory_fact_get` likewise drops bookkeeping
 keys from its record; pass `verbose=true` for full metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
+**Toolset tiers.** Three visibility tiers — `minimal` (10 tools), `core`
 (24), `full` (38) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
